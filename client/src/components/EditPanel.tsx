@@ -4,7 +4,7 @@ import { Star, Check, X, Pipette, Undo2, Redo2 } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
-import { applyBatchEdit, type Params } from '@/api/edits';
+import { applyBatchEdit, type Delta, type Params } from '@/api/edits';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -42,6 +42,19 @@ const FBDD_OPTIONS = [
   { value: 1, label: 'Light' },
   { value: 2, label: 'Full' },
 ];
+
+// "auto" stands in for the stored "" default (AHD, with the faster PPG at
+// interactive 1:1) — Radix toggle items cannot carry an empty value.
+const DEMOSAIC_OPTIONS = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'vng', label: 'VNG' },
+  { value: 'ppg', label: 'PPG' },
+  { value: 'ahd', label: 'AHD' },
+  { value: 'dht', label: 'DHT' },
+];
+
+// Display for the ±1 sliders shown as ±100.
+const pct = (v: number) => (v === 0 ? '0' : `${v > 0 ? '+' : ''}${Math.round(v * 100)}`);
 
 export function EditPanel({ photos }: { photos: Photo[] }) {
   const client = useApiClient();
@@ -154,6 +167,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
     onFocusControl: () => esSetActive(control),
   });
 
+  const kelvinMode = draft.wbMode === 'kelvin';
   return (
     <div className="flex flex-col gap-4 p-4 text-sm">
       <div className="flex items-center gap-2">
@@ -173,6 +187,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         </span>
       </div>
 
+      <Section>Tone</Section>
       <EditSlider
         label="Exposure"
         hotkey="E"
@@ -232,10 +247,16 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         onCommit={(v) => commit({ shadow: v })}
         {...num('shadow')}
       />
+      <PctSlider label="Contrast" hotkey="C" field="contrast" draft={draft} update={update} commit={commit} {...num('contrast')} />
+      <PctSlider label="Whites" field="whites" draft={draft} update={update} commit={commit} {...num('whites')} />
+      <PctSlider label="Blacks" field="blacks" draft={draft} update={update} commit={commit} {...num('blacks')} />
+      <PctSlider label="Shadows" field="toneShadows" draft={draft} update={update} commit={commit} {...num('toneShadows')} />
+      <PctSlider label="Highlights" field="toneHighlights" draft={draft} update={update} commit={commit} {...num('toneHighlights')} />
 
+      <Section>White balance</Section>
       <div className={cn('flex flex-col gap-1.5 rounded-md', activeControl === 'wbMode' && 'ring-2 ring-ring ring-offset-2 ring-offset-background')}>
         <span className="text-xs text-muted-foreground">
-          White balance <kbd className="text-[10px] opacity-60">W</kbd>
+          Mode <kbd className="text-[10px] opacity-60">W</kbd>
         </span>
         <div className="flex items-center gap-1.5">
           <ToggleGroup
@@ -248,7 +269,9 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
               const patch: Partial<Params> =
                 v === 'custom'
                   ? { wbMode: 'custom' }
-                  : { wbMode: v as Params['wbMode'], wbMul: [0, 0, 0, 0] };
+                  : v === 'kelvin'
+                    ? { wbMode: 'kelvin', wbKelvin: draft.wbKelvin || 5500, wbMul: [0, 0, 0, 0] }
+                    : { wbMode: v as Params['wbMode'], wbKelvin: 0, wbMul: [0, 0, 0, 0] };
               update(patch);
               commit(patch);
             }}
@@ -258,6 +281,9 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
             </ToggleGroupItem>
             <ToggleGroupItem value="auto" className="flex-1">
               Auto
+            </ToggleGroupItem>
+            <ToggleGroupItem value="kelvin" className="flex-1">
+              Kelvin
             </ToggleGroupItem>
             <ToggleGroupItem value="custom" className="flex-1" disabled={draft.wbMode !== 'custom'}>
               Picked
@@ -274,19 +300,34 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         </div>
       </div>
 
-      <EditSlider
-        label="Temperature"
-        hotkey="T"
-        value={draft.wbTemp * 100}
-        display={draft.wbTemp === 0 ? '0' : `${draft.wbTemp > 0 ? '+' : ''}${Math.round(draft.wbTemp * 100)}`}
-        min={-100}
-        max={100}
-        step={2}
-        disabled={draft.wbMode === 'auto'}
-        onChange={(v) => update({ wbTemp: v / 100 })}
-        onCommit={(v) => commit({ wbTemp: v / 100 })}
-        {...num('wbTemp')}
-      />
+      {kelvinMode ? (
+        <EditSlider
+          label="Temperature"
+          hotkey="K"
+          value={draft.wbKelvin === 0 ? 5500 : draft.wbKelvin}
+          display={`${Math.round(draft.wbKelvin === 0 ? 5500 : draft.wbKelvin)} K`}
+          min={2000}
+          max={12000}
+          step={50}
+          onChange={(v) => update({ wbKelvin: v })}
+          onCommit={(v) => commit({ wbKelvin: v })}
+          {...num('wbKelvin')}
+        />
+      ) : (
+        <EditSlider
+          label="Temperature"
+          hotkey="T"
+          value={draft.wbTemp * 100}
+          display={pct(draft.wbTemp)}
+          min={-100}
+          max={100}
+          step={2}
+          disabled={draft.wbMode === 'auto'}
+          onChange={(v) => update({ wbTemp: v / 100 })}
+          onCommit={(v) => commit({ wbTemp: v / 100 })}
+          {...num('wbTemp')}
+        />
+      )}
       <EditSlider
         label="Tint"
         hotkey="I"
@@ -301,8 +342,20 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         {...num('wbTint')}
       />
 
+      <Section>Color</Section>
+      <PctSlider label="Saturation" hotkey="A" field="saturation" draft={draft} update={update} commit={commit} {...num('saturation')} />
+      <PctSlider label="Vibrance" hotkey="V" field="vibrance" draft={draft} update={update} commit={commit} {...num('vibrance')} />
+      <HueSlider label="Shadow tint" field="splitShadowHue" draft={draft} update={update} commit={commit} {...num('splitShadowHue')} />
+      <AmtSlider label="Shadow tint amount" field="splitShadowAmt" draft={draft} update={update} commit={commit} {...num('splitShadowAmt')} />
+      <HueSlider label="Highlight tint" field="splitHighlightHue" draft={draft} update={update} commit={commit} {...num('splitHighlightHue')} />
+      <AmtSlider label="Highlight tint amount" field="splitHighlightAmt" draft={draft} update={update} commit={commit} {...num('splitHighlightAmt')} />
+
+      <Section>Effects</Section>
+      <PctSlider label="Vignette" hotkey="O" field="vignette" draft={draft} update={update} commit={commit} {...num('vignette')} />
+
+      <Section>Detail</Section>
       <ButtonRow
-        label="Highlights"
+        label="Highlight recovery"
         hotkey="H"
         active={activeControl === 'highlight'}
         options={HIGHLIGHT_OPTIONS}
@@ -349,6 +402,22 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         {...num('medPasses')}
       />
 
+      <ButtonRow
+        label="Demosaic"
+        hotkey="D"
+        active={activeControl === 'demosaic'}
+        options={DEMOSAIC_OPTIONS}
+        // Same generated-union lie as wbMode: the stored default is "".
+        value={(draft.demosaic as string) || 'auto'}
+        onChange={(v) => {
+          const patch = { demosaic: (v === 'auto' ? '' : v) as Params['demosaic'] };
+          update(patch);
+          commit(patch);
+        }}
+      />
+      <PctSlider label="CA red/cyan" field="caRed" draft={draft} update={update} commit={commit} {...num('caRed')} />
+      <PctSlider label="CA blue/yellow" field="caBlue" draft={draft} update={update} commit={commit} {...num('caBlue')} />
+
       <Separator />
 
       <div className="flex flex-wrap gap-2">
@@ -382,7 +451,126 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
   );
 }
 
-function ButtonRow({
+function Section({ children }: { children: React.ReactNode }) {
+  return <h3 className="-mb-2 mt-1 text-xs font-medium text-muted-foreground/80">{children}</h3>;
+}
+
+// The ±1 params rendered as ±100 sliders share everything but the field.
+type PctField =
+  | 'contrast'
+  | 'whites'
+  | 'blacks'
+  | 'toneShadows'
+  | 'toneHighlights'
+  | 'saturation'
+  | 'vibrance'
+  | 'vignette'
+  | 'caRed'
+  | 'caBlue';
+
+function PctSlider({
+  label,
+  hotkey,
+  field,
+  draft,
+  update,
+  commit,
+  active,
+  onFocusControl,
+}: {
+  label: string;
+  hotkey?: string;
+  field: PctField;
+  draft: Params;
+  update: (patch: Partial<Params>) => void;
+  commit: (patch?: Partial<Params>) => void;
+  active?: boolean;
+  onFocusControl?: () => void;
+}) {
+  return (
+    <EditSlider
+      label={label}
+      hotkey={hotkey}
+      value={draft[field] * 100}
+      display={pct(draft[field])}
+      min={-100}
+      max={100}
+      step={2}
+      onChange={(v) => update({ [field]: v / 100 })}
+      onCommit={(v) => commit({ [field]: v / 100 })}
+      active={active}
+      onFocusControl={onFocusControl}
+    />
+  );
+}
+
+function HueSlider({
+  label,
+  field,
+  draft,
+  update,
+  commit,
+  active,
+  onFocusControl,
+}: {
+  label: string;
+  field: 'splitShadowHue' | 'splitHighlightHue';
+  draft: Params;
+  update: (patch: Partial<Params>) => void;
+  commit: (patch?: Partial<Params>) => void;
+  active?: boolean;
+  onFocusControl?: () => void;
+}) {
+  return (
+    <EditSlider
+      label={label}
+      value={draft[field]}
+      display={`${Math.round(draft[field])}°`}
+      min={0}
+      max={359}
+      step={5}
+      onChange={(v) => update({ [field]: v })}
+      onCommit={(v) => commit({ [field]: v })}
+      active={active}
+      onFocusControl={onFocusControl}
+    />
+  );
+}
+
+function AmtSlider({
+  label,
+  field,
+  draft,
+  update,
+  commit,
+  active,
+  onFocusControl,
+}: {
+  label: string;
+  field: 'splitShadowAmt' | 'splitHighlightAmt';
+  draft: Params;
+  update: (patch: Partial<Params>) => void;
+  commit: (patch?: Partial<Params>) => void;
+  active?: boolean;
+  onFocusControl?: () => void;
+}) {
+  return (
+    <EditSlider
+      label={label}
+      value={draft[field] * 100}
+      display={draft[field] === 0 ? 'Off' : String(Math.round(draft[field] * 100))}
+      min={0}
+      max={100}
+      step={2}
+      onChange={(v) => update({ [field]: v / 100 })}
+      onCommit={(v) => commit({ [field]: v / 100 })}
+      active={active}
+      onFocusControl={onFocusControl}
+    />
+  );
+}
+
+function ButtonRow<V extends string | number>({
   label,
   hotkey,
   active,
@@ -393,10 +581,11 @@ function ButtonRow({
   label: string;
   hotkey?: string;
   active?: boolean;
-  options: { value: number; label: string }[];
-  value: number;
-  onChange: (v: number) => void;
+  options: { value: V; label: string }[];
+  value: V;
+  onChange: (v: V) => void;
 }) {
+  const selected = options.some((o) => o.value === value) ? value : options[0].value;
   return (
     <div className={cn('flex flex-col gap-1.5 rounded-md', active && 'ring-2 ring-ring ring-offset-2 ring-offset-background')}>
       <span className="text-xs text-muted-foreground">
@@ -405,10 +594,11 @@ function ButtonRow({
       <ToggleGroup
         size="sm"
         className="w-full"
-        value={[String(options.some((o) => o.value === value) ? value : options[0].value)]}
+        value={[String(selected)]}
         onValueChange={(groupValue) => {
           const v = (groupValue as string[])[0];
-          if (v != null) onChange(Number(v));
+          const opt = options.find((o) => String(o.value) === v);
+          if (opt) onChange(opt.value);
         }}
       >
         {options.map((o) => (
@@ -476,10 +666,29 @@ export function EditSlider({
   );
 }
 
+// A Delta with every field untouched; spread and override to build one.
+const NULL_DELTA: Delta = {
+  expEV: null,
+  bright: null,
+  highlight: null,
+  nrThreshold: null,
+  fbddNoiseRd: null,
+  medPasses: null,
+  contrast: null,
+  whites: null,
+  blacks: null,
+  toneShadows: null,
+  toneHighlights: null,
+  saturation: null,
+  vibrance: null,
+};
+
 // BatchSection offers relative adjustments on top of the absolute controls
 // above (which already apply to the whole selection).
 function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
   const [ev, setEv] = useState(0.5);
+  const [contrast, setContrast] = useState(0);
+  const [saturation, setSaturation] = useState(0);
   const [progress, setProgress] = useState<number | null>(null);
 
   const run = (fn: () => Promise<void>, label: string) => {
@@ -490,6 +699,7 @@ function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
       .finally(() => setProgress(null));
   };
 
+  const noChange = ev === 0 && contrast === 0 && saturation === 0;
   return (
     <div className="flex flex-col gap-3 border-t p-4 text-sm">
       <h3 className="text-xs font-medium text-muted-foreground">Relative batch adjustment</h3>
@@ -503,24 +713,48 @@ function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
         onChange={setEv}
         onCommit={setEv}
       />
+      <EditSlider
+        label="Contrast adjustment"
+        value={contrast * 100}
+        display={pct(contrast)}
+        min={-100}
+        max={100}
+        step={2}
+        onChange={(v) => setContrast(v / 100)}
+        onCommit={(v) => setContrast(v / 100)}
+      />
+      <EditSlider
+        label="Saturation adjustment"
+        value={saturation * 100}
+        display={pct(saturation)}
+        min={-100}
+        max={100}
+        step={2}
+        onChange={(v) => setSaturation(v / 100)}
+        onCommit={(v) => setSaturation(v / 100)}
+      />
       <Button
         size="sm"
-        disabled={progress != null || ev === 0}
+        disabled={progress != null || noChange}
         onClick={() =>
           run(
             () =>
               applyBatchEdit(
                 client,
                 ids,
-                { expEV: ev, bright: null, highlight: null, nrThreshold: null, fbddNoiseRd: null, medPasses: null },
+                {
+                  ...NULL_DELTA,
+                  expEV: ev === 0 ? null : ev,
+                  contrast: contrast === 0 ? null : contrast,
+                  saturation: saturation === 0 ? null : saturation,
+                },
                 { onProgress: (cur, total) => setProgress((cur / total) * 100) },
               ),
-            `Applied ${ev > 0 ? '+' : ''}${ev} EV to ${ids.length} photos`,
+            `Adjusted ${ids.length} photos`,
           )
         }
       >
-        Apply {ev >= 0 ? '+' : ''}
-        {ev.toFixed(2)} EV to {ids.length} photos
+        Apply to {ids.length} photos
       </Button>
       {progress != null && <Progress value={progress} />}
     </div>

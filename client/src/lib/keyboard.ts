@@ -24,11 +24,17 @@ const CONTROL_KEYS: Record<string, ControlId> = {
   w: 'wbMode',
   t: 'wbTemp',
   i: 'wbTint',
+  k: 'wbKelvin',
   g: 'gamma',
   s: 'shadow',
+  c: 'contrast',
+  a: 'saturation',
+  v: 'vibrance',
+  o: 'vignette',
   h: 'highlight',
   n: 'nrThreshold',
   m: 'medPasses',
+  d: 'demosaic',
 };
 
 // useKeyboard installs the app-wide keymap:
@@ -36,7 +42,7 @@ const CONTROL_KEYS: Record<string, ControlId> = {
 //   1-5 / 0       set / clear rating
 //   P / X / U     pick / exclude / unflag
 //   Enter         loupe view · Esc control → grid
-//   E B W T I G S H N M   focus an edit control, +/- adjusts (Shift = big steps)
+//   E B W T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
 //   +/- / Z / Space   zoom (loupe, no control focused; Z/Space toggle 1:1↔fit)
 //   Ctrl+A/C/V    select all, copy/paste edit settings
 //   Ctrl+Z/Y      per-photo edit undo/redo

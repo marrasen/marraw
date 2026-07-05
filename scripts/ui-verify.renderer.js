@@ -98,10 +98,39 @@ try {
   }
 
   // --- WB controls present -------------------------------------------------
-  R.wbControls = ['As shot', 'Auto', 'Picked'].every((t) => buttons().some((b) => b.textContent.trim() === t));
+  R.wbControls = ['As shot', 'Auto', 'Kelvin', 'Picked'].every((t) => buttons().some((b) => b.textContent.trim() === t));
   R.wbSliders = !!sliderRowByLabel('Temperature') && !!sliderRowByLabel('Tint');
   R.newSliders = !!sliderRowByLabel('Gamma') && !!sliderRowByLabel('Shadow slope') && !!sliderRowByLabel('Median passes');
   R.highlightButtons = ['Clip', 'Unclip', 'Blend', 'Rebuild'].every((t) => buttons().some((b) => b.textContent.trim() === t));
+
+  // --- look-stage adjustment controls present ------------------------------
+  R.toneSliders =
+    !!sliderRowByLabel('Contrast') && !!sliderRowByLabel('Whites') && !!sliderRowByLabel('Blacks') &&
+    !!sliderRowByLabel('Shadows') && !!sliderRowByLabel('Highlights');
+  R.colorSliders =
+    !!sliderRowByLabel('Saturation') && !!sliderRowByLabel('Vibrance') &&
+    !!sliderRowByLabel('Shadow tint') && !!sliderRowByLabel('Vignette');
+  R.detailControls =
+    ['VNG', 'PPG', 'AHD', 'DHT'].every((t) => buttons().some((b) => b.textContent.trim() === t)) &&
+    !!sliderRowByLabel('CA red/cyan');
+
+  // --- C focuses contrast, stepping patches the draft ----------------------
+  key('c');
+  R.contrastFocus = es().activeControl === 'contrast';
+  key('+');
+  R.contrastSteps = Math.abs(es().draft.contrast - 0.02) < 1e-9;
+  key('Escape');
+  await sleep(900); // let the step commit debounce settle before moving on
+
+  // --- Kelvin mode swaps the temperature slider -----------------------------
+  const kelvinBtn = buttons().find((b) => b.textContent.trim() === 'Kelvin');
+  kelvinBtn.click();
+  await until(() => es().draft.wbMode === 'kelvin' && es().draft.wbKelvin === 5500, 5000, 'kelvin mode');
+  R.kelvinMode = sliderRowByLabel('Temperature')?.textContent.includes('5500 K') ?? false;
+  const asShotBtn = buttons().find((b) => b.textContent.trim() === 'As shot');
+  asShotBtn.click();
+  await until(() => es().draft.wbMode !== 'kelvin', 5000, 'back to as-shot');
+  await sleep(400);
 
   // --- filmstrip: rating badge + multi-select ------------------------------
   key('3');

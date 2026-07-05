@@ -47,6 +47,16 @@ type Params struct {
 	WBTemp float64
 	WBTint float64
 
+	// WBKelvin, when > 0, derives the multipliers from an absolute color
+	// temperature via the camera's XYZ matrix, overriding UserMul and
+	// WBTemp (WBTint still applies). Ignored when UseAutoWB is set.
+	WBKelvin float64
+
+	// CARed/CABlue are chromatic-aberration correction factors: the red and
+	// blue channels are magnified by 1/factor (libraw aber[]). 0 or 1 = off.
+	CARed  float64
+	CABlue float64
+
 	Bright        float64 // linear brightness, 1.0 neutral; 0 = leave default
 	Highlight     int     // 0 clip, 1 unclip, 2 blend, 3..9 rebuild
 	Gamma         [2]float64 // power, toe slope; zero = library default (BT.709)
@@ -91,13 +101,20 @@ func (p Params) apply(h *C.libraw_data_t) {
 	o.use_camera_wb = cbool(p.UseCameraWB)
 	o.use_auto_wb = cbool(p.UseAutoWB)
 	mul := p.UserMul
-	if (p.WBTemp != 0 || p.WBTint != 0) && !p.UseAutoWB {
+	switch {
+	case p.WBKelvin > 0 && !p.UseAutoWB:
+		mul = AdjustWB(kelvinMulOf(h, p.WBKelvin), 0, p.WBTint)
+		o.use_camera_wb = 0
+	case (p.WBTemp != 0 || p.WBTint != 0) && !p.UseAutoWB:
 		mul = AdjustWB(baseMul(h, mul), p.WBTemp, p.WBTint)
 		o.use_camera_wb = 0
 	}
 	for i, m := range mul {
 		o.user_mul[i] = C.float(m)
 	}
+	// aber defaults to 1 (off); the handle is reused, so always write it.
+	o.aber[0] = C.double(caFactor(p.CARed))
+	o.aber[2] = C.double(caFactor(p.CABlue))
 	if p.Bright > 0 {
 		o.bright = C.float(p.Bright)
 	} else {
@@ -170,6 +187,15 @@ func AdjustWB(mul [4]float64, temp, tint float64) [4]float64 {
 		mul[3] *= gf
 	}
 	return mul
+}
+
+// caFactor sanitizes a CA channel scale: 0 means off (1.0), and anything
+// outside a ±2% band is clamped — larger values are never lateral CA.
+func caFactor(v float64) float64 {
+	if v == 0 {
+		return 1
+	}
+	return clamp(v, 0.98, 1.02)
 }
 
 func cbool(b bool) C.int {

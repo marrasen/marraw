@@ -104,6 +104,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 
 	registry.RegisterEnumFor(library, FlagValues())
 	registry.RegisterEnumFor(edits, edit.WBModeValues())
+	registry.RegisterEnumFor(edits, edit.DemosaicValues())
 	registry.RegisterEnumFor(export, ExportFormatValues())
 	// PhotoPatchEvent is no longer broadcast as a push event — it is the
 	// payload of subscription patches — but registering it keeps the

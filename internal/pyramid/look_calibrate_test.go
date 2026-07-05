@@ -67,7 +67,7 @@ func TestCalibrateLook(t *testing.T) {
 		raw := MeanLuma(rgba)
 
 		gamma := ComputeLookGamma(raw, camera)
-		ApplyLook(rgba, gamma)
+		ApplyLook(rgba, gamma, nil)
 		got := MeanLuma(rgba)
 
 		t.Logf("%s: camera=%.1f raw=%.1f gamma=%.2f -> %.1f", filepath.Base(path), camera, raw, gamma, got)

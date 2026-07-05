@@ -8,10 +8,19 @@ import type {
     UseQueryResult,
 } from './client';
 
+export const Demosaic = {
+    Vng: "vng",
+    Ppg: "ppg",
+    Ahd: "ahd",
+    Dht: "dht",
+} as const;
+export type DemosaicType = typeof Demosaic[keyof typeof Demosaic];
+
 export const WBMode = {
     Camera: "camera",
     Auto: "auto",
     Custom: "custom",
+    Kelvin: "kelvin",
 } as const;
 export type WBModeType = typeof WBMode[keyof typeof WBMode];
 
@@ -22,6 +31,13 @@ export interface Delta {
     nrThreshold: number | null;
     fbddNoiseRd: number | null;
     medPasses: number | null;
+    contrast: number | null;
+    whites: number | null;
+    blacks: number | null;
+    toneShadows: number | null;
+    toneHighlights: number | null;
+    saturation: number | null;
+    vibrance: number | null;
 }
 
 export interface Params {
@@ -31,6 +47,7 @@ export interface Params {
     wbMul: [number, number, number, number];
     wbTemp: number;
     wbTint: number;
+    wbKelvin: number;
     bright: number;
     gamma: number;
     shadow: number;
@@ -38,6 +55,21 @@ export interface Params {
     nrThreshold: number;
     fbddNoiseRd: number;
     medPasses: number;
+    contrast: number;
+    whites: number;
+    blacks: number;
+    toneShadows: number;
+    toneHighlights: number;
+    saturation: number;
+    vibrance: number;
+    splitShadowHue: number;
+    splitShadowAmt: number;
+    splitHighlightHue: number;
+    splitHighlightAmt: number;
+    vignette: number;
+    demosaic: DemosaicType;
+    caRed: number;
+    caBlue: number;
 }
 
 

@@ -93,7 +93,7 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 	if gamma == 0 {
 		gamma = pyramid.FallbackLookGamma
 	}
-	if err := e.deps.Cache.WritePreview(rgba, photo.CacheKey, hash, gamma); err != nil {
+	if err := e.deps.Cache.WritePreview(rgba, photo.CacheKey, hash, gamma, ep); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -130,14 +130,26 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params edit
 	if lookGamma == 0 {
 		lookGamma = pyramid.FallbackLookGamma
 	}
-	rl, gl, bl := samplePatchLinear(img, x, y, lookGamma)
+	// The look's saturation boost scales with the edit's Saturation; the
+	// floor keeps a near-grayscale edit from exploding the inversion.
+	satFactor := math.Max(0.2, 1.15*(1+params.Saturation))
+	rl, gl, bl := samplePatchLinear(img, x, y, lookGamma, satFactor)
 	if gl < 1e-4 || rl < 1e-4 || bl < 1e-4 {
 		return nil, aprot.ErrInvalidParams("picked area is too dark — pick a brighter neutral area")
 	}
 
 	// The effective multipliers the sampled rendition was produced with.
 	base := params.WBMul
-	if params.WBMode != edit.WBCustom || base == ([4]float64{}) {
+	temp := params.WBTemp
+	if params.WBMode == edit.WBKelvin && params.WBKelvin > 0 {
+		proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
+		if err != nil {
+			return nil, err
+		}
+		base = proc.KelvinMul(params.WBKelvin)
+		release()
+		temp = 0
+	} else if params.WBMode != edit.WBCustom || base == ([4]float64{}) {
 		proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
 		if err != nil {
 			return nil, err
@@ -145,7 +157,7 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params edit
 		base = proc.CamMul()
 		release()
 	}
-	eff := libraw.AdjustWB(base, params.WBTemp, params.WBTint)
+	eff := libraw.AdjustWB(base, temp, params.WBTint)
 
 	// Scale so the sampled patch comes out neutral, then normalize G to 1.
 	mul := eff
@@ -161,15 +173,17 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params edit
 	out := params
 	out.WBMode = edit.WBCustom
 	out.WBMul = mul
-	out.WBTemp, out.WBTint = 0, 0
+	out.WBTemp, out.WBTint, out.WBKelvin = 0, 0, 0
 	return &out, nil
 }
 
 // samplePatchLinear averages a small patch around (x,y) in approximately
 // linear light: the display look (BT.709 gamma × calibrated lift) is
-// inverted with a single combined power, and the look's saturation boost is
-// undone around luma.
-func samplePatchLinear(img image.Image, x, y, lookGamma float64) (r, g, b float64) {
+// inverted with a single combined power, and the look's saturation boost
+// (satFactor) is undone around luma. The edit's tone-curve adjustments are
+// not inverted — the pick is approximate by design and a second pick
+// refines it.
+func samplePatchLinear(img image.Image, x, y, lookGamma, satFactor float64) (r, g, b float64) {
 	bnd := img.Bounds()
 	cx := bnd.Min.X + int(x*float64(bnd.Dx()-1))
 	cy := bnd.Min.Y + int(y*float64(bnd.Dy()-1))
@@ -184,11 +198,11 @@ func samplePatchLinear(img image.Image, x, y, lookGamma float64) (r, g, b float6
 			}
 			pr, pg, pb, _ := img.At(px, py).RGBA() // 16-bit
 			fr, fg, fb := float64(pr)/65535, float64(pg)/65535, float64(pb)/65535
-			// Undo the look's saturation boost (1.15 around Rec.601 luma).
+			// Undo the look's saturation boost around Rec.601 luma.
 			luma := 0.299*fr + 0.587*fg + 0.114*fb
-			fr = luma + (fr-luma)/1.15
-			fg = luma + (fg-luma)/1.15
-			fb = luma + (fb-luma)/1.15
+			fr = luma + (fr-luma)/satFactor
+			fg = luma + (fg-luma)/satFactor
+			fb = luma + (fb-luma)/satFactor
 			r += math.Pow(math.Max(0, fr), decodePow)
 			g += math.Pow(math.Max(0, fg), decodePow)
 			b += math.Pow(math.Max(0, fb), decodePow)

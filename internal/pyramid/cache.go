@@ -73,7 +73,7 @@ func (c *Cache) Dir() string { return c.dir }
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r5"
+const renderVersion = "r6"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
@@ -176,7 +176,7 @@ func (c *Cache) generate(proc *libraw.Processor, photo store.Photo, level, editH
 	// roughly half AHD's cost, visually equivalent at loupe zoom; export
 	// keeps AHD.
 	params := edits.LibrawParams(level != "full")
-	if level == "full" {
+	if level == "full" && (edits == nil || edits.Demosaic == "") {
 		params.UserQual = libraw.DemosaicPPG
 	}
 	img, err := proc.Process(params)
@@ -190,7 +190,7 @@ func (c *Cache) generate(proc *libraw.Processor, photo store.Photo, level, editH
 	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
 	if level == "full" {
 		c.healDimensions(photo, rgba.Bounds().Dx(), rgba.Bounds().Dy())
-		ApplyLook(rgba, gamma)
+		ApplyLook(rgba, gamma, edits)
 		if err := c.writeTiles(rgba, photo.CacheKey, editHash); err != nil {
 			return err
 		}
@@ -199,7 +199,7 @@ func (c *Cache) generate(proc *libraw.Processor, photo store.Photo, level, editH
 	// Downscale before applying the look: 4x fewer pixels, same result at
 	// these sizes.
 	scaled := scaleToLongEdge(rgba, 2048)
-	ApplyLook(scaled, gamma)
+	ApplyLook(scaled, gamma, edits)
 	return c.WriteLevels(scaled, photo.CacheKey, editHash, 2048, 1024, 512, 256)
 }
 
@@ -295,7 +295,7 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 // scaling instead of CatmullRom — a slider drag needs latency, not the last
 // bit of resampling quality — and the look applied after the downscale.
 // Input must be a freshly RAW-decoded image (no look applied).
-func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGamma float64) error {
+func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGamma float64, edits *edit.Params) error {
 	b := src.Bounds()
 	long := max(b.Dx(), b.Dy())
 	dst := src
@@ -304,7 +304,7 @@ func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGam
 		dst = image.NewRGBA(image.Rect(0, 0, max(1, w), max(1, h)))
 		xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, b, xdraw.Src, nil)
 	}
-	ApplyLook(dst, lookGamma)
+	ApplyLook(dst, lookGamma, edits)
 	return c.writeJPEG(dst, cacheKey, "2048", editHash, 80)
 }
 

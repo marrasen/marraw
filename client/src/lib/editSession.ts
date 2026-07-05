@@ -25,6 +25,7 @@ export const NEUTRAL: Params = {
   wbMul: [0, 0, 0, 0],
   wbTemp: 0,
   wbTint: 0,
+  wbKelvin: 0,
   bright: 0,
   gamma: 0,
   shadow: 0,
@@ -32,6 +33,22 @@ export const NEUTRAL: Params = {
   nrThreshold: 0,
   fbddNoiseRd: 0,
   medPasses: 0,
+  contrast: 0,
+  whites: 0,
+  blacks: 0,
+  toneShadows: 0,
+  toneHighlights: 0,
+  saturation: 0,
+  vibrance: 0,
+  splitShadowHue: 0,
+  splitShadowAmt: 0,
+  splitHighlightHue: 0,
+  splitHighlightAmt: 0,
+  vignette: 0,
+  // The server stores the default as "" — same generated-union lie as wbMode.
+  demosaic: '' as Params['demosaic'],
+  caRed: 0,
+  caBlue: 0,
 };
 
 // Controls addressable from the keyboard. Numeric controls step with +/-;
@@ -42,13 +59,29 @@ export type ControlId =
   | 'bright'
   | 'gamma'
   | 'shadow'
+  | 'contrast'
+  | 'whites'
+  | 'blacks'
+  | 'toneShadows'
+  | 'toneHighlights'
   | 'wbMode'
   | 'wbTemp'
   | 'wbTint'
+  | 'wbKelvin'
   | 'highlight'
+  | 'saturation'
+  | 'vibrance'
+  | 'splitShadowHue'
+  | 'splitShadowAmt'
+  | 'splitHighlightHue'
+  | 'splitHighlightAmt'
+  | 'vignette'
   | 'nrThreshold'
   | 'fbddNoiseRd'
-  | 'medPasses';
+  | 'medPasses'
+  | 'demosaic'
+  | 'caRed'
+  | 'caBlue';
 
 interface NumericSpec {
   kind: 'numeric';
@@ -85,14 +118,35 @@ export const CONTROL_SPECS: Record<ControlId, ControlSpec> = {
     get: (p) => (p.shadow === 0 ? 4.5 : p.shadow),
     set: (v) => ({ shadow: v }),
   },
+  contrast: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.contrast, set: (v) => ({ contrast: v }) },
+  whites: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.whites, set: (v) => ({ whites: v }) },
+  blacks: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.blacks, set: (v) => ({ blacks: v }) },
+  toneShadows: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.toneShadows, set: (v) => ({ toneShadows: v }) },
+  toneHighlights: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.toneHighlights, set: (v) => ({ toneHighlights: v }) },
   wbMode: {
-    kind: 'cycle', values: ['camera', 'auto'],
+    kind: 'cycle', values: ['camera', 'auto', 'kelvin'],
     // The server normalizes "camera" (the default) to "" in stored params.
     get: (p) => (p.wbMode as string) || 'camera',
-    set: (v) => ({ wbMode: v as Params['wbMode'] }),
+    set: (v) =>
+      v === 'kelvin'
+        ? { wbMode: 'kelvin', wbKelvin: 5500, wbMul: [0, 0, 0, 0] }
+        : { wbMode: v as Params['wbMode'], wbKelvin: 0, wbMul: [0, 0, 0, 0] },
   },
   wbTemp: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.wbTemp, set: (v) => ({ wbTemp: v }) },
   wbTint: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.wbTint, set: (v) => ({ wbTint: v }) },
+  wbKelvin: {
+    kind: 'numeric', min: 2000, max: 12000, step: 50, bigStep: 250,
+    get: (p) => (p.wbKelvin === 0 ? 5500 : p.wbKelvin),
+    // Stepping the Kelvin control switches into kelvin mode.
+    set: (v) => ({ wbMode: 'kelvin', wbKelvin: v }),
+  },
+  saturation: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.saturation, set: (v) => ({ saturation: v }) },
+  vibrance: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.vibrance, set: (v) => ({ vibrance: v }) },
+  splitShadowHue: { kind: 'numeric', min: 0, max: 359, step: 5, bigStep: 30, get: (p) => p.splitShadowHue, set: (v) => ({ splitShadowHue: v }) },
+  splitShadowAmt: { kind: 'numeric', min: 0, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.splitShadowAmt, set: (v) => ({ splitShadowAmt: v }) },
+  splitHighlightHue: { kind: 'numeric', min: 0, max: 359, step: 5, bigStep: 30, get: (p) => p.splitHighlightHue, set: (v) => ({ splitHighlightHue: v }) },
+  splitHighlightAmt: { kind: 'numeric', min: 0, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.splitHighlightAmt, set: (v) => ({ splitHighlightAmt: v }) },
+  vignette: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.vignette, set: (v) => ({ vignette: v }) },
   highlight: {
     kind: 'cycle', values: [0, 1, 2, 5],
     get: (p) => p.highlight,
@@ -105,6 +159,13 @@ export const CONTROL_SPECS: Record<ControlId, ControlSpec> = {
     set: (v) => ({ fbddNoiseRd: v as number }),
   },
   medPasses: { kind: 'numeric', min: 0, max: 5, step: 1, bigStep: 1, get: (p) => p.medPasses, set: (v) => ({ medPasses: v }) },
+  demosaic: {
+    kind: 'cycle', values: ['', 'vng', 'ppg', 'ahd', 'dht'],
+    get: (p) => p.demosaic as string,
+    set: (v) => ({ demosaic: v as Params['demosaic'] }),
+  },
+  caRed: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.caRed, set: (v) => ({ caRed: v }) },
+  caBlue: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.caBlue, set: (v) => ({ caBlue: v }) },
 };
 
 interface Preview {

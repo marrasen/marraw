@@ -91,7 +91,9 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int)
 		}
 	}
 	lp := params.LibrawParams(false)
-	lp.UserQual = libraw.DemosaicAHD
+	if params == nil || params.Demosaic == "" {
+		lp.UserQual = libraw.DemosaicAHD
+	}
 	if format == "tiff16" {
 		lp.OutputBPS = 16
 	}
@@ -115,7 +117,7 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int)
 	case "tiff16":
 		err = encodeTIFF16(f, img, longEdge)
 	default:
-		err = encodeJPEG(f, img, quality, longEdge, gamma)
+		err = encodeJPEG(f, img, quality, longEdge, gamma, params)
 	}
 	if err != nil {
 		f.Close()
@@ -129,7 +131,7 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int)
 	return os.Rename(tmp, outPath)
 }
 
-func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma float64) error {
+func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma float64, params *edit.Params) error {
 	if img.Bits != 8 {
 		return fmt.Errorf("export: jpeg needs 8-bit output, got %d", img.Bits)
 	}
@@ -142,7 +144,7 @@ func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma 
 	}
 	// Match what the user saw in the preview. TIFF16 stays neutral — it is
 	// the flat master for external editing.
-	pyramid.ApplyLook(rgba, lookGamma)
+	pyramid.ApplyLook(rgba, lookGamma, params)
 	out := resizeRGBA(rgba, longEdge)
 	return jpeg.Encode(f, out, &jpeg.Options{Quality: quality})
 }

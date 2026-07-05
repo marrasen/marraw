@@ -33,12 +33,16 @@ shipped as an Electron app.
   edit renders, and JPEG exports (TIFF16 stays neutral as a flat master).
   Bump `renderVersion` (Go) + `RENDER_VERSION` (TS) together when the
   render pipeline changes — image URLs are cached as immutable.
-- **Editing** is non-destructive: LibRaw params (exposure, WB, highlights,
-  brightness, NR, …) stored as JSON in SQLite. While a slider drags, the
-  backend re-processes the photo's already-unpacked handle at half size
-  (~400 ms warm on 42 MP files) and the loupe swaps in the new rendition
-  flicker-free. Multi-select applies relative adjustments ("+0.5 EV on 10
-  photos"); copy/paste edit settings with Ctrl+C/V.
+- **Editing** is non-destructive: LibRaw params (exposure, WB — as-shot /
+  auto / absolute Kelvin / picked, highlight recovery, brightness, NR,
+  demosaic choice, chromatic-aberration correction, …) plus look-stage
+  adjustments computed after LibRaw (contrast, whites/blacks,
+  shadows/highlights, saturation, vibrance, split toning, vignette), all
+  stored as JSON in SQLite. While a slider drags, the backend re-processes
+  the photo's already-unpacked handle at half size (~400 ms warm on 42 MP
+  files) and the loupe swaps in the new rendition flicker-free.
+  Multi-select applies relative adjustments ("+0.5 EV on 10 photos");
+  copy/paste edit settings with Ctrl+C/V.
 - **Export** saturates all cores via an errgroup pool, full-quality AHD
   demosaic, JPEG or 16-bit TIFF, with streaming progress.
 
@@ -102,9 +106,10 @@ scripts/            setup-libraw.ps1, smoke.mjs
 ## Known gaps / next steps
 
 - XMP sidecar export for Lightroom/darktable interop.
-- Crop tool (LibRaw `cropbox` is plumbed but has no UI).
-- White balance temp/tint sliders adjust multipliers relative to as-shot
-  (±1 stop on R/B and G); a true Kelvin scale needs camera-matrix math.
+- Crop, straighten and rotate (LibRaw `cropbox` is plumbed but has no UI;
+  user rotation needs care around tile-grid dimensions).
+- Spatial adjustments: sharpening/clarity (unsharp mask), HSL color mixer,
+  dehaze, lens-profile corrections, local masks.
 - aprot wishlist that fell out of this project — all shipped in aprot
   v0.47.0 and adopted here:
   [delta/patch subscriptions](https://github.com/marrasen/aprot/issues/237)
