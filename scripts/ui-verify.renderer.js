@@ -256,6 +256,17 @@ try {
     R.loupeWheelAnchor =
       ui().loupeZoom > 1.05 && drift < 2 ? true : `zoom ${ui().loupeZoom}, drift ${drift.toFixed(1)}px`;
 
+    // After a zoom change, mounted tiles must render at the new scale — a
+    // stale (memoization-frozen) tile layer shows content at the wrong
+    // magnification and stops covering the image.
+    await sleep(500);
+    const zt = ui().loupeZoom;
+    const fullTile = [...document.querySelectorAll(`img[src*="/img/${t2}/tile/"]`)].find(
+      (t) => t.complete && t.naturalWidth === 1024 && t.getBoundingClientRect().width > 0,
+    );
+    const tw = fullTile ? fullTile.getBoundingClientRect().width : 0;
+    R.loupe11TileScale = fullTile && Math.abs(tw - 1024 * zt) < 3 ? true : `zoom ${zt}, tile width ${tw.toFixed(1)}`;
+
     // Space toggles 1:1 <-> fit.
     key(' ');
     await sleep(100);
@@ -270,6 +281,7 @@ try {
     R.loupe11Prefetch = R.loupe11Prefetch ?? String(err);
     R.loupeDragPan = R.loupeDragPan ?? String(err);
     R.loupeWheelAnchor = R.loupeWheelAnchor ?? String(err);
+    R.loupe11TileScale = R.loupe11TileScale ?? String(err);
     R.loupeSpaceToggle = R.loupeSpaceToggle ?? String(err);
     R.loupeNoScrollbar = R.loupeNoScrollbar ?? String(err);
   }

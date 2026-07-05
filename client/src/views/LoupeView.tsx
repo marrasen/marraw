@@ -229,7 +229,13 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
           >
             <DecodedImage src={src} onShown={setShownSrc} className="absolute inset-0 size-full" />
             {wantTiles && shownSrc.includes(`/img/${photo.id}/`) && (
-              <TileLayer photo={photo} boxW={boxW} boxH={boxH} container={containerRef} />
+              <TileLayer
+                key={`${photo.id}|${photo.cacheKey}|${photo.editHash}`}
+                photo={photo}
+                boxW={boxW}
+                boxH={boxH}
+                container={containerRef}
+              />
             )}
           </div>
         ) : (
@@ -287,9 +293,10 @@ function ZoomToolbar({
 // TileLayer sharpens the loupe past pyramid depth: the part of the image in
 // the scrolled viewport (plus a margin) is covered with full-resolution
 // TILE_SIZE tiles scaled into the display box, on top of the always-present
-// 2048 underlay. Tiles accumulate while the photo stays, so panning back
-// never re-fades; a tile a hair off the rendered image's edge 404s and
-// simply stays hidden, leaving the underlay visible.
+// 2048 underlay. Tiles accumulate for the component's lifetime, so panning
+// back never re-fades — the caller keys this component by photo + edit
+// state, so a switch starts from scratch. A tile a hair off the rendered
+// image's edge 404s and simply stays hidden, leaving the underlay visible.
 function TileLayer({
   photo,
   boxW,
@@ -305,9 +312,8 @@ function TileLayer({
   const cols = Math.ceil(dw / TILE_SIZE);
   const rows = Math.ceil(dh / TILE_SIZE);
   const scale = boxW / dw;
-  const photoKey = `${photo.id}|${photo.cacheKey}|${photo.editHash}`;
-  // Tile keys mounted so far, tagged with the photo state they belong to.
-  const [mounted, setMounted] = useState<{ key: string; tiles: string[] }>({ key: photoKey, tiles: [] });
+  // Tile keys mounted so far.
+  const [tiles, setTiles] = useState<string[]>([]);
 
   useEffect(() => {
     const el = container.current;
@@ -325,9 +331,8 @@ function TileLayer({
       const y0 = Math.max(0, Math.floor(((el.scrollTop - offY) / scale - margin) / TILE_SIZE));
       const x1 = Math.min(cols - 1, Math.floor(((el.scrollLeft - offX + el.clientWidth) / scale + margin) / TILE_SIZE));
       const y1 = Math.min(rows - 1, Math.floor(((el.scrollTop - offY + el.clientHeight) / scale + margin) / TILE_SIZE));
-      setMounted((prev) => {
-        const kept = prev.key === photoKey ? prev.tiles : [];
-        const have = new Set(kept);
+      setTiles((prev) => {
+        const have = new Set(prev);
         const added: string[] = [];
         for (let ty = y0; ty <= y1; ty++) {
           for (let tx = x0; tx <= x1; tx++) {
@@ -335,8 +340,7 @@ function TileLayer({
             if (!have.has(k)) added.push(k);
           }
         }
-        if (added.length === 0 && prev.key === photoKey) return prev;
-        return { key: photoKey, tiles: [...kept, ...added] };
+        return added.length > 0 ? [...prev, ...added] : prev;
       });
     };
     const schedule = () => {
@@ -348,9 +352,8 @@ function TileLayer({
       el.removeEventListener('scroll', schedule);
       cancelAnimationFrame(raf);
     };
-  }, [container, photoKey, scale, cols, rows, boxW, boxH]);
+  }, [container, scale, cols, rows, boxW, boxH]);
 
-  const tiles = mounted.key === photoKey ? mounted.tiles : [];
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
       <div
