@@ -255,6 +255,38 @@ func (db *DB) SetFlag(ctx context.Context, ids []int64, flag int) error {
 	return err
 }
 
+// PhotoFolders maps each given photo id to its folder id.
+func (db *DB) PhotoFolders(ctx context.Context, ids []int64) (map[int64]int64, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	ph, args := int64Placeholders(ids)
+	rows, err := db.QueryContext(ctx, `SELECT id, folder_id FROM photos WHERE id IN (`+ph+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64]int64, len(ids))
+	for rows.Next() {
+		var id, folderID int64
+		if err := rows.Scan(&id, &folderID); err != nil {
+			return nil, err
+		}
+		out[id] = folderID
+	}
+	return out, rows.Err()
+}
+
+// DeletePhotos removes photo rows (the files are the caller's problem).
+func (db *DB) DeletePhotos(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	ph, args := int64Placeholders(ids)
+	_, err := db.ExecContext(ctx, `DELETE FROM photos WHERE id IN (`+ph+`)`, args...)
+	return err
+}
+
 // SetEdit stores the edit params JSON (nil clears) and its hash.
 func (db *DB) SetEdit(ctx context.Context, id int64, paramsJSON *string, hash string) error {
 	_, err := db.ExecContext(ctx, `UPDATE photos SET edit_params = ?, edit_hash = ? WHERE id = ?`,

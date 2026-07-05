@@ -10,11 +10,18 @@ function Slider({
   max = 100,
   ...props
 }: SliderPrimitive.Root.Props) {
+  // One thumb per actual value. A plain-number value must yield ONE thumb —
+  // the previous [min, max] fallback rendered a phantom second thumb that
+  // broke base-ui's click-on-track value jumping.
   const _values = Array.isArray(value)
     ? value
-    : Array.isArray(defaultValue)
-      ? defaultValue
-      : [min, max]
+    : value != null
+      ? [value]
+      : Array.isArray(defaultValue)
+        ? defaultValue
+        : defaultValue != null
+          ? [defaultValue]
+          : [min]
 
   return (
     <SliderPrimitive.Root

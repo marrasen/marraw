@@ -1,19 +1,24 @@
 import { useEffect, useMemo } from 'react';
-import { useListPhotos, onPhotoPatchEvent, type Photo } from '@/api/library';
-import { useApiClient } from '@/api/client';
+import { useListPhotos, type Photo, type PhotoPatchEvent } from '@/api/library';
 import { useUIStore } from '@/stores/uiStore';
 
-// usePatchEvents folds server patch broadcasts into the override map.
-// Mount once at App level.
-export function usePatchEvents() {
-  const client = useApiClient();
-  useEffect(
-    () =>
-      onPhotoPatchEvent(client, (ev) => {
-        useUIStore.getState().applyPatches(ev.patches);
-      }),
-    [client],
-  );
+// photoPatchReducer folds server-pushed subscription patches (aprot
+// PatchSubscription — O(patch) on the wire) into the shared query snapshot.
+// Nil patch fields mean "unchanged", so mergeByKey's blind shallow merge
+// does not fit; merge non-null fields by hand.
+function photoPatchReducer(data: Photo[], patch: unknown): Photo[] {
+  const ev = patch as PhotoPatchEvent;
+  if (!ev || !Array.isArray(ev.patches)) return data;
+  const byId = new Map(ev.patches.map((p) => [p.id, p]));
+  return data.map((photo) => {
+    const p = byId.get(photo.id);
+    if (!p) return photo;
+    const next = { ...photo };
+    if (p.rating != null) next.rating = p.rating;
+    if (p.flag != null) next.flag = p.flag;
+    if (p.editHash != null) next.editHash = p.editHash;
+    return next;
+  });
 }
 
 export interface PhotoLists {
@@ -22,10 +27,11 @@ export interface PhotoLists {
   isLoading: boolean;
 }
 
-// usePhotos merges the subscribed folder list with local overrides and
-// applies the cull filters, entirely client-side.
+// usePhotos merges the subscribed folder list (kept fresh through
+// subscription patches) with optimistic local overrides and applies the
+// cull filters, entirely client-side.
 export function usePhotos(folderId: number): PhotoLists {
-  const { data, isLoading } = useListPhotos(folderId);
+  const { data, isLoading } = useListPhotos(folderId, { applyPatch: photoPatchReducer });
   const overrides = useUIStore((s) => s.overrides);
   const minRating = useUIStore((s) => s.minRating);
   const flagFilter = useUIStore((s) => s.flagFilter);

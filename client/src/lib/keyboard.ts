@@ -1,18 +1,46 @@
 import { useEffect } from 'react';
 import type { FlagType } from '@/api/library';
-import { pasteEditParams, getEditParams } from '@/api/edits';
+import { getEditParams } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { toast } from 'sonner';
 import { applyRating as doRating, applyFlag as doFlag } from '@/lib/actions';
 import { useUIStore, selectionOrFocus } from '@/stores/uiStore';
+import {
+  esApplyParams,
+  esRedo,
+  esSetActive,
+  esSetWBPicking,
+  esStep,
+  esUndo,
+  useEditSession,
+  type ControlId,
+} from '@/lib/editSession';
 
-// useKeyboard installs the app-wide culling keymap:
-//   arrows      navigate (Shift extends the selection)
-//   1-5 / 0     set / clear rating
-//   P / X / U   pick / exclude / unflag
-//   Enter or E  loupe view, Esc or G grid view
-//   Ctrl+A      select all, Ctrl+C/V copy/paste edit settings
-//   Ctrl+E      export dialog
+// Keys that focus an edit control; +/- then adjusts it, Esc returns to the
+// image (where +/- zooms again).
+const CONTROL_KEYS: Record<string, ControlId> = {
+  e: 'expEV',
+  b: 'bright',
+  w: 'wbMode',
+  t: 'wbTemp',
+  i: 'wbTint',
+  g: 'gamma',
+  s: 'shadow',
+  h: 'highlight',
+  n: 'nrThreshold',
+  m: 'medPasses',
+};
+
+// useKeyboard installs the app-wide keymap:
+//   arrows        navigate (Shift extends the selection)
+//   1-5 / 0       set / clear rating
+//   P / X / U     pick / exclude / unflag
+//   Enter         loupe view · Esc control → grid
+//   E B W T I G S H N M   focus an edit control, +/- adjusts (Shift = big steps)
+//   +/- / Z       zoom (loupe, no control focused)
+//   Ctrl+A/C/V    select all, copy/paste edit settings
+//   Ctrl+Z/Y      per-photo edit undo/redo
+//   Ctrl+E        export dialog
 export function useKeyboard() {
   const client = useApiClient();
 
@@ -22,6 +50,7 @@ export function useKeyboard() {
       if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable) return;
       const s = useUIStore.getState();
       if (s.exportOpen) return;
+      const es = useEditSession.getState();
 
       const move = (delta: number) => {
         const ids = s.visibleIds;
@@ -57,19 +86,33 @@ export function useKeyboard() {
             return;
           }
           case 'v': {
-            const ids = selectionOrFocus();
-            if (!s.clipboard || ids.length === 0) return;
+            if (!s.clipboard || s.focusId == null) return;
             e.preventDefault();
-            pasteEditParams(client, ids, s.clipboard)
-              .then(() => toast.success(`Edit settings pasted to ${ids.length} photo${ids.length > 1 ? 's' : ''}`))
-              .catch((err) => toast.error(`Paste failed: ${err.message}`));
+            esApplyParams(client, s.clipboard);
+            toast.success('Edit settings pasted');
             return;
           }
+          case 'z':
+            e.preventDefault();
+            if (e.shiftKey) esRedo(client);
+            else esUndo(client);
+            return;
+          case 'y':
+            e.preventDefault();
+            esRedo(client);
+            return;
           case 'e':
             e.preventDefault();
             s.setExportOpen(true);
             return;
         }
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+      if (CONTROL_KEYS[key] && es.draft) {
+        e.preventDefault();
+        esSetActive(CONTROL_KEYS[key]);
         return;
       }
 
@@ -111,21 +154,26 @@ export function useKeyboard() {
           applyFlag('none');
           break;
         case 'Enter':
-        case 'e':
-        case 'E':
           if (s.focusId != null) s.setView('loupe');
           break;
         case 'Escape':
-        case 'g':
-        case 'G':
-          s.setView('grid');
+          if (es.wbPicking) {
+            esSetWBPicking(false);
+          } else if (es.activeControl != null) {
+            esSetActive(null);
+          } else {
+            s.setView('grid');
+          }
           break;
         case '+':
         case '=':
-          zoomStep(1.25);
+          if (es.activeControl != null) esStep(client, es.activeControl, 1, e.shiftKey);
+          else zoomStep(1.25);
           break;
         case '-':
-          zoomStep(0.8);
+        case '_':
+          if (es.activeControl != null) esStep(client, es.activeControl, -1, e.shiftKey);
+          else zoomStep(0.8);
           break;
         case 'z':
         case 'Z':

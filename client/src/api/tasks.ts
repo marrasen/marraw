@@ -81,3 +81,9 @@ export function useTaskOutput(taskId: string): { lines: string[]; clear: () => v
     return { lines, clear };
 }
 
+
+export interface TaskMeta {
+    kind: string;
+    folder?: string;
+    destDir?: string;
+}

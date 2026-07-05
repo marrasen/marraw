@@ -49,7 +49,7 @@ func (c *Cache) Dir() string { return c.dir }
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r4"
+const renderVersion = "r5"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
@@ -191,7 +191,10 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 		rgba = image.NewRGBA(b)
 		xdraw.Copy(rgba, image.Point{}, img, b, xdraw.Src, nil)
 	}
-	rgba = rotateFlip(rgba, photo.Orientation)
+	// Orientation from the open file, not the DB row: on-demand requests can
+	// arrive before the metadata backfill has written photo.Orientation, and
+	// a thumb cached unrotated stays wrong forever.
+	rgba = rotateFlip(rgba, proc.Metadata().Orientation)
 	// Write every level the thumb can serve, largest first.
 	var levels []int
 	for _, l := range []int{1024, 512, 256} {

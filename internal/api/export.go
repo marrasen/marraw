@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
-	"iter"
+	"fmt"
 	"os"
+	"sync"
 
 	"github.com/marrasen/aprot"
+	"github.com/marrasen/aprot/tasks"
 
 	"github.com/marrasen/marraw/internal/export"
 )
@@ -21,57 +23,83 @@ type ExportRequest struct {
 	Format      ExportFormat `json:"format"`
 	JpegQuality int          `json:"jpegQuality" validate:"gte=0,lte=100"`
 	LongEdge    int          `json:"longEdge" validate:"gte=0,lte=65536"`
+	// CreateDir creates DestDir if missing (the client asks the user first).
+	CreateDir bool `json:"createDir"`
 }
 
-type ExportItem struct {
-	PhotoID  int64  `json:"photoId"`
-	FileName string `json:"fileName"`
-	OK       bool   `json:"ok"`
-	Error    string `json:"error"`
+type DestInfo struct {
+	Exists bool `json:"exists"`
 }
 
-// ExportPhotos renders the requested photos to req.DestDir using every CPU
-// core, streaming one item per finished file. Cancel via AbortController.
-func (x *Export) ExportPhotos(ctx context.Context, req ExportRequest) (iter.Seq[ExportItem], error) {
-	if st, err := os.Stat(req.DestDir); err != nil || !st.IsDir() {
-		return nil, aprot.ErrInvalidParams("destination is not a directory: " + req.DestDir)
+// CheckDest reports whether the destination directory exists, so the client
+// can offer to create it before starting the export.
+func (x *Export) CheckDest(ctx context.Context, path string) (*DestInfo, error) {
+	st, err := os.Stat(path)
+	return &DestInfo{Exists: err == nil && st.IsDir()}, nil
+}
+
+// StartExport renders the requested photos to req.DestDir as a background
+// shared task using every spare CPU core. Progress and per-file failures
+// stream through the task system; cancel via the task's cancel action.
+func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.TaskRef, error) {
+	if st, err := os.Stat(req.DestDir); err == nil {
+		if !st.IsDir() {
+			return nil, aprot.ErrInvalidParams("destination is not a directory: " + req.DestDir)
+		}
+	} else if !req.CreateDir {
+		return nil, aprot.ErrInvalidParams("destination does not exist: " + req.DestDir)
+	} else if err := os.MkdirAll(req.DestDir, 0o755); err != nil {
+		return nil, aprot.ErrInvalidParams("cannot create destination: " + err.Error())
 	}
 	format := string(req.Format)
 	if format == "" {
 		format = string(ExportJPEG)
 	}
 
-	return func(yield func(ExportItem) bool) {
-		runCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
+	total := len(req.PhotoIDs)
+	tctx, task := tasks.StartTask[TaskMeta](
+		context.WithoutCancel(ctx),
+		fmt.Sprintf("Exporting %d photo%s", total, plural(total)),
+		tasks.Shared(),
+	)
+	task.SetMeta(TaskMeta{Kind: "export", DestDir: req.DestDir})
+	task.Progress(0, total)
 
-		items := make(chan export.Item, len(req.PhotoIDs))
-		go func() {
-			defer close(items)
-			export.Run(runCtx, x.deps.DB, export.Request{
-				PhotoIDs:    req.PhotoIDs,
-				DestDir:     req.DestDir,
-				Format:      format,
-				JpegQuality: req.JpegQuality,
-				LongEdge:    req.LongEdge,
-			}, func(it export.Item) { items <- it })
-		}()
-
-		total := len(req.PhotoIDs)
-		done := 0
-		for it := range items {
+	go func() {
+		var mu sync.Mutex
+		done, failed := 0, 0
+		err := export.Run(tctx, x.deps.DB, export.Request{
+			PhotoIDs:    req.PhotoIDs,
+			DestDir:     req.DestDir,
+			Format:      format,
+			JpegQuality: req.JpegQuality,
+			LongEdge:    req.LongEdge,
+		}, func(it export.Item) {
+			mu.Lock()
 			done++
-			aprot.Progress(ctx).Update(done, total, it.FileName)
-			out := ExportItem{PhotoID: it.PhotoID, FileName: it.FileName, OK: it.Err == nil}
+			d := done
 			if it.Err != nil {
-				out.Error = it.Err.Error()
+				failed++
+				task.Output(fmt.Sprintf("%s: %v", it.FileName, it.Err))
 			}
-			if !yield(out) {
-				cancel()
-				for range items {
-				} // drain so the exporter can finish
-				return
-			}
+			mu.Unlock()
+			task.Progress(d, total)
+		})
+		switch {
+		case err != nil:
+			task.Fail(err.Error())
+		case failed > 0:
+			task.Fail(fmt.Sprintf("%d of %d exports failed", failed, total))
+		default:
+			task.Close()
 		}
-	}, nil
+	}()
+	return &tasks.TaskRef{TaskID: task.ID()}, nil
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }

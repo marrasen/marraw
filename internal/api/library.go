@@ -12,6 +12,7 @@ import (
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/store"
+	"github.com/marrasen/marraw/internal/trash"
 )
 
 // Library handles folder browsing and culling.
@@ -81,13 +82,15 @@ func hasSubdirs(path string) bool {
 }
 
 // OpenFolder scans a folder into the library and returns its id and photo
-// count. Fast: no decoding happens here.
+// count. Fast: no decoding happens here — the metadata backfill and the
+// pre-render pass start in the background as cancellable shared tasks.
 func (l *Library) OpenFolder(ctx context.Context, path string) (*FolderInfo, error) {
 	folderID, count, err := l.deps.Scanner.OpenFolder(ctx, path)
 	if err != nil {
 		return nil, aprot.ErrInvalidParams(err.Error())
 	}
 	aprot.TriggerRefresh(ctx, photosKey(folderID))
+	l.startFolderJobs(ctx, folderID, path)
 	return &FolderInfo{FolderID: folderID, Path: path, PhotoCount: count}, nil
 }
 
@@ -141,7 +144,7 @@ func (l *Library) SetRating(ctx context.Context, ids []int64, rating int) error 
 	for i, id := range ids {
 		patches[i] = PhotoPatch{ID: id, Rating: &rating}
 	}
-	l.deps.Broadcast(&PhotoPatchEvent{Patches: patches})
+	l.deps.PatchPhotos(ctx, patches)
 	return nil
 }
 
@@ -154,8 +157,34 @@ func (l *Library) SetFlag(ctx context.Context, ids []int64, flag Flag) error {
 	for i, id := range ids {
 		patches[i] = PhotoPatch{ID: id, Flag: &flag}
 	}
-	l.deps.Broadcast(&PhotoPatchEvent{Patches: patches})
+	l.deps.PatchPhotos(ctx, patches)
 	return nil
+}
+
+// DeletePhotos moves the given photos' files to the OS recycle bin and
+// removes them from the library. Structural change: subscribers get a full
+// refresh, not a patch.
+func (l *Library) DeletePhotos(ctx context.Context, ids []int64) (*DeleteResult, error) {
+	photos, err := l.deps.DB.GetPhotos(ctx, ids)
+	if err != nil {
+		return nil, aprot.ErrInvalidParams(err.Error())
+	}
+	paths := make([]string, len(photos))
+	folders := map[int64]bool{}
+	for i, p := range photos {
+		paths[i] = p.Path()
+		folders[p.FolderID] = true
+	}
+	if err := trash.MoveToTrash(paths); err != nil {
+		return nil, err
+	}
+	if err := l.deps.DB.DeletePhotos(ctx, ids); err != nil {
+		return nil, err
+	}
+	for f := range folders {
+		aprot.TriggerRefresh(ctx, photosKey(f))
+	}
+	return &DeleteResult{Deleted: len(photos)}, nil
 }
 
 // SetVisible hints which photos the client's viewport shows so their

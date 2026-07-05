@@ -24,8 +24,8 @@ github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
 github.com/leodido/go-urn v1.4.0 h1:WT9HwE9SGECu3lg4d/dIA+jxlljEa1/ffXKmRjqdmIQ=
 github.com/leodido/go-urn v1.4.0/go.mod h1:bvxc+MVxLKB4z00jd1z+Dvzr47oO32F/QSNjSBOlFxI=
-github.com/marrasen/aprot v0.46.0 h1:iXZRWZmr6r5f3WRvaunbbnNh6k3Mv1G2zG6Ffs54D/0=
-github.com/marrasen/aprot v0.46.0/go.mod h1:9CpgyA1h+/BYWmjiEe8AfJ+/GDszQJN5FHrpiwikWMQ=
+github.com/marrasen/aprot v0.47.0 h1:7UKCi6STLFVLZUmohq5uLcpU5/LUlp2PLHc4roRAvjU=
+github.com/marrasen/aprot v0.47.0/go.mod h1:9CpgyA1h+/BYWmjiEe8AfJ+/GDszQJN5FHrpiwikWMQ=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=

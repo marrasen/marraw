@@ -82,10 +82,9 @@ type FolderInfo struct {
 	PhotoCount int    `json:"photoCount"`
 }
 
-// PreviewResult carries the edit hash the client needs to build the
-// preview image URL.
-type PreviewResult struct {
-	EditHash string `json:"editHash"`
+// DeleteResult reports how many photos DeletePhotos moved to the trash.
+type DeleteResult struct {
+	Deleted int `json:"deleted"`
 }
 
 // PhotoPatch is a partial update to one photo; nil fields are unchanged.

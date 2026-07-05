@@ -75,6 +75,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
+	// Wide-open CORS so the client can fetch() pixels for the histogram —
+	// including from Electron's file:// origin ("null"). Access control is
+	// the token, which rides in the URL, not the origin.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	http.ServeContent(w, r, "", time.Time{}, f)

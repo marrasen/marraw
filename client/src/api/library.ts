@@ -17,6 +17,10 @@ export const Flag = {
 } as const;
 export type FlagType = typeof Flag[keyof typeof Flag];
 
+export interface DeleteResult {
+    deleted: number;
+}
+
 export interface DirEntry {
     name: string;
     path: string;
@@ -66,6 +70,19 @@ export interface PhotoPatchEvent {
 }
 
 
+export function deletePhotos(client: ApiClient, ids: number[], options?: RequestOptions): Promise<DeleteResult> {
+    return client.request<DeleteResult>('Library.DeletePhotos', [ids], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+deletePhotos.method = 'Library.DeletePhotos' as const;
+
+export function subscribeDeletePhotos(client: ApiClient, ids: number[], callback: (data: DeleteResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<DeleteResult>('Library.DeletePhotos', [ids], callback, onError, options);
+}
+
+
 export function listDir(client: ApiClient, path: string, options?: RequestOptions): Promise<DirEntry[]> {
     return client.request<DirEntry[]>('Library.ListDir', [path], options);
 }
@@ -74,8 +91,8 @@ export function listDir(client: ApiClient, path: string, options?: RequestOption
 // (unaffected by minification, unlike Function.name).
 listDir.method = 'Library.ListDir' as const;
 
-export function subscribeListDir(client: ApiClient, path: string, callback: (data: DirEntry[]) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<DirEntry[]>('Library.ListDir', [path], callback, onError);
+export function subscribeListDir(client: ApiClient, path: string, callback: (data: DirEntry[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<DirEntry[]>('Library.ListDir', [path], callback, onError, options);
 }
 
 
@@ -87,8 +104,8 @@ export function listDrives(client: ApiClient, options?: RequestOptions): Promise
 // (unaffected by minification, unlike Function.name).
 listDrives.method = 'Library.ListDrives' as const;
 
-export function subscribeListDrives(client: ApiClient, callback: (data: DriveInfo[]) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<DriveInfo[]>('Library.ListDrives', [], callback, onError);
+export function subscribeListDrives(client: ApiClient, callback: (data: DriveInfo[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<DriveInfo[]>('Library.ListDrives', [], callback, onError, options);
 }
 
 
@@ -100,8 +117,8 @@ export function listPhotos(client: ApiClient, folderID: number, options?: Reques
 // (unaffected by minification, unlike Function.name).
 listPhotos.method = 'Library.ListPhotos' as const;
 
-export function subscribeListPhotos(client: ApiClient, folderID: number, callback: (data: Photo[]) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<Photo[]>('Library.ListPhotos', [folderID], callback, onError);
+export function subscribeListPhotos(client: ApiClient, folderID: number, callback: (data: Photo[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Photo[]>('Library.ListPhotos', [folderID], callback, onError, options);
 }
 
 
@@ -113,8 +130,8 @@ export function openFolder(client: ApiClient, path: string, options?: RequestOpt
 // (unaffected by minification, unlike Function.name).
 openFolder.method = 'Library.OpenFolder' as const;
 
-export function subscribeOpenFolder(client: ApiClient, path: string, callback: (data: FolderInfo) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<FolderInfo>('Library.OpenFolder', [path], callback, onError);
+export function subscribeOpenFolder(client: ApiClient, path: string, callback: (data: FolderInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<FolderInfo>('Library.OpenFolder', [path], callback, onError, options);
 }
 
 
@@ -126,8 +143,8 @@ export function setFlag(client: ApiClient, ids: number[], flag: FlagType, option
 // (unaffected by minification, unlike Function.name).
 setFlag.method = 'Library.SetFlag' as const;
 
-export function subscribeSetFlag(client: ApiClient, ids: number[], flag: FlagType, callback: (data: void) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<void>('Library.SetFlag', [ids, flag], callback, onError);
+export function subscribeSetFlag(client: ApiClient, ids: number[], flag: FlagType, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Library.SetFlag', [ids, flag], callback, onError, options);
 }
 
 
@@ -139,8 +156,8 @@ export function setRating(client: ApiClient, ids: number[], rating: number, opti
 // (unaffected by minification, unlike Function.name).
 setRating.method = 'Library.SetRating' as const;
 
-export function subscribeSetRating(client: ApiClient, ids: number[], rating: number, callback: (data: void) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<void>('Library.SetRating', [ids, rating], callback, onError);
+export function subscribeSetRating(client: ApiClient, ids: number[], rating: number, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Library.SetRating', [ids, rating], callback, onError, options);
 }
 
 
@@ -152,8 +169,8 @@ export function setVisible(client: ApiClient, folderID: number, ids: number[], o
 // (unaffected by minification, unlike Function.name).
 setVisible.method = 'Library.SetVisible' as const;
 
-export function subscribeSetVisible(client: ApiClient, folderID: number, ids: number[], callback: (data: void) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<void>('Library.SetVisible', [folderID, ids], callback, onError);
+export function subscribeSetVisible(client: ApiClient, folderID: number, ids: number[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Library.SetVisible', [folderID, ids], callback, onError, options);
 }
 
 export function onPhotoPatchEvent(client: ApiClient, handler: PushHandler<PhotoPatchEvent>): () => void {
@@ -163,13 +180,28 @@ export function onPhotoPatchEvent(client: ApiClient, handler: PushHandler<PhotoP
 // React Hooks for Library
 
 /**
+ * Subscribes to `Library.DeletePhotos` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useDeletePhotos(ids: number[], options?: UseQueryOptions<DeleteResult>): UseQueryResult<DeleteResult> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, ids: number[]) => deletePhotos(client, ids, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [ids], _subscribe: { method: 'Library.DeletePhotos', params: [ids] } });
+}
+
+/**
  * Subscribes to `Library.ListDir` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useListDir(path: string, options?: UseQueryOptions): UseQueryResult<DirEntry[]> {
+export function useListDir(path: string, options?: UseQueryOptions<DirEntry[]>): UseQueryResult<DirEntry[]> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, path: string) => listDir(client, path, { signal }),
         [],
@@ -183,7 +215,7 @@ export function useListDir(path: string, options?: UseQueryOptions): UseQueryRes
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useListDrives(options?: UseQueryOptions): UseQueryResult<DriveInfo[]> {
+export function useListDrives(options?: UseQueryOptions<DriveInfo[]>): UseQueryResult<DriveInfo[]> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal) => listDrives(client, { signal }),
         [],
@@ -198,7 +230,7 @@ export function useListDrives(options?: UseQueryOptions): UseQueryResult<DriveIn
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useListPhotos(folderID: number, options?: UseQueryOptions): UseQueryResult<Photo[]> {
+export function useListPhotos(folderID: number, options?: UseQueryOptions<Photo[]>): UseQueryResult<Photo[]> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, folderID: number) => listPhotos(client, folderID, { signal }),
         [],
@@ -213,7 +245,7 @@ export function useListPhotos(folderID: number, options?: UseQueryOptions): UseQ
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useOpenFolder(path: string, options?: UseQueryOptions): UseQueryResult<FolderInfo> {
+export function useOpenFolder(path: string, options?: UseQueryOptions<FolderInfo>): UseQueryResult<FolderInfo> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, path: string) => openFolder(client, path, { signal }),
         [],
@@ -228,7 +260,7 @@ export function useOpenFolder(path: string, options?: UseQueryOptions): UseQuery
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useSetFlag(ids: number[], flag: FlagType, options?: UseQueryOptions): UseQueryResult<void> {
+export function useSetFlag(ids: number[], flag: FlagType, options?: UseQueryOptions<void>): UseQueryResult<void> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, ids: number[], flag: FlagType) => setFlag(client, ids, flag, { signal }),
         [],
@@ -243,7 +275,7 @@ export function useSetFlag(ids: number[], flag: FlagType, options?: UseQueryOpti
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useSetRating(ids: number[], rating: number, options?: UseQueryOptions): UseQueryResult<void> {
+export function useSetRating(ids: number[], rating: number, options?: UseQueryOptions<void>): UseQueryResult<void> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, ids: number[], rating: number) => setRating(client, ids, rating, { signal }),
         [],
@@ -258,7 +290,7 @@ export function useSetRating(ids: number[], rating: number, options?: UseQueryOp
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useSetVisible(folderID: number, ids: number[], options?: UseQueryOptions): UseQueryResult<void> {
+export function useSetVisible(folderID: number, ids: number[], options?: UseQueryOptions<void>): UseQueryResult<void> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, folderID: number, ids: number[]) => setVisible(client, folderID, ids, { signal }),
         [],

@@ -97,12 +97,17 @@ scripts/            setup-libraw.ps1, smoke.mjs
 
 ## Known gaps / next steps
 
-- Custom white balance UI (Kelvin/tint) — needs camera-matrix math; only
-  as-shot/auto exposed for now.
 - XMP sidecar export for Lightroom/darktable interop.
 - Crop tool (LibRaw `cropbox` is plumbed but has no UI).
-- aprot wishlist that fell out of this project (filed upstream):
-  [delta/patch subscriptions](https://github.com/marrasen/aprot/issues/237),
-  [binary payloads](https://github.com/marrasen/aprot/issues/238),
-  [stream flow control / chunked yields](https://github.com/marrasen/aprot/issues/239),
-  [fixed-size arrays generate `any`](https://github.com/marrasen/aprot/issues/240).
+- White balance temp/tint sliders adjust multipliers relative to as-shot
+  (±1 stop on R/B and G); a true Kelvin scale needs camera-matrix math.
+- aprot wishlist that fell out of this project — all shipped in aprot
+  v0.47.0 and adopted here:
+  [delta/patch subscriptions](https://github.com/marrasen/aprot/issues/237)
+  (photo rating/flag/edit patches),
+  [binary payloads](https://github.com/marrasen/aprot/issues/238)
+  (edit previews ride the WebSocket as JPEG blobs),
+  [stream chunking](https://github.com/marrasen/aprot/issues/239)
+  (enabled server-wide),
+  [fixed-size array codegen](https://github.com/marrasen/aprot/issues/240)
+  (`wbMul` is a typed tuple).

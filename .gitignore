@@ -10,3 +10,4 @@ go.work.sum
 .devdata/
 build/ui-smoke.png
 build/packaged-smoke.png
+.idea/

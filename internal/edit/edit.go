@@ -26,21 +26,35 @@ const (
 func WBModeValues() []WBMode { return []WBMode{WBCamera, WBAuto, WBCustom} }
 
 // Params is the edit state, stored as JSON in photos.edit_params.
-// The zero value is the neutral edit.
+// The zero value is the neutral edit. Every field's zero value must mean
+// "default" — IsNeutral and hashing rely on it, and it keeps stored JSON
+// from older versions forward-compatible.
 type Params struct {
 	ExpEV       float64    `json:"expEV" validate:"gte=-2,lte=3"`
 	ExpPreserve float64    `json:"expPreserve" validate:"gte=0,lte=1"`
 	WBMode      WBMode     `json:"wbMode" validate:"omitempty,oneof=camera auto custom"`
 	WBMul       [4]float64 `json:"wbMul"`
-	Bright      float64    `json:"bright" validate:"gte=0,lte=4"` // 0 = default (1.0)
-	Highlight   int        `json:"highlight" validate:"gte=0,lte=9"`
-	NRThreshold float64    `json:"nrThreshold" validate:"gte=0,lte=1000"`
-	FBDDNoiseRd int        `json:"fbddNoiseRd" validate:"gte=0,lte=2"`
-	MedPasses   int        `json:"medPasses" validate:"gte=0,lte=5"`
+	// WBTemp/WBTint warm/shift the white balance relative to the selected
+	// base (as-shot or picked custom multipliers): ±1 ≈ ±1 stop on the
+	// R/B (temp) or G (tint) multipliers. Ignored in auto mode.
+	WBTemp      float64 `json:"wbTemp" validate:"gte=-1,lte=1"`
+	WBTint      float64 `json:"wbTint" validate:"gte=-1,lte=1"`
+	Bright      float64 `json:"bright" validate:"gte=0,lte=4"` // 0 = default (1.0)
+	// Gamma is the display gamma power (contrast): 0 = default (BT.709,
+	// 2.222). Higher lifts midtones (flatter), lower darkens (punchier).
+	Gamma float64 `json:"gamma" validate:"gte=0,lte=3.5"`
+	// Shadow is the gamma toe slope: 0 = default (4.5). Higher darkens
+	// deep shadows, lower lifts them.
+	Shadow      float64 `json:"shadow" validate:"gte=0,lte=12"`
+	Highlight   int     `json:"highlight" validate:"gte=0,lte=9"`
+	NRThreshold float64 `json:"nrThreshold" validate:"gte=0,lte=1000"`
+	FBDDNoiseRd int     `json:"fbddNoiseRd" validate:"gte=0,lte=2"`
+	MedPasses   int     `json:"medPasses" validate:"gte=0,lte=5"`
 }
 
 // Normalize canonicalizes equivalent states so hashing is stable: "camera"
-// is the implicit WB default, and multipliers only matter in custom mode.
+// is the implicit WB default, multipliers only matter in custom mode, and
+// temp/tint only outside auto mode.
 func (e *Params) Normalize() {
 	if e == nil {
 		return
@@ -50,6 +64,9 @@ func (e *Params) Normalize() {
 	}
 	if e.WBMode != WBCustom {
 		e.WBMul = [4]float64{}
+	}
+	if e.WBMode == WBAuto {
+		e.WBTemp, e.WBTint = 0, 0
 	}
 }
 
@@ -110,8 +127,23 @@ func (e *Params) LibrawParams(halfSize bool) libraw.Params {
 		p.UseCameraWB = false
 		p.UserMul = e.WBMul
 	}
+	if e.WBMode != WBAuto {
+		p.WBTemp = e.WBTemp
+		p.WBTint = e.WBTint
+	}
 	if e.Bright > 0 {
 		p.Bright = e.Bright
+	}
+	if e.Gamma > 0 || e.Shadow > 0 {
+		g := e.Gamma
+		if g == 0 {
+			g = 2.222
+		}
+		s := e.Shadow
+		if s == 0 {
+			s = 4.5
+		}
+		p.Gamma = [2]float64{1 / g, s}
 	}
 	p.Highlight = e.Highlight
 	p.Threshold = e.NRThreshold

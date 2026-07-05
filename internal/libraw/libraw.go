@@ -84,6 +84,12 @@ func (p *Processor) Metadata() Metadata {
 	}
 }
 
+// CamMul returns the file's as-shot white balance multipliers (falling back
+// to daylight pre_mul, then unity, for files without them). Valid after Open.
+func (p *Processor) CamMul() [4]float64 {
+	return camMulOf(p.h)
+}
+
 // EmbeddedThumb extracts the largest embedded preview as raw JPEG bytes
 // without decoding any RAW data.
 func (p *Processor) EmbeddedThumb() ([]byte, error) {

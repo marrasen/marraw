@@ -7,7 +7,7 @@ import { StatusBar } from '@/components/StatusBar';
 import { GridView } from '@/views/GridView';
 import { LoupeView } from '@/views/LoupeView';
 import { useKeyboard } from '@/lib/keyboard';
-import { usePatchEvents, usePhotos } from '@/lib/usePhotos';
+import { usePhotos } from '@/lib/usePhotos';
 import { useUIStore } from '@/stores/uiStore';
 import { useEffect } from 'react';
 import { openFolder } from '@/api/library';
@@ -27,7 +27,6 @@ function useAutoOpenFolder() {
 
 export default function App() {
   useKeyboard();
-  usePatchEvents();
   useAutoOpenFolder();
   const folderId = useUIStore((s) => s.folderId);
 

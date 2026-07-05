@@ -77,6 +77,71 @@ export function getValidationErrors(err: unknown): FieldError[] | null {
     return err.data as FieldError[];
 }
 
+/**
+ * Options for {@link ApiClient.subscribe} and generated `subscribeX` helpers.
+ */
+export interface SubscribeOptions {
+    /**
+     * Called when the server pushes a `subscription_patch` frame for this
+     * subscription (see the server-side `aprot.PatchSubscription`). Providing
+     * it declares patch support to the server; without it, the server falls
+     * back to a full refresh (re-running the query and re-sending the result).
+     * The patch payload is whatever the mutation handler pushed — apply it to
+     * your local copy of the data.
+     */
+    onPatch?: (patch: unknown) => void;
+}
+
+/**
+ * Builds an `applyPatch` reducer for the common case: the subscribed result
+ * is an array of objects with a unique key field, and patches are partial
+ * objects (or arrays of them) carrying that key. Entries matching a patch's
+ * key are shallow-merged; patches with no matching entry are ignored — use a
+ * full refresh (server-side `TriggerRefresh`) for structural changes like
+ * added or removed items.
+ *
+ *   const { data } = useListPhotos({ applyPatch: mergeByKey('id') });
+ *
+ * For wrapped results (e.g. `{ photos: Photo[] }`) or richer semantics,
+ * write the reducer by hand: `(data, patch) => ({ ...data, photos: ... })`.
+ */
+export function mergeByKey<T extends object>(key: keyof T & string): (data: T[], patch: unknown) => T[] {
+    return (data: T[], patch: unknown): T[] => {
+        const patches = (Array.isArray(patch) ? patch : [patch]) as Array<Partial<T> & Record<string, unknown>>;
+        const byKey = new Map<unknown, Partial<T>>();
+        for (const p of patches) {
+            if (p && typeof p === 'object' && key in p) byKey.set(p[key], p);
+        }
+        if (byKey.size === 0) return data;
+        return data.map((item) => {
+            const p = byKey.get((item as Record<string, unknown>)[key]);
+            return p ? { ...item, ...p } : item;
+        });
+    };
+}
+
+// Shared decoder for binary frame headers — small and reused per message.
+const binaryHeaderDecoder = new TextDecoder();
+
+// decodeBlobResult converts the server's JSON fallback for a Blob result —
+// an object whose only key is "$blob" carrying { contentType?, data(base64) } —
+// into a DOM Blob, so callers see the same type the binary path delivers.
+// Any other result value passes through untouched.
+function decodeBlobResult(result: unknown): unknown {
+    if (
+        result === null || typeof result !== 'object' || Array.isArray(result)
+        || !('$blob' in result) || Object.keys(result).length !== 1
+    ) {
+        return result;
+    }
+    const b = (result as { $blob: { contentType?: string; data?: string } }).$blob;
+    if (b === null || typeof b !== 'object') return result;
+    const bin = atob(b.data ?? '');
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], b.contentType ? { type: b.contentType } : undefined);
+}
+
 // ConnectionErrorReason classifies why a connection failed or could not be
 // used. Browsers deliberately collapse most pre-WebSocket-upgrade failures
 // (DNS, TCP refused, TLS handshake, HTTP 4xx during upgrade) into close
@@ -189,7 +254,7 @@ export interface TransportCloseInfo {
  *   must be reusable after disconnect()/onClose.
  */
 export interface ClientTransport {
-    connect(url: string, onMessage: (data: string) => void, onClose: (info?: TransportCloseInfo) => void): Promise<void>;
+    connect(url: string, onMessage: (data: string | Blob | ArrayBuffer) => void, onClose: (info?: TransportCloseInfo) => void): Promise<void>;
     send(message: object): void;
     disconnect(): void;
     isConnected(): boolean;
@@ -265,7 +330,7 @@ export function getSSEUrl(path: string = '/sse'): string {
 class WebSocketTransport implements ClientTransport {
     private ws: WebSocket | null = null;
 
-    connect(url: string, onMessage: (data: string) => void, onClose: (info?: TransportCloseInfo) => void): Promise<void> {
+    connect(url: string, onMessage: (data: string | Blob | ArrayBuffer) => void, onClose: (info?: TransportCloseInfo) => void): Promise<void> {
         return new Promise((resolve, reject) => {
             // Detach and close previous socket so its deferred onclose
             // cannot interfere with the new connection (mobile wake race).
@@ -278,6 +343,7 @@ class WebSocketTransport implements ClientTransport {
             }
             let opened = false;
             this.ws = new WebSocket(url);
+            this.ws.binaryType = 'arraybuffer';
             this.ws.onopen = () => { opened = true; resolve(); };
             this.ws.onerror = () => {}; // Error is followed by close
             this.ws.onmessage = (e) => onMessage(e.data);
@@ -327,7 +393,7 @@ class SSETransport implements ClientTransport {
     private baseUrl: string = '';
     private onMessage: ((data: string) => void) | null = null;
 
-    connect(url: string, onMessage: (data: string) => void, onClose: (info?: TransportCloseInfo) => void): Promise<void> {
+    connect(url: string, onMessage: (data: string | Blob | ArrayBuffer) => void, onClose: (info?: TransportCloseInfo) => void): Promise<void> {
         this.baseUrl = url;
         this.onMessage = onMessage;
 
@@ -380,6 +446,10 @@ class SSETransport implements ClientTransport {
             });
 
             this.eventSource.addEventListener('stream_item', (e: MessageEvent) => {
+                onMessage(e.data);
+            });
+
+            this.eventSource.addEventListener('stream_chunk', (e: MessageEvent) => {
                 onMessage(e.data);
             });
 
@@ -514,6 +584,7 @@ export class ApiClient {
         params: unknown[];
         callback: (data: unknown) => void;
         onError?: (error: Error) => void;
+        onPatch?: (patch: unknown) => void;
     }>();
     private streams = new Map<string, {
         push: (item: unknown) => void;
@@ -938,7 +1009,11 @@ export class ApiClient {
         }
     }
 
-    private handleMessage(data: string): void {
+    private handleMessage(data: string | Blob | ArrayBuffer): void {
+        if (typeof data !== 'string') {
+            this.handleBinaryMessage(data);
+            return;
+        }
         const msg = JSON.parse(data);
         switch (msg.type) {
             case 'config':
@@ -957,18 +1032,20 @@ export class ApiClient {
                 break;
             }
             case 'response': {
-                const p = this.pending.get(msg.id);
-                if (p) {
-                    this.pending.delete(msg.id);
-                    p.onSettle?.();
-                    p.resolve(msg.result);
-                    this.notifyLoadingChange();
-                } else {
-                    // Server-driven subscription refresh
-                    const sub = this.subscriptions.get(msg.id);
-                    if (sub) {
-                        sub.callback(msg.result);
-                    }
+                this.settleResponse(msg.id, decodeBlobResult(msg.result));
+                break;
+            }
+            case 'subscription_patch': {
+                const sub = this.subscriptions.get(msg.id);
+                if (!sub) break;
+                if (sub.onPatch) {
+                    sub.onPatch(msg.patch);
+                } else if (this.transport.isConnected()) {
+                    // Defensive: the server only sends patches to subscriptions
+                    // that declared support, so this should not happen — but if
+                    // it does, re-subscribe to fetch the full result rather
+                    // than silently going stale.
+                    this.transport.send({ type: 'subscribe', id: msg.id, method: sub.method, params: sub.params });
                 }
                 break;
             }
@@ -1034,6 +1111,16 @@ export class ApiClient {
                 if (s) s.push(msg.item);
                 break;
             }
+            case 'stream_chunk': {
+                // Server-side chunking (ServerOptions.StreamChunking) batches
+                // consecutive items into one frame; unroll so the
+                // AsyncIterable still yields one item at a time.
+                const s = this.streams.get(msg.id);
+                if (s && Array.isArray(msg.items)) {
+                    for (const item of msg.items) s.push(item);
+                }
+                break;
+            }
             case 'stream_end': {
                 const s = this.streams.get(msg.id);
                 if (s) {
@@ -1048,6 +1135,64 @@ export class ApiClient {
                 break;
             }
         }
+    }
+
+    /**
+     * Delivers a result for `id`: settles the pending request if there is
+     * one, otherwise dispatches to the matching server-driven subscription.
+     * Both the JSON `response` envelope and binary frames end here, so the
+     * two paths cannot drift apart.
+     */
+    private settleResponse(id: string, result: unknown): void {
+        const p = this.pending.get(id);
+        if (p) {
+            this.pending.delete(id);
+            p.onSettle?.();
+            p.resolve(result);
+            this.notifyLoadingChange();
+        } else {
+            // Server-driven subscription refresh
+            const sub = this.subscriptions.get(id);
+            if (sub) {
+                sub.callback(result);
+            }
+        }
+    }
+
+    private rejectResponse(id: string, error: Error): void {
+        const p = this.pending.get(id);
+        if (p) {
+            this.pending.delete(id);
+            p.onSettle?.();
+            p.reject(error);
+            this.notifyLoadingChange();
+        } else {
+            const sub = this.subscriptions.get(id);
+            if (sub) {
+                sub.onError?.(error);
+            }
+        }
+    }
+
+    private async handleBinaryMessage(data: Blob | ArrayBuffer): Promise<void> {
+        const buffer = data instanceof ArrayBuffer ? data : await data.arrayBuffer();
+        const view = new DataView(buffer);
+        const headerLen = view.getUint32(0, false);
+        const headerBytes = new Uint8Array(buffer, 4, headerLen);
+        const header = JSON.parse(binaryHeaderDecoder.decode(headerBytes));
+        if (header.version !== 1 || header.type !== 'response') {
+            // Unknown frame: reject rather than drop, so the awaiting caller
+            // fails fast instead of hanging until the connection closes.
+            this.rejectResponse(header.id, new ApiError(
+                ErrorCode.InternalError,
+                `unsupported binary frame (version ${header.version}, type ${header.type})`,
+            ));
+            return;
+        }
+        // Zero-copy view into the received buffer; Blob copies on read.
+        const payload = new Uint8Array(buffer, 4 + headerLen);
+        const blob = new Blob([payload], header.contentType ? { type: header.contentType } : undefined);
+        this.settleResponse(header.id, blob);
     }
 
     private applyConfig(config: {
@@ -1175,7 +1320,7 @@ export class ApiClient {
                 resolve: (result) => { sub.callback(result); },
                 reject: (err) => { sub.onError?.(err as Error); },
             });
-            this.transport.send({ type: 'subscribe', id, method: sub.method, params: sub.params });
+            this.transport.send({ type: 'subscribe', id, method: sub.method, params: sub.params, ...(sub.onPatch ? { patch: true } : {}) });
         }
         this.notifyLoadingChange();
     }
@@ -1191,10 +1336,11 @@ export class ApiClient {
         };
     }
 
-    subscribe<T>(method: string, params: unknown[], callback: (data: T) => void, onError?: (error: Error) => void): () => void {
+    subscribe<T>(method: string, params: unknown[], callback: (data: T) => void, onError?: (error: Error) => void, options?: SubscribeOptions): () => void {
         const id = String(++this.requestId);
         const cb = callback as (data: unknown) => void;
-        this.subscriptions.set(id, { method, params, callback: cb, onError });
+        const onPatch = options?.onPatch;
+        this.subscriptions.set(id, { method, params, callback: cb, onError, onPatch });
 
         // Register in pending for the initial response
         this.pending.set(id, {
@@ -1203,7 +1349,7 @@ export class ApiClient {
         });
 
         if (this.transport.isConnected()) {
-            this.transport.send({ type: 'subscribe', id, method, params });
+            this.transport.send({ type: 'subscribe', id, method, params, ...(onPatch ? { patch: true } : {}) });
         }
 
         return () => {
@@ -1548,7 +1694,23 @@ export function useIsLoading(): boolean {
 /**
  * Options for {@link useQuery} hooks.
  */
-export interface UseQueryOptions {
+export interface UseQueryOptions<TData = unknown> {
+    /**
+     * Reducer applying server-pushed `subscription_patch` payloads to the
+     * current `data` without a refetch (see the server-side
+     * `aprot.PatchSubscription`). Providing it declares patch support for the
+     * subscription; without it, the server falls back to re-running the query
+     * and re-sending the full result. Must be pure: return a new value,
+     * never mutate `data` in place. For keyed-array results, `mergeByKey`
+     * builds the common shallow-merge reducer:
+     *
+     *   useListPhotos({ applyPatch: mergeByKey('id') })
+     *
+     * In cached mode the patch is applied to the shared cache snapshot, so
+     * every component using the same hook sees it. Only applies in
+     * subscription mode.
+     */
+    applyPatch?: (data: TData, patch: unknown) => TData;
     /**
      * When `false`, the query will not execute. Useful for conditional fetching
      * (e.g., wait until an ID is available). Defaults to `true`.
@@ -1766,6 +1928,15 @@ interface SubscriptionCacheEntry {
     listeners: Set<() => void>;
     refCount: number;
     unsubscribe: (() => void) | null;
+    /** Reducer applying subscription_patch payloads to the cached data. */
+    applyPatch?: (data: unknown, patch: unknown) => unknown;
+    /**
+     * Patches that arrived before the initial subscribe response. The server
+     * may push a patch between registering the subscription and sending the
+     * first result, and that result can predate the patch's mutation — so
+     * these are replayed on top of the first data instead of being dropped.
+     */
+    pendingPatches: unknown[];
 }
 
 const subscriptionCaches = new WeakMap<ApiClient, Map<string, SubscriptionCacheEntry>>();
@@ -1784,6 +1955,7 @@ function subscribeCached<T>(
     key: string,
     method: string,
     params: unknown[],
+    applyPatch?: (data: T, patch: unknown) => T,
 ): {
     subscribe: (listener: () => void) => () => void;
     getSnapshot: () => SubscriptionSnapshot<T>;
@@ -1802,8 +1974,12 @@ function subscribeCached<T>(
                 listeners: new Set(),
                 refCount: 0,
                 unsubscribe: null,
+                pendingPatches: [],
             };
             cache.set(key, entry);
+        }
+        if (applyPatch) {
+            entry.applyPatch = applyPatch as (data: unknown, patch: unknown) => unknown;
         }
         entry.listeners.add(listener);
         entry.refCount++;
@@ -1814,13 +1990,30 @@ function subscribeCached<T>(
                 method,
                 params,
                 (result) => {
-                    e.snapshot = { data: result, error: null, isLoading: false };
+                    let data: unknown = result;
+                    // Replay patches that raced ahead of this (re)load — the
+                    // result may have been computed before their mutations.
+                    if (e.applyPatch && data !== null) {
+                        for (const p of e.pendingPatches) data = e.applyPatch(data, p);
+                    }
+                    e.pendingPatches = [];
+                    e.snapshot = { data, error: null, isLoading: false };
                     notify(e);
                 },
                 (err) => {
                     e.snapshot = { ...e.snapshot, error: err, isLoading: false };
                     notify(e);
                 },
+                applyPatch ? {
+                    onPatch: (patch) => {
+                        if (e.snapshot.data === null || !e.applyPatch) {
+                            e.pendingPatches.push(patch);
+                            return;
+                        }
+                        e.snapshot = { ...e.snapshot, data: e.applyPatch(e.snapshot.data, patch) };
+                        notify(e);
+                    },
+                } : undefined,
             );
         }
 
@@ -1921,11 +2114,11 @@ function updateCachedSnapshot<T>(
  * (unmount, param change, or React Strict Mode re-run), which cancels the
  * Go handler's `context.Context`.
  */
-export function useQuery<TRes>(fn: (client: ApiClient, signal: AbortSignal) => Promise<TRes>, options?: UseQueryOptions): UseQueryResult<TRes>;
-export function useQuery<TArgs extends unknown[], TRes>(fn: (client: ApiClient, signal: AbortSignal, ...args: TArgs) => Promise<TRes>, options: UseQueryOptions & { params: TArgs }): UseQueryResult<TRes>;
+export function useQuery<TRes>(fn: (client: ApiClient, signal: AbortSignal) => Promise<TRes>, options?: UseQueryOptions<TRes>): UseQueryResult<TRes>;
+export function useQuery<TArgs extends unknown[], TRes>(fn: (client: ApiClient, signal: AbortSignal, ...args: TArgs) => Promise<TRes>, options: UseQueryOptions<TRes> & { params: TArgs }): UseQueryResult<TRes>;
 export function useQuery<TArgs extends unknown[], TRes>(
     fn: (client: ApiClient, signal: AbortSignal, ...args: TArgs) => Promise<TRes>,
-    options?: UseQueryOptions & { params?: TArgs },
+    options?: UseQueryOptions<TRes> & { params?: TArgs },
 ): UseQueryResult<TRes> {
     const client = useApiClient();
     const [data, setData] = useState<TRes | null>(null);
@@ -1952,10 +2145,12 @@ export function useQuery<TArgs extends unknown[], TRes>(
 
     const cacheStore = useMemo(() => {
         if (!shouldCache) return null;
-        return subscribeCached<TRes>(client, cacheKey, subscribeMethod!, subscribeOpts!.params);
+        return subscribeCached<TRes>(client, cacheKey, subscribeMethod!, subscribeOpts!.params, options?.applyPatch);
     // subscribeMethod / subscribeOpts.params are already encoded into cacheKey,
     // so listing them again would force the memo to re-run on identity changes
-    // even when the resolved key is unchanged.
+    // even when the resolved key is unchanged. applyPatch is intentionally
+    // omitted too: inline reducers change identity every render, and the cache
+    // entry keeps the latest reducer via subscribeCached's subscribe() path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [client, cacheKey, shouldCache]);
 
@@ -2014,6 +2209,7 @@ export function useQuery<TArgs extends unknown[], TRes>(
         if (!subscribeMethod || options?.enabled === false) return;
         if (options?.cache !== false && queryCacheEnabled) return; // cached path handles this
         setIsLoading(true);
+        const applyPatch = options?.applyPatch;
         const unsubscribe = client.subscribe<TRes>(
             subscribeMethod,
             subscribeOpts!.params,
@@ -2026,6 +2222,13 @@ export function useQuery<TArgs extends unknown[], TRes>(
                 setError(err);
                 setIsLoading(false);
             },
+            applyPatch ? {
+                // Patches arriving before the first result are dropped here;
+                // the cached path (the default) queues and replays them.
+                onPatch: (patch) => {
+                    setData((d) => (d === null ? d : applyPatch(d, patch)));
+                },
+            } : undefined,
         );
         return unsubscribe;
     // eslint-disable-next-line react-hooks/exhaustive-deps

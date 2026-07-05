@@ -92,6 +92,30 @@ async function createWindow() {
     await win.loadFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'), { query });
   }
 
+  // Scripted UI verification: MARRAW_UITEST=<renderer-script.js> runs the
+  // script in the page (async IIFE, must return a JSON-serializable value),
+  // prints it as a UITEST_RESULT line, and exits — used by
+  // scripts/ui-verify.mjs.
+  if (process.env.MARRAW_UITEST) {
+    setTimeout(async () => {
+      try {
+        const src = require('node:fs').readFileSync(process.env.MARRAW_UITEST, 'utf8');
+        const result = await win.webContents.executeJavaScript(`(async () => { ${src}\n })()`);
+        console.log(`UITEST_RESULT ${JSON.stringify(result)}`);
+      } catch (err) {
+        console.log(`UITEST_RESULT ${JSON.stringify({ fatal: String(err) })}`);
+      }
+      if (process.env.MARRAW_SCREENSHOT) {
+        try {
+          const img = await win.webContents.capturePage();
+          require('node:fs').writeFileSync(process.env.MARRAW_SCREENSHOT, img.toPNG());
+        } catch {}
+      }
+      app.quit();
+    }, Number(process.env.MARRAW_UITEST_DELAY ?? 4000));
+    return;
+  }
+
   // Headless UI smoke: MARRAW_SCREENSHOT=out.png captures the window after
   // load and exits — used by scripts/ui-smoke.mjs since there is no display
   // assertion harness.

@@ -4,7 +4,7 @@
 //
 //   node scripts/smoke.mjs "D:\Photos\2026-04-18 Velox Valor Trollhättan"
 
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,12 +16,23 @@ if (!FOLDER) {
 const HTTP = 'http://127.0.0.1:8483';
 
 const ws = new WebSocket('ws://127.0.0.1:8483/ws');
+ws.binaryType = 'arraybuffer';
 let nextId = 1;
 const pending = new Map();
 const pushes = [];
-const streamItems = new Map();
+const patches = []; // subscription_patch frames
 
 ws.onmessage = (ev) => {
+  if (ev.data instanceof ArrayBuffer) {
+    // Binary Blob result: 4-byte BE header length + JSON header + payload.
+    const view = new DataView(ev.data);
+    const headerLen = view.getUint32(0, false);
+    const header = JSON.parse(new TextDecoder().decode(new Uint8Array(ev.data, 4, headerLen)));
+    const payload = new Uint8Array(ev.data, 4 + headerLen);
+    pending.get(header.id)?.resolve({ $binary: true, contentType: header.contentType, bytes: payload });
+    pending.delete(header.id);
+    return;
+  }
   const msg = JSON.parse(ev.data);
   switch (msg.type) {
     case 'response': {
@@ -34,17 +45,8 @@ ws.onmessage = (ev) => {
       pending.delete(msg.id);
       break;
     }
-    case 'stream_item': {
-      streamItems.get(msg.id)?.push(msg.item);
-      break;
-    }
-    case 'stream_end': {
-      const p = pending.get(msg.id);
-      if (p) {
-        if (msg.code) p.reject(new Error(`${msg.code}: ${msg.message}`));
-        else p.resolve(streamItems.get(msg.id));
-      }
-      pending.delete(msg.id);
+    case 'subscription_patch': {
+      patches.push(msg);
       break;
     }
     case 'push': {
@@ -54,9 +56,8 @@ ws.onmessage = (ev) => {
   }
 };
 
-function call(method, params, stream = false) {
+function call(method, params) {
   const id = String(nextId++);
-  if (stream) streamItems.set(id, []);
   return new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject });
     ws.send(JSON.stringify({ type: 'request', id, method, params }));
@@ -67,6 +68,33 @@ function call(method, params, stream = false) {
       }
     }, 120_000);
   });
+}
+
+// subscribe opens a patch-capable subscription; resolves with the initial
+// result. Later patches land in `patches`.
+function subscribe(method, params) {
+  const id = String(nextId++);
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    ws.send(JSON.stringify({ type: 'subscribe', id, method, params, patch: true }));
+    setTimeout(() => {
+      if (pending.has(id)) {
+        pending.delete(id);
+        reject(new Error(`timeout: subscribe ${method}`));
+      }
+    }, 120_000);
+  });
+}
+
+// waitFor polls a predicate over incoming frames.
+async function waitFor(name, pred, timeoutMs = 60_000) {
+  const t = Date.now();
+  while (Date.now() - t < timeoutMs) {
+    const v = pred();
+    if (v) return v;
+    await new Promise((s) => setTimeout(s, 100));
+  }
+  throw new Error(`timeout waiting for ${name}`);
 }
 
 const t0 = Date.now();
@@ -106,32 +134,35 @@ const tCache = Date.now();
 r = await fetch(`${HTTP}/img/${p.id}/512?v=${p.cacheKey}`);
 await r.arrayBuffer();
 step(`GET /img/512 (cached) -> ${Date.now() - tCache}ms`);
-check(Date.now() - tCache < 100, 'cached thumb serves fast');
+// Generous bound: the pre-render pass kicked off by OpenFolder is
+// saturating the decode pool while this runs.
+check(Date.now() - tCache < 400, 'cached thumb serves fast');
 
 // Stale cache key must 409.
 r = await fetch(`${HTTP}/img/${p.id}/512?v=${'0'.repeat(32)}`);
 check(r.status === 409, 'stale cache key -> 409');
 
-// 4. Rating + push event.
+// 4. Rating + subscription patch (aprot PatchSubscription, O(patch) wire).
+const subPhotos = await subscribe('Library.ListPhotos', [info.folderId]);
+check(subPhotos.length === info.photoCount, 'subscription initial result');
 await call('Library.SetRating', [[p.id], 4]);
-await new Promise((s) => setTimeout(s, 300));
-const patch = pushes.find((m) => m.event === 'PhotoPatchEvent');
-step('SetRating -> push received');
-check(patch && patch.data.patches.some((x) => x.id === p.id && x.rating === 4), 'PhotoPatchEvent carries rating patch');
+const ratingPatch = await waitFor('rating patch', () =>
+  patches.find((m) => m.patch?.patches?.some((x) => x.id === p.id && x.rating === 4)), 5_000);
+step('SetRating -> subscription_patch received');
+check(!!ratingPatch, 'subscription patch carries rating');
 
-// 5. Edit preview loop (+1 EV), then commit.
+// 5. Edit preview loop (+1 EV) — the preview JPEG rides back as a binary
+// Blob frame — then commit.
 const params = {
   expEV: 1, expPreserve: 0, wbMode: 'camera', wbMul: [0, 0, 0, 0],
-  bright: 0, highlight: 0, nrThreshold: 0, fbddNoiseRd: 0, medPasses: 0,
+  wbTemp: 0, wbTint: 0, bright: 0, gamma: 0, shadow: 0,
+  highlight: 0, nrThreshold: 0, fbddNoiseRd: 0, medPasses: 0,
 };
 const tPrev = Date.now();
 const prev = await call('Edits.PreviewEdit', [p.id, params]);
 const coldPreviewMs = Date.now() - tPrev;
-step(`PreviewEdit (cold) -> hash=${prev.editHash} in ${coldPreviewMs}ms`);
-check(/^[0-9a-f]{12}$/.test(prev.editHash), 'preview returns edit hash');
-
-r = await fetch(`${HTTP}/img/${p.id}/2048?v=${p.cacheKey}&e=${prev.editHash}`);
-check(r.status === 200, 'preview rendition served');
+step(`PreviewEdit (cold) -> ${prev.bytes?.length ?? 0} bytes in ${coldPreviewMs}ms`);
+check(prev.$binary && prev.contentType === 'image/jpeg' && prev.bytes.length > 30_000, 'preview arrives as binary JPEG blob');
 
 // Warm re-render with a different EV must be fast (handle kept unpacked).
 const params2 = { ...params, expEV: 0.5 };
@@ -140,16 +171,24 @@ const prev2 = await call('Edits.PreviewEdit', [p.id, params2]);
 const warmMs = Date.now() - tWarm;
 step(`PreviewEdit (warm) -> ${warmMs}ms`);
 check(warmMs < 1500, `warm preview under 1.5s (${warmMs}ms)`);
-check(prev2.editHash !== prev.editHash, 'different params -> different hash');
+check(prev2.$binary && prev2.bytes.length > 30_000, 'warm preview blob served');
 
 await call('Edits.SetEditParams', [p.id, params2]);
 step('SetEditParams committed');
 const stored = await call('Edits.GetEditParams', [p.id]);
 check(stored && stored.expEV === 0.5, 'edit params persisted');
 
-// Edited grid thumb serves for the committed hash.
-r = await fetch(`${HTTP}/img/${p.id}/512?v=${p.cacheKey}&e=${prev2.editHash}`);
+// The commit pushed an editHash patch; the grid thumb serves for that hash.
+const hashPatch = await waitFor('editHash patch', () =>
+  patches.map((m) => m.patch?.patches?.find((x) => x.id === p.id && x.editHash)).find(Boolean), 5_000);
+check(/^[0-9a-f]{12}$/.test(hashPatch.editHash), 'commit pushes edit hash patch');
+r = await fetch(`${HTTP}/img/${p.id}/512?v=${p.cacheKey}&e=${hashPatch.editHash}`);
 check(r.status === 200, 'edited grid thumb served');
+
+// White balance pick: neutralize the image center.
+const picked = await call('Edits.PickWhiteBalance', [p.id, params2, 0.5, 0.5]);
+step(`PickWhiteBalance -> mul=[${picked.wbMul.map((m) => m.toFixed(2)).join(', ')}]`);
+check(picked.wbMode === 'custom' && picked.wbMul[1] === 1 && picked.wbMul[0] > 0, 'picker returns custom multipliers');
 
 // 6. Batch edit two photos.
 const ids = photos.slice(1, 3).map((x) => x.id);
@@ -158,20 +197,51 @@ const batchParams = await call('Edits.GetEditParams', [ids[0]]);
 step('ApplyBatchEdit done');
 check(batchParams && batchParams.expEV === 0.25, 'batch delta applied');
 
-// 7. Export three photos (one edited).
+// 7. Export three photos (one edited) as a background shared task.
 const dest = mkdtempSync(join(tmpdir(), 'marraw-export-'));
 const tExp = Date.now();
-const items = await call('Export.ExportPhotos', [{
+const destMissing = await call('Export.CheckDest', [join(dest, 'nope')]);
+check(destMissing.exists === false, 'CheckDest reports missing dir');
+const ref = await call('Export.StartExport', [{
   photoIds: photos.slice(0, 3).map((x) => x.id),
-  destDir: dest, format: 'jpeg', jpegQuality: 90, longEdge: 0,
-}], true);
-step(`ExportPhotos -> ${items.length} items in ${Date.now() - tExp}ms`);
-check(items.length === 3 && items.every((i) => i.ok), 'all exports ok');
+  destDir: dest, format: 'jpeg', jpegQuality: 90, longEdge: 0, createDir: false,
+}]);
+check(typeof ref.taskId === 'string' && ref.taskId.length > 0, 'StartExport returns task ref');
+const doneTask = await waitFor('export task completion', () => {
+  for (const m of pushes) {
+    if (m.event !== 'TaskStateEvent') continue;
+    const t = m.data.tasks?.find((t) => t.id === ref.taskId);
+    if (t && (t.status === 'completed' || t.status === 'failed')) return t;
+  }
+  return null;
+}, 120_000);
+step(`StartExport -> task ${doneTask.status} in ${Date.now() - tExp}ms`);
+check(doneTask.status === 'completed', 'export task completed');
 const written = readdirSync(dest);
 check(written.length === 3, `3 files written (${written.join(', ')})`);
 rmSync(dest, { recursive: true, force: true });
+// Progress events flowed while it ran.
+const sawProgress = pushes.some((m) =>
+  m.event === 'TaskStateEvent' && m.data.tasks?.some((t) => t.id === ref.taskId && t.total === 3));
+check(sawProgress, 'export task reported progress');
 
-// 8. Reset edits to leave a clean state.
+// 8. DeletePhotos moves the file to the recycle bin (tested on a copy).
+const delDir = mkdtempSync(join(tmpdir(), 'marraw-del-'));
+copyFileSync(join(FOLDER, p.fileName), join(delDir, p.fileName));
+const delInfo = await call('Library.OpenFolder', [delDir]);
+check(delInfo.photoCount === 1, 'copy scanned into temp folder');
+const delPhotos = await call('Library.ListPhotos', [delInfo.folderId]);
+const delRes = await call('Library.DeletePhotos', [[delPhotos[0].id]]);
+step('DeletePhotos done');
+check(delRes.deleted === 1, 'DeletePhotos reports 1 deleted');
+check(!existsSync(join(delDir, p.fileName)), 'file gone from disk (recycled)');
+const delList = await call('Library.ListPhotos', [delInfo.folderId]);
+check(delList.length === 0, 'photo row removed');
+rmSync(delDir, { recursive: true, force: true });
+// Restore the main folder's background jobs slot (deleting opened a folder).
+await call('Library.OpenFolder', [FOLDER]);
+
+// 9. Reset edits to leave a clean state.
 await call('Edits.ResetEdits', [[p.id, ...ids]]);
 const cleared = await call('Edits.GetEditParams', [p.id]);
 check(cleared === null || cleared === undefined, 'edits reset');

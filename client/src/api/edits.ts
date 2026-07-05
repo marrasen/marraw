@@ -28,16 +28,16 @@ export interface Params {
     expEV: number;
     expPreserve: number;
     wbMode: WBModeType;
-    wbMul: any;
+    wbMul: [number, number, number, number];
+    wbTemp: number;
+    wbTint: number;
     bright: number;
+    gamma: number;
+    shadow: number;
     highlight: number;
     nrThreshold: number;
     fbddNoiseRd: number;
     medPasses: number;
-}
-
-export interface PreviewResult {
-    editHash: string;
 }
 
 
@@ -49,8 +49,8 @@ export function applyBatchEdit(client: ApiClient, ids: number[], delta: Delta, o
 // (unaffected by minification, unlike Function.name).
 applyBatchEdit.method = 'Edits.ApplyBatchEdit' as const;
 
-export function subscribeApplyBatchEdit(client: ApiClient, ids: number[], delta: Delta, callback: (data: void) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<void>('Edits.ApplyBatchEdit', [ids, delta], callback, onError);
+export function subscribeApplyBatchEdit(client: ApiClient, ids: number[], delta: Delta, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Edits.ApplyBatchEdit', [ids, delta], callback, onError, options);
 }
 
 
@@ -62,8 +62,8 @@ export function getEditParams(client: ApiClient, photoID: number, options?: Requ
 // (unaffected by minification, unlike Function.name).
 getEditParams.method = 'Edits.GetEditParams' as const;
 
-export function subscribeGetEditParams(client: ApiClient, photoID: number, callback: (data: Params) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<Params>('Edits.GetEditParams', [photoID], callback, onError);
+export function subscribeGetEditParams(client: ApiClient, photoID: number, callback: (data: Params) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Params>('Edits.GetEditParams', [photoID], callback, onError, options);
 }
 
 
@@ -75,21 +75,34 @@ export function pasteEditParams(client: ApiClient, ids: number[], params: Params
 // (unaffected by minification, unlike Function.name).
 pasteEditParams.method = 'Edits.PasteEditParams' as const;
 
-export function subscribePasteEditParams(client: ApiClient, ids: number[], params: Params, callback: (data: void) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<void>('Edits.PasteEditParams', [ids, params], callback, onError);
+export function subscribePasteEditParams(client: ApiClient, ids: number[], params: Params, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Edits.PasteEditParams', [ids, params], callback, onError, options);
 }
 
 
-export function previewEdit(client: ApiClient, photoID: number, params: Params, options?: RequestOptions): Promise<PreviewResult> {
-    return client.request<PreviewResult>('Edits.PreviewEdit', [photoID, params], options);
+export function pickWhiteBalance(client: ApiClient, photoID: number, params: Params, x: number, y: number, options?: RequestOptions): Promise<Params> {
+    return client.request<Params>('Edits.PickWhiteBalance', [photoID, params, x, y], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+pickWhiteBalance.method = 'Edits.PickWhiteBalance' as const;
+
+export function subscribePickWhiteBalance(client: ApiClient, photoID: number, params: Params, x: number, y: number, callback: (data: Params) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Params>('Edits.PickWhiteBalance', [photoID, params, x, y], callback, onError, options);
+}
+
+
+export function previewEdit(client: ApiClient, photoID: number, params: Params, options?: RequestOptions): Promise<Blob> {
+    return client.request<Blob>('Edits.PreviewEdit', [photoID, params], options);
 }
 // Wire-method tag consumed by useQuerySuspense to key the promise cache and
 // open the matching server subscription. Stable identifier across builds
 // (unaffected by minification, unlike Function.name).
 previewEdit.method = 'Edits.PreviewEdit' as const;
 
-export function subscribePreviewEdit(client: ApiClient, photoID: number, params: Params, callback: (data: PreviewResult) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<PreviewResult>('Edits.PreviewEdit', [photoID, params], callback, onError);
+export function subscribePreviewEdit(client: ApiClient, photoID: number, params: Params, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Blob>('Edits.PreviewEdit', [photoID, params], callback, onError, options);
 }
 
 
@@ -101,8 +114,8 @@ export function resetEdits(client: ApiClient, ids: number[], options?: RequestOp
 // (unaffected by minification, unlike Function.name).
 resetEdits.method = 'Edits.ResetEdits' as const;
 
-export function subscribeResetEdits(client: ApiClient, ids: number[], callback: (data: void) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<void>('Edits.ResetEdits', [ids], callback, onError);
+export function subscribeResetEdits(client: ApiClient, ids: number[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Edits.ResetEdits', [ids], callback, onError, options);
 }
 
 
@@ -114,8 +127,8 @@ export function setEditParams(client: ApiClient, photoID: number, params: Params
 // (unaffected by minification, unlike Function.name).
 setEditParams.method = 'Edits.SetEditParams' as const;
 
-export function subscribeSetEditParams(client: ApiClient, photoID: number, params: Params, callback: (data: void) => void, onError?: (error: Error) => void): () => void {
-    return client.subscribe<void>('Edits.SetEditParams', [photoID, params], callback, onError);
+export function subscribeSetEditParams(client: ApiClient, photoID: number, params: Params, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Edits.SetEditParams', [photoID, params], callback, onError, options);
 }
 
 // React Hooks for Edits
@@ -127,7 +140,7 @@ export function subscribeSetEditParams(client: ApiClient, photoID: number, param
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useApplyBatchEdit(ids: number[], delta: Delta, options?: UseQueryOptions): UseQueryResult<void> {
+export function useApplyBatchEdit(ids: number[], delta: Delta, options?: UseQueryOptions<void>): UseQueryResult<void> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, ids: number[], delta: Delta) => applyBatchEdit(client, ids, delta, { signal }),
         [],
@@ -142,7 +155,7 @@ export function useApplyBatchEdit(ids: number[], delta: Delta, options?: UseQuer
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useGetEditParams(photoID: number, options?: UseQueryOptions): UseQueryResult<Params> {
+export function useGetEditParams(photoID: number, options?: UseQueryOptions<Params>): UseQueryResult<Params> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, photoID: number) => getEditParams(client, photoID, { signal }),
         [],
@@ -157,12 +170,27 @@ export function useGetEditParams(photoID: number, options?: UseQueryOptions): Us
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function usePasteEditParams(ids: number[], params: Params, options?: UseQueryOptions): UseQueryResult<void> {
+export function usePasteEditParams(ids: number[], params: Params, options?: UseQueryOptions<void>): UseQueryResult<void> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, ids: number[], params: Params) => pasteEditParams(client, ids, params, { signal }),
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [ids, params], _subscribe: { method: 'Edits.PasteEditParams', params: [ids, params] } });
+}
+
+/**
+ * Subscribes to `Edits.PickWhiteBalance` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function usePickWhiteBalance(photoID: number, params: Params, x: number, y: number, options?: UseQueryOptions<Params>): UseQueryResult<Params> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, x: number, y: number) => pickWhiteBalance(client, photoID, params, x, y, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, x, y], _subscribe: { method: 'Edits.PickWhiteBalance', params: [photoID, params, x, y] } });
 }
 
 /**
@@ -172,7 +200,7 @@ export function usePasteEditParams(ids: number[], params: Params, options?: UseQ
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function usePreviewEdit(photoID: number, params: Params, options?: UseQueryOptions): UseQueryResult<PreviewResult> {
+export function usePreviewEdit(photoID: number, params: Params, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, photoID: number, params: Params) => previewEdit(client, photoID, params, { signal }),
         [],
@@ -187,7 +215,7 @@ export function usePreviewEdit(photoID: number, params: Params, options?: UseQue
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useResetEdits(ids: number[], options?: UseQueryOptions): UseQueryResult<void> {
+export function useResetEdits(ids: number[], options?: UseQueryOptions<void>): UseQueryResult<void> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, ids: number[]) => resetEdits(client, ids, { signal }),
         [],
@@ -202,7 +230,7 @@ export function useResetEdits(ids: number[], options?: UseQueryOptions): UseQuer
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useSetEditParams(photoID: number, params: Params, options?: UseQueryOptions): UseQueryResult<void> {
+export function useSetEditParams(photoID: number, params: Params, options?: UseQueryOptions<void>): UseQueryResult<void> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, photoID: number, params: Params) => setEditParams(client, photoID, params, { signal }),
         [],

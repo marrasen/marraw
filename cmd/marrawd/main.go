@@ -69,7 +69,12 @@ func main() {
 
 	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner}
 	registry, _, _, _ := api.NewRegistry(deps)
-	server := aprot.NewServer(registry)
+	// StreamChunking batches streamed items into stream_chunk frames
+	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any
+	// future large streams; the generated client understands both framings.
+	server := aprot.NewServer(registry, aprot.ServerOptions{
+		StreamChunking: &aprot.StreamChunking{},
+	})
 	deps.SetServer(server)
 	scanner.OnPhotosChanged = func(folderID int64) {
 		server.TriggerRefresh(fmt.Sprintf("photos:%d", folderID))

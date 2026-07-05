@@ -7,6 +7,7 @@ export const ExportRequestSchema = z.object({
     format: z.enum(["jpeg", "tiff16"]),
     jpegQuality: z.number().int().min(0).max(100),
     longEdge: z.number().int().min(0).max(65536),
+    createDir: z.boolean(),
 });
 
 export type ExportRequest = z.infer<typeof ExportRequestSchema>;

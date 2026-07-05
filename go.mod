@@ -3,7 +3,7 @@ module github.com/marrasen/marraw
 go 1.26
 
 require (
-	github.com/marrasen/aprot v0.46.0
+	github.com/marrasen/aprot v0.47.0
 	golang.org/x/image v0.43.0
 	golang.org/x/sync v0.21.0
 	modernc.org/sqlite v1.53.0

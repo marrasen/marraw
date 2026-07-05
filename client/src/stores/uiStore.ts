@@ -17,8 +17,9 @@ interface UIState {
   minRating: number;
   flagFilter: FlagFilter;
 
-  // Server-truth patches applied on top of the subscribed photo list, so a
-  // rating keystroke is O(changed photos), not a full list refresh.
+  // Optimistic patches applied on top of the subscribed photo list, so a
+  // rating keystroke shows before the server round trip settles. Server
+  // truth arrives through subscription patches into the query cache.
   overrides: Map<number, Partial<Photo>>;
 
   // Grid geometry + currently visible list, for keyboard navigation.
@@ -26,8 +27,6 @@ interface UIState {
   visibleIds: number[];
 
   clipboard: Params | null;
-  // Unsaved preview state of the focused photo (slider being dragged).
-  previewHash: string | null;
   exportOpen: boolean;
 
   // Grid cell target width (zoom slider in the gallery).
@@ -47,7 +46,6 @@ interface UIState {
   setGrid: (cols: number) => void;
   setVisibleIds: (ids: number[]) => void;
   setClipboard: (p: Params | null) => void;
-  setPreviewHash: (h: string | null) => void;
   setExportOpen: (open: boolean) => void;
   setCellSize: (px: number) => void;
   setLoupeZoom: (z: 'fit' | number) => void;
@@ -66,7 +64,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   gridCols: 4,
   visibleIds: [],
   clipboard: null,
-  previewHash: null,
   exportOpen: false,
   cellSize: 220,
   loupeZoom: 'fit',
@@ -80,10 +77,9 @@ export const useUIStore = create<UIState>((set, get) => ({
       anchorId: null,
       selection: new Set(),
       overrides: new Map(),
-      previewHash: null,
     }),
 
-  setView: (v) => set({ view: v, previewHash: null }),
+  setView: (v) => set({ view: v }),
 
   focus: (id, opts) => {
     if (id == null) {
@@ -96,7 +92,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       const b = visibleIds.indexOf(id);
       if (a >= 0 && b >= 0) {
         const [lo, hi] = a < b ? [a, b] : [b, a];
-        set({ focusId: id, selection: new Set(visibleIds.slice(lo, hi + 1)), previewHash: null });
+        set({ focusId: id, selection: new Set(visibleIds.slice(lo, hi + 1)) });
         return;
       }
     }
@@ -104,10 +100,10 @@ export const useUIStore = create<UIState>((set, get) => ({
       const next = new Set(selection);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      set({ focusId: id, anchorId: id, selection: next, previewHash: null });
+      set({ focusId: id, anchorId: id, selection: next });
       return;
     }
-    set({ focusId: id, anchorId: id, selection: new Set([id]), previewHash: null });
+    set({ focusId: id, anchorId: id, selection: new Set([id]) });
   },
 
   selectAll: (ids) => set({ selection: new Set(ids) }),
@@ -136,9 +132,26 @@ export const useUIStore = create<UIState>((set, get) => ({
     }),
 
   setGrid: (cols) => set({ gridCols: cols }),
-  setVisibleIds: (ids) => set({ visibleIds: ids }),
+
+  setVisibleIds: (ids) =>
+    set((s) => {
+      // Keep the cursor position when the focused photo drops out of the
+      // filtered list (e.g. pressing X under the "Unculled" filter): move
+      // focus to the photo now occupying the same index instead of letting
+      // views fall back to the start of the list.
+      if (s.focusId != null && ids.length > 0 && !ids.includes(s.focusId)) {
+        const prevIdx = s.visibleIds.indexOf(s.focusId);
+        if (prevIdx >= 0) {
+          const nextId = ids[Math.min(prevIdx, ids.length - 1)];
+          const selection = new Set([...s.selection].filter((id) => ids.includes(id)));
+          if (selection.size === 0) selection.add(nextId);
+          return { visibleIds: ids, focusId: nextId, anchorId: nextId, selection };
+        }
+      }
+      return { visibleIds: ids };
+    }),
+
   setClipboard: (p) => set({ clipboard: p }),
-  setPreviewHash: (h) => set({ previewHash: h }),
   setExportOpen: (open) => set({ exportOpen: open }),
   setCellSize: (px) => set({ cellSize: Math.min(400, Math.max(120, px)) }),
   setLoupeZoom: (z) =>

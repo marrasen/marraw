@@ -1,59 +1,66 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Star, Check, X } from 'lucide-react';
+import { Star, Check, X, Pipette, Undo2, Redo2 } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
-import {
-  getEditParams,
-  previewEdit,
-  setEditParams,
-  resetEdits,
-  applyBatchEdit,
-  pasteEditParams,
-  type Params,
-} from '@/api/edits';
-import { useApiClient } from '@/api/client';
+import { applyBatchEdit, type Params } from '@/api/edits';
+import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Histogram } from '@/components/Histogram';
 import { useUIStore } from '@/stores/uiStore';
-
-export const NEUTRAL: Params = {
-  expEV: 0,
-  expPreserve: 0,
-  wbMode: 'camera',
-  wbMul: [0, 0, 0, 0],
-  bright: 0,
-  highlight: 0,
-  nrThreshold: 0,
-  fbddNoiseRd: 0,
-  medPasses: 0,
-};
+import {
+  esApplyParams,
+  esCanRedo,
+  esCanUndo,
+  esCommit,
+  esLoad,
+  esRedo,
+  esReset,
+  esSetActive,
+  esSetApplyIds,
+  esSetWBPicking,
+  esUndo,
+  esUpdate,
+  useEditSession,
+  type ControlId,
+} from '@/lib/editSession';
 
 const HIGHLIGHT_OPTIONS = [
   { value: 0, label: 'Clip' },
   { value: 1, label: 'Unclip' },
   { value: 2, label: 'Blend' },
-  { value: 3, label: 'Rebuild (soft)' },
   { value: 5, label: 'Rebuild' },
-  { value: 9, label: 'Rebuild (strong)' },
+];
+
+const FBDD_OPTIONS = [
+  { value: 0, label: 'Off' },
+  { value: 1, label: 'Light' },
+  { value: 2, label: 'Full' },
 ];
 
 export function EditPanel({ photos }: { photos: Photo[] }) {
+  const client = useApiClient();
   const selection = useUIStore((s) => s.selection);
   const focusId = useUIStore((s) => s.focusId);
-  if (selection.size > 1) return <BatchPanel ids={[...selection]} />;
+  const ids = selection.size > 1 ? [...selection] : focusId != null ? [focusId] : [];
+
+  // Open an edit session whenever the focus moves; keep commit targets in
+  // sync when only the selection changes.
+  useEffect(() => {
+    if (focusId != null) void esLoad(client, focusId, ids);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, focusId]);
+  const idsKey = ids.join(',');
+  useEffect(() => {
+    esSetApplyIds(ids);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey]);
+
   if (focusId == null) {
     return <div className="p-4 text-sm text-muted-foreground">Select a photo to edit.</div>;
   }
@@ -61,7 +68,9 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       {photo && <PhotoHeader photo={photo} />}
-      <SinglePanel key={focusId} photoId={focusId} />
+      {photo && <Histogram photo={photo} />}
+      <DevelopPanel client={client} targetCount={ids.length} />
+      {ids.length > 1 && <BatchSection client={client} ids={ids} />}
     </div>
   );
 }
@@ -126,58 +135,47 @@ function formatShutter(s: number): string {
   return `1/${Math.round(1 / s)}s`;
 }
 
-function SinglePanel({ photoId }: { photoId: number }) {
-  const client = useApiClient();
-  const [draft, setDraft] = useState<Params | null>(null);
-  const setPreviewHash = useUIStore((s) => s.setPreviewHash);
+function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount: number }) {
+  const draft = useEditSession((s) => s.draft);
+  const activeControl = useEditSession((s) => s.activeControl);
+  const wbPicking = useEditSession((s) => s.wbPicking);
+  const canUndo = useEditSession(esCanUndo);
+  const canRedo = useEditSession(esCanRedo);
   const setClipboard = useUIStore((s) => s.setClipboard);
   const clipboard = useUIStore((s) => s.clipboard);
 
-  const previewTimer = useRef<number>(0);
-  const previewAbort = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    getEditParams(client, photoId)
-      .then((p) => alive && setDraft(p ?? { ...NEUTRAL }))
-      .catch(() => alive && setDraft({ ...NEUTRAL }));
-    return () => {
-      alive = false;
-      window.clearTimeout(previewTimer.current);
-      previewAbort.current?.abort();
-      setPreviewHash(null);
-    };
-  }, [client, photoId, setPreviewHash]);
-
   if (!draft) return <div className="p-4 text-sm text-muted-foreground">Loading edits…</div>;
 
-  // update: change the draft and (debounced) render a live preview.
-  const update = (patch: Partial<Params>) => {
-    const next = { ...draft, ...patch };
-    setDraft(next);
-    window.clearTimeout(previewTimer.current);
-    previewTimer.current = window.setTimeout(() => {
-      previewAbort.current?.abort();
-      const ac = new AbortController();
-      previewAbort.current = ac;
-      previewEdit(client, photoId, next, { signal: ac.signal })
-        .then((r) => setPreviewHash(r.editHash))
-        .catch(() => {}); // aborted or superseded
-    }, 150);
-  };
+  const update = (patch: Partial<Params>) => esUpdate(client, patch);
+  const commit = (patch?: Partial<Params>) => esCommit(client, patch);
 
-  // commit: persist on slider release / control close.
-  const commit = (patch?: Partial<Params>) => {
-    const params = patch ? { ...draft, ...patch } : draft;
-    setEditParams(client, photoId, params).catch((err) => toast.error(`Save failed: ${err.message}`));
-  };
+  const num = (control: ControlId) => ({
+    active: activeControl === control,
+    onFocusControl: () => esSetActive(control),
+  });
 
   return (
     <div className="flex flex-col gap-4 p-4 text-sm">
-      <h2 className="font-medium">Develop</h2>
+      <div className="flex items-center gap-2">
+        <h2 className="font-medium">Develop</h2>
+        {targetCount > 1 && (
+          <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">
+            applies to {targetCount} photos
+          </span>
+        )}
+        <span className="ml-auto flex gap-1">
+          <Button size="icon-sm" variant="ghost" disabled={!canUndo} onClick={() => esUndo(client)} title="Undo (Ctrl+Z)">
+            <Undo2 />
+          </Button>
+          <Button size="icon-sm" variant="ghost" disabled={!canRedo} onClick={() => esRedo(client)} title="Redo (Ctrl+Y)">
+            <Redo2 />
+          </Button>
+        </span>
+      </div>
 
       <EditSlider
         label="Exposure"
+        hotkey="E"
         value={draft.expEV}
         display={`${draft.expEV >= 0 ? '+' : ''}${draft.expEV.toFixed(2)} EV`}
         min={-2}
@@ -185,9 +183,22 @@ function SinglePanel({ photoId }: { photoId: number }) {
         step={0.05}
         onChange={(v) => update({ expEV: v })}
         onCommit={(v) => commit({ expEV: v })}
+        {...num('expEV')}
+      />
+      <EditSlider
+        label="Preserve highlights"
+        value={draft.expPreserve}
+        display={draft.expPreserve === 0 ? 'Off' : draft.expPreserve.toFixed(2)}
+        min={0}
+        max={1}
+        step={0.05}
+        onChange={(v) => update({ expPreserve: v })}
+        onCommit={(v) => commit({ expPreserve: v })}
+        {...num('expPreserve')}
       />
       <EditSlider
         label="Brightness"
+        hotkey="B"
         value={draft.bright === 0 ? 1 : draft.bright}
         display={`${(draft.bright === 0 ? 1 : draft.bright).toFixed(2)}×`}
         min={0.25}
@@ -195,56 +206,116 @@ function SinglePanel({ photoId }: { photoId: number }) {
         step={0.05}
         onChange={(v) => update({ bright: v })}
         onCommit={(v) => commit({ bright: v })}
+        {...num('bright')}
+      />
+      <EditSlider
+        label="Gamma"
+        hotkey="G"
+        value={draft.gamma === 0 ? 2.222 : draft.gamma}
+        display={(draft.gamma === 0 ? 2.222 : draft.gamma).toFixed(2)}
+        min={1}
+        max={3.5}
+        step={0.05}
+        onChange={(v) => update({ gamma: v })}
+        onCommit={(v) => commit({ gamma: v })}
+        {...num('gamma')}
+      />
+      <EditSlider
+        label="Shadow slope"
+        hotkey="S"
+        value={draft.shadow === 0 ? 4.5 : draft.shadow}
+        display={(draft.shadow === 0 ? 4.5 : draft.shadow).toFixed(1)}
+        min={1}
+        max={12}
+        step={0.5}
+        onChange={(v) => update({ shadow: v })}
+        onCommit={(v) => commit({ shadow: v })}
+        {...num('shadow')}
       />
 
-      <div className="flex flex-col gap-1.5">
-        <span className="text-xs text-muted-foreground">Highlights</span>
-        <Select
-          value={String(draft.highlight)}
-          onValueChange={(v) => {
-            update({ highlight: Number(v) });
-            commit({ highlight: Number(v) });
-          }}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {HIGHLIGHT_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={String(o.value)}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <span className="text-xs text-muted-foreground">White balance</span>
-        <ToggleGroup
-          className="w-full"
-          value={[draft.wbMode === 'auto' ? 'auto' : 'camera']}
-          onValueChange={(groupValue) => {
-            const v = (groupValue as string[])[0];
-            if (v) {
-              update({ wbMode: v as Params['wbMode'] });
-              commit({ wbMode: v as Params['wbMode'] });
-            }
-          }}
-        >
-          <ToggleGroupItem value="camera" className="flex-1">
-            As shot
-          </ToggleGroupItem>
-          <ToggleGroupItem value="auto" className="flex-1">
-            Auto
-          </ToggleGroupItem>
-        </ToggleGroup>
+      <div className={cn('flex flex-col gap-1.5 rounded-md', activeControl === 'wbMode' && 'ring-2 ring-ring ring-offset-2 ring-offset-background')}>
+        <span className="text-xs text-muted-foreground">
+          White balance <kbd className="text-[10px] opacity-60">W</kbd>
+        </span>
+        <div className="flex items-center gap-1.5">
+          <ToggleGroup
+            className="flex-1"
+            // The server normalizes "camera" (the default) to "".
+            value={[(draft.wbMode as string) || 'camera']}
+            onValueChange={(groupValue) => {
+              const v = (groupValue as string[])[0];
+              if (!v) return;
+              const patch: Partial<Params> =
+                v === 'custom'
+                  ? { wbMode: 'custom' }
+                  : { wbMode: v as Params['wbMode'], wbMul: [0, 0, 0, 0] };
+              update(patch);
+              commit(patch);
+            }}
+          >
+            <ToggleGroupItem value="camera" className="flex-1">
+              As shot
+            </ToggleGroupItem>
+            <ToggleGroupItem value="auto" className="flex-1">
+              Auto
+            </ToggleGroupItem>
+            <ToggleGroupItem value="custom" className="flex-1" disabled={draft.wbMode !== 'custom'}>
+              Picked
+            </ToggleGroupItem>
+          </ToggleGroup>
+          <Button
+            size="icon-sm"
+            variant={wbPicking ? 'default' : 'outline'}
+            title="Pick white balance: click a neutral gray in the image"
+            onClick={() => esSetWBPicking(!wbPicking)}
+          >
+            <Pipette />
+          </Button>
+        </div>
       </div>
 
       <EditSlider
+        label="Temperature"
+        hotkey="T"
+        value={draft.wbTemp * 100}
+        display={draft.wbTemp === 0 ? '0' : `${draft.wbTemp > 0 ? '+' : ''}${Math.round(draft.wbTemp * 100)}`}
+        min={-100}
+        max={100}
+        step={2}
+        disabled={draft.wbMode === 'auto'}
+        onChange={(v) => update({ wbTemp: v / 100 })}
+        onCommit={(v) => commit({ wbTemp: v / 100 })}
+        {...num('wbTemp')}
+      />
+      <EditSlider
+        label="Tint"
+        hotkey="I"
+        value={draft.wbTint * 100}
+        display={draft.wbTint === 0 ? '0' : `${draft.wbTint > 0 ? '+' : ''}${Math.round(draft.wbTint * 100)}`}
+        min={-100}
+        max={100}
+        step={2}
+        disabled={draft.wbMode === 'auto'}
+        onChange={(v) => update({ wbTint: v / 100 })}
+        onCommit={(v) => commit({ wbTint: v / 100 })}
+        {...num('wbTint')}
+      />
+
+      <ButtonRow
+        label="Highlights"
+        hotkey="H"
+        active={activeControl === 'highlight'}
+        options={HIGHLIGHT_OPTIONS}
+        value={draft.highlight}
+        onChange={(v) => {
+          update({ highlight: v });
+          commit({ highlight: v });
+        }}
+      />
+
+      <EditSlider
         label="Noise reduction"
+        hotkey="N"
         value={draft.nrThreshold}
         display={draft.nrThreshold === 0 ? 'Off' : String(Math.round(draft.nrThreshold))}
         min={0}
@@ -252,6 +323,30 @@ function SinglePanel({ photoId }: { photoId: number }) {
         step={25}
         onChange={(v) => update({ nrThreshold: v })}
         onCommit={(v) => commit({ nrThreshold: v })}
+        {...num('nrThreshold')}
+      />
+
+      <ButtonRow
+        label="FBDD denoise"
+        active={activeControl === 'fbddNoiseRd'}
+        options={FBDD_OPTIONS}
+        value={draft.fbddNoiseRd}
+        onChange={(v) => {
+          update({ fbddNoiseRd: v });
+          commit({ fbddNoiseRd: v });
+        }}
+      />
+
+      <EditSlider
+        label="Median passes"
+        value={draft.medPasses}
+        display={draft.medPasses === 0 ? 'Off' : String(draft.medPasses)}
+        min={0}
+        max={5}
+        step={1}
+        onChange={(v) => update({ medPasses: v })}
+        onCommit={(v) => commit({ medPasses: v })}
+        {...num('medPasses')}
       />
 
       <Separator />
@@ -271,56 +366,101 @@ function SinglePanel({ photoId }: { photoId: number }) {
           size="sm"
           variant="outline"
           disabled={!clipboard}
-          onClick={() => {
-            if (!clipboard) return;
-            setDraft(clipboard);
-            setEditParams(client, photoId, clipboard).catch((err) => toast.error(err.message));
-          }}
+          onClick={() => clipboard && esApplyParams(client, clipboard)}
         >
           Paste
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setDraft({ ...NEUTRAL });
-            setPreviewHash(null);
-            resetEdits(client, [photoId]).catch((err) => toast.error(err.message));
-          }}
-        >
+        <Button size="sm" variant="outline" onClick={() => esReset(client)}>
           Reset
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Drag a slider for a live preview; release to save. Ctrl+C / Ctrl+V copies edits between photos.
+        Drag a slider for a live preview; release to save. Press a control's key (E, B, W, …) and
+        use +/- to adjust; Esc returns to the image. Ctrl+Z/Ctrl+Y undo/redo per photo.
       </p>
     </div>
   );
 }
 
-function EditSlider({
+function ButtonRow({
   label,
+  hotkey,
+  active,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  hotkey?: string;
+  active?: boolean;
+  options: { value: number; label: string }[];
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className={cn('flex flex-col gap-1.5 rounded-md', active && 'ring-2 ring-ring ring-offset-2 ring-offset-background')}>
+      <span className="text-xs text-muted-foreground">
+        {label} {hotkey && <kbd className="text-[10px] opacity-60">{hotkey}</kbd>}
+      </span>
+      <ToggleGroup
+        size="sm"
+        className="w-full"
+        value={[String(options.some((o) => o.value === value) ? value : options[0].value)]}
+        onValueChange={(groupValue) => {
+          const v = (groupValue as string[])[0];
+          if (v != null) onChange(Number(v));
+        }}
+      >
+        {options.map((o) => (
+          <ToggleGroupItem key={o.value} value={String(o.value)} className="flex-1">
+            {o.label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    </div>
+  );
+}
+
+export function EditSlider({
+  label,
+  hotkey,
   value,
   display,
   min,
   max,
   step,
+  disabled,
+  active,
+  onFocusControl,
   onChange,
   onCommit,
 }: {
   label: string;
+  hotkey?: string;
   value: number;
   display: string;
   min: number;
   max: number;
   step: number;
+  disabled?: boolean;
+  active?: boolean;
+  onFocusControl?: () => void;
   onChange: (v: number) => void;
   onCommit: (v: number) => void;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div
+      className={cn(
+        'flex flex-col gap-1.5 rounded-md',
+        active && 'ring-2 ring-ring ring-offset-2 ring-offset-background',
+        disabled && 'opacity-50',
+      )}
+      onPointerDown={onFocusControl}
+    >
       <div className="flex items-baseline justify-between">
-        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className="text-xs text-muted-foreground">
+          {label} {hotkey && <kbd className="text-[10px] opacity-60">{hotkey}</kbd>}
+        </span>
         <span className="text-xs tabular-nums">{display}</span>
       </div>
       <Slider
@@ -328,6 +468,7 @@ function EditSlider({
         min={min}
         max={max}
         step={step}
+        disabled={disabled}
         onValueChange={(v) => onChange(v as number)}
         onValueCommitted={(v) => onCommit(v as number)}
       />
@@ -335,9 +476,9 @@ function EditSlider({
   );
 }
 
-function BatchPanel({ ids }: { ids: number[] }) {
-  const client = useApiClient();
-  const clipboard = useUIStore((s) => s.clipboard);
+// BatchSection offers relative adjustments on top of the absolute controls
+// above (which already apply to the whole selection).
+function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
   const [ev, setEv] = useState(0.5);
   const [progress, setProgress] = useState<number | null>(null);
 
@@ -345,14 +486,13 @@ function BatchPanel({ ids }: { ids: number[] }) {
     setProgress(0);
     fn()
       .then(() => toast.success(label))
-      .catch((err) => toast.error(err.message))
+      .catch((err) => toast.error((err as Error).message))
       .finally(() => setProgress(null));
   };
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 text-sm">
-      <h2 className="font-medium">Batch edit — {ids.length} photos</h2>
-
+    <div className="flex flex-col gap-3 border-t p-4 text-sm">
+      <h3 className="text-xs font-medium text-muted-foreground">Relative batch adjustment</h3>
       <EditSlider
         label="Exposure adjustment"
         value={ev}
@@ -382,29 +522,7 @@ function BatchPanel({ ids }: { ids: number[] }) {
         Apply {ev >= 0 ? '+' : ''}
         {ev.toFixed(2)} EV to {ids.length} photos
       </Button>
-
       {progress != null && <Progress value={progress} />}
-
-      <Separator />
-
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!clipboard || progress != null}
-          onClick={() => clipboard && run(() => pasteEditParams(client, ids, clipboard), 'Edit settings pasted')}
-        >
-          Paste settings
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={progress != null}
-          onClick={() => run(() => resetEdits(client, ids), 'Edits reset')}
-        >
-          Reset all
-        </Button>
-      </div>
     </div>
   );
 }
