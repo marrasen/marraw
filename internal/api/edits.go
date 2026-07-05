@@ -14,6 +14,7 @@ import (
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
+	"github.com/marrasen/marraw/internal/store"
 )
 
 // Edits handles non-destructive editing.
@@ -21,7 +22,11 @@ type Edits struct {
 	deps *Deps
 }
 
-// GetEditParams returns the stored edit state, or null when untouched.
+// GetEditParams returns the stored edit state. An untouched photo returns
+// the seeded starting point instead of null once the calibrate pass has
+// measured its camera-mimic compensation: the exposure dial then already
+// reads the auto-brighten lift (e.g. +1.3 EV), so the first adjustment
+// starts from what is on screen instead of dropping the compensation.
 func (e *Edits) GetEditParams(ctx context.Context, photoID int64) (*edit.Params, error) {
 	aprot.RegisterRefreshTrigger(ctx, editKey(photoID))
 	p, err := e.deps.DB.GetPhoto(ctx, photoID)
@@ -29,9 +34,22 @@ func (e *Edits) GetEditParams(ctx context.Context, photoID int64) (*edit.Params,
 		return nil, err
 	}
 	if !p.EditParams.Valid {
+		if seeded := seededParams(p); seeded != nil {
+			return seeded, nil
+		}
 		return nil, nil
 	}
 	return edit.Parse(p.EditParams.String)
+}
+
+// seededParams is the starting edit state of an untouched photo: neutral
+// except for the measured base exposure compensation. Nil when unmeasured
+// or when the measurement was a no-op (then base-look rendering applies).
+func seededParams(p store.Photo) *edit.Params {
+	if !p.BaseExpEV.Valid || p.BaseExpEV.Float64 == 0 {
+		return nil
+	}
+	return &edit.Params{ExpEV: p.BaseExpEV.Float64}
 }
 
 // PreviewEdit renders a 2048px preview of the (unsaved) edit state and
@@ -261,6 +279,11 @@ func (e *Edits) ApplyBatchEdit(ctx context.Context, ids []int64, delta edit.Delt
 			if ep, err := edit.Parse(p.EditParams.String); err == nil {
 				params = *ep
 			}
+		} else if seeded := seededParams(p); seeded != nil {
+			// Relative adjustments on untouched photos start from the seeded
+			// compensation, not from zero — "+0.5 EV" means half a stop
+			// brighter than what is on screen.
+			params = *seeded
 		}
 		delta.Apply(&params)
 		if err := e.saveEdit(ctx, id, &params); err != nil {

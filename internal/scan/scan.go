@@ -122,7 +122,10 @@ func (s *Scanner) Backfill(ctx context.Context, folderID int64, onProgress func(
 		// Prefetch priority: metadata reads are cheap (no decode) and unblock
 		// culling info + correctly-oriented thumbs; don't let them starve
 		// behind queued pre-render decodes.
-		err := s.Pool.Do(ctx, ph.CacheKey+"|meta", decode.PriorityPrefetch, func(proc *libraw.Processor) error {
+		err := s.Pool.Do(ctx, ph.CacheKey+"|meta", decode.PriorityPrefetch, func(jctx context.Context, proc *libraw.Processor) error {
+			if err := jctx.Err(); err != nil {
+				return err
+			}
 			if err := proc.Open(ph.Path()); err != nil {
 				return err
 			}

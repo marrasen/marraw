@@ -37,6 +37,10 @@ type Photo struct {
 	// LookGamma is the per-photo adaptive tone lift calibrated against the
 	// camera's embedded JPEG during the first RAW render; 0 = not yet known.
 	LookGamma float64
+	// BaseExpEV is the measured EV equivalent of the base look's
+	// auto-brighten lift, used to seed the exposure dial so the camera-mimic
+	// compensation is visible in the develop values. Invalid = not measured.
+	BaseExpEV sql.NullFloat64
 }
 
 // Path returns the absolute file path of the photo.
@@ -134,14 +138,14 @@ func (db *DB) SyncFolder(ctx context.Context, folderID int64, folderPath string,
 const photoCols = `p.id, p.folder_id, f.path, p.file_name, p.file_size, p.mtime_ns, p.cache_key,
 	p.meta_loaded, p.width, p.height, p.orientation, p.make, p.model,
 	p.iso, p.shutter, p.aperture, p.focal_len, p.taken_at, p.rating, p.flag, p.edit_params, p.edit_hash,
-	p.look_gamma`
+	p.look_gamma, p.base_exp_ev`
 
 func scanPhoto(row interface{ Scan(...any) error }) (Photo, error) {
 	var p Photo
 	err := row.Scan(&p.ID, &p.FolderID, &p.FolderPath, &p.FileName, &p.FileSize, &p.MtimeNs, &p.CacheKey,
 		&p.MetaLoaded, &p.Width, &p.Height, &p.Orientation, &p.Make, &p.Model,
 		&p.ISO, &p.Shutter, &p.Aperture, &p.FocalLen, &p.TakenAt, &p.Rating, &p.Flag, &p.EditParams, &p.EditHash,
-		&p.LookGamma)
+		&p.LookGamma, &p.BaseExpEV)
 	return p, err
 }
 
@@ -155,6 +159,12 @@ func (db *DB) SetDimensions(ctx context.Context, id int64, w, h int) error {
 // SetLookGamma persists the calibrated tone lift for a photo.
 func (db *DB) SetLookGamma(ctx context.Context, id int64, gamma float64) error {
 	_, err := db.ExecContext(ctx, `UPDATE photos SET look_gamma = ? WHERE id = ?`, gamma, id)
+	return err
+}
+
+// SetBaseExpEV persists the measured auto-brighten EV for a photo.
+func (db *DB) SetBaseExpEV(ctx context.Context, id int64, ev float64) error {
+	_, err := db.ExecContext(ctx, `UPDATE photos SET base_exp_ev = ? WHERE id = ?`, ev, id)
 	return err
 }
 

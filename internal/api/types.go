@@ -76,6 +76,13 @@ type DirEntry struct {
 	HasSubdirs bool   `json:"hasSubdirs"`
 }
 
+// FolderPrefs is the user's persistent folder-panel state: pinned favourite
+// folders plus the most recently opened ones (newest first).
+type FolderPrefs struct {
+	Favorites []string `json:"favorites"`
+	Recents   []string `json:"recents"`
+}
+
 type FolderInfo struct {
 	FolderID   int64  `json:"folderId"`
 	Path       string `json:"path"`

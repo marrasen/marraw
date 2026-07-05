@@ -58,6 +58,7 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
     if (!active) return;
     const i = photos.findIndex((p) => p.id === photo.id);
     if (i < 0) return;
+    const ac = new AbortController();
     const next = new Map<string, HTMLImageElement>();
     for (const j of [i + 1, i - 1, i + 2]) {
       const p = photos[j];
@@ -72,10 +73,20 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
       const tile = tileUrl(p, 0, 0);
       if (!triggered.current.has(tile)) {
         triggered.current.add(tile);
-        fetch(tile).catch(() => {});
+        // On abort, un-remember the trigger so a later revisit retries.
+        fetch(tile, { signal: ac.signal }).catch(() => triggered.current.delete(tile));
       }
     }
+    // Warm underlays that fell out of the neighbor window: stop their
+    // downloads too, not just release them for eviction.
+    for (const [url, img] of held.current) {
+      if (!next.has(url) && !img.complete) img.src = '';
+    }
     held.current = next;
+    // Aborting on every focus change is fine: if the user lands on the
+    // prefetched neighbor, the main image/tile layer re-requests it at
+    // visible priority and the pool dedups against any run still going.
+    return () => ac.abort();
   }, [photos, photo, active]);
 }
 
@@ -418,6 +429,10 @@ export function DecodedImage({
       .catch(() => alive && setShown(src)); // decode() can reject spuriously; let <img> retry
     return () => {
       alive = false;
+      // A superseded rendition still downloading is dead weight — abort it
+      // so the server can cancel the render (holding the arrow key would
+      // otherwise stack up a full develop per photo skimmed past).
+      if (!img.complete) img.src = '';
     };
   }, [src]);
   return <img src={shown} draggable={false} alt="" className={className} />;

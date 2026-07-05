@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/marrasen/aprot"
 
@@ -90,8 +92,73 @@ func (l *Library) OpenFolder(ctx context.Context, path string) (*FolderInfo, err
 		return nil, aprot.ErrInvalidParams(err.Error())
 	}
 	aprot.TriggerRefresh(ctx, photosKey(folderID))
+	l.rememberRecent(ctx, path)
 	l.startFolderJobs(ctx, folderID, path)
 	return &FolderInfo{FolderID: folderID, Path: path, PhotoCount: count}, nil
+}
+
+const (
+	settingFavoriteFolders = "favoriteFolders"
+	settingRecentFolders   = "recentFolders"
+	folderPrefsKey         = "folderPrefs"
+	maxRecentFolders       = 8
+)
+
+// GetFolderPrefs returns favourite and recently opened folders. Subscription
+// query: adding a favourite or opening a folder pushes an update.
+func (l *Library) GetFolderPrefs(ctx context.Context) (*FolderPrefs, error) {
+	aprot.RegisterRefreshTrigger(ctx, folderPrefsKey)
+	return &FolderPrefs{
+		Favorites: l.pathListSetting(ctx, settingFavoriteFolders),
+		Recents:   l.pathListSetting(ctx, settingRecentFolders),
+	}, nil
+}
+
+// SetFavoriteFolders replaces the favourite list (add, remove, and reorder are
+// all "send the new list").
+func (l *Library) SetFavoriteFolders(ctx context.Context, paths []string) error {
+	if paths == nil {
+		paths = []string{}
+	}
+	if err := l.savePathListSetting(ctx, settingFavoriteFolders, paths); err != nil {
+		return err
+	}
+	aprot.TriggerRefresh(ctx, folderPrefsKey)
+	return nil
+}
+
+// rememberRecent moves path to the front of the recent-folders list. Best
+// effort: an opened folder must never fail because bookkeeping did.
+func (l *Library) rememberRecent(ctx context.Context, path string) {
+	recents := []string{path}
+	for _, p := range l.pathListSetting(ctx, settingRecentFolders) {
+		if !strings.EqualFold(p, path) && len(recents) < maxRecentFolders {
+			recents = append(recents, p)
+		}
+	}
+	if err := l.savePathListSetting(ctx, settingRecentFolders, recents); err == nil {
+		aprot.TriggerRefresh(ctx, folderPrefsKey)
+	}
+}
+
+func (l *Library) pathListSetting(ctx context.Context, key string) []string {
+	raw, err := l.deps.DB.GetSetting(ctx, key)
+	if err != nil || raw == "" {
+		return []string{}
+	}
+	var paths []string
+	if json.Unmarshal([]byte(raw), &paths) != nil || paths == nil {
+		return []string{}
+	}
+	return paths
+}
+
+func (l *Library) savePathListSetting(ctx context.Context, key string, paths []string) error {
+	raw, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	return l.deps.DB.SetSetting(ctx, key, string(raw))
 }
 
 // ListPhotos returns all photos of a folder, sorted by file name. It is a

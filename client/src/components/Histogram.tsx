@@ -21,6 +21,9 @@ export function Histogram({ photo }: { photo: Photo }) {
 
   useEffect(() => {
     let alive = true;
+    // Abort the rendition fetch when the photo changes so the server can
+    // cancel a render nobody is waiting for anymore.
+    const ac = new AbortController();
     const compute = async (blob: Blob) => {
       const bins = await histogramOf(blob);
       if (alive && canvasRef.current) drawHistogram(canvasRef.current, bins);
@@ -28,13 +31,14 @@ export function Histogram({ photo }: { photo: Photo }) {
     if (previewBlob) {
       compute(previewBlob).catch(() => {});
     } else {
-      fetch(imgUrl(photo, '512'))
+      fetch(imgUrl(photo, '512'), { signal: ac.signal })
         .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))
         .then(compute)
         .catch(() => {});
     }
     return () => {
       alive = false;
+      ac.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photo.id, photo.editHash, photo.cacheKey, previewBlob]);

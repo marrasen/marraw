@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 type DB struct {
 	*sql.DB
@@ -77,6 +77,14 @@ func (db *DB) migrate(ctx context.Context) error {
 			// task on the next folder open. Ratings, flags, and edits keep.
 			if _, err := tx.ExecContext(ctx, `UPDATE photos SET meta_loaded = 0`); err != nil {
 				return fmt.Errorf("store: migrate v3: %w", err)
+			}
+		}
+		if v < 4 {
+			// Camera-mimic exposure compensation, measured by the background
+			// calibrate pass; NULL = not yet measured.
+			if _, err := tx.ExecContext(ctx,
+				`ALTER TABLE photos ADD COLUMN base_exp_ev REAL`); err != nil {
+				return fmt.Errorf("store: migrate v4: %w", err)
 			}
 		}
 	}

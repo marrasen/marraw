@@ -12,13 +12,15 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/marrasen/marraw/internal/decode"
+	"github.com/marrasen/marraw/internal/libraw"
+	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
 )
 
 // TaskMeta is the typed metadata attached to shared background tasks so the
 // client task tray can render kind-specific UI (reveal export folder, …).
 type TaskMeta struct {
-	Kind    string `json:"kind"` // "scan" | "prerender" | "export"
+	Kind    string `json:"kind"` // "scan" | "calibrate" | "prerender" | "export"
 	Folder  string `json:"folder,omitempty"`
 	DestDir string `json:"destDir,omitempty"`
 }
@@ -41,8 +43,68 @@ func (l *Library) startFolderJobs(reqCtx context.Context, folderID int64, path s
 	name := filepath.Base(path)
 	go func() {
 		l.metaPass(ctx, folderID, name)
+		l.calibratePass(ctx, folderID, name)
 		l.prerenderPass(ctx, folderID, name)
 	}()
+}
+
+// calibratePass measures the base look's auto-brighten lift (as an exposure
+// EV) for photos that don't have one yet. The value seeds the exposure dial
+// so the camera-mimic compensation is visible in the develop values instead
+// of silently vanishing on the first edit. Two demosaic-free half-size
+// decodes per photo — much cheaper than the pre-render pass that follows.
+func (l *Library) calibratePass(ctx context.Context, folderID int64, name string) {
+	photos, err := l.deps.DB.ListPhotos(ctx, folderID)
+	if err != nil {
+		return
+	}
+	var work []store.Photo
+	for _, p := range photos {
+		if !p.BaseExpEV.Valid {
+			work = append(work, p)
+		}
+	}
+	if len(work) == 0 {
+		return
+	}
+
+	tctx, task := tasks.StartTask[TaskMeta](ctx, "Calibrating "+name, tasks.Shared())
+	task.SetMeta(TaskMeta{Kind: "calibrate", Folder: name})
+	total := len(work)
+	task.Progress(0, total)
+
+	var done atomic.Int64
+	g, gctx := errgroup.WithContext(tctx)
+	g.SetLimit(max(1, runtime.NumCPU()-2))
+	for _, p := range work {
+		g.Go(func() error {
+			if gctx.Err() != nil {
+				return gctx.Err()
+			}
+			// The DB write lives inside the pool job so a deduplicated
+			// concurrent caller can't race in a zero measurement.
+			err := l.deps.Pool.Do(gctx, p.CacheKey+"|calibrate", decode.PriorityBackground,
+				func(jctx context.Context, proc *libraw.Processor) error {
+					if err := jctx.Err(); err != nil {
+						return err
+					}
+					if err := proc.Open(p.Path()); err != nil {
+						return err
+					}
+					ev, err := pyramid.MeasureAutoBrightEV(proc)
+					if err != nil {
+						return err
+					}
+					return l.deps.DB.SetBaseExpEV(context.WithoutCancel(jctx), p.ID, ev)
+				})
+			if err != nil && gctx.Err() == nil {
+				task.Output(p.FileName + ": " + err.Error())
+			}
+			task.Progress(int(done.Add(1)), total)
+			return nil
+		})
+	}
+	task.Err(g.Wait())
 }
 
 // metaPass backfills missing photo metadata under a shared task.

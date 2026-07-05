@@ -38,6 +38,11 @@ export interface FolderInfo {
     photoCount: number;
 }
 
+export interface FolderPrefs {
+    favorites: string[];
+    recents: string[];
+}
+
 export interface Photo {
     id: number;
     fileName: string;
@@ -80,6 +85,19 @@ deletePhotos.method = 'Library.DeletePhotos' as const;
 
 export function subscribeDeletePhotos(client: ApiClient, ids: number[], callback: (data: DeleteResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<DeleteResult>('Library.DeletePhotos', [ids], callback, onError, options);
+}
+
+
+export function getFolderPrefs(client: ApiClient, options?: RequestOptions): Promise<FolderPrefs> {
+    return client.request<FolderPrefs>('Library.GetFolderPrefs', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+getFolderPrefs.method = 'Library.GetFolderPrefs' as const;
+
+export function subscribeGetFolderPrefs(client: ApiClient, callback: (data: FolderPrefs) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<FolderPrefs>('Library.GetFolderPrefs', [], callback, onError, options);
 }
 
 
@@ -132,6 +150,19 @@ openFolder.method = 'Library.OpenFolder' as const;
 
 export function subscribeOpenFolder(client: ApiClient, path: string, callback: (data: FolderInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<FolderInfo>('Library.OpenFolder', [path], callback, onError, options);
+}
+
+
+export function setFavoriteFolders(client: ApiClient, paths: string[], options?: RequestOptions): Promise<void> {
+    return client.request<void>('Library.SetFavoriteFolders', [paths], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setFavoriteFolders.method = 'Library.SetFavoriteFolders' as const;
+
+export function subscribeSetFavoriteFolders(client: ApiClient, paths: string[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Library.SetFavoriteFolders', [paths], callback, onError, options);
 }
 
 
@@ -195,6 +226,20 @@ export function useDeletePhotos(ids: number[], options?: UseQueryOptions<DeleteR
 }
 
 /**
+ * Subscribes to `Library.GetFolderPrefs` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useGetFolderPrefs(options?: UseQueryOptions<FolderPrefs>): UseQueryResult<FolderPrefs> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => getFolderPrefs(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'Library.GetFolderPrefs', params: [] } });
+}
+
+/**
  * Subscribes to `Library.ListDir` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -251,6 +296,21 @@ export function useOpenFolder(path: string, options?: UseQueryOptions<FolderInfo
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Library.OpenFolder', params: [path] } });
+}
+
+/**
+ * Subscribes to `Library.SetFavoriteFolders` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetFavoriteFolders(paths: string[], options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, paths: string[]) => setFavoriteFolders(client, paths, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [paths], _subscribe: { method: 'Library.SetFavoriteFolders', params: [paths] } });
 }
 
 /**

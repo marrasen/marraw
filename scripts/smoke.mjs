@@ -190,12 +190,15 @@ const picked = await call('Edits.PickWhiteBalance', [p.id, params2, 0.5, 0.5]);
 step(`PickWhiteBalance -> mul=[${picked.wbMul.map((m) => m.toFixed(2)).join(', ')}]`);
 check(picked.wbMode === 'custom' && picked.wbMul[1] === 1 && picked.wbMul[0] > 0, 'picker returns custom multipliers');
 
-// 6. Batch edit two photos.
+// 6. Batch edit two photos. Untouched photos start from their seeded
+// camera-mimic compensation (base_exp_ev), so the delta lands on top of it.
 const ids = photos.slice(1, 3).map((x) => x.id);
+const seedBefore = await call('Edits.GetEditParams', [ids[0]]);
+const seedEV = seedBefore?.expEV ?? 0;
 await call('Edits.ApplyBatchEdit', [ids, { expEV: 0.25, bright: null, highlight: null, nrThreshold: null, fbddNoiseRd: null, medPasses: null }]);
 const batchParams = await call('Edits.GetEditParams', [ids[0]]);
-step('ApplyBatchEdit done');
-check(batchParams && batchParams.expEV === 0.25, 'batch delta applied');
+step(`ApplyBatchEdit done (seed ${seedEV} EV)`);
+check(batchParams && Math.abs(batchParams.expEV - Math.min(3, seedEV + 0.25)) < 1e-6, 'batch delta applied on top of seed');
 
 // 7. Export three photos (one edited) as a background shared task.
 const dest = mkdtempSync(join(tmpdir(), 'marraw-export-'));
@@ -241,10 +244,17 @@ rmSync(delDir, { recursive: true, force: true });
 // Restore the main folder's background jobs slot (deleting opened a folder).
 await call('Library.OpenFolder', [FOLDER]);
 
-// 9. Reset edits to leave a clean state.
+// 9. Reset edits to leave a clean state. A reset photo has no stored edit
+// row (editHash back to 'base'); GetEditParams then reports either null or
+// the seeded baseline — neutral except the camera-mimic exposure seed.
 await call('Edits.ResetEdits', [[p.id, ...ids]]);
 const cleared = await call('Edits.GetEditParams', [p.id]);
-check(cleared === null || cleared === undefined, 'edits reset');
+const seededOnly =
+  cleared != null &&
+  Object.entries(cleared).every(([k, v]) =>
+    k === 'expEV' ? true : Array.isArray(v) ? v.every((x) => !x) : !v);
+const afterReset = (await call('Library.ListPhotos', [info.folderId])).find((x) => x.id === p.id);
+check((cleared == null || seededOnly) && afterReset.editHash === 'base', 'edits reset to seeded baseline');
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECKS FAILED`);
 ws.close();

@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/libraw"
 )
 
 // FallbackLookGamma is used when a photo has no calibrated gamma yet
@@ -22,6 +23,59 @@ func ComputeLookGamma(rawMean, cameraMean float64) float64 {
 	}
 	g := math.Log(cameraMean/255) / math.Log(rawMean/255)
 	return math.Min(1.1, math.Max(0.5, g))
+}
+
+// MeasureAutoBrightEV measures LibRaw's auto-brighten lift on the opened
+// photo as the equivalent exposure-slider EV. The base look renders with
+// auto-brighten (histogram-normalizing, scene-dependent); any edit switches
+// to a deterministic ExpShift = 2^expEV. Seeding the exposure dial with this
+// EV makes that switch invisible — the mimic compensation shows in the dial
+// instead of silently vanishing on the first adjustment.
+func MeasureAutoBrightEV(proc *libraw.Processor) (float64, error) {
+	p := libraw.DefaultParams()
+	p.HalfSize = true // no demosaic — only the mean luma matters
+	bright, err := proc.Process(p)
+	if err != nil {
+		return 0, err
+	}
+	mb := meanLumaPacked(bright)
+	p.NoAutoBright = true
+	flat, err := proc.Process(p)
+	if err != nil {
+		return 0, err
+	}
+	return AutoBrightEV(mb, meanLumaPacked(flat)), nil
+}
+
+// AutoBrightEV converts the display-space mean ratio between the
+// auto-brightened and flat renders of one scene into an exposure EV:
+// display values are approximately linear^(1/2.222), so the linear-domain
+// ratio is the display ratio raised to 2.222. Clamped to the exposure
+// slider's range and rounded so the dial reads cleanly.
+func AutoBrightEV(brightMean, flatMean float64) float64 {
+	if brightMean <= 1 || flatMean <= 1 {
+		return 0
+	}
+	ev := 2.222 * math.Log2(brightMean/flatMean)
+	return math.Min(3, math.Max(-2, math.Round(ev*100)/100))
+}
+
+// meanLumaPacked is MeanLuma for LibRaw's 3-byte interleaved RGB output.
+func meanLumaPacked(img *libraw.Image) float64 {
+	if img == nil || img.Bits != 8 || img.Channels != 3 {
+		return 0
+	}
+	pix := img.Data
+	var sum, n uint64
+	// Every 4th pixel is plenty for a scene mean.
+	for i := 0; i+2 < len(pix); i += 12 {
+		sum += (299*uint64(pix[i]) + 587*uint64(pix[i+1]) + 114*uint64(pix[i+2])) / 1000
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	return float64(sum) / float64(n)
 }
 
 // MeanLuma returns the mean Rec.601 luma (0..255), subsampled for speed.

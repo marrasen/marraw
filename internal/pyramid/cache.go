@@ -97,11 +97,11 @@ func (c *Cache) Ensure(ctx context.Context, photo store.Photo, level, editHash s
 		return path, nil
 	}
 	key := photo.CacheKey + "|" + level + "|" + editHash
-	err := c.pool.Do(ctx, key, prio, func(proc *libraw.Processor) error {
+	err := c.pool.Do(ctx, key, prio, func(jctx context.Context, proc *libraw.Processor) error {
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
-		return c.generate(proc, photo, level, editHash)
+		return c.generate(jctx, proc, photo, level, editHash)
 	})
 	if err != nil {
 		return "", err
@@ -127,11 +127,11 @@ func (c *Cache) EnsureTile(ctx context.Context, photo store.Photo, tx, ty int, e
 		return "", fs.ErrNotExist
 	}
 	key := photo.CacheKey + "|full|" + editHash
-	err := c.pool.Do(ctx, key, prio, func(proc *libraw.Processor) error {
+	err := c.pool.Do(ctx, key, prio, func(jctx context.Context, proc *libraw.Processor) error {
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
-		return c.generate(proc, photo, "full", editHash)
+		return c.generate(jctx, proc, photo, "full", editHash)
 	})
 	if err != nil {
 		return "", err
@@ -144,8 +144,14 @@ func (c *Cache) EnsureTile(ctx context.Context, photo store.Photo, tx, ty int, e
 }
 
 // generate renders the requested level and, opportunistically, the smaller
-// levels that fall out of the same decode for free.
-func (c *Cache) generate(proc *libraw.Processor, photo store.Photo, level, editHash string) error {
+// levels that fall out of the same decode for free. ctx is checked before
+// the expensive stages so an abandoned render stops early; once the decode
+// has been paid for, the write-out always completes — the cache files stay
+// useful for the next visit.
+func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo store.Photo, level, editHash string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	var edits *edit.Params
 	if editHash != edit.BaseHash {
 		if photo.EditHash != editHash || !photo.EditParams.Valid {
@@ -175,6 +181,9 @@ func (c *Cache) generate(proc *libraw.Processor, photo store.Photo, level, editH
 	// needs the full-resolution pipeline. Interactive full renders use PPG —
 	// roughly half AHD's cost, visually equivalent at loupe zoom; export
 	// keeps AHD.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	params := edits.LibrawParams(level != "full")
 	if level == "full" && (edits == nil || edits.Demosaic == "") {
 		params.UserQual = libraw.DemosaicPPG

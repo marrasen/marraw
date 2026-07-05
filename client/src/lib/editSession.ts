@@ -391,15 +391,25 @@ export function esStep(client: ApiClient, control: ControlId, dir: 1 | -1, big =
   commitTimer = window.setTimeout(() => esCommit(client), 600);
 }
 
-// esReset clears the edit state of every photo in the selection.
+// esReset clears the edit state of every photo in the selection, then
+// reloads the clean state — which the server may seed with the photo's
+// camera-mimic compensation (exposure dial back at e.g. +1.3 EV, not 0).
 export function esReset(client: ApiClient) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
+  const photoId = s.photoId;
   setState({ draft: { ...NEUTRAL } });
-  pushHistory(s.photoId, { ...NEUTRAL });
   esClearPreview();
-  const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
-  resetEdits(client, ids).catch((err) => toast.error((err as Error).message));
+  const ids = s.applyIds.length > 1 ? s.applyIds : [photoId];
+  resetEdits(client, ids)
+    .then(async () => {
+      const params = await getEditParams(client, photoId).catch(() => null);
+      if (useEditSession.getState().photoId !== photoId) return;
+      const draft = params ?? { ...NEUTRAL };
+      setState({ draft });
+      pushHistory(photoId, draft);
+    })
+    .catch((err) => toast.error((err as Error).message));
 }
 
 // esPickWB asks the backend to compute custom multipliers that neutralize

@@ -40,19 +40,22 @@ try {
   const photoA = ui().focusId;
 
   // Start from a clean baseline even if a previous aborted run left edits.
+  // The clean draft may carry the seeded camera-mimic exposure (base_exp_ev),
+  // so exposure checks below are relative to whatever the baseline reads.
   const resetBtn = buttons().find((b) => b.textContent.trim() === 'Reset');
   if (resetBtn) {
     resetBtn.click();
-    await until(() => es().draft && es().draft.expEV === 0, 5000, 'baseline reset');
+    await sleep(900); // reset round-trips, then reloads the seeded baseline
   }
   key('0'); // clear rating
   await sleep(200);
+  const baseEV = es().draft.expEV;
 
   // --- E focuses exposure, +/- steps, preview blob arrives ---------------
   key('e');
   R.controlFocusE = es().activeControl === 'expEV';
   key('+'); key('+'); key('+'); key('+');
-  R.plusSteps = Math.abs(es().draft.expEV - 0.2) < 1e-9;
+  R.plusSteps = Math.abs(es().draft.expEV - (baseEV + 0.2)) < 1e-9;
   await until(() => es().preview && es().preview.photoId === photoA, 20000, 'preview blob');
   R.previewBlob = true;
   key('Escape');
@@ -72,10 +75,10 @@ try {
   await sleep(900); // let the keyboard-step commit debounce fire
   key('z', { ctrlKey: true });
   await sleep(300);
-  R.undo = es().draft.expEV === 0;
+  R.undo = Math.abs(es().draft.expEV - baseEV) < 1e-9;
   key('y', { ctrlKey: true });
   await sleep(300);
-  R.redo = Math.abs(es().draft.expEV - 0.2) < 1e-9;
+  R.redo = Math.abs(es().draft.expEV - (baseEV + 0.2)) < 1e-9;
 
   // --- slider click-to-position -------------------------------------------
   const expRow = sliderRowByLabel('Exposure');
