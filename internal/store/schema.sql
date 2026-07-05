@@ -26,6 +26,7 @@ CREATE TABLE photos (
     flag        INTEGER NOT NULL DEFAULT 0,
     edit_params TEXT,
     edit_hash   TEXT    NOT NULL DEFAULT 'base',
+    look_gamma  REAL    NOT NULL DEFAULT 0,
     UNIQUE(folder_id, file_name)
 );
 CREATE INDEX idx_photos_folder ON photos(folder_id, file_name);

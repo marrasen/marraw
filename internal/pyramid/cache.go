@@ -11,6 +11,7 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	xdraw "golang.org/x/image/draw"
@@ -25,31 +26,35 @@ import (
 var Levels = []string{"256", "512", "1024", "2048", "full"}
 
 func ValidLevel(level string) bool {
-	for _, l := range Levels {
-		if l == level {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(Levels, level)
 }
 
 type Cache struct {
 	dir  string
 	pool *decode.Pool
+	db   *store.DB
 }
 
-func New(dir string, pool *decode.Pool) (*Cache, error) {
+func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	return &Cache{dir: dir, pool: pool}, nil
+	return &Cache{dir: dir, pool: pool, db: db}, nil
 }
 
 func (c *Cache) Dir() string { return c.dir }
 
+// renderVersion is baked into cache file names; bump it whenever the
+// rendering pipeline changes (tone curve, gamma, …) so stale renditions
+// regenerate instead of being served. Orphans age out via the janitor.
+// Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
+// cached as immutable, so the version has to appear in the URL too.
+const renderVersion = "r4"
+
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
-	return filepath.Join(c.dir, cacheKey[:2], fmt.Sprintf("%s_%s_%s.jpg", cacheKey, level, editHash))
+	return filepath.Join(c.dir, cacheKey[:2],
+		fmt.Sprintf("%s_%s_%s_%s.jpg", cacheKey, level, editHash, renderVersion))
 }
 
 // Ensure guarantees the rendition exists on disk and returns its path.
@@ -103,8 +108,14 @@ func (c *Cache) generate(proc *libraw.Processor, photo store.Photo, level, editH
 	}
 
 	// RAW route: a half-size decode covers every fixed level; only "full"
-	// needs the full-resolution pipeline.
-	img, err := proc.Process(edits.LibrawParams(level != "full"))
+	// needs the full-resolution pipeline. Interactive full renders use PPG —
+	// roughly half AHD's cost, visually equivalent at loupe zoom; export
+	// keeps AHD.
+	params := edits.LibrawParams(level != "full")
+	if level == "full" {
+		params.UserQual = libraw.DemosaicPPG
+	}
+	img, err := proc.Process(params)
 	if err != nil {
 		return err
 	}
@@ -112,12 +123,52 @@ func (c *Cache) generate(proc *libraw.Processor, photo store.Photo, level, editH
 	if err != nil {
 		return err
 	}
+	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
 	if level == "full" {
+		ApplyLook(rgba, gamma)
 		if err := c.writeJPEG(rgba, photo.CacheKey, "full", editHash, 90); err != nil {
 			return err
 		}
+		return c.WriteLevels(rgba, photo.CacheKey, editHash, 2048, 1024, 512, 256)
 	}
-	return c.WriteLevels(rgba, photo.CacheKey, editHash, 2048, 1024, 512, 256)
+	// Downscale before applying the look: 4x fewer pixels, same result at
+	// these sizes.
+	scaled := scaleToLongEdge(rgba, 2048)
+	ApplyLook(scaled, gamma)
+	return c.WriteLevels(scaled, photo.CacheKey, editHash, 2048, 1024, 512, 256)
+}
+
+// lookGammaFor returns the photo's calibrated tone lift, computing and
+// persisting it on the first base render (the only moment we hold both the
+// camera's rendering and our own of the same scene). Edited renders reuse
+// the stored value so sliders behave deterministically.
+func (c *Cache) lookGammaFor(proc *libraw.Processor, photo store.Photo, isBase bool, rendered *image.RGBA) float64 {
+	if photo.LookGamma > 0 {
+		return photo.LookGamma
+	}
+	if !isBase {
+		return FallbackLookGamma
+	}
+	thumb, err := proc.EmbeddedThumb()
+	if err != nil {
+		return FallbackLookGamma
+	}
+	thumbImg, err := jpeg.Decode(bytes.NewReader(thumb))
+	if err != nil {
+		return FallbackLookGamma
+	}
+	cameraRGBA, ok := thumbImg.(*image.RGBA)
+	if !ok {
+		cameraRGBA = image.NewRGBA(thumbImg.Bounds())
+		xdraw.Copy(cameraRGBA, image.Point{}, thumbImg, thumbImg.Bounds(), xdraw.Src, nil)
+	}
+	gamma := ComputeLookGamma(MeanLuma(rendered), MeanLuma(cameraRGBA))
+	if c.db != nil {
+		if err := c.db.SetLookGamma(context.Background(), photo.ID, gamma); err == nil {
+			return gamma
+		}
+	}
+	return gamma
 }
 
 // tryThumbRoute serves grid-size levels from the embedded JPEG preview when
@@ -153,9 +204,9 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 
 // WritePreview writes the 2048 rendition on the interactive path: bilinear
 // scaling instead of CatmullRom — a slider drag needs latency, not the last
-// bit of resampling quality. The committed pipeline re-renders smaller
-// levels with the quality scaler later.
-func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string) error {
+// bit of resampling quality — and the look applied after the downscale.
+// Input must be a freshly RAW-decoded image (no look applied).
+func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGamma float64) error {
 	b := src.Bounds()
 	long := max(b.Dx(), b.Dy())
 	dst := src
@@ -164,6 +215,7 @@ func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string) error {
 		dst = image.NewRGBA(image.Rect(0, 0, max(1, w), max(1, h)))
 		xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, b, xdraw.Src, nil)
 	}
+	ApplyLook(dst, lookGamma)
 	return c.writeJPEG(dst, cacheKey, "2048", editHash, 80)
 }
 

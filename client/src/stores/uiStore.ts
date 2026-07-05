@@ -30,6 +30,12 @@ interface UIState {
   previewHash: string | null;
   exportOpen: boolean;
 
+  // Grid cell target width (zoom slider in the gallery).
+  cellSize: number;
+  // Loupe zoom: 'fit' or a scale factor (1 = 100%). Deliberately survives
+  // photo navigation so a series can be compared at the same crop.
+  loupeZoom: 'fit' | number;
+
   setFolder: (id: number, path: string) => void;
   setView: (v: View) => void;
   focus: (id: number | null, opts?: { extend?: boolean; toggle?: boolean }) => void;
@@ -43,6 +49,8 @@ interface UIState {
   setClipboard: (p: Params | null) => void;
   setPreviewHash: (h: string | null) => void;
   setExportOpen: (open: boolean) => void;
+  setCellSize: (px: number) => void;
+  setLoupeZoom: (z: 'fit' | number) => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -60,6 +68,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   clipboard: null,
   previewHash: null,
   exportOpen: false,
+  cellSize: 220,
+  loupeZoom: 'fit',
 
   setFolder: (id, path) =>
     set({
@@ -130,6 +140,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   setClipboard: (p) => set({ clipboard: p }),
   setPreviewHash: (h) => set({ previewHash: h }),
   setExportOpen: (open) => set({ exportOpen: open }),
+  setCellSize: (px) => set({ cellSize: Math.min(400, Math.max(120, px)) }),
+  setLoupeZoom: (z) =>
+    set({ loupeZoom: z === 'fit' ? z : Math.min(4, Math.max(0.05, z)) }),
 }));
 
 // selectionOrFocus returns the ids an action should apply to.

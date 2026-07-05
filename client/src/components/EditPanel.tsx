@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { Star, Check, X } from 'lucide-react';
+import type { Photo } from '@/api/library';
+import { cn } from '@/lib/utils';
+import { applyRating, applyFlag } from '@/lib/actions';
 import {
   getEditParams,
   previewEdit,
@@ -46,14 +50,80 @@ const HIGHLIGHT_OPTIONS = [
   { value: 9, label: 'Rebuild (strong)' },
 ];
 
-export function EditPanel() {
+export function EditPanel({ photos }: { photos: Photo[] }) {
   const selection = useUIStore((s) => s.selection);
   const focusId = useUIStore((s) => s.focusId);
   if (selection.size > 1) return <BatchPanel ids={[...selection]} />;
   if (focusId == null) {
     return <div className="p-4 text-sm text-muted-foreground">Select a photo to edit.</div>;
   }
-  return <SinglePanel key={focusId} photoId={focusId} />;
+  const photo = photos.find((p) => p.id === focusId);
+  return (
+    <div className="flex h-full flex-col overflow-y-auto">
+      {photo && <PhotoHeader photo={photo} />}
+      <SinglePanel key={focusId} photoId={focusId} />
+    </div>
+  );
+}
+
+// PhotoHeader shows and edits the cull state of the focused photo — the
+// loupe itself stays clean, so stars/flags live here.
+function PhotoHeader({ photo }: { photo: Photo }) {
+  const client = useApiClient();
+  return (
+    <div className="flex flex-col gap-2 border-b p-4 text-sm">
+      <span className="truncate font-medium" title={photo.fileName}>
+        {photo.fileName}
+      </span>
+      <div className="flex items-center gap-2">
+        <div className="flex" role="group" aria-label="Rating">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              key={n}
+              className="p-0.5"
+              aria-label={`${n} stars`}
+              onClick={() => applyRating(client, [photo.id], photo.rating === n ? 0 : n)}
+            >
+              <Star
+                className={cn(
+                  'size-5',
+                  n <= photo.rating ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground/40',
+                )}
+              />
+            </button>
+          ))}
+        </div>
+        <ToggleGroup
+          size="sm"
+          className="ml-auto"
+          value={[photo.flag]}
+          onValueChange={(groupValue) => {
+            const v = ((groupValue as string[])[0] ?? 'none') as Photo['flag'];
+            applyFlag(client, [photo.id], v);
+          }}
+        >
+          <ToggleGroupItem value="pick" title="Pick (P)" className="data-pressed:text-emerald-500">
+            <Check />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="exclude" title="Exclude (X)" className="data-pressed:text-red-500">
+            <X />
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+      {photo.metaLoaded && (
+        <span className="text-xs text-muted-foreground">
+          {photo.model} · ISO {photo.iso} · {formatShutter(photo.shutter)} · f/{photo.aperture} ·{' '}
+          {Math.round(photo.focalLen)}mm
+        </span>
+      )}
+    </div>
+  );
+}
+
+function formatShutter(s: number): string {
+  if (s <= 0) return '—';
+  if (s >= 1) return `${s.toFixed(1)}s`;
+  return `1/${Math.round(1 / s)}s`;
 }
 
 function SinglePanel({ photoId }: { photoId: number }) {
@@ -103,7 +173,7 @@ function SinglePanel({ photoId }: { photoId: number }) {
   };
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4 text-sm">
+    <div className="flex flex-col gap-4 p-4 text-sm">
       <h2 className="font-medium">Develop</h2>
 
       <EditSlider

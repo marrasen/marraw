@@ -54,6 +54,15 @@ function Workspace({ folderId }: { folderId: number }) {
   const view = useUIStore((s) => s.view);
   const { all, visible } = usePhotos(folderId);
 
+  // ?loupe=1 jumps straight into loupe on the first photo (UI smoke test).
+  useEffect(() => {
+    const s = useUIStore.getState();
+    if (visible.length > 0 && s.focusId == null && new URLSearchParams(window.location.search).has('loupe')) {
+      s.focus(visible[0].id);
+      s.setView('loupe');
+    }
+  }, [visible]);
+
   return (
     <>
       <main className="flex min-w-0 flex-1 flex-col">
@@ -66,7 +75,7 @@ function Workspace({ folderId }: { folderId: number }) {
         <StatusBar shown={visible.length} total={all.length} />
       </main>
       <aside className="w-72 shrink-0 border-l">
-        <EditPanel />
+        <EditPanel photos={all} />
       </aside>
       <ExportDialog photos={visible} />
     </>

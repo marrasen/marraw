@@ -52,7 +52,10 @@ type Params struct {
 }
 
 // DefaultParams renders a pleasant sRGB 8-bit image honoring camera WB
-// and orientation, with auto-brighten on (dcraw default look).
+// and orientation, with auto-brighten on (dcraw default look). Gamma stays
+// at LibRaw's BT.709 default — the sRGB toe (12.92 slope) crushes shadows
+// visibly against camera JPEGs; contrast shaping happens in the baseline
+// look instead.
 func DefaultParams() Params {
 	return Params{
 		UseCameraWB: true,

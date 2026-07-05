@@ -17,7 +17,18 @@ shipped as an Electron app.
   content-addressed, so the browser cache is always valid.
 - **Culling** is keyboard-first: arrows navigate, `1–5` rate, `P` pick,
   `X` exclude, `U` unflag, `Enter` loupe, `Ctrl+E` export. Rating changes
-  broadcast granular patch events — no list re-fetch.
+  broadcast granular patch events — no list re-fetch. The loupe zooms with
+  `+`/`-`/`Z`/Ctrl+wheel or the zoom toolbar, and keeps zoom + pan position
+  across arrow navigation so a burst series can be compared at the same
+  crop. Grid thumbnail size has a slider in the filter bar.
+- **Adaptive base look**: LibRaw output is flat next to camera JPEGs
+  (manufacturer tone curves are proprietary and adaptive, e.g. Sony DRO).
+  On the first RAW render of each photo, marraw calibrates a per-photo tone
+  lift by matching mean luminance against the camera's own embedded JPEG,
+  stores it (`photos.look_gamma`), and applies it consistently to previews,
+  edit renders, and JPEG exports (TIFF16 stays neutral as a flat master).
+  Bump `renderVersion` (Go) + `RENDER_VERSION` (TS) together when the
+  render pipeline changes — image URLs are cached as immutable.
 - **Editing** is non-destructive: LibRaw params (exposure, WB, highlights,
   brightness, NR, …) stored as JSON in SQLite. While a slider drags, the
   backend re-processes the photo's already-unpacked handle at half size

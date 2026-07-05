@@ -7,7 +7,6 @@ import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { useUIStore } from '@/stores/uiStore';
 
-const CELL_TARGET = 220; // px, desired cell width
 const CELL_GAP = 8;
 
 export function GridView({ photos, folderId }: { photos: Photo[]; folderId: number }) {
@@ -28,8 +27,9 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
     return () => ro.disconnect();
   }, [scrollEl]);
 
-  const cols = Math.max(2, Math.floor(width / CELL_TARGET));
-  const cellW = width > 0 ? Math.floor((width - CELL_GAP * (cols + 1)) / cols) : CELL_TARGET;
+  const cellTarget = useUIStore((s) => s.cellSize);
+  const cols = Math.max(1, Math.floor(width / cellTarget));
+  const cellW = width > 0 ? Math.floor((width - CELL_GAP * (cols + 1)) / cols) : cellTarget;
   const cellH = Math.floor(cellW * 0.72) + 28;
   const rowCount = Math.ceil(photos.length / cols);
 

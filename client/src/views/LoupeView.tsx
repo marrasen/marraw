@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { Maximize, Square } from 'lucide-react';
 import type { Photo } from '@/api/library';
+import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
-import { imgUrl, levelForSize, type Level } from '@/lib/backend';
+import { imgUrl, type Level } from '@/lib/backend';
 import { useUIStore } from '@/stores/uiStore';
 
 export function LoupeView({ photos }: { photos: Photo[] }) {
@@ -24,63 +27,139 @@ export function LoupeView({ photos }: { photos: Photo[] }) {
   );
 }
 
+// displayDims returns the on-screen orientation-corrected pixel size.
+function displayDims(photo: Photo): [number, number] {
+  if (photo.orientation === 5 || photo.orientation === 6) return [photo.height, photo.width];
+  return [photo.width, photo.height];
+}
+
+// levelForPx picks the smallest rendition covering px device pixels.
+function levelForPx(px: number): Level {
+  for (const l of ['256', '512', '1024', '2048'] as const) {
+    if (Number(l) >= px) return l;
+  }
+  return 'full';
+}
+
 function MainImage({ photo }: { photo: Photo }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState<'fit' | '1:1'>('fit');
+  const [container, setContainer] = useState<[number, number]>([0, 0]);
+  const zoom = useUIStore((s) => s.loupeZoom);
+  const setZoom = useUIStore((s) => s.setLoupeZoom);
   const previewHash = useUIStore((s) => s.previewHash);
+  // Pan position as a ratio of the scrollable range — survives photo
+  // switches so a burst series can be compared at the exact same crop.
+  const panRatio = useRef<[number, number]>([0.5, 0.5]);
 
-  // While an edit preview is active we always show the 2048 rendition the
-  // backend just produced; otherwise pick by container size / zoom.
-  const [fitLevel, setFitLevel] = useState<Level>('1024');
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const update = () => setFitLevel(levelForSize(Math.max(el.clientWidth, el.clientHeight)));
+    const update = () => setContainer([el.clientWidth, el.clientHeight]);
     const ro = new ResizeObserver(update);
     ro.observe(el);
     update();
     return () => ro.disconnect();
   }, []);
 
-  const level: Level = previewHash ? '2048' : zoom === '1:1' ? 'full' : fitLevel;
-  const src = imgUrl(photo, level, previewHash ?? undefined);
-  // Under the hi-res image keep a small rendition that is almost certainly
-  // cached, so level/zoom switches never flash white.
-  const placeholder = imgUrl(photo, '512', previewHash ? undefined : undefined);
+  const [dw, dh] = displayDims(photo);
+  const haveDims = dw > 0 && dh > 0 && container[0] > 0;
+  const fitScale = haveDims ? Math.min(container[0] / dw, container[1] / dh) : 1;
+  const scale = zoom === 'fit' ? fitScale : zoom;
+  const boxW = Math.max(1, Math.round(dw * scale));
+  const boxH = Math.max(1, Math.round(dh * scale));
 
-  useEffect(() => setZoom('fit'), [photo.id]);
+  // While an edit preview is active, always show the 2048 rendition the
+  // backend just produced (previews render at 2048 only).
+  const level: Level = previewHash ? '2048' : levelForPx(Math.max(boxW, boxH) * window.devicePixelRatio);
+  const src = imgUrl(photo, level, previewHash ?? undefined);
+
+  // Restore the pan ratio whenever the geometry or photo changes.
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.scrollLeft = panRatio.current[0] * Math.max(0, el.scrollWidth - el.clientWidth);
+    el.scrollTop = panRatio.current[1] * Math.max(0, el.scrollHeight - el.clientHeight);
+  }, [photo.id, boxW, boxH]);
+
+  const onScroll = () => {
+    const el = containerRef.current;
+    if (!el) return;
+    const rx = el.scrollWidth > el.clientWidth ? el.scrollLeft / (el.scrollWidth - el.clientWidth) : 0.5;
+    const ry = el.scrollHeight > el.clientHeight ? el.scrollTop / (el.scrollHeight - el.clientHeight) : 0.5;
+    panRatio.current = [rx, ry];
+  };
+
+  const onWheel = (e: React.WheelEvent) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const cur = zoom === 'fit' ? fitScale : zoom;
+    setZoom(cur * Math.exp(-e.deltaY * 0.0015));
+  };
 
   return (
-    <div
-      ref={containerRef}
-      className={cn(
-        'relative min-h-0 flex-1 bg-black/40',
-        zoom === 'fit' ? 'cursor-zoom-in overflow-hidden' : 'cursor-zoom-out overflow-auto',
-      )}
-      onDoubleClick={() => setZoom((z) => (z === 'fit' ? '1:1' : 'fit'))}
-    >
-      {zoom === 'fit' ? (
-        <DecodedImage key={photo.id} src={src} placeholder={placeholder} className="absolute inset-0 size-full object-contain" />
-      ) : (
-        <DecodedImage key={photo.id + ':1:1'} src={src} placeholder={placeholder} className="max-w-none" />
-      )}
+    <div className="relative min-h-0 flex-1">
+      <div
+        ref={containerRef}
+        className="flex size-full overflow-auto bg-black/40"
+        onScroll={onScroll}
+        onWheel={onWheel}
+        onDoubleClick={() => setZoom(zoom === 'fit' ? 1 : 'fit')}
+      >
+        {haveDims ? (
+          <div className="relative m-auto shrink-0" style={{ width: boxW, height: boxH }}>
+            <DecodedImage src={src} className="absolute inset-0 size-full" />
+          </div>
+        ) : (
+          // Metadata not scanned yet: plain fit rendering.
+          <DecodedImage src={src} className="m-auto max-h-full max-w-full object-contain" />
+        )}
+      </div>
+      <ZoomToolbar scale={scale} isFit={zoom === 'fit'} setZoom={setZoom} />
     </div>
   );
 }
 
-// DecodedImage double-buffers src changes: the new image is decoded
-// off-screen and swapped in only when ready, so slider drags and zoom
-// changes never flash.
-export function DecodedImage({
-  src,
-  placeholder,
-  className,
+function ZoomToolbar({
+  scale,
+  isFit,
+  setZoom,
 }: {
-  src: string;
-  placeholder?: string;
-  className?: string;
+  scale: number;
+  isFit: boolean;
+  setZoom: (z: 'fit' | number) => void;
 }) {
-  const [shown, setShown] = useState(placeholder ?? src);
+  return (
+    <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border bg-background/85 px-2 py-1 backdrop-blur">
+      <Button size="sm" variant={isFit ? 'secondary' : 'ghost'} onClick={() => setZoom('fit')} title="Fit (Z)">
+        <Maximize data-icon="inline-start" />
+        Fit
+      </Button>
+      <Button size="sm" variant={!isFit && Math.abs(scale - 1) < 0.01 ? 'secondary' : 'ghost'} onClick={() => setZoom(1)} title="100% (Z)">
+        <Square data-icon="inline-start" />
+        1:1
+      </Button>
+      <Slider
+        className="w-36"
+        value={Math.round(scale * 100)}
+        min={5}
+        max={400}
+        step={5}
+        onValueChange={(v) => setZoom((v as number) / 100)}
+        aria-label="Zoom"
+      />
+      <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">
+        {Math.round(scale * 100)}%
+      </span>
+    </div>
+  );
+}
+
+// DecodedImage double-buffers src changes: the new image decodes off-screen
+// and swaps in only when ready, so photo switches, zoom-level upgrades, and
+// slider drags never flash or show a misplaced small rendition. Until the
+// first decode lands, the previous src keeps filling the same box.
+export function DecodedImage({ src, className }: { src: string; className?: string }) {
+  const [shown, setShown] = useState(src);
   useEffect(() => {
     let alive = true;
     const img = new Image();

@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
-import { setRating, setFlag, type FlagType } from '@/api/library';
+import type { FlagType } from '@/api/library';
 import { pasteEditParams, getEditParams } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { toast } from 'sonner';
+import { applyRating as doRating, applyFlag as doFlag } from '@/lib/actions';
 import { useUIStore, selectionOrFocus } from '@/stores/uiStore';
 
 // useKeyboard installs the app-wide culling keymap:
@@ -30,18 +31,14 @@ export function useKeyboard() {
         s.focus(ids[next], { extend: e.shiftKey });
       };
 
-      const applyRating = (n: number) => {
-        const ids = selectionOrFocus();
-        if (ids.length === 0) return;
-        s.applyLocal(ids, { rating: n });
-        setRating(client, ids, n).catch((err) => toast.error(`Rating failed: ${err.message}`));
-      };
+      const applyRating = (n: number) => doRating(client, selectionOrFocus(), n);
+      const applyFlag = (flag: FlagType) => doFlag(client, selectionOrFocus(), flag);
 
-      const applyFlag = (flag: FlagType) => {
-        const ids = selectionOrFocus();
-        if (ids.length === 0) return;
-        s.applyLocal(ids, { flag });
-        setFlag(client, ids, flag).catch((err) => toast.error(`Flag failed: ${err.message}`));
+      const zoomStep = (factor: number) => {
+        if (s.view !== 'loupe') return;
+        // Stepping from 'fit' starts at 100%; the loupe resolves 'fit' itself.
+        const cur = s.loupeZoom === 'fit' ? 1 : s.loupeZoom;
+        s.setLoupeZoom(cur * factor);
       };
 
       if (e.ctrlKey || e.metaKey) {
@@ -122,6 +119,17 @@ export function useKeyboard() {
         case 'g':
         case 'G':
           s.setView('grid');
+          break;
+        case '+':
+        case '=':
+          zoomStep(1.25);
+          break;
+        case '-':
+          zoomStep(0.8);
+          break;
+        case 'z':
+        case 'Z':
+          if (s.view === 'loupe') s.setLoupeZoom(s.loupeZoom === 'fit' ? 1 : 'fit');
           break;
       }
     };

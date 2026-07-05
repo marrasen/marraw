@@ -19,6 +19,7 @@ import (
 
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/libraw"
+	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
 )
 
@@ -100,6 +101,11 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int)
 		return err
 	}
 
+	gamma := photo.LookGamma
+	if gamma == 0 {
+		gamma = pyramid.FallbackLookGamma
+	}
+
 	tmp := outPath + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
@@ -109,7 +115,7 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int)
 	case "tiff16":
 		err = encodeTIFF16(f, img, longEdge)
 	default:
-		err = encodeJPEG(f, img, quality, longEdge)
+		err = encodeJPEG(f, img, quality, longEdge, gamma)
 	}
 	if err != nil {
 		f.Close()
@@ -123,7 +129,7 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int)
 	return os.Rename(tmp, outPath)
 }
 
-func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int) error {
+func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma float64) error {
 	if img.Bits != 8 {
 		return fmt.Errorf("export: jpeg needs 8-bit output, got %d", img.Bits)
 	}
@@ -134,6 +140,9 @@ func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int) error {
 		rgba.Pix[j+2] = img.Data[i+2]
 		rgba.Pix[j+3] = 0xff
 	}
+	// Match what the user saw in the preview. TIFF16 stays neutral — it is
+	// the flat master for external editing.
+	pyramid.ApplyLook(rgba, lookGamma)
 	out := resizeRGBA(rgba, longEdge)
 	return jpeg.Encode(f, out, &jpeg.Options{Quality: quality})
 }

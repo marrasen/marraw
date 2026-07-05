@@ -21,11 +21,17 @@ export interface ImgRef {
   editHash: string;
 }
 
-// imgUrl builds a content-addressed image URL: cacheKey (v) and editHash (e)
-// are part of the URL, so the browser cache never serves stale pixels.
+// RENDER_VERSION must match pyramid.renderVersion in the Go backend: image
+// responses are cached as immutable, so a rendering-pipeline change must
+// change the URL or clients keep serving the old pixels forever.
+const RENDER_VERSION = 'r4';
+
+// imgUrl builds a content-addressed image URL: cacheKey (v), editHash (e),
+// and render version (r) are part of the URL, so the browser cache never
+// serves stale pixels.
 export function imgUrl(p: ImgRef, level: Level, editHashOverride?: string): string {
   const e = editHashOverride ?? p.editHash;
-  const params = new URLSearchParams({ v: p.cacheKey });
+  const params = new URLSearchParams({ v: p.cacheKey, r: RENDER_VERSION });
   if (e && e !== 'base') params.set('e', e);
   if (backend.token) params.set('t', backend.token);
   return `${backend.http}/img/${p.id}/${level}?${params}`;

@@ -94,6 +94,9 @@ func (e *Params) LibrawParams(halfSize bool) libraw.Params {
 	p := libraw.DefaultParams()
 	p.HalfSize = halfSize
 	if e == nil {
+		// Base look: auto-bright plus the pyramid baseline LUT. Note that a
+		// pre-demosaic exp_shift is pointless here — auto-bright re-normalizes
+		// the histogram and cancels it — so tone shaping lives in the LUT.
 		return p
 	}
 	p.NoAutoBright = true

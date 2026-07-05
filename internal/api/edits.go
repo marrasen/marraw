@@ -61,7 +61,11 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 	if err != nil {
 		return nil, err
 	}
-	if err := e.deps.Cache.WritePreview(rgba, photo.CacheKey, hash); err != nil {
+	gamma := photo.LookGamma
+	if gamma == 0 {
+		gamma = pyramid.FallbackLookGamma
+	}
+	if err := e.deps.Cache.WritePreview(rgba, photo.CacheKey, hash, gamma); err != nil {
 		return nil, err
 	}
 	return &PreviewResult{EditHash: hash}, nil

@@ -6,7 +6,7 @@ package libraw
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../third_party/libraw/include -DLIBRAW_NODLL
-#cgo LDFLAGS: -L${SRCDIR}/../../third_party/libraw/lib -lraw -lstdc++ -lws2_32 -lm
+#cgo LDFLAGS: -L${SRCDIR}/../../third_party/libraw/lib -lraw -lstdc++ -lws2_32 -lm -static
 
 #include <stdlib.h>
 #include <libraw/libraw.h>

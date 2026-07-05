@@ -58,7 +58,7 @@ func main() {
 	pool := decode.NewPool(runtime.NumCPU())
 	defer pool.Close()
 
-	cache, err := pyramid.New(filepath.Join(*dataDir, "cache", "previews"), pool)
+	cache, err := pyramid.New(filepath.Join(*dataDir, "cache", "previews"), pool, db)
 	if err != nil {
 		log.Fatalf("open cache: %v", err)
 	}

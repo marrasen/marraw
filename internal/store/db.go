@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 type DB struct {
 	*sql.DB
@@ -58,8 +58,14 @@ func (db *DB) migrate(ctx context.Context) error {
 	}
 	defer tx.Rollback()
 	if v < 1 {
+		// Fresh database: schema.sql is always current.
 		if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
 			return fmt.Errorf("store: apply schema: %w", err)
+		}
+	} else if v < 2 {
+		if _, err := tx.ExecContext(ctx,
+			`ALTER TABLE photos ADD COLUMN look_gamma REAL NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("store: migrate v2: %w", err)
 		}
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {

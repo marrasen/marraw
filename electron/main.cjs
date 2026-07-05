@@ -23,11 +23,18 @@ async function startDaemon() {
     env: { ...process.env, MARRAW_TOKEN: token, MARRAW_PARENT_WATCH: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  child.stderr.on('data', (d) => console.error(`[marrawd] ${d}`.trimEnd()));
+  // Keep recent stderr so an unexpected exit can say *why*.
+  const stderrTail = [];
+  child.stderr.on('data', (d) => {
+    console.error(`[marrawd] ${d}`.trimEnd());
+    stderrTail.push(String(d));
+    while (stderrTail.length > 20) stderrTail.shift();
+  });
   child.on('exit', (code) => {
     child = null;
     if (!quitting) {
-      dialog.showErrorBox('marraw', `Backend exited unexpectedly (code ${code}).`);
+      const detail = stderrTail.length ? `\n\n${stderrTail.join('').slice(-1500)}` : '';
+      dialog.showErrorBox('marraw', `Backend exited unexpectedly (code ${code}).${detail}`);
       app.quit();
     }
   });
@@ -76,6 +83,7 @@ async function createWindow() {
 
   const query = { apiPort: String(backend.port), token: backend.token };
   if (process.env.MARRAW_OPEN_FOLDER) query.openFolder = process.env.MARRAW_OPEN_FOLDER;
+  if (process.env.MARRAW_LOUPE) query.loupe = '1';
   if (DEV) {
     const qs = new URLSearchParams(query).toString();
     await win.loadURL(`http://localhost:5173/?${qs}`);
