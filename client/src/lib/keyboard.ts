@@ -37,7 +37,7 @@ const CONTROL_KEYS: Record<string, ControlId> = {
 //   P / X / U     pick / exclude / unflag
 //   Enter         loupe view · Esc control → grid
 //   E B W T I G S H N M   focus an edit control, +/- adjusts (Shift = big steps)
-//   +/- / Z       zoom (loupe, no control focused)
+//   +/- / Z / Space   zoom (loupe, no control focused; Z/Space toggle 1:1↔fit)
 //   Ctrl+A/C/V    select all, copy/paste edit settings
 //   Ctrl+Z/Y      per-photo edit undo/redo
 //   Ctrl+E        export dialog
@@ -177,7 +177,11 @@ export function useKeyboard() {
           break;
         case 'z':
         case 'Z':
-          if (s.view === 'loupe') s.setLoupeZoom(s.loupeZoom === 'fit' ? 1 : 'fit');
+        case ' ':
+          if (s.view === 'loupe') {
+            e.preventDefault(); // space must not scroll or trigger a focused button
+            s.setLoupeZoom(s.loupeZoom === 'fit' ? 1 : 'fit');
+          }
           break;
       }
     };

@@ -1,6 +1,7 @@
 // Package pyramid maintains the on-disk preview cache: a mip-map-style set
-// of JPEG renditions per photo at fixed long-edge levels, keyed by file
-// identity (cache key) and edit state (edit hash).
+// of JPEG renditions per photo at fixed long-edge levels, plus a grid of
+// full-resolution tiles for 1:1 viewing, keyed by file identity (cache key)
+// and edit state (edit hash).
 package pyramid
 
 import (
@@ -9,12 +10,15 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 
 	xdraw "golang.org/x/image/draw"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
@@ -22,11 +26,28 @@ import (
 	"github.com/marrasen/marraw/internal/store"
 )
 
-// Levels are the pyramid long-edge sizes; "full" is full processed resolution.
-var Levels = []string{"256", "512", "1024", "2048", "full"}
+// Levels are the pyramid long-edge sizes. Full processed resolution is not a
+// level: it is served as a grid of TileSize tiles (see EnsureTile), so the
+// client never downloads or decodes a whole-sensor JPEG.
+var Levels = []string{"256", "512", "1024", "2048"}
 
 func ValidLevel(level string) bool {
 	return slices.Contains(Levels, level)
+}
+
+// TileSize is the edge length of one full-resolution tile in pixels.
+// Must match TILE_SIZE in client/src/lib/backend.ts.
+const TileSize = 1024
+
+// TileGrid is the tile-grid size implied by the photo's scanned metadata
+// (orientation-corrected, like the rendered image). Returns zeros when the
+// dimensions haven't been scanned yet.
+func TileGrid(p store.Photo) (cols, rows int) {
+	w, h := p.Width, p.Height
+	if p.Orientation == 5 || p.Orientation == 6 {
+		w, h = h, w
+	}
+	return (w + TileSize - 1) / TileSize, (h + TileSize - 1) / TileSize
 }
 
 type Cache struct {
@@ -57,6 +78,12 @@ func (c *Cache) PathFor(cacheKey, level, editHash string) string {
 		fmt.Sprintf("%s_%s_%s_%s.jpg", cacheKey, level, editHash, renderVersion))
 }
 
+// PathForTile is the cache file location for one full-resolution tile.
+func (c *Cache) PathForTile(cacheKey string, tx, ty int, editHash string) string {
+	return filepath.Join(c.dir, cacheKey[:2],
+		fmt.Sprintf("%s_t%dx%d_%s_%s.jpg", cacheKey, tx, ty, editHash, renderVersion))
+}
+
 // Ensure guarantees the rendition exists on disk and returns its path.
 // editHash must be edit.BaseHash or the photo's current edit hash.
 // Generation is deduplicated and prioritized through the decode pool;
@@ -75,6 +102,40 @@ func (c *Cache) Ensure(ctx context.Context, photo store.Photo, level, editHash s
 	})
 	if err != nil {
 		return "", err
+	}
+	return path, nil
+}
+
+// EnsureTile guarantees one full-resolution tile exists on disk and returns
+// its path. The whole tile set comes from a single decode: a miss renders
+// every tile of the photo (deduplicated through the pool under one job key),
+// so neighboring tiles are already on disk when the viewer pans. Returns
+// fs.ErrNotExist for coordinates outside the image — checked against the
+// metadata grid up front so a stray request can't burn a full decode.
+func (c *Cache) EnsureTile(ctx context.Context, photo store.Photo, tx, ty int, editHash string, prio decode.Priority) (string, error) {
+	path := c.PathForTile(photo.CacheKey, tx, ty, editHash)
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	if tx < 0 || ty < 0 {
+		return "", fs.ErrNotExist
+	}
+	if cols, rows := TileGrid(photo); cols > 0 && (tx >= cols || ty >= rows) {
+		return "", fs.ErrNotExist
+	}
+	key := photo.CacheKey + "|full|" + editHash
+	err := c.pool.Do(ctx, key, prio, func(proc *libraw.Processor) error {
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		}
+		return c.generate(proc, photo, "full", editHash)
+	})
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(path); err != nil {
+		// Rendered image is a hair smaller than the metadata grid promised.
+		return "", fs.ErrNotExist
 	}
 	return path, nil
 }
@@ -126,7 +187,7 @@ func (c *Cache) generate(proc *libraw.Processor, photo store.Photo, level, editH
 	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
 	if level == "full" {
 		ApplyLook(rgba, gamma)
-		if err := c.writeJPEG(rgba, photo.CacheKey, "full", editHash, 90); err != nil {
+		if err := c.writeTiles(rgba, photo.CacheKey, editHash); err != nil {
 			return err
 		}
 		return c.WriteLevels(rgba, photo.CacheKey, editHash, 2048, 1024, 512, 256)
@@ -239,8 +300,33 @@ func (c *Cache) WriteLevels(src *image.RGBA, cacheKey, editHash string, levels .
 	return nil
 }
 
+// writeTiles cuts the full-resolution render into TileSize tiles and encodes
+// them in parallel — Go's JPEG encoder is single-threaded, so tiling also
+// makes the full render markedly faster than one monolithic encode was.
+func (c *Cache) writeTiles(src *image.RGBA, cacheKey, editHash string) error {
+	b := src.Bounds()
+	var g errgroup.Group
+	g.SetLimit(runtime.NumCPU())
+	for ty := 0; ty*TileSize < b.Dy(); ty++ {
+		for tx := 0; tx*TileSize < b.Dx(); tx++ {
+			r := image.Rect(
+				b.Min.X+tx*TileSize, b.Min.Y+ty*TileSize,
+				min(b.Min.X+(tx+1)*TileSize, b.Max.X), min(b.Min.Y+(ty+1)*TileSize, b.Max.Y),
+			)
+			path := c.PathForTile(cacheKey, tx, ty, editHash)
+			g.Go(func() error {
+				return writeJPEGFile(path, src.SubImage(r), 90)
+			})
+		}
+	}
+	return g.Wait()
+}
+
 func (c *Cache) writeJPEG(img *image.RGBA, cacheKey, level, editHash string, quality int) error {
-	path := c.PathFor(cacheKey, level, editHash)
+	return writeJPEGFile(c.PathFor(cacheKey, level, editHash), img, quality)
+}
+
+func writeJPEGFile(path string, img image.Image, quality int) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	}

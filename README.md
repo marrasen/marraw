@@ -11,10 +11,14 @@ shipped as an Electron app.
   linked via cgo; a worker pool (one LibRaw handle per core) feeds a
   priority queue (interactive > visible > prefetch > background).
 - **Pyramid cache**: every photo gets JPEG renditions at 256/512/1024/2048
-  px + full, keyed by file identity (`sha256(path|size|mtime)`) and edit
-  state hash. Grid thumbs come from the RAW's embedded JPEG (no decode,
-  ~ms); larger levels from a `half_size` LibRaw decode. URLs are
-  content-addressed, so the browser cache is always valid.
+  px, keyed by file identity (`sha256(path|size|mtime)`) and edit state
+  hash. Grid thumbs come from the RAW's embedded JPEG (no decode, ~ms);
+  larger levels from a `half_size` LibRaw decode. URLs are
+  content-addressed, so the browser cache is always valid. Past 2048 the
+  loupe switches to full-resolution 1024 px tiles (one decode renders the
+  whole set, tiles JPEG-encode in parallel): the client downloads and
+  decodes only the visible crop over an upscaled-2048 underlay, and the
+  neighboring photos' tile sets pre-render while browsing at 1:1.
 - **Culling** is keyboard-first: arrows navigate, `1–5` rate, `P` pick,
   `X` exclude, `U` unflag, `Enter` loupe, `Ctrl+E` export. Rating changes
   broadcast granular patch events — no list re-fetch. The loupe zooms with

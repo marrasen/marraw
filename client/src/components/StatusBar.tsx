@@ -26,7 +26,7 @@ export function StatusBar({ shown, total }: { shown: number; total: number }) {
       <span className="hidden xl:block">
         {view === 'grid'
           ? '↑↓←→ navigate · 1–5 rate · P/X/U flag · Enter loupe · E/B/W… focus control · Ctrl+E export'
-          : '←→ navigate · +/- zoom · E/B/W… focus control then +/- adjust · Esc back · Ctrl+Z undo'}
+          : '←→ navigate · +/- zoom · Space 1:1 · drag to pan · E/B/W… control then +/- adjust · Esc back · Ctrl+Z undo'}
       </span>
     </div>
   );

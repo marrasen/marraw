@@ -20,12 +20,14 @@ type Handler struct {
 	Token string // empty disables the check (dev mode)
 }
 
-// ServeHTTP handles GET /img/{id}/{level}?v={cacheKey}&e={editHash}.
+// photoFor authorizes the request and resolves the photo record and edit
+// hash shared by both endpoints. On failure it writes the error response and
+// returns ok=false.
 //
-// v makes URLs content-addressed: a changed file gets a new cache key, hence
-// a new URL, so responses are immutable and cacheable forever. A stale v
-// yields 409 so the client refetches the photo record.
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// The v query param makes URLs content-addressed: a changed file gets a new
+// cache key, hence a new URL, so responses are immutable and cacheable
+// forever. A stale v yields 409 so the client refetches the photo record.
+func (h *Handler) photoFor(w http.ResponseWriter, r *http.Request) (photo store.Photo, editHash string, ok bool) {
 	if h.Token != "" && r.URL.Query().Get("t") != h.Token && r.Header.Get("X-Marraw-Token") != h.Token {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
@@ -35,17 +37,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad photo id", http.StatusBadRequest)
 		return
 	}
-	level := r.PathValue("level")
-	if !pyramid.ValidLevel(level) {
-		http.Error(w, "bad level", http.StatusBadRequest)
-		return
-	}
-	editHash := r.URL.Query().Get("e")
+	editHash = r.URL.Query().Get("e")
 	if editHash == "" {
 		editHash = edit.BaseHash
 	}
-
-	photo, err := h.DB.GetPhoto(r.Context(), id)
+	photo, err = h.DB.GetPhoto(r.Context(), id)
 	if err != nil {
 		http.Error(w, "unknown photo", http.StatusNotFound)
 		return
@@ -54,12 +50,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "stale cache key", http.StatusConflict)
 		return
 	}
+	return photo, editHash, true
+}
 
+// generatable reports whether the edit state can be rendered on demand: only
+// current states are; other hashes exist solely as files PreviewEdit already
+// wrote.
+func generatable(photo store.Photo, editHash string) bool {
+	return editHash == edit.BaseHash || editHash == photo.EditHash
+}
+
+// ServeHTTP handles GET /img/{id}/{level}?v={cacheKey}&e={editHash}.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	level := r.PathValue("level")
+	if !pyramid.ValidLevel(level) {
+		http.Error(w, "bad level", http.StatusBadRequest)
+		return
+	}
+	photo, editHash, ok := h.photoFor(w, r)
+	if !ok {
+		return
+	}
 	path := h.Cache.PathFor(photo.CacheKey, level, editHash)
 	if _, err := os.Stat(path); err != nil {
-		// Only current states are generatable; other hashes exist solely as
-		// files PreviewEdit already wrote.
-		if editHash != edit.BaseHash && editHash != photo.EditHash {
+		if !generatable(photo, editHash) {
 			http.Error(w, "unknown edit state", http.StatusNotFound)
 			return
 		}
@@ -68,7 +82,43 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	h.serveFile(w, r, path)
+}
 
+// ServeTile handles GET /img/{id}/tile/{tx}/{ty}?v={cacheKey}&e={editHash}:
+// one full-resolution tile of the pyramid.TileSize grid. A miss renders the
+// photo's whole tile set in one decode; coordinates outside the image yield
+// 404.
+func (h *Handler) ServeTile(w http.ResponseWriter, r *http.Request) {
+	tx, errX := strconv.Atoi(r.PathValue("tx"))
+	ty, errY := strconv.Atoi(r.PathValue("ty"))
+	if errX != nil || errY != nil {
+		http.Error(w, "bad tile coordinates", http.StatusBadRequest)
+		return
+	}
+	photo, editHash, ok := h.photoFor(w, r)
+	if !ok {
+		return
+	}
+	path := h.Cache.PathForTile(photo.CacheKey, tx, ty, editHash)
+	if _, err := os.Stat(path); err != nil {
+		if !generatable(photo, editHash) {
+			http.Error(w, "unknown edit state", http.StatusNotFound)
+			return
+		}
+		if path, err = h.Cache.EnsureTile(r.Context(), photo, tx, ty, editHash, decode.PriorityVisible); err != nil {
+			if os.IsNotExist(err) {
+				http.Error(w, "tile outside image", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "render failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	h.serveFile(w, r, path)
+}
+
+func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, path string) {
 	f, err := os.Open(path)
 	if err != nil {
 		http.Error(w, "cache read failed", http.StatusInternalServerError)

@@ -120,6 +120,9 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    /* Slim, theme-colored scrollbars instead of the chunky OS default. */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 50%, transparent) transparent;
     }
   body {
     @apply bg-background text-foreground;
@@ -127,4 +130,12 @@
   html {
     @apply font-sans;
     }
+}
+
+/* Scroll without any visible scrollbar (the loupe pans by dragging). */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }

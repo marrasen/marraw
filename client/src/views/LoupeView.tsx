@@ -6,7 +6,7 @@ import { useApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
-import { imgUrl, type Level } from '@/lib/backend';
+import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
 import { esPickWB, useEditSession } from '@/lib/editSession';
 import { useUIStore } from '@/stores/uiStore';
 
@@ -23,7 +23,7 @@ export function LoupeView({ photos }: { photos: Photo[] }) {
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <MainImage photo={photo} />
+      <MainImage photo={photo} photos={photos} />
       <Filmstrip photos={photos} currentId={photo.id} />
     </div>
   );
@@ -35,15 +35,51 @@ function displayDims(photo: Photo): [number, number] {
   return [photo.width, photo.height];
 }
 
-// levelForPx picks the smallest rendition covering px device pixels.
-function levelForPx(px: number): Level {
+// levelForPx picks the smallest rendition covering px device pixels; past
+// pyramid depth the loupe switches to full-resolution tiles.
+function levelForPx(px: number): Level | 'tiles' {
   for (const l of ['256', '512', '1024', '2048'] as const) {
     if (Number(l) >= px) return l;
   }
-  return 'full';
+  return 'tiles';
 }
 
-function MainImage({ photo }: { photo: Photo }) {
+// useTilePrefetch warms the photos adjacent to the focused one while the
+// loupe is past pyramid depth: it pre-decodes their 2048 underlay (the
+// bridge shown at the moment of a switch) and requests one tile, which makes
+// the backend render the photo's whole tile set ahead of time — the visible
+// tiles then come out of the local cache in tens of milliseconds. Underlay
+// refs are held only for the current window so the browser can evict older
+// decodes.
+function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
+  const held = useRef<Map<string, HTMLImageElement>>(new Map());
+  const triggered = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!active) return;
+    const i = photos.findIndex((p) => p.id === photo.id);
+    if (i < 0) return;
+    const next = new Map<string, HTMLImageElement>();
+    for (const j of [i + 1, i - 1, i + 2]) {
+      const p = photos[j];
+      if (!p) continue;
+      const url = imgUrl(p, '2048');
+      const img = held.current.get(url) ?? new Image();
+      if (!img.src) {
+        img.src = url;
+        img.decode().catch(() => {});
+      }
+      next.set(url, img);
+      const tile = tileUrl(p, 0, 0);
+      if (!triggered.current.has(tile)) {
+        triggered.current.add(tile);
+        fetch(tile).catch(() => {});
+      }
+    }
+    held.current = next;
+  }, [photos, photo, active]);
+}
+
+function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
   const client = useApiClient();
   const containerRef = useRef<HTMLDivElement>(null);
   const [container, setContainer] = useState<[number, number]>([0, 0]);
@@ -75,8 +111,15 @@ function MainImage({ photo }: { photo: Photo }) {
   // While an edit preview is active, show the JPEG the backend just pushed
   // over the WebSocket (rendered at 2048) instead of a cache URL.
   const previewUrl = preview && preview.photoId === photo.id ? preview.url : null;
-  const level: Level = levelForPx(Math.max(boxW, boxH) * window.devicePixelRatio);
-  const src = previewUrl ?? imgUrl(photo, level);
+  const level = levelForPx(Math.max(boxW, boxH) * window.devicePixelRatio);
+  // Past pyramid depth the 2048 rendition stays on as an instantly-available
+  // underlay stretched into the box, and TileLayer sharpens the visible
+  // region with full-resolution tiles on top; neighbors are warmed so
+  // stepping through a burst stays instant.
+  const wantTiles = !previewUrl && level === 'tiles';
+  const src = previewUrl ?? imgUrl(photo, level === 'tiles' ? '2048' : level);
+  const [shownSrc, setShownSrc] = useState('');
+  useTilePrefetch(photos, photo, wantTiles);
 
   // Restore the pan ratio whenever the geometry or photo changes.
   useLayoutEffect(() => {
@@ -98,7 +141,59 @@ function MainImage({ photo }: { photo: Photo }) {
     if (!e.ctrlKey) return;
     e.preventDefault();
     const cur = zoom === 'fit' ? fitScale : zoom;
-    setZoom(cur * Math.exp(-e.deltaY * 0.0015));
+    const next = Math.min(4, Math.max(0.05, cur * Math.exp(-e.deltaY * 0.0015)));
+    const el = containerRef.current;
+    if (el && haveDims) {
+      // Anchor the image point under the cursor (map-style zoom): compute
+      // the scroll that keeps it stationary at the new scale and hand it to
+      // the pan-ratio restore that runs when the box resizes.
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const offX = Math.max(0, (el.clientWidth - dw * cur) / 2);
+      const offY = Math.max(0, (el.clientHeight - dh * cur) / 2);
+      const ix = (el.scrollLeft + mx - offX) / cur; // image px under the cursor
+      const iy = (el.scrollTop + my - offY) / cur;
+      const sx = ix * next - mx + Math.max(0, (el.clientWidth - dw * next) / 2);
+      const sy = iy * next - my + Math.max(0, (el.clientHeight - dh * next) / 2);
+      const maxX = Math.max(0, Math.round(dw * next) - el.clientWidth);
+      const maxY = Math.max(0, Math.round(dh * next) - el.clientHeight);
+      panRatio.current = [
+        maxX > 0 ? Math.min(1, Math.max(0, sx / maxX)) : 0.5,
+        maxY > 0 ? Math.min(1, Math.max(0, sy / maxY)) : 0.5,
+      ];
+    }
+    setZoom(next);
+  };
+
+  // Click-drag pans the zoomed image; the pointer is captured so the drag
+  // survives leaving the container. WB picking keeps plain clicks.
+  const dragFrom = useRef<[number, number] | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const pannable = haveDims && (boxW > container[0] || boxH > container[1]);
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (wbPicking || e.button !== 0 || !pannable) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Capture only widens the drag beyond the container; a pointer that
+      // can't be captured (synthetic test events) still pans.
+    }
+    dragFrom.current = [e.clientX, e.clientY];
+    setDragging(true);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const el = containerRef.current;
+    if (!dragFrom.current || !el) return;
+    el.scrollLeft -= e.clientX - dragFrom.current[0];
+    el.scrollTop -= e.clientY - dragFrom.current[1];
+    dragFrom.current = [e.clientX, e.clientY];
+  };
+  const onPointerEnd = (e: React.PointerEvent) => {
+    if (!dragFrom.current) return;
+    dragFrom.current = null;
+    setDragging(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
   const onImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -114,9 +209,16 @@ function MainImage({ photo }: { photo: Photo }) {
     <div className="relative min-h-0 flex-1">
       <div
         ref={containerRef}
-        className={cn('flex size-full overflow-auto bg-black/40', wbPicking && 'cursor-crosshair')}
+        className={cn(
+          'no-scrollbar flex size-full touch-none overflow-auto bg-black/40 select-none',
+          wbPicking ? 'cursor-crosshair' : dragging ? 'cursor-grabbing' : pannable && 'cursor-grab',
+        )}
         onScroll={onScroll}
         onWheel={onWheel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerEnd}
+        onPointerCancel={onPointerEnd}
         onDoubleClick={() => !wbPicking && setZoom(zoom === 'fit' ? 1 : 'fit')}
       >
         {haveDims ? (
@@ -125,7 +227,10 @@ function MainImage({ photo }: { photo: Photo }) {
             style={{ width: boxW, height: boxH }}
             onClick={onImageClick}
           >
-            <DecodedImage src={src} className="absolute inset-0 size-full" />
+            <DecodedImage src={src} onShown={setShownSrc} className="absolute inset-0 size-full" />
+            {wantTiles && shownSrc.includes(`/img/${photo.id}/`) && (
+              <TileLayer photo={photo} boxW={boxW} boxH={boxH} container={containerRef} />
+            )}
           </div>
         ) : (
           // Metadata not scanned yet: plain fit rendering.
@@ -155,11 +260,11 @@ function ZoomToolbar({
 }) {
   return (
     <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border bg-background/85 px-2 py-1 backdrop-blur">
-      <Button size="sm" variant={isFit ? 'secondary' : 'ghost'} onClick={() => setZoom('fit')} title="Fit (Z)">
+      <Button size="sm" variant={isFit ? 'secondary' : 'ghost'} onClick={() => setZoom('fit')} title="Fit (Z or Space)">
         <Maximize data-icon="inline-start" />
         Fit
       </Button>
-      <Button size="sm" variant={!isFit && Math.abs(scale - 1) < 0.01 ? 'secondary' : 'ghost'} onClick={() => setZoom(1)} title="100% (Z)">
+      <Button size="sm" variant={!isFit && Math.abs(scale - 1) < 0.01 ? 'secondary' : 'ghost'} onClick={() => setZoom(1)} title="100% (Z or Space)">
         <Square data-icon="inline-start" />
         1:1
       </Button>
@@ -179,12 +284,127 @@ function ZoomToolbar({
   );
 }
 
+// TileLayer sharpens the loupe past pyramid depth: the part of the image in
+// the scrolled viewport (plus a margin) is covered with full-resolution
+// TILE_SIZE tiles scaled into the display box, on top of the always-present
+// 2048 underlay. Tiles accumulate while the photo stays, so panning back
+// never re-fades; a tile a hair off the rendered image's edge 404s and
+// simply stays hidden, leaving the underlay visible.
+function TileLayer({
+  photo,
+  boxW,
+  boxH,
+  container,
+}: {
+  photo: Photo;
+  boxW: number;
+  boxH: number;
+  container: React.RefObject<HTMLDivElement | null>;
+}) {
+  const [dw, dh] = displayDims(photo);
+  const cols = Math.ceil(dw / TILE_SIZE);
+  const rows = Math.ceil(dh / TILE_SIZE);
+  const scale = boxW / dw;
+  const photoKey = `${photo.id}|${photo.cacheKey}|${photo.editHash}`;
+  // Tile keys mounted so far, tagged with the photo state they belong to.
+  const [mounted, setMounted] = useState<{ key: string; tiles: string[] }>({ key: photoKey, tiles: [] });
+
+  useEffect(() => {
+    const el = container.current;
+    if (!el) return;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      // Viewport rect in image pixels. When the box is smaller than the
+      // viewport it sits centered with no scroll range; the offset folds
+      // that case into the same formula.
+      const offX = Math.max(0, (el.clientWidth - boxW) / 2);
+      const offY = Math.max(0, (el.clientHeight - boxH) / 2);
+      const margin = TILE_SIZE / 2;
+      const x0 = Math.max(0, Math.floor(((el.scrollLeft - offX) / scale - margin) / TILE_SIZE));
+      const y0 = Math.max(0, Math.floor(((el.scrollTop - offY) / scale - margin) / TILE_SIZE));
+      const x1 = Math.min(cols - 1, Math.floor(((el.scrollLeft - offX + el.clientWidth) / scale + margin) / TILE_SIZE));
+      const y1 = Math.min(rows - 1, Math.floor(((el.scrollTop - offY + el.clientHeight) / scale + margin) / TILE_SIZE));
+      setMounted((prev) => {
+        const kept = prev.key === photoKey ? prev.tiles : [];
+        const have = new Set(kept);
+        const added: string[] = [];
+        for (let ty = y0; ty <= y1; ty++) {
+          for (let tx = x0; tx <= x1; tx++) {
+            const k = `${tx},${ty}`;
+            if (!have.has(k)) added.push(k);
+          }
+        }
+        if (added.length === 0 && prev.key === photoKey) return prev;
+        return { key: photoKey, tiles: [...kept, ...added] };
+      });
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    el.addEventListener('scroll', schedule);
+    update();
+    return () => {
+      el.removeEventListener('scroll', schedule);
+      cancelAnimationFrame(raf);
+    };
+  }, [container, photoKey, scale, cols, rows, boxW, boxH]);
+
+  const tiles = mounted.key === photoKey ? mounted.tiles : [];
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div
+        className="absolute top-0 left-0 origin-top-left"
+        style={{ width: dw, height: dh, transform: `scale(${scale})` }}
+      >
+        {tiles.map((k) => {
+          const [tx, ty] = k.split(',').map(Number);
+          return <Tile key={k} src={tileUrl(photo, tx, ty)} left={tx * TILE_SIZE} top={ty * TILE_SIZE} />;
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Tile renders at its natural size (the server decides edge-tile dimensions)
+// and fades in once loaded; a 404 off the rendered edge stays invisible.
+function Tile({ src, left, top }: { src: string; left: number; top: number }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <img
+      src={src}
+      alt=""
+      draggable={false}
+      onLoad={() => setLoaded(true)}
+      className="absolute max-w-none transition-opacity duration-150"
+      style={{ left, top, opacity: loaded ? 1 : 0 }}
+    />
+  );
+}
+
 // DecodedImage double-buffers src changes: the new image decodes off-screen
 // and swaps in only when ready, so photo switches, zoom-level upgrades, and
 // slider drags never flash or show a misplaced small rendition. Until the
-// first decode lands, the previous src keeps filling the same box.
-export function DecodedImage({ src, className }: { src: string; className?: string }) {
+// decode lands, the previous src keeps filling the same box — at loupe depth
+// that previous 2048 doubles as the bridge while tiles arrive. onShown
+// reports every swap so the caller can keep overlays (the tile layer) in
+// lockstep with what is actually displayed.
+export function DecodedImage({
+  src,
+  className,
+  onShown,
+}: {
+  src: string;
+  className?: string;
+  onShown?: (src: string) => void;
+}) {
   const [shown, setShown] = useState(src);
+  // Depends on onShown too: the caller may attach it after mount (the loupe
+  // renders a bare fallback until its container is measured), and shown may
+  // never change again after that.
+  useEffect(() => {
+    onShown?.(shown);
+  }, [shown, onShown]);
   useEffect(() => {
     let alive = true;
     const img = new Image();

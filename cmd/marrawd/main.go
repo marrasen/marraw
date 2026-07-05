@@ -102,7 +102,9 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/ws", server)
-	mux.Handle("GET /img/{id}/{level}", &imghttp.Handler{DB: db, Cache: cache, Token: imgToken})
+	img := &imghttp.Handler{DB: db, Cache: cache, Token: imgToken}
+	mux.Handle("GET /img/{id}/{level}", img)
+	mux.Handle("GET /img/{id}/tile/{tx}/{ty}", http.HandlerFunc(img.ServeTile))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})

@@ -180,6 +180,104 @@ try {
   // --- task tray exists ------------------------------------------------------
   R.taskTray = !!document.querySelector('[data-testid="task-tray"]');
 
+  // --- loupe 1:1: tiles sharpen, switches bridge via 2048, neighbors prefetch
+  // Own try/catch: a timeout here (e.g. a slow cold full render) must not
+  // skip the edit-state cleanup below.
+  try {
+    const ids = ui().visibleIds;
+    const i0 = Math.min(30, ids.length - 3);
+    const [t1, t2, t3] = [ids[i0], ids[i0 + 1], ids[i0 + 2]];
+    ui().focus(t1);
+    key('Enter');
+    await until(() => ui().view === 'loupe' && ui().focusId === t1, 5000, '1:1 loupe');
+    // First img in the box is the 2048 underlay; tiles follow it.
+    const underlaySrc = () => document.querySelector('.overflow-auto img')?.src ?? '';
+    const tileLoaded = (id) =>
+      [...document.querySelectorAll(`img[src*="/img/${id}/tile/"]`)].some((im) => im.complete && im.naturalWidth > 0);
+    performance.clearResourceTimings();
+    ui().setLoupeZoom(1);
+    await until(() => tileLoaded(t1), 60000, 'tiles on screen');
+    // Switching photos at 1:1 must show the next photo promptly (its 2048
+    // underlay bridges) instead of holding the previous photo through a
+    // full-resolution render.
+    const tSwitch = performance.now();
+    ui().focus(t2);
+    await until(() => underlaySrc().includes(`/img/${t2}/2048`) || tileLoaded(t2), 60000, 'photo switch bridged');
+    const bridgeMs = Math.round(performance.now() - tSwitch);
+    R.loupe11Bridge = bridgeMs < 1500 ? true : `bridged after ${bridgeMs}ms`;
+    await until(() => tileLoaded(t2), 60000, 'tiles after photo switch');
+    // The photo ahead was prefetched: a tile request for it fired without it
+    // ever being shown.
+    await until(
+      () => performance.getEntriesByType('resource').some((e) => e.name.includes(`/img/${t3}/tile/`)),
+      60000,
+      'neighbor tiles prefetched',
+    );
+    R.loupe11Prefetch = true;
+
+    // --- pan/zoom interactions -----------------------------------------
+    const pane = document.querySelector('.overflow-auto');
+    R.loupeNoScrollbar = getComputedStyle(pane).scrollbarWidth === 'none';
+
+    // Drag pans the zoomed image.
+    const rect = pane.getBoundingClientRect();
+    const [sx, sy] = [pane.scrollLeft, pane.scrollTop];
+    const pt = (type, x, y) =>
+      pane.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, button: 0, buttons: 1, pointerId: 9, isPrimary: true,
+        clientX: rect.left + x, clientY: rect.top + y,
+      }));
+    pt('pointerdown', 400, 300);
+    pt('pointermove', 320, 250);
+    pt('pointerup', 320, 250);
+    await sleep(100);
+    // Scroll positions snap to device pixels, so allow a ~1px tolerance.
+    R.loupeDragPan =
+      Math.abs(pane.scrollLeft - (sx + 80)) <= 1 && Math.abs(pane.scrollTop - (sy + 50)) <= 1
+        ? true
+        : `scroll ${sx},${sy} -> ${pane.scrollLeft},${pane.scrollTop}`;
+
+    // Ctrl+wheel zooms toward the cursor: the image point under it stays put.
+    const boxEl = pane.firstElementChild;
+    const imgPxAt = (x, y) => {
+      const z = ui().loupeZoom;
+      const offX = Math.max(0, (pane.clientWidth - parseFloat(boxEl.style.width)) / 2);
+      const offY = Math.max(0, (pane.clientHeight - parseFloat(boxEl.style.height)) / 2);
+      return [(pane.scrollLeft + x - offX) / z, (pane.scrollTop + y - offY) / z];
+    };
+    const anchorBefore = imgPxAt(400, 300);
+    pane.dispatchEvent(new WheelEvent('wheel', {
+      bubbles: true, cancelable: true, ctrlKey: true, deltaY: -300,
+      clientX: rect.left + 400, clientY: rect.top + 300,
+    }));
+    await sleep(200);
+    const anchorAfter = imgPxAt(400, 300);
+    const drift = Math.hypot(anchorAfter[0] - anchorBefore[0], anchorAfter[1] - anchorBefore[1]);
+    R.loupeWheelAnchor =
+      ui().loupeZoom > 1.05 && drift < 2 ? true : `zoom ${ui().loupeZoom}, drift ${drift.toFixed(1)}px`;
+
+    // Space toggles 1:1 <-> fit.
+    key(' ');
+    await sleep(100);
+    const spaceToFit = ui().loupeZoom === 'fit';
+    key(' ');
+    await sleep(100);
+    R.loupeSpaceToggle = spaceToFit && ui().loupeZoom === 1 ? true : `fit=${spaceToFit}, then ${ui().loupeZoom}`;
+
+    ui().setLoupeZoom('fit');
+  } catch (err) {
+    R.loupe11Bridge = R.loupe11Bridge ?? String(err);
+    R.loupe11Prefetch = R.loupe11Prefetch ?? String(err);
+    R.loupeDragPan = R.loupeDragPan ?? String(err);
+    R.loupeWheelAnchor = R.loupeWheelAnchor ?? String(err);
+    R.loupeSpaceToggle = R.loupeSpaceToggle ?? String(err);
+    R.loupeNoScrollbar = R.loupeNoScrollbar ?? String(err);
+  }
+  for (let i = 0; i < 3 && ui().view !== 'grid'; i++) {
+    key('Escape');
+    await sleep(150);
+  }
+
   // --- cleanup: reset edits on A and B, clear rating -------------------------
   for (const id of [photoA, photoB]) {
     ui().focus(id);

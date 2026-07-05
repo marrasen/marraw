@@ -2,7 +2,11 @@
 // daemon's port and auth token via query params; browser dev falls back to
 // the fixed dev port.
 
-export type Level = '256' | '512' | '1024' | '2048' | 'full';
+export type Level = '256' | '512' | '1024' | '2048';
+
+// TILE_SIZE must match pyramid.TileSize in the Go backend: full processed
+// resolution is served as a grid of square tiles, not one giant JPEG.
+export const TILE_SIZE = 1024;
 
 const q = new URLSearchParams(window.location.search);
 const port = q.get('apiPort') ?? '8483';
@@ -37,8 +41,17 @@ export function imgUrl(p: ImgRef, level: Level, editHashOverride?: string): stri
   return `${backend.http}/img/${p.id}/${level}?${params}`;
 }
 
+// tileUrl builds the content-addressed URL of one full-resolution tile,
+// versioned exactly like imgUrl.
+export function tileUrl(p: ImgRef, tx: number, ty: number): string {
+  const params = new URLSearchParams({ v: p.cacheKey, r: RENDER_VERSION });
+  if (p.editHash && p.editHash !== 'base') params.set('e', p.editHash);
+  if (backend.token) params.set('t', backend.token);
+  return `${backend.http}/img/${p.id}/tile/${tx}/${ty}?${params}`;
+}
+
 // levelForSize picks the smallest pyramid level that covers cssPx on this
-// display, capped (the loupe only goes to "full" at 1:1 zoom).
+// display, capped (past 2048 the loupe switches to full-resolution tiles).
 export function levelForSize(cssPx: number, cap: Level = '2048'): Level {
   const target = cssPx * window.devicePixelRatio;
   for (const l of ['256', '512', '1024', '2048'] as const) {
