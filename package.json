@@ -1,0 +1,53 @@
+{
+  "name": "marraw",
+  "version": "0.1.0",
+  "description": "Fast RAW photo organizer and editor",
+  "author": "Marras",
+  "license": "MIT",
+  "private": true,
+  "main": "electron/main.cjs",
+  "scripts": {
+    "setup:libraw": "powershell -ExecutionPolicy Bypass -File scripts/setup-libraw.ps1",
+    "gen": "go run ./tools/generate",
+    "dev:server": "go run ./cmd/marrawd --dev --port 8483",
+    "dev:client": "npm --prefix client run dev",
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:electron": "cross-env MARRAW_DEV=1 MARRAW_PORT=8483 electron .",
+    "smoke": "node scripts/smoke.mjs",
+    "build:server": "go build -ldflags \"-s -w\" -o build/marrawd.exe ./cmd/marrawd",
+    "build:client": "npm --prefix client run build",
+    "typecheck": "npm --prefix client run typecheck",
+    "dist": "npm run gen && npm run build:client && npm run build:server && electron-builder --win"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^10.0.0",
+    "electron": "^38.4.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "se.skalarit.marraw",
+    "productName": "marraw",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "client/dist/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build/marrawd.exe",
+        "to": "marrawd.exe"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "marraw-Setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

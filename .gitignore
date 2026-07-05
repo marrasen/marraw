@@ -1,0 +1,12 @@
+third_party/
+build/
+node_modules/
+client/dist/
+client/node_modules/
+dist/
+*.exe
+go.work.sum
+
+.devdata/
+build/ui-smoke.png
+build/packaged-smoke.png

@@ -1,0 +1,156 @@
+// marrawd is the marraw backend daemon. It serves the aprot API over
+// WebSocket and pyramid images over HTTP on one localhost port, and prints
+// "MARRAW_READY port=N" on stdout once listening so the Electron shell can
+// connect.
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/marrasen/aprot"
+
+	"github.com/marrasen/marraw/internal/api"
+	"github.com/marrasen/marraw/internal/decode"
+	"github.com/marrasen/marraw/internal/imghttp"
+	"github.com/marrasen/marraw/internal/pyramid"
+	"github.com/marrasen/marraw/internal/scan"
+	"github.com/marrasen/marraw/internal/store"
+)
+
+func main() {
+	var (
+		port     = flag.Int("port", 0, "listen port (0 = pick a free one)")
+		dev      = flag.Bool("dev", false, "development mode: no token required, permissive origin")
+		dataDir  = flag.String("data-dir", "", "app data directory (default %APPDATA%/marraw)")
+		cacheCap = flag.Int64("cache-cap-gb", 20, "preview cache size cap in GiB")
+	)
+	flag.Parse()
+
+	if *dataDir == "" {
+		base, err := os.UserConfigDir()
+		if err != nil {
+			log.Fatalf("resolve data dir: %v", err)
+		}
+		*dataDir = filepath.Join(base, "marraw")
+	}
+	token := os.Getenv("MARRAW_TOKEN")
+	if token == "" && !*dev {
+		log.Fatal("MARRAW_TOKEN must be set (or run with --dev)")
+	}
+
+	db, err := store.Open(*dataDir)
+	if err != nil {
+		log.Fatalf("open store: %v", err)
+	}
+	defer db.Close()
+
+	pool := decode.NewPool(runtime.NumCPU())
+	defer pool.Close()
+
+	cache, err := pyramid.New(filepath.Join(*dataDir, "cache", "previews"), pool)
+	if err != nil {
+		log.Fatalf("open cache: %v", err)
+	}
+	handles := decode.NewHandleCache(3)
+	defer handles.Close()
+
+	scanner := &scan.Scanner{DB: db, Cache: cache, Pool: pool}
+
+	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner}
+	registry, _, _, _ := api.NewRegistry(deps)
+	server := aprot.NewServer(registry)
+	deps.SetServer(server)
+	scanner.OnPhotosChanged = func(folderID int64) {
+		server.TriggerRefresh(fmt.Sprintf("photos:%d", folderID))
+	}
+
+	// The renderer runs on file:// (Origin "null") in production; trust is
+	// established by the shared token, not the origin.
+	isDev := *dev
+	server.SetCheckOrigin(func(r *http.Request) bool {
+		if isDev {
+			return true
+		}
+		return r.URL.Query().Get("t") == token
+	})
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	janitor := &pyramid.Janitor{Cache: cache, CapBytes: *cacheCap << 30}
+	go janitor.Run(ctx)
+
+	imgToken := token
+	if isDev {
+		imgToken = ""
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/ws", server)
+	mux.Handle("GET /img/{id}/{level}", &imghttp.Handler{DB: db, Cache: cache, Token: imgToken})
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "ok")
+	})
+
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
+	if err != nil {
+		log.Fatalf("listen: %v", err)
+	}
+	actualPort := ln.Addr().(*net.TCPAddr).Port
+
+	httpServer := &http.Server{Handler: cors(isDev, mux)}
+	go func() {
+		if err := httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("serve: %v", err)
+		}
+	}()
+
+	// The handshake line the Electron main process waits for.
+	fmt.Printf("MARRAW_READY port=%d\n", actualPort)
+	log.Printf("marrawd listening on 127.0.0.1:%d (data: %s)", actualPort, *dataDir)
+
+	// Exit when the parent dies: Electron holds our stdin open; EOF means
+	// the shell is gone and we must not linger.
+	if os.Getenv("MARRAW_PARENT_WATCH") == "1" {
+		go func() {
+			buf := make([]byte, 1)
+			for {
+				if _, err := os.Stdin.Read(buf); err != nil {
+					log.Println("stdin closed; shutting down")
+					stop()
+					return
+				}
+			}
+		}()
+	}
+
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	server.Stop(shutdownCtx)
+	httpServer.Shutdown(shutdownCtx)
+}
+
+// cors allows the Vite dev origin to fetch /img during browser development.
+func cors(dev bool, next http.Handler) http.Handler {
+	if !dev {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "http://127.0.0.1:") {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
