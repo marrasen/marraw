@@ -90,6 +90,8 @@ scripts/            setup-libraw.ps1, smoke.mjs
   as-shot/auto exposed for now.
 - XMP sidecar export for Lightroom/darktable interop.
 - Crop tool (LibRaw `cropbox` is plumbed but has no UI).
-- aprot wishlist that fell out of this project: delta/patch subscriptions
-  (avoid re-sending big lists), binary frames for image push, fixed-size
-  array types (`[4]float64` currently generates `any`).
+- aprot wishlist that fell out of this project (filed upstream):
+  [delta/patch subscriptions](https://github.com/marrasen/aprot/issues/237),
+  [binary payloads](https://github.com/marrasen/aprot/issues/238),
+  [stream flow control / chunked yields](https://github.com/marrasen/aprot/issues/239),
+  [fixed-size arrays generate `any`](https://github.com/marrasen/aprot/issues/240).
