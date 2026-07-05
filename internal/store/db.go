@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 type DB struct {
 	*sql.DB
@@ -62,10 +62,22 @@ func (db *DB) migrate(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
 			return fmt.Errorf("store: apply schema: %w", err)
 		}
-	} else if v < 2 {
-		if _, err := tx.ExecContext(ctx,
-			`ALTER TABLE photos ADD COLUMN look_gamma REAL NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("store: migrate v2: %w", err)
+	} else {
+		if v < 2 {
+			if _, err := tx.ExecContext(ctx,
+				`ALTER TABLE photos ADD COLUMN look_gamma REAL NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("store: migrate v2: %w", err)
+			}
+		}
+		if v < 3 {
+			// Metadata written by older builds can hold wrong (half-size)
+			// pixel dimensions, which mis-size the loupe box and the 1:1 tile
+			// grid. Re-run the metadata pass for everything: it is cheap
+			// (file open only, no decode) and runs as the usual background
+			// task on the next folder open. Ratings, flags, and edits keep.
+			if _, err := tx.ExecContext(ctx, `UPDATE photos SET meta_loaded = 0`); err != nil {
+				return fmt.Errorf("store: migrate v3: %w", err)
+			}
 		}
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {

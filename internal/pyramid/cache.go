@@ -54,6 +54,9 @@ type Cache struct {
 	dir  string
 	pool *decode.Pool
 	db   *store.DB
+	// OnPhotoChanged, when set, is called after the cache corrects a photo
+	// row (dimension healing) so folder subscribers can refresh.
+	OnPhotoChanged func(folderID int64)
 }
 
 func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
@@ -186,6 +189,7 @@ func (c *Cache) generate(proc *libraw.Processor, photo store.Photo, level, editH
 	}
 	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
 	if level == "full" {
+		c.healDimensions(photo, rgba.Bounds().Dx(), rgba.Bounds().Dy())
 		ApplyLook(rgba, gamma)
 		if err := c.writeTiles(rgba, photo.CacheKey, editHash); err != nil {
 			return err
@@ -197,6 +201,27 @@ func (c *Cache) generate(proc *libraw.Processor, photo store.Photo, level, editH
 	scaled := scaleToLongEdge(rgba, 2048)
 	ApplyLook(scaled, gamma)
 	return c.WriteLevels(scaled, photo.CacheKey, editHash, 2048, 1024, 512, 256)
+}
+
+// healDimensions repairs stored photo dimensions against a full-resolution
+// render — the one moment the true size is in hand. Databases written by
+// older builds can hold wrong (half-size) dimensions, which mis-size the
+// loupe box and the 1:1 tile grid; the correction is pushed to folder
+// subscribers so an open client recovers immediately.
+func (c *Cache) healDimensions(photo store.Photo, renderedW, renderedH int) {
+	w, h := renderedW, renderedH
+	if photo.Orientation == 5 || photo.Orientation == 6 {
+		w, h = h, w // stored dimensions are pre-flip
+	}
+	if c.db == nil || (w == photo.Width && h == photo.Height) {
+		return
+	}
+	if err := c.db.SetDimensions(context.Background(), photo.ID, w, h); err != nil {
+		return
+	}
+	if c.OnPhotoChanged != nil {
+		c.OnPhotoChanged(photo.FolderID)
+	}
 }
 
 // lookGammaFor returns the photo's calibrated tone lift, computing and

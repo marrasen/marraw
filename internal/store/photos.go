@@ -145,6 +145,13 @@ func scanPhoto(row interface{ Scan(...any) error }) (Photo, error) {
 	return p, err
 }
 
+// SetDimensions corrects the stored pixel dimensions from a ground-truth
+// source (the pyramid's full-resolution render).
+func (db *DB) SetDimensions(ctx context.Context, id int64, w, h int) error {
+	_, err := db.ExecContext(ctx, `UPDATE photos SET width = ?, height = ? WHERE id = ?`, w, h, id)
+	return err
+}
+
 // SetLookGamma persists the calibrated tone lift for a photo.
 func (db *DB) SetLookGamma(ctx context.Context, id int64, gamma float64) error {
 	_, err := db.ExecContext(ctx, `UPDATE photos SET look_gamma = ? WHERE id = ?`, gamma, id)

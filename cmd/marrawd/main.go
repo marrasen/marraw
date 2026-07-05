@@ -79,6 +79,7 @@ func main() {
 	scanner.OnPhotosChanged = func(folderID int64) {
 		server.TriggerRefresh(fmt.Sprintf("photos:%d", folderID))
 	}
+	cache.OnPhotoChanged = scanner.OnPhotosChanged
 
 	// The renderer runs on file:// (Origin "null") in production; trust is
 	// established by the shared token, not the origin.
