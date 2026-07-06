@@ -142,8 +142,13 @@ try {
   await until(() => es().cropping && ui().view === 'loupe', 5000, 'crop mode on');
   R.cropOverlay = !!document.querySelector('[data-testid="crop-overlay"]') &&
     ['Free', '1:1', '16:9', 'Done'].every((t) => buttons().some((b) => b.textContent.trim() === t));
+  // Straighten previews as a live client-side rotation (no backend render):
+  // the loupe image carries a rotate() transform while cropping.
+  mw.esUpdate({ cropAngle: 7 });
+  await sleep(80);
+  R.straightenCss = [...document.querySelectorAll('img')].some((im) => (im.style.transform || '').includes('rotate'));
   // Apply a half-frame crop through the dev bridge, then exit crop mode.
-  mw.esUpdate({ cropX: 0.2, cropY: 0.2, cropW: 0.5, cropH: 0.5 });
+  mw.esUpdate({ cropX: 0.2, cropY: 0.2, cropW: 0.5, cropH: 0.5, cropAngle: 0 });
   await sleep(50);
   key('Enter'); // apply crop
   await until(() => !es().cropping, 5000, 'crop applied');

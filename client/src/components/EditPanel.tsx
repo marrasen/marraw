@@ -215,7 +215,16 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         step={0.1}
         onChange={(v) => update({ cropAngle: v })}
         onCommit={(v) => commit({ cropAngle: v })}
-        {...num('cropAngle')}
+        active={activeControl === 'cropAngle'}
+        // Straightening opens the crop overlay, where the angle previews as an
+        // instant client-side rotation instead of a backend re-render.
+        onFocusControl={() => {
+          esSetActive('cropAngle');
+          if (!cropping) {
+            setView('loupe');
+            esSetCropping(client, true);
+          }
+        }}
       />
 
       <Section>Tone</Section>

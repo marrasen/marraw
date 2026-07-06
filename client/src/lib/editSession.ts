@@ -278,6 +278,10 @@ export function esSetCropping(client: ApiClient, on: boolean) {
 }
 
 const CROP_RECT_KEYS = ['cropX', 'cropY', 'cropW', 'cropH'] as const;
+// Params the crop overlay previews entirely client-side while cropping: the
+// rectangle (drawn by the overlay) and the straighten angle (a CSS rotation
+// of the flat frame). Changing any of these needs no backend render.
+const CROP_LIVE_KEYS = [...CROP_RECT_KEYS, 'cropAngle'] as const;
 
 // Draft writes during a slider drag are coalesced to one per animation frame:
 // the develop panel has ~30 controls, so applying every pointer-move
@@ -309,10 +313,9 @@ export function esUpdate(client: ApiClient, patch: Partial<Params>) {
   if (!s.draft || s.photoId == null) return;
   pendingPatch = { ...(pendingPatch ?? {}), ...patch };
   if (!draftRaf) draftRaf = requestAnimationFrame(flushDraft);
-  // While cropping, the preview shows the crop-stripped frame, so moving the
-  // rectangle needs no backend render — the overlay updates from the draft
-  // directly. Only a change beyond the crop rectangle (e.g. the angle) does.
-  if (s.cropping && Object.keys(patch).every((k) => (CROP_RECT_KEYS as readonly string[]).includes(k))) {
+  // While cropping, the crop rectangle and straighten angle are previewed
+  // client-side (overlay + CSS rotation), so they need no backend render.
+  if (s.cropping && Object.keys(patch).every((k) => (CROP_LIVE_KEYS as readonly string[]).includes(k))) {
     return;
   }
   window.clearTimeout(previewTimer);
@@ -326,10 +329,13 @@ async function renderPreview(client: ApiClient) {
   const ac = new AbortController();
   previewAbort = ac;
   setState((s) => ({ rendering: s.rendering + 1 }));
-  // In crop mode the loupe draws the rectangle over the full straightened
-  // frame, so render with the crop rectangle stripped (angle and every other
-  // edit stay). The draft keeps the real crop for commit.
-  const renderParams = cropping ? { ...draft, cropX: 0, cropY: 0, cropW: 0, cropH: 0 } : draft;
+  // In crop mode the loupe draws the rectangle and applies the straighten
+  // angle as a CSS rotation, both client-side — so render the flat full frame
+  // (crop + angle stripped) once and let the overlay/transform do the rest.
+  // The draft keeps the real crop and angle for commit.
+  const renderParams = cropping
+    ? { ...draft, cropX: 0, cropY: 0, cropW: 0, cropH: 0, cropAngle: 0 }
+    : draft;
   try {
     const blob = await previewEdit(client, photoId, renderParams, { signal: ac.signal });
     if (useEditSession.getState().photoId !== photoId || ac.signal.aborted) return;

@@ -7,10 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
-import { esCommit, esPickWB, esSetCropping, esUpdate, useEditSession } from '@/lib/editSession';
+import { esClearPreview, esCommit, esPickWB, esSetCropping, esUpdate, useEditSession } from '@/lib/editSession';
 import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
+import type { Params } from '@/api/edits';
 
 export function LoupeView({ photos }: { photos: Photo[] }) {
   const focusId = useUIStore((s) => s.focusId);
@@ -82,6 +83,11 @@ function CropToolbar({
   );
 }
 
+// cropMemo remembers each photo's crop so returning to it sizes the loupe box
+// correctly on the very first frame — before esLoad has refetched the draft —
+// instead of briefly stretching the cropped rendition into a full-frame box.
+const cropMemo = new Map<number, Params>();
+
 // levelForPx picks the smallest rendition covering px device pixels; past
 // pyramid depth the loupe switches to full-resolution tiles.
 function levelForPx(px: number): Level | 'tiles' {
@@ -148,10 +154,13 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
   const cropping = useEditSession((s) => s.cropping);
   const draft = useEditSession((s) => s.draft);
   const esPhotoId = useEditSession((s) => s.photoId);
-  // The crop that applies to the shown pixels: only when the edit session is
-  // on this photo. While cropping, the loupe shows the full (uncropped) frame
-  // so the overlay can reach the whole image.
-  const activeCrop = esPhotoId === photo.id ? draft : null;
+  // The crop that applies to the shown pixels: the draft when the edit session
+  // is on this photo, else the last-known crop from the memo (so a return
+  // doesn't flash uncropped while the draft refetches). While cropping, the
+  // loupe shows the full (uncropped) frame so the overlay can reach the image.
+  const liveCrop = esPhotoId === photo.id ? draft : null;
+  if (liveCrop) cropMemo.set(photo.id, liveCrop);
+  const activeCrop = liveCrop ?? cropMemo.get(photo.id) ?? null;
   const [aspectKey, setAspectKey] = useState('free');
   // Pan position as a ratio of the scrollable range — survives photo
   // switches so a burst series can be compared at the exact same crop.
@@ -188,6 +197,24 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
   const src = previewUrl ?? imgUrl(photo, level === 'tiles' ? '2048' : level);
   const [shownSrc, setShownSrc] = useState('');
   useTilePrefetch(photos, photo, wantTiles);
+
+  // Once a commit lands (the photo's editHash changes to the newly rendered
+  // state) AND we're past pyramid depth, drop the live 2048 preview so the
+  // loupe shows the committed full-resolution tiles instead of the upscaled,
+  // blurry preview blob that otherwise lingers until the next photo switch.
+  // Below tile depth the 2048 preview and the committed rendition are the same
+  // resolution, so keep it — clearing there would just cause a needless swap.
+  const lastHash = useRef(photo.editHash);
+  const levelRef = useRef(level);
+  levelRef.current = level;
+  useEffect(() => {
+    if (photo.editHash !== lastHash.current) {
+      lastHash.current = photo.editHash;
+      if (levelRef.current !== 'tiles') return;
+      const p = useEditSession.getState().preview;
+      if (p && p.photoId === photo.id) esClearPreview();
+    }
+  }, [photo.editHash, photo.id]);
 
   // Restore the pan ratio whenever the geometry or photo changes.
   useLayoutEffect(() => {
@@ -308,11 +335,19 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
       >
         {haveDims ? (
           <div
-            className="relative m-auto shrink-0"
+            className={cn('relative m-auto shrink-0', cropping && 'overflow-hidden bg-black')}
             style={{ width: boxW, height: boxH }}
             onClick={onImageClick}
           >
-            <DecodedImage src={src} onShown={setShownSrc} className="absolute inset-0 size-full" />
+            <DecodedImage
+              src={src}
+              onShown={setShownSrc}
+              className="absolute inset-0 size-full"
+              // While cropping, the straighten angle is a live client-side
+              // rotation of the flat frame — instant, full-resolution feedback
+              // — matched exactly by the backend crop on commit.
+              style={cropping && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
+            />
             {wantTiles && shownSrc.includes(`/img/${photo.id}/`) && (
               <TileLayer
                 key={`${photo.id}|${photo.cacheKey}|${photo.editHash}`}
@@ -497,10 +532,12 @@ function Tile({ src, left, top }: { src: string; left: number; top: number }) {
 export function DecodedImage({
   src,
   className,
+  style,
   onShown,
 }: {
   src: string;
   className?: string;
+  style?: React.CSSProperties;
   onShown?: (src: string) => void;
 }) {
   const [shown, setShown] = useState(src);
@@ -526,7 +563,7 @@ export function DecodedImage({
       if (!img.complete) img.src = '';
     };
   }, [src]);
-  return <img src={shown} draggable={false} alt="" className={className} />;
+  return <img src={shown} draggable={false} alt="" className={className} style={style} />;
 }
 
 function Filmstrip({ photos, currentId }: { photos: Photo[]; currentId: number }) {
