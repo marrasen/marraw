@@ -2,13 +2,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Maximize, Square, Star, Check, X } from 'lucide-react';
 import type { Photo } from '@/api/library';
-import { useApiClient } from '@/api/client';
+import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
-import { esPickWB, useEditSession } from '@/lib/editSession';
+import { esCommit, esPickWB, esSetCropping, esUpdate, useEditSession } from '@/lib/editSession';
 import { useUIStore } from '@/stores/uiStore';
+import { displayDims as fullDisplayDims, renderedDims, ASPECT_PRESETS } from '@/lib/crop';
+import { CropOverlay } from '@/components/CropOverlay';
 
 export function LoupeView({ photos }: { photos: Photo[] }) {
   const focusId = useUIStore((s) => s.focusId);
@@ -29,10 +31,55 @@ export function LoupeView({ photos }: { photos: Photo[] }) {
   );
 }
 
-// displayDims returns the on-screen orientation-corrected pixel size.
-function displayDims(photo: Photo): [number, number] {
-  if (photo.orientation === 5 || photo.orientation === 6) return [photo.height, photo.width];
-  return [photo.width, photo.height];
+// aspectRatioFrac converts a selected aspect preset into a crop ratio in
+// fraction space (crop-width-fraction / crop-height-fraction), accounting for
+// the frame's own aspect: a 1:1 pixel crop of a 3:2 frame is not 1:1 in
+// fractions. Returns null for a freeform crop.
+function aspectRatioFrac(key: string, fdw: number, fdh: number): number | null {
+  const preset = ASPECT_PRESETS.find((p) => p.key === key);
+  if (!preset) return null;
+  const ratio = key === 'orig' ? fdw / fdh : preset.ratio;
+  if (!ratio || fdw <= 0 || fdh <= 0) return null;
+  return (ratio * fdh) / fdw;
+}
+
+// CropToolbar shows aspect presets plus reset/done while the crop overlay is
+// active, in the same slot the zoom toolbar normally occupies.
+function CropToolbar({
+  client,
+  aspectKey,
+  setAspectKey,
+}: {
+  client: ApiClient;
+  aspectKey: string;
+  setAspectKey: (k: string) => void;
+}) {
+  return (
+    <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-md border bg-background/85 px-2 py-1 backdrop-blur">
+      {ASPECT_PRESETS.map((p) => (
+        <Button
+          key={p.key}
+          size="sm"
+          variant={aspectKey === p.key ? 'secondary' : 'ghost'}
+          onClick={() => setAspectKey(p.key)}
+        >
+          {p.label}
+        </Button>
+      ))}
+      <span className="mx-1 h-4 w-px bg-border" />
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => esUpdate(client, { cropX: 0, cropY: 0, cropW: 1, cropH: 1 })}
+        title="Reset crop to the full frame"
+      >
+        Reset
+      </Button>
+      <Button size="sm" onClick={() => esSetCropping(client, false)} title="Apply crop (Enter or R)">
+        Done
+      </Button>
+    </div>
+  );
 }
 
 // levelForPx picks the smallest rendition covering px device pixels; past
@@ -98,6 +145,14 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
   const setZoom = useUIStore((s) => s.setLoupeZoom);
   const preview = useEditSession((s) => s.preview);
   const wbPicking = useEditSession((s) => s.wbPicking);
+  const cropping = useEditSession((s) => s.cropping);
+  const draft = useEditSession((s) => s.draft);
+  const esPhotoId = useEditSession((s) => s.photoId);
+  // The crop that applies to the shown pixels: only when the edit session is
+  // on this photo. While cropping, the loupe shows the full (uncropped) frame
+  // so the overlay can reach the whole image.
+  const activeCrop = esPhotoId === photo.id ? draft : null;
+  const [aspectKey, setAspectKey] = useState('free');
   // Pan position as a ratio of the scrollable range — survives photo
   // switches so a burst series can be compared at the exact same crop.
   const panRatio = useRef<[number, number]>([0.5, 0.5]);
@@ -112,7 +167,9 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
     return () => ro.disconnect();
   }, []);
 
-  const [dw, dh] = displayDims(photo);
+  const [fdw, fdh] = fullDisplayDims(photo);
+  // When cropping we display the full frame; otherwise the cropped render.
+  const [dw, dh] = cropping ? [fdw, fdh] : renderedDims(fdw, fdh, activeCrop);
   const haveDims = dw > 0 && dh > 0 && container[0] > 0;
   const fitScale = haveDims ? Math.min(container[0] / dw, container[1] / dh) : 1;
   const scale = zoom === 'fit' ? fitScale : zoom;
@@ -127,7 +184,7 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
   // underlay stretched into the box, and TileLayer sharpens the visible
   // region with full-resolution tiles on top; neighbors are warmed so
   // stepping through a burst stays instant.
-  const wantTiles = !previewUrl && level === 'tiles';
+  const wantTiles = !previewUrl && level === 'tiles' && !cropping;
   const src = previewUrl ?? imgUrl(photo, level === 'tiles' ? '2048' : level);
   const [shownSrc, setShownSrc] = useState('');
   useTilePrefetch(photos, photo, wantTiles);
@@ -181,9 +238,9 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
   // survives leaving the container. WB picking keeps plain clicks.
   const dragFrom = useRef<[number, number] | null>(null);
   const [dragging, setDragging] = useState(false);
-  const pannable = haveDims && (boxW > container[0] || boxH > container[1]);
+  const pannable = haveDims && !cropping && (boxW > container[0] || boxH > container[1]);
   const onPointerDown = (e: React.PointerEvent) => {
-    if (wbPicking || e.button !== 0 || !pannable) return;
+    if (wbPicking || cropping || e.button !== 0 || !pannable) return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -243,9 +300,19 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
               <TileLayer
                 key={`${photo.id}|${photo.cacheKey}|${photo.editHash}`}
                 photo={photo}
+                dw={dw}
+                dh={dh}
                 boxW={boxW}
                 boxH={boxH}
                 container={containerRef}
+              />
+            )}
+            {cropping && draft && (
+              <CropOverlay
+                draft={draft}
+                ratioFrac={aspectRatioFrac(aspectKey, fdw, fdh)}
+                onChange={(patch) => esUpdate(client, patch)}
+                onCommit={() => esCommit(client)}
               />
             )}
           </div>
@@ -261,7 +328,11 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
           Click a neutral gray area to set white balance — Esc to cancel
         </div>
       )}
-      <ZoomToolbar scale={scale} isFit={zoom === 'fit'} setZoom={setZoom} />
+      {cropping ? (
+        <CropToolbar client={client} aspectKey={aspectKey} setAspectKey={setAspectKey} />
+      ) : (
+        <ZoomToolbar scale={scale} isFit={zoom === 'fit'} setZoom={setZoom} />
+      )}
     </div>
   );
 }
@@ -310,16 +381,19 @@ function ZoomToolbar({
 // image's edge 404s and simply stays hidden, leaving the underlay visible.
 function TileLayer({
   photo,
+  dw,
+  dh,
   boxW,
   boxH,
   container,
 }: {
   photo: Photo;
+  dw: number; // rendered (crop-aware) display width
+  dh: number;
   boxW: number;
   boxH: number;
   container: React.RefObject<HTMLDivElement | null>;
 }) {
-  const [dw, dh] = displayDims(photo);
   const cols = Math.ceil(dw / TILE_SIZE);
   const rows = Math.ceil(dh / TILE_SIZE);
   const scale = boxW / dw;

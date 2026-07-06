@@ -101,6 +101,41 @@ type Params struct {
 	Demosaic Demosaic `json:"demosaic" validate:"omitempty,oneof=vng ppg ahd dht"`
 	CARed    float64  `json:"caRed" validate:"gte=-1,lte=1"`
 	CABlue   float64  `json:"caBlue" validate:"gte=-1,lte=1"`
+
+	// Crop + straighten, applied as a post-decode geometry stage in display
+	// (orientation-corrected) space. CropW/CropH == 0 means "no crop" (the
+	// full frame); when set they are the rectangle size as a fraction of the
+	// frame, with CropX/CropY its top-left, all in [0,1]. CropAngle levels
+	// the horizon in degrees: the frame is rotated about its center and the
+	// axis-aligned crop rectangle is taken from the rotated result.
+	CropX     float64 `json:"cropX" validate:"gte=0,lte=1"`
+	CropY     float64 `json:"cropY" validate:"gte=0,lte=1"`
+	CropW     float64 `json:"cropW" validate:"gte=0,lte=1"`
+	CropH     float64 `json:"cropH" validate:"gte=0,lte=1"`
+	CropAngle float64 `json:"cropAngle" validate:"gte=-15,lte=15"`
+}
+
+// HasCrop reports whether a crop rectangle is set (a straighten angle alone
+// does not crop — it rotates the full frame). Callers that need to know
+// whether the rendered dimensions differ from the sensor use this.
+func (e *Params) HasCrop() bool {
+	return e != nil && e.CropW > 0 && e.CropH > 0
+}
+
+// OutputDims maps the full display-space dimensions (fullW×fullH, already
+// orientation-corrected) to the rendered dimensions after crop. The
+// straighten angle rotates within the frame and does not change the output
+// size, so only the crop rectangle matters. A nil or un-cropped edit returns
+// the input unchanged. Both sides of the wire compute this identically
+// (mirrored in client/src/lib/crop.ts) so the loupe box, tile grid and
+// dimension-healing all agree without a round trip.
+func (e *Params) OutputDims(fullW, fullH int) (w, h int) {
+	if !e.HasCrop() {
+		return fullW, fullH
+	}
+	w = int(math.Round(e.CropW * float64(fullW)))
+	h = int(math.Round(e.CropH * float64(fullH)))
+	return max(1, w), max(1, h)
 }
 
 // Normalize canonicalizes equivalent states so hashing is stable: "camera"
@@ -130,6 +165,11 @@ func (e *Params) Normalize() {
 	}
 	if e.SplitHighlightAmt == 0 {
 		e.SplitHighlightHue = 0
+	}
+	// A degenerate or full-frame crop is no crop: clear the rectangle so it
+	// hashes identically to neutral (a bare straighten angle is kept).
+	if !e.HasCrop() || (e.CropX == 0 && e.CropY == 0 && e.CropW >= 1 && e.CropH >= 1) {
+		e.CropX, e.CropY, e.CropW, e.CropH = 0, 0, 0, 0
 	}
 }
 

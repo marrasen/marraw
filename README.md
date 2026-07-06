@@ -37,12 +37,13 @@ shipped as an Electron app.
   auto / absolute Kelvin / picked, highlight recovery, brightness, NR,
   demosaic choice, chromatic-aberration correction, …) plus look-stage
   adjustments computed after LibRaw (contrast, whites/blacks,
-  shadows/highlights, saturation, vibrance, split toning, vignette), all
-  stored as JSON in SQLite. While a slider drags, the backend re-processes
-  the photo's already-unpacked handle at half size (~400 ms warm on 42 MP
-  files) and the loupe swaps in the new rendition flicker-free.
-  Multi-select applies relative adjustments ("+0.5 EV on 10 photos");
-  copy/paste edit settings with Ctrl+C/V.
+  shadows/highlights, saturation, vibrance, split toning, vignette), and a
+  post-decode geometry stage (crop + straighten, edited with an interactive
+  loupe overlay), all stored as JSON in SQLite. While a slider drags, the
+  backend re-processes the photo's already-unpacked handle at half size
+  (~400 ms warm on 42 MP files) and the loupe swaps in the new rendition
+  flicker-free. Multi-select applies relative adjustments ("+0.5 EV on 10
+  photos"); copy/paste edit settings with Ctrl+C/V.
 - **Export** saturates all cores via an errgroup pool, full-quality AHD
   demosaic, JPEG or 16-bit TIFF, with streaming progress.
 
@@ -106,8 +107,8 @@ scripts/            setup-libraw.ps1, smoke.mjs
 ## Known gaps / next steps
 
 - XMP sidecar export for Lightroom/darktable interop.
-- Crop, straighten and rotate (LibRaw `cropbox` is plumbed but has no UI;
-  user rotation needs care around tile-grid dimensions).
+- Coarse 90°/180° rotation and flip (crop + straighten shipped; coarse
+  rotation still needs care around the orientation-swap in the tile grid).
 - Spatial adjustments: sharpening/clarity (unsharp mask), HSL color mixer,
   dehaze, lens-profile corrections, local masks.
 - aprot wishlist that fell out of this project — all shipped in aprot

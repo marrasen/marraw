@@ -9,6 +9,7 @@ import {
   esApplyParams,
   esRedo,
   esSetActive,
+  esSetCropping,
   esSetWBPicking,
   esStep,
   esUndo,
@@ -115,6 +116,14 @@ export function useKeyboard() {
         return;
       }
 
+      // R toggles crop mode (needs the loupe, where the overlay lives).
+      if (e.key.toLowerCase() === 'r' && es.draft) {
+        e.preventDefault();
+        if (!es.cropping) s.setView('loupe');
+        esSetCropping(client, !es.cropping);
+        return;
+      }
+
       const key = e.key.toLowerCase();
       if (CONTROL_KEYS[key] && es.draft) {
         e.preventDefault();
@@ -160,10 +169,14 @@ export function useKeyboard() {
           applyFlag('none');
           break;
         case 'Enter':
-          if (s.focusId != null) s.setView('loupe');
+          // In crop mode, Enter applies the crop rather than entering loupe.
+          if (es.cropping) esSetCropping(client, false);
+          else if (s.focusId != null) s.setView('loupe');
           break;
         case 'Escape':
-          if (es.wbPicking) {
+          if (es.cropping) {
+            esSetCropping(client, false);
+          } else if (es.wbPicking) {
             esSetWBPicking(false);
           } else if (es.activeControl != null) {
             esSetActive(null);

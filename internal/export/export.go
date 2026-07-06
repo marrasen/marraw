@@ -142,8 +142,10 @@ func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma 
 		rgba.Pix[j+2] = img.Data[i+2]
 		rgba.Pix[j+3] = 0xff
 	}
-	// Match what the user saw in the preview. TIFF16 stays neutral — it is
-	// the flat master for external editing.
+	// Match what the user saw in the preview: crop/straighten, then the look.
+	// TIFF16 stays neutral AND full-frame — the flat, uncropped master for
+	// external editing.
+	rgba = pyramid.ApplyGeometry(rgba, params)
 	pyramid.ApplyLook(rgba, lookGamma, params)
 	out := resizeRGBA(rgba, longEdge)
 	return jpeg.Encode(f, out, &jpeg.Options{Quality: quality})

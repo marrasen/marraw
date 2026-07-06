@@ -95,6 +95,32 @@ func TestDeltaLookFields(t *testing.T) {
 	}
 }
 
+func TestCropNormalizeAndDims(t *testing.T) {
+	// A full-frame crop normalizes away to neutral.
+	e := &Params{CropX: 0, CropY: 0, CropW: 1, CropH: 1}
+	e.Normalize()
+	if !e.IsNeutral() {
+		t.Errorf("full-frame crop should be neutral, got %+v", e)
+	}
+	// A bare straighten angle is a real (non-neutral) edit that keeps the
+	// full dimensions.
+	a := &Params{CropAngle: 5}
+	if a.IsNeutral() {
+		t.Error("straighten angle must not be neutral")
+	}
+	if w, h := a.OutputDims(4000, 3000); w != 4000 || h != 3000 {
+		t.Errorf("straighten-only OutputDims = %dx%d, want 4000x3000", w, h)
+	}
+	// A real crop reports HasCrop and shrinks the dimensions.
+	c := &Params{CropX: 0.1, CropY: 0.1, CropW: 0.5, CropH: 0.5}
+	if !c.HasCrop() {
+		t.Error("expected HasCrop")
+	}
+	if w, h := c.OutputDims(4000, 3000); w != 2000 || h != 1500 {
+		t.Errorf("crop OutputDims = %dx%d, want 2000x1500", w, h)
+	}
+}
+
 func TestHashStableAcrossEquivalentStates(t *testing.T) {
 	a := &Params{WBMode: WBKelvin, WBKelvin: 5500, WBTemp: 0.5}
 	b := &Params{WBMode: WBKelvin, WBKelvin: 5500}

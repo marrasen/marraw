@@ -39,14 +39,24 @@ func ValidLevel(level string) bool {
 // Must match TILE_SIZE in client/src/lib/backend.ts.
 const TileSize = 1024
 
-// TileGrid is the tile-grid size implied by the photo's scanned metadata
-// (orientation-corrected, like the rendered image). Returns zeros when the
-// dimensions haven't been scanned yet.
-func TileGrid(p store.Photo) (cols, rows int) {
-	w, h := p.Width, p.Height
+// DisplayDims returns the on-screen, orientation-corrected size of a photo's
+// full frame (zeros until metadata is scanned). This is the coordinate space
+// the crop rectangle and straighten angle live in.
+func DisplayDims(p store.Photo) (w, h int) {
+	w, h = p.Width, p.Height
 	if p.Orientation == 5 || p.Orientation == 6 {
 		w, h = h, w
 	}
+	return w, h
+}
+
+// TileGrid is the tile-grid size of the rendered image for the given edit
+// state: the crop shrinks the render, so a cropped edit has fewer tiles than
+// the full frame. edits may be nil for the base look. Returns zeros when the
+// dimensions haven't been scanned yet.
+func TileGrid(p store.Photo, edits *edit.Params) (cols, rows int) {
+	w, h := DisplayDims(p)
+	w, h = edits.OutputDims(w, h)
 	return (w + TileSize - 1) / TileSize, (h + TileSize - 1) / TileSize
 }
 
@@ -73,7 +83,7 @@ func (c *Cache) Dir() string { return c.dir }
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r6"
+const renderVersion = "r7"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
@@ -123,11 +133,15 @@ func (c *Cache) EnsureTile(ctx context.Context, photo store.Photo, tx, ty int, e
 	if tx < 0 || ty < 0 {
 		return "", fs.ErrNotExist
 	}
-	if cols, rows := TileGrid(photo); cols > 0 && (tx >= cols || ty >= rows) {
+	edits, err := editsForHash(photo, editHash)
+	if err != nil {
+		return "", err
+	}
+	if cols, rows := TileGrid(photo, edits); cols > 0 && (tx >= cols || ty >= rows) {
 		return "", fs.ErrNotExist
 	}
 	key := photo.CacheKey + "|full|" + editHash
-	err := c.pool.Do(ctx, key, prio, func(jctx context.Context, proc *libraw.Processor) error {
+	err = c.pool.Do(ctx, key, prio, func(jctx context.Context, proc *libraw.Processor) error {
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
@@ -143,6 +157,23 @@ func (c *Cache) EnsureTile(ctx context.Context, photo store.Photo, tx, ty int, e
 	return path, nil
 }
 
+// editsForHash returns the parsed edit params identified by editHash, or nil
+// for the base look. It errors if the hash doesn't match the photo's stored
+// edit — the render pipeline only ever serves the base or the current edit.
+func editsForHash(photo store.Photo, editHash string) (*edit.Params, error) {
+	if editHash == edit.BaseHash {
+		return nil, nil
+	}
+	if photo.EditHash != editHash || !photo.EditParams.Valid {
+		return nil, fmt.Errorf("pyramid: photo %d has no edit state %s", photo.ID, editHash)
+	}
+	e, err := edit.Parse(photo.EditParams.String)
+	if err != nil {
+		return nil, fmt.Errorf("pyramid: photo %d edit params: %w", photo.ID, err)
+	}
+	return e, nil
+}
+
 // generate renders the requested level and, opportunistically, the smaller
 // levels that fall out of the same decode for free. ctx is checked before
 // the expensive stages so an abandoned render stops early; once the decode
@@ -152,16 +183,9 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var edits *edit.Params
-	if editHash != edit.BaseHash {
-		if photo.EditHash != editHash || !photo.EditParams.Valid {
-			return fmt.Errorf("pyramid: photo %d has no edit state %s", photo.ID, editHash)
-		}
-		e, err := edit.Parse(photo.EditParams.String)
-		if err != nil {
-			return fmt.Errorf("pyramid: photo %d edit params: %w", photo.ID, err)
-		}
-		edits = e
+	edits, err := editsForHash(photo, editHash)
+	if err != nil {
+		return err
 	}
 
 	if err := proc.Open(photo.Path()); err != nil {
@@ -196,9 +220,14 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	if err != nil {
 		return err
 	}
-	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
+	// Heal the stored dimensions against the FULL uncropped decode — the crop
+	// stage below shrinks the render, so this must read the pre-geometry size.
 	if level == "full" {
 		c.healDimensions(photo, rgba.Bounds().Dx(), rgba.Bounds().Dy())
+	}
+	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
+	rgba = ApplyGeometry(rgba, edits)
+	if level == "full" {
 		ApplyLook(rgba, gamma, edits)
 		if err := c.writeTiles(rgba, photo.CacheKey, editHash); err != nil {
 			return err
@@ -305,6 +334,9 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 // bit of resampling quality — and the look applied after the downscale.
 // Input must be a freshly RAW-decoded image (no look applied).
 func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGamma float64, edits *edit.Params) error {
+	// Crop/straighten first, at decode resolution, so the 2048 the preview
+	// targets is 2048 of the cropped frame — the loupe box is sized to match.
+	src = ApplyGeometry(src, edits)
 	b := src.Bounds()
 	long := max(b.Dx(), b.Dy())
 	dst := src

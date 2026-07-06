@@ -17,6 +17,10 @@ if (import.meta.env.DEV) {
       (window as unknown as Record<string, unknown>).__marraw = {
         useUIStore: ui.useUIStore,
         useEditSession: es.useEditSession,
+        // Action fns the scripted UI test drives directly (client-bound calls
+        // like a crop drag are awkward to synthesize as raw pointer events).
+        esUpdate: (patch: unknown) => es.esUpdate(client, patch as never),
+        esSetCropping: (on: boolean) => es.esSetCropping(client, on),
       };
     },
   );

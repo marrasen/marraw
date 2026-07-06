@@ -49,6 +49,11 @@ export const NEUTRAL: Params = {
   demosaic: '' as Params['demosaic'],
   caRed: 0,
   caBlue: 0,
+  cropX: 0,
+  cropY: 0,
+  cropW: 0,
+  cropH: 0,
+  cropAngle: 0,
 };
 
 // Controls addressable from the keyboard. Numeric controls step with +/-;
@@ -81,7 +86,8 @@ export type ControlId =
   | 'medPasses'
   | 'demosaic'
   | 'caRed'
-  | 'caBlue';
+  | 'caBlue'
+  | 'cropAngle';
 
 interface NumericSpec {
   kind: 'numeric';
@@ -166,6 +172,7 @@ export const CONTROL_SPECS: Record<ControlId, ControlSpec> = {
   },
   caRed: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.caRed, set: (v) => ({ caRed: v }) },
   caBlue: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.caBlue, set: (v) => ({ caBlue: v }) },
+  cropAngle: { kind: 'numeric', min: -15, max: 15, step: 0.1, bigStep: 1, get: (p) => p.cropAngle, set: (v) => ({ cropAngle: v }) },
 };
 
 interface Preview {
@@ -189,6 +196,7 @@ interface EditSessionState {
   rendering: number; // in-flight preview renders (task tray indicator)
   preview: Preview | null;
   wbPicking: boolean;
+  cropping: boolean; // crop overlay active: loupe shows the uncropped frame
 }
 
 export const useEditSession = create<EditSessionState>(() => ({
@@ -201,6 +209,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   rendering: 0,
   preview: null,
   wbPicking: false,
+  cropping: false,
 }));
 
 let previewTimer = 0;
@@ -227,7 +236,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
   window.clearTimeout(commitTimer);
   previewAbort?.abort();
   esClearPreview();
-  setState({ photoId, applyIds, draft: null, loading: true, wbPicking: false });
+  setState({ photoId, applyIds, draft: null, loading: true, wbPicking: false, cropping: false });
   let params: Params | null = null;
   try {
     params = await getEditParams(client, photoId);
@@ -256,24 +265,48 @@ export function esSetWBPicking(on: boolean) {
   setState({ wbPicking: on });
 }
 
+// esSetCropping toggles the crop overlay. Entering re-renders the preview
+// without the crop (the full straightened frame the overlay draws on);
+// leaving re-renders the committed crop and persists the draft.
+export function esSetCropping(client: ApiClient, on: boolean) {
+  const s = useEditSession.getState();
+  if (s.cropping === on) return;
+  setState({ cropping: on });
+  if (!on) esCommit(client); // persist the crop chosen in the overlay
+  window.clearTimeout(previewTimer);
+  void renderPreview(client);
+}
+
+const CROP_RECT_KEYS = ['cropX', 'cropY', 'cropW', 'cropH'] as const;
+
 // esUpdate changes the draft and schedules a debounced live preview.
 export function esUpdate(client: ApiClient, patch: Partial<Params>) {
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
   setState({ draft: { ...s.draft, ...patch } });
+  // While cropping, the preview shows the crop-stripped frame, so moving the
+  // rectangle needs no backend render — the overlay updates from the draft
+  // directly. Only a change beyond the crop rectangle (e.g. the angle) does.
+  if (s.cropping && Object.keys(patch).every((k) => (CROP_RECT_KEYS as readonly string[]).includes(k))) {
+    return;
+  }
   window.clearTimeout(previewTimer);
   previewTimer = window.setTimeout(() => void renderPreview(client), 150);
 }
 
 async function renderPreview(client: ApiClient) {
-  const { photoId, draft } = useEditSession.getState();
+  const { photoId, draft, cropping } = useEditSession.getState();
   if (photoId == null || !draft) return;
   previewAbort?.abort();
   const ac = new AbortController();
   previewAbort = ac;
   setState((s) => ({ rendering: s.rendering + 1 }));
+  // In crop mode the loupe draws the rectangle over the full straightened
+  // frame, so render with the crop rectangle stripped (angle and every other
+  // edit stay). The draft keeps the real crop for commit.
+  const renderParams = cropping ? { ...draft, cropX: 0, cropY: 0, cropW: 0, cropH: 0 } : draft;
   try {
-    const blob = await previewEdit(client, photoId, draft, { signal: ac.signal });
+    const blob = await previewEdit(client, photoId, renderParams, { signal: ac.signal });
     if (useEditSession.getState().photoId !== photoId || ac.signal.aborted) return;
     const url = URL.createObjectURL(blob);
     const old = useEditSession.getState().preview;

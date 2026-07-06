@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Star, Check, X, Pipette, Undo2, Redo2 } from 'lucide-react';
+import { Star, Check, X, Pipette, Undo2, Redo2, Crop } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
@@ -23,6 +23,7 @@ import {
   esReset,
   esSetActive,
   esSetApplyIds,
+  esSetCropping,
   esSetWBPicking,
   esUndo,
   esUpdate,
@@ -152,10 +153,12 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
   const draft = useEditSession((s) => s.draft);
   const activeControl = useEditSession((s) => s.activeControl);
   const wbPicking = useEditSession((s) => s.wbPicking);
+  const cropping = useEditSession((s) => s.cropping);
   const canUndo = useEditSession(esCanUndo);
   const canRedo = useEditSession(esCanRedo);
   const setClipboard = useUIStore((s) => s.setClipboard);
   const clipboard = useUIStore((s) => s.clipboard);
+  const setView = useUIStore((s) => s.setView);
 
   if (!draft) return <div className="p-4 text-sm text-muted-foreground">Loading edits…</div>;
 
@@ -186,6 +189,34 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           </Button>
         </span>
       </div>
+
+      <Section>Crop &amp; straighten</Section>
+      <Button
+        size="sm"
+        variant={cropping ? 'default' : 'outline'}
+        className="justify-start"
+        onClick={() => {
+          // The overlay lives in the loupe, so entering crop opens it.
+          if (!cropping) setView('loupe');
+          esSetCropping(client, !cropping);
+        }}
+        title="Crop &amp; straighten (R)"
+      >
+        <Crop data-icon="inline-start" />
+        {cropping ? 'Done cropping' : 'Crop'}
+        <kbd className="ml-auto text-[10px] opacity-60">R</kbd>
+      </Button>
+      <EditSlider
+        label="Straighten"
+        value={draft.cropAngle}
+        display={draft.cropAngle === 0 ? '0°' : `${draft.cropAngle > 0 ? '+' : ''}${draft.cropAngle.toFixed(1)}°`}
+        min={-15}
+        max={15}
+        step={0.1}
+        onChange={(v) => update({ cropAngle: v })}
+        onCommit={(v) => commit({ cropAngle: v })}
+        {...num('cropAngle')}
+      />
 
       <Section>Tone</Section>
       <EditSlider

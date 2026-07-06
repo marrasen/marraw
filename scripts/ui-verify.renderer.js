@@ -135,6 +135,28 @@ try {
   await until(() => es().draft.wbMode !== 'kelvin', 5000, 'back to as-shot');
   await sleep(400);
 
+  // --- crop mode: overlay mounts, crop applies, dims propagate -------------
+  R.cropControls = !!sliderRowByLabel('Straighten') &&
+    buttons().some((b) => b.textContent.trim().startsWith('Crop'));
+  key('r'); // toggle crop mode
+  await until(() => es().cropping && ui().view === 'loupe', 5000, 'crop mode on');
+  R.cropOverlay = !!document.querySelector('[data-testid="crop-overlay"]') &&
+    ['Free', '1:1', '16:9', 'Done'].every((t) => buttons().some((b) => b.textContent.trim() === t));
+  // Apply a half-frame crop through the dev bridge, then exit crop mode.
+  mw.esUpdate({ cropX: 0.2, cropY: 0.2, cropW: 0.5, cropH: 0.5 });
+  await sleep(50);
+  key('Enter'); // apply crop
+  await until(() => !es().cropping, 5000, 'crop applied');
+  R.cropApplied = es().draft.cropW === 0.5 && es().draft.cropH === 0.5 && es().draft.cropX === 0.2;
+  // The rendered preview now has the cropped aspect ratio (0.5·W / 0.5·H of a
+  // 3:2-ish frame ≈ the same ratio) and the overlay is gone.
+  R.cropOverlayGone = !document.querySelector('[data-testid="crop-overlay"]');
+  await sleep(300);
+  // Reset back to neutral (persisted) so later checks and the DB start clean.
+  buttons().find((b) => b.textContent.trim() === 'Reset')?.click();
+  await until(() => es().draft.cropW === 0, 5000, 'crop reset');
+  await sleep(200);
+
   // --- filmstrip: rating badge + multi-select ------------------------------
   key('3');
   await until(() => document.querySelector('[data-testid="strip-rating"]'), 5000, 'filmstrip rating badge');
