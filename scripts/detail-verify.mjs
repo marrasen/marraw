@@ -67,7 +67,7 @@ console.log(`photo ${p.id} (${p.fileName})`);
 const neutralish = { expEV: 0.75 }; // non-neutral base so every render is deterministic
 const render = async (extra) => {
   const t = Date.now();
-  const blob = await call('Edits.PreviewEdit', [p.id, { ...neutralish, ...extra }]);
+  const blob = await call('Edits.PreviewEdit', [p.id, { ...neutralish, ...extra }, 0]);
   return { bytes: blob.bytes, ms: Date.now() - t };
 };
 
@@ -90,7 +90,7 @@ for (const [name, extra] of [
 }
 
 // Validation: out-of-range values must be rejected.
-const rejected = await call('Edits.PreviewEdit', [p.id, { ...neutralish, sharpen: 2 }])
+const rejected = await call('Edits.PreviewEdit', [p.id, { ...neutralish, sharpen: 2 }, 0])
   .then(() => false, () => true);
 check(rejected, 'out-of-range sharpen rejected by validation');
 

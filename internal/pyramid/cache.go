@@ -404,20 +404,20 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 	return true, c.WriteLevels(rgba, photo.CacheKey, editHash, levels...)
 }
 
-// WritePreview writes the 2048 rendition on the interactive path: bilinear
-// scaling instead of CatmullRom — a slider drag needs latency, not the last
-// bit of resampling quality — and the look applied after the downscale.
-// Input must be a freshly RAW-decoded image (no look applied).
-func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGamma float64, edits *edit.Params) error {
-	// Always returns a fresh buffer (a copy even when no downscale is needed),
-	// so the later in-place ApplyLook never mutates WritePreview's input — the
-	// caller may hand in a shared, cached decode.
+// RenderPreview produces an interactive-path rendition at the given long
+// edge: bilinear scaling instead of CatmullRom — a slider drag needs latency,
+// not the last bit of resampling quality — and the look applied after the
+// downscale. Input must be a freshly RAW-decoded image (no look applied); the
+// result is always a fresh buffer (a copy even when no downscale is needed),
+// so the in-place ApplyLook never mutates src — the caller may hand in a
+// shared, cached decode.
+func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit.Params) *image.RGBA {
 	scale := func(img *image.RGBA) *image.RGBA {
 		b := img.Bounds()
 		long := max(b.Dx(), b.Dy())
 		w, h := b.Dx(), b.Dy()
-		if long > 2048 {
-			w, h = b.Dx()*2048/long, b.Dy()*2048/long
+		if long > longEdge {
+			w, h = b.Dx()*longEdge/long, b.Dy()*longEdge/long
 		}
 		dst := image.NewRGBA(image.Rect(0, 0, max(1, w), max(1, h)))
 		xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), img, b, xdraw.Src, nil)
@@ -428,7 +428,7 @@ func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGam
 	// interactive path do it AFTER the downscale (≈4× fewer pixels than the
 	// full decode) — the committed cache render still straightens at full
 	// resolution. A pure crop is a cheap sub-image, so crop first to keep the
-	// preview at 2048 of the cropped region rather than 2048 of the frame.
+	// preview at longEdge of the cropped region rather than of the frame.
 	var dst *image.RGBA
 	if edits != nil && edits.CropAngle != 0 {
 		dst = ApplyGeometry(scale(src), edits)
@@ -437,7 +437,13 @@ func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGam
 	}
 	ApplyLook(dst, lookGamma, edits)
 	ApplyDetail(dst, edits)
-	return c.writeJPEG(dst, cacheKey, "2048", editHash, 80)
+	return dst
+}
+
+// WritePreview writes the 2048 rendition on the interactive path so a
+// following commit serves the same pixels over /img.
+func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGamma float64, edits *edit.Params) error {
+	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits), cacheKey, "2048", editHash, 80)
 }
 
 // WriteLevels writes a chain of downscaled renditions from src, skipping

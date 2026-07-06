@@ -134,16 +134,16 @@ export function subscribePickWhiteBalance(client: ApiClient, photoID: number, pa
 }
 
 
-export function previewEdit(client: ApiClient, photoID: number, params: Params, options?: RequestOptions): Promise<Blob> {
-    return client.request<Blob>('Edits.PreviewEdit', [photoID, params], options);
+export function previewEdit(client: ApiClient, photoID: number, params: Params, longEdge: number, options?: RequestOptions): Promise<Blob> {
+    return client.request<Blob>('Edits.PreviewEdit', [photoID, params, longEdge], options);
 }
 // Wire-method tag consumed by useQuerySuspense to key the promise cache and
 // open the matching server subscription. Stable identifier across builds
 // (unaffected by minification, unlike Function.name).
 previewEdit.method = 'Edits.PreviewEdit' as const;
 
-export function subscribePreviewEdit(client: ApiClient, photoID: number, params: Params, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
-    return client.subscribe<Blob>('Edits.PreviewEdit', [photoID, params], callback, onError, options);
+export function subscribePreviewEdit(client: ApiClient, photoID: number, params: Params, longEdge: number, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Blob>('Edits.PreviewEdit', [photoID, params, longEdge], callback, onError, options);
 }
 
 
@@ -241,12 +241,12 @@ export function usePickWhiteBalance(photoID: number, params: Params, x: number, 
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function usePreviewEdit(photoID: number, params: Params, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
+export function usePreviewEdit(photoID: number, params: Params, longEdge: number, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
     const wrappedFn = useCallback(
-        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params) => previewEdit(client, photoID, params, { signal }),
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, longEdge: number) => previewEdit(client, photoID, params, longEdge, { signal }),
         [],
     );
-    return useQuery(wrappedFn, { ...options, params: [photoID, params], _subscribe: { method: 'Edits.PreviewEdit', params: [photoID, params] } });
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, longEdge], _subscribe: { method: 'Edits.PreviewEdit', params: [photoID, params, longEdge] } });
 }
 
 /**

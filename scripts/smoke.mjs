@@ -159,7 +159,7 @@ const params = {
   highlight: 0, nrThreshold: 0, fbddNoiseRd: 0, medPasses: 0,
 };
 const tPrev = Date.now();
-const prev = await call('Edits.PreviewEdit', [p.id, params]);
+const prev = await call('Edits.PreviewEdit', [p.id, params, 0]);
 const coldPreviewMs = Date.now() - tPrev;
 step(`PreviewEdit (cold) -> ${prev.bytes?.length ?? 0} bytes in ${coldPreviewMs}ms`);
 check(prev.$binary && prev.contentType === 'image/jpeg' && prev.bytes.length > 30_000, 'preview arrives as binary JPEG blob');
@@ -167,11 +167,19 @@ check(prev.$binary && prev.contentType === 'image/jpeg' && prev.bytes.length > 3
 // Warm re-render with a different EV must be fast (handle kept unpacked).
 const params2 = { ...params, expEV: 0.5 };
 const tWarm = Date.now();
-const prev2 = await call('Edits.PreviewEdit', [p.id, params2]);
+const prev2 = await call('Edits.PreviewEdit', [p.id, params2, 0]);
 const warmMs = Date.now() - tWarm;
 step(`PreviewEdit (warm) -> ${warmMs}ms`);
 check(warmMs < 1500, `warm preview under 1.5s (${warmMs}ms)`);
 check(prev2.$binary && prev2.bytes.length > 30_000, 'warm preview blob served');
+
+// Low-res draft path (drag frames): rendered in memory at 1024 — must be
+// faster-or-equal and a much smaller blob than the 2048 render.
+const tDraft = Date.now();
+const draft = await call('Edits.PreviewEdit', [p.id, { ...params, expEV: 0.7 }, 1024]);
+const draftMs = Date.now() - tDraft;
+step(`PreviewEdit (draft 1024) -> ${draft.bytes?.length ?? 0} bytes in ${draftMs}ms`);
+check(draft.$binary && draft.bytes.length > 10_000 && draft.bytes.length < prev2.bytes.length, 'draft preview is a smaller JPEG');
 
 await call('Edits.SetEditParams', [p.id, params2]);
 step('SetEditParams committed');

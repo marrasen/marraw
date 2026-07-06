@@ -224,9 +224,28 @@ export const useEditSession = create<EditSessionState>(() => ({
   cropping: false,
 }));
 
-let previewTimer = 0;
+// Preview renders are coalesced, not debounced: a render fires immediately
+// when none is in flight, and while one IS in flight only "a newer state is
+// wanted" is remembered — the moment the current render returns, the newest
+// draft goes out. The server paces the stream naturally and no fixed latency
+// is added to any adjustment. Drag frames render at DRAFT_PX (quarter the
+// pixels of 2048, in-memory on the server — fast and cheap, transiently
+// upscaled by the loupe); commits and one-shot applies render FULL_PX, which
+// the server also persists to the pyramid cache for /img.
+const DRAFT_PX = 1024;
+const FULL_PX = 2048;
+let previewInFlight = false;
+let previewPending: { full: boolean } | null = null;
 let previewAbort: AbortController | null = null;
 let commitTimer = 0;
+
+function schedulePreview(client: ApiClient, full: boolean) {
+  if (previewInFlight) {
+    previewPending = { full: (previewPending?.full ?? false) || full };
+    return;
+  }
+  void renderPreview(client, full);
+}
 
 function setState(patch: Partial<EditSessionState> | ((s: EditSessionState) => Partial<EditSessionState>)) {
   useEditSession.setState(patch);
@@ -244,8 +263,8 @@ export function esClearPreview() {
 
 // esLoad opens an edit session for the newly focused photo.
 export async function esLoad(client: ApiClient, photoId: number, applyIds: number[]) {
-  window.clearTimeout(previewTimer);
   window.clearTimeout(commitTimer);
+  previewPending = null;
   previewAbort?.abort();
   esClearPreview();
   setState({ photoId, applyIds, draft: null, loading: true, wbPicking: false, cropping: false });
@@ -284,9 +303,11 @@ export function esSetCropping(client: ApiClient, on: boolean) {
   const s = useEditSession.getState();
   if (s.cropping === on) return;
   setState({ cropping: on });
-  if (!on) esCommit(client); // persist the crop chosen in the overlay
-  window.clearTimeout(previewTimer);
-  void renderPreview(client);
+  if (!on) {
+    esCommit(client); // persist the crop; the commit re-renders the cropped frame
+  } else {
+    schedulePreview(client, true);
+  }
 }
 
 const CROP_RECT_KEYS = ['cropX', 'cropY', 'cropW', 'cropH'] as const;
@@ -318,8 +339,8 @@ export function esFlushDraft() {
   }
 }
 
-// esUpdate changes the draft (coalesced to a frame) and schedules a debounced
-// live preview.
+// esUpdate changes the draft (coalesced to a frame) and schedules a low-res
+// live preview render (coalesced against the in-flight one).
 export function esUpdate(client: ApiClient, patch: Partial<Params>) {
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
@@ -330,14 +351,14 @@ export function esUpdate(client: ApiClient, patch: Partial<Params>) {
   if (s.cropping && Object.keys(patch).every((k) => (CROP_LIVE_KEYS as readonly string[]).includes(k))) {
     return;
   }
-  window.clearTimeout(previewTimer);
-  previewTimer = window.setTimeout(() => void renderPreview(client), 150);
+  schedulePreview(client, false);
 }
 
-async function renderPreview(client: ApiClient) {
+async function renderPreview(client: ApiClient, full: boolean) {
+  esFlushDraft(); // render the freshest slider state, not last frame's
   const { photoId, draft, cropping } = useEditSession.getState();
   if (photoId == null || !draft) return;
-  previewAbort?.abort();
+  previewInFlight = true;
   const ac = new AbortController();
   previewAbort = ac;
   setState((s) => ({ rendering: s.rendering + 1 }));
@@ -349,7 +370,9 @@ async function renderPreview(client: ApiClient) {
     ? { ...draft, cropX: 0, cropY: 0, cropW: 0, cropH: 0, cropAngle: 0 }
     : draft;
   try {
-    const blob = await previewEdit(client, photoId, renderParams, { signal: ac.signal });
+    const blob = await previewEdit(client, photoId, renderParams, full ? FULL_PX : DRAFT_PX, {
+      signal: ac.signal,
+    });
     if (useEditSession.getState().photoId !== photoId || ac.signal.aborted) return;
     const url = URL.createObjectURL(blob);
     const old = useEditSession.getState().preview;
@@ -358,7 +381,13 @@ async function renderPreview(client: ApiClient) {
   } catch {
     // aborted or superseded
   } finally {
+    previewInFlight = false;
     setState((s) => ({ rendering: Math.max(0, s.rendering - 1) }));
+    const pending = previewPending;
+    previewPending = null;
+    // A newer state arrived while rendering — fire it now (unless the whole
+    // session moved on and aborted us).
+    if (pending && !ac.signal.aborted) void renderPreview(client, pending.full);
   }
 }
 
@@ -390,6 +419,9 @@ export function esCommit(client: ApiClient, patch?: Partial<Params>) {
   pushHistory(s.photoId, params);
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
   persist(client, params, ids);
+  // Settle render: drag frames were low-res, so bring the loupe back to the
+  // full 2048 (which the server also writes to the pyramid cache).
+  schedulePreview(client, true);
 }
 
 // esApplyParams replaces the whole draft (paste, picker result, undo) with
@@ -399,8 +431,7 @@ export function esApplyParams(client: ApiClient, params: Params, opts?: { skipHi
   if (s.photoId == null) return;
   setState({ draft: params });
   if (!opts?.skipHistory) pushHistory(s.photoId, params);
-  window.clearTimeout(previewTimer);
-  void renderPreview(client);
+  schedulePreview(client, true);
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
   persist(client, params, ids);
 }
@@ -439,8 +470,7 @@ function moveHistory(client: ApiClient, dir: number) {
     draft: params,
     history: { ...s.history, [s.photoId]: { ...h, index } },
   });
-  window.clearTimeout(previewTimer);
-  void renderPreview(client);
+  schedulePreview(client, true);
   setEditParams(client, s.photoId, params).catch((err) =>
     toast.error(`Save failed: ${(err as Error).message}`),
   );

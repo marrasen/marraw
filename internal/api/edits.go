@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"image"
@@ -69,22 +70,55 @@ func seededParams(p store.Photo) *edit.Params {
 	return &edit.Params{ExpEV: p.BaseExpEV.Float64}
 }
 
-// PreviewEdit renders a 2048px preview of the (unsaved) edit state and
-// returns the JPEG itself as a binary Blob riding the WebSocket — no second
-// HTTP round trip. The rendition is also written to the pyramid cache, so a
-// following commit serves the same pixels instantly over /img.
-// The photo's unpacked handle is kept hot, so repeated calls while dragging
-// a slider skip file reading entirely.
-func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Params) (*aprot.Blob, error) {
-	path, err := e.ensurePreview(ctx, photoID, params)
+// previewLongEdge is the full-quality preview size; renders at this size are
+// persisted to the pyramid cache so a following commit serves the same
+// pixels instantly over /img.
+const previewLongEdge = 2048
+
+// PreviewEdit renders a preview of the (unsaved) edit state and returns the
+// JPEG itself as a binary Blob riding the WebSocket — no second HTTP round
+// trip. longEdge picks the rendition size: 0 or anything >= 2048 is the full
+// 2048 cache-backed render; smaller values (the client drags at 1024) render
+// entirely in memory — quarter the pixels and no disk round trip, so the
+// stream of drag frames stays fast. The photo's unpacked handle is kept hot,
+// so repeated calls while dragging a slider skip file reading entirely.
+func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Params, longEdge int) (*aprot.Blob, error) {
+	if longEdge <= 0 || longEdge >= previewLongEdge {
+		path, err := e.ensurePreview(ctx, photoID, params)
+		if err != nil {
+			return nil, err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		return &aprot.Blob{ContentType: "image/jpeg", Data: data}, nil
+	}
+
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(path)
+	var ep *edit.Params
+	if !params.IsNeutral() {
+		ep = &params
+	}
+	rgba, err := e.previewDecode(ctx, photoID, photo, ep)
 	if err != nil {
 		return nil, err
 	}
-	return &aprot.Blob{ContentType: "image/jpeg", Data: data}, nil
+	gamma := photo.LookGamma
+	if gamma == 0 {
+		gamma = pyramid.FallbackLookGamma
+	}
+	img := pyramid.RenderPreview(rgba, longEdge, gamma, ep)
+	var buf bytes.Buffer
+	// Slightly lower quality than the cached rendition: the frame is
+	// transient and a smaller blob keeps the WebSocket stream snappy.
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 75}); err != nil {
+		return nil, err
+	}
+	return &aprot.Blob{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
 }
 
 // ensurePreview guarantees the 2048 rendition of the given (possibly
@@ -107,32 +141,9 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 		ep = &params
 	}
 
-	// Reuse the cached decode when only geometry/look changed; otherwise run
-	// the (expensive) demosaic once and cache it for the next drag frame.
-	libKey := "base"
-	if ep != nil {
-		libKey = ep.LibrawInputsHash()
-	}
-	rgba := e.cachedDecode(photoID, libKey)
-	if rgba == nil {
-		proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
-		if err != nil {
-			return "", err
-		}
-		if ctx.Err() != nil {
-			release()
-			return "", ctx.Err() // superseded while waiting for the handle
-		}
-		img, err := proc.Process(ep.LibrawParams(true))
-		release()
-		if err != nil {
-			return "", err
-		}
-		rgba, err = pyramid.FromLibraw(img)
-		if err != nil {
-			return "", err
-		}
-		e.storeDecode(photoID, libKey, rgba)
+	rgba, err := e.previewDecode(ctx, photoID, photo, ep)
+	if err != nil {
+		return "", err
 	}
 	gamma := photo.LookGamma
 	if gamma == 0 {
@@ -144,6 +155,39 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 		return "", err
 	}
 	return path, nil
+}
+
+// previewDecode returns the half-size RAW decode for the given LibRaw-input
+// state, reusing the cached decode when only geometry/look changed —
+// otherwise it runs the (expensive) demosaic once and caches it for the next
+// drag frame.
+func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params) (*image.RGBA, error) {
+	libKey := "base"
+	if ep != nil {
+		libKey = ep.LibrawInputsHash()
+	}
+	if rgba := e.cachedDecode(photoID, libKey); rgba != nil {
+		return rgba, nil
+	}
+	proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
+	if err != nil {
+		return nil, err
+	}
+	if ctx.Err() != nil {
+		release()
+		return nil, ctx.Err() // superseded while waiting for the handle
+	}
+	img, err := proc.Process(ep.LibrawParams(true))
+	release()
+	if err != nil {
+		return nil, err
+	}
+	rgba, err := pyramid.FromLibraw(img)
+	if err != nil {
+		return nil, err
+	}
+	e.storeDecode(photoID, libKey, rgba)
+	return rgba, nil
 }
 
 // cachedDecode returns the cached half-size decode for (photoID, key), or nil.
