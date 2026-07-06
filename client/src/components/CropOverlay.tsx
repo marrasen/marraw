@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Params } from '@/api/edits';
 import { cn } from '@/lib/utils';
 
@@ -44,7 +44,21 @@ export function CropOverlay({
   const rootRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ grip: Grip; startRect: Rect; startX: number; startY: number } | null>(null);
   const [active, setActive] = useState(false);
-  const rect = currentRect(draft);
+  // The rectangle is driven from local state during a drag so a pointer-move
+  // re-renders only this overlay — writing to the edit draft on every move
+  // would re-render the whole panel and stutter. The draft is updated once on
+  // release. When the draft changes from elsewhere (aspect reset, undo) and no
+  // drag is in flight, resync.
+  const [rect, setRectState] = useState<Rect>(() => currentRect(draft));
+  const rectRef = useRef(rect);
+  const setRect = (rc: Rect) => {
+    rectRef.current = rc;
+    setRectState(rc);
+  };
+  useEffect(() => {
+    if (!drag.current) setRect(currentRect(draft));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.cropX, draft.cropY, draft.cropW, draft.cropH]);
 
   const pointFrac = (e: React.PointerEvent): [number, number] => {
     const el = rootRef.current!;
@@ -52,9 +66,6 @@ export function CropOverlay({
     return [clamp01((e.clientX - r.left) / r.width), clamp01((e.clientY - r.top) / r.height)];
   };
 
-  const commitRect = (rc: Rect) => {
-    onChange({ cropX: rc.x, cropY: rc.y, cropW: rc.w, cropH: rc.h });
-  };
 
   const applyRatio = (rc: Rect, grip: Grip): Rect => {
     if (!ratioFrac) return rc;
@@ -116,7 +127,7 @@ export function CropOverlay({
     rc.h = Math.min(rc.h, 1 - Math.max(0, rc.y));
     rc.x = clamp01(rc.x);
     rc.y = clamp01(rc.y);
-    commitRect(rc);
+    setRect(rc); // local only — no store write while dragging
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -124,6 +135,9 @@ export function CropOverlay({
     drag.current = null;
     setActive(false);
     (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    // Push the final rectangle to the draft and persist once.
+    const rc = rectRef.current;
+    onChange({ cropX: rc.x, cropY: rc.y, cropW: rc.w, cropH: rc.h });
     onCommit();
   };
 

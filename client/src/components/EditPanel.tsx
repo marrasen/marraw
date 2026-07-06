@@ -669,6 +669,11 @@ export function EditSlider({
   onChange: (v: number) => void;
   onCommit: (v: number) => void;
 }) {
+  // During a drag the thumb tracks a local value, so it stays smooth even
+  // while the store update (which re-renders the whole panel) is coalesced to
+  // one frame. `dragging === null` means idle → follow the prop.
+  const [dragging, setDragging] = useState<number | null>(null);
+  const shown = dragging ?? value;
   return (
     <div
       className={cn(
@@ -685,13 +690,19 @@ export function EditSlider({
         <span className="text-xs tabular-nums">{display}</span>
       </div>
       <Slider
-        value={value}
+        value={shown}
         min={min}
         max={max}
         step={step}
         disabled={disabled}
-        onValueChange={(v) => onChange(v as number)}
-        onValueCommitted={(v) => onCommit(v as number)}
+        onValueChange={(v) => {
+          setDragging(v as number);
+          onChange(v as number);
+        }}
+        onValueCommitted={(v) => {
+          setDragging(null);
+          onCommit(v as number);
+        }}
       />
     </div>
   );

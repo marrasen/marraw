@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"math"
 	"os"
+	"sync"
 
 	"github.com/marrasen/aprot"
 
@@ -20,6 +21,21 @@ import (
 // Edits handles non-destructive editing.
 type Edits struct {
 	deps *Deps
+
+	// decodeCache holds the most recent half-size RAW decode for the preview
+	// path, keyed by photo + LibRaw-input hash. Crop, straighten and the
+	// look-stage sliders don't change the decode, so while one of them is
+	// dragged this lets every preview skip the ~400 ms demosaic and re-run
+	// only the cheap post-decode stages. One entry: the current hot photo and
+	// LibRaw state; it is replaced when either changes.
+	decodeMu    sync.Mutex
+	decodeEntry *decodeCache
+}
+
+type decodeCache struct {
+	photoID int64
+	key     string
+	rgba    *image.RGBA // never mutated in place once cached
 }
 
 // GetEditParams returns the stored edit state. An untouched photo returns
@@ -90,31 +106,60 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 		ep = &params
 	}
 
-	proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
-	if err != nil {
-		return "", err
+	// Reuse the cached decode when only geometry/look changed; otherwise run
+	// the (expensive) demosaic once and cache it for the next drag frame.
+	libKey := "base"
+	if ep != nil {
+		libKey = ep.LibrawInputsHash()
 	}
-	defer release()
-	if ctx.Err() != nil {
-		return "", ctx.Err() // superseded while waiting for the handle
-	}
-
-	img, err := proc.Process(ep.LibrawParams(true))
-	if err != nil {
-		return "", err
-	}
-	rgba, err := pyramid.FromLibraw(img)
-	if err != nil {
-		return "", err
+	rgba := e.cachedDecode(photoID, libKey)
+	if rgba == nil {
+		proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
+		if err != nil {
+			return "", err
+		}
+		if ctx.Err() != nil {
+			release()
+			return "", ctx.Err() // superseded while waiting for the handle
+		}
+		img, err := proc.Process(ep.LibrawParams(true))
+		release()
+		if err != nil {
+			return "", err
+		}
+		rgba, err = pyramid.FromLibraw(img)
+		if err != nil {
+			return "", err
+		}
+		e.storeDecode(photoID, libKey, rgba)
 	}
 	gamma := photo.LookGamma
 	if gamma == 0 {
 		gamma = pyramid.FallbackLookGamma
 	}
+	// WritePreview never mutates its input, so handing it the shared cached
+	// decode is safe.
 	if err := e.deps.Cache.WritePreview(rgba, photo.CacheKey, hash, gamma, ep); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+// cachedDecode returns the cached half-size decode for (photoID, key), or nil.
+func (e *Edits) cachedDecode(photoID int64, key string) *image.RGBA {
+	e.decodeMu.Lock()
+	defer e.decodeMu.Unlock()
+	if e.decodeEntry != nil && e.decodeEntry.photoID == photoID && e.decodeEntry.key == key {
+		return e.decodeEntry.rgba
+	}
+	return nil
+}
+
+// storeDecode replaces the single-entry decode cache.
+func (e *Edits) storeDecode(photoID int64, key string, rgba *image.RGBA) {
+	e.decodeMu.Lock()
+	defer e.decodeMu.Unlock()
+	e.decodeEntry = &decodeCache{photoID: photoID, key: key, rgba: rgba}
 }
 
 // PickWhiteBalance samples the current rendition at the given relative

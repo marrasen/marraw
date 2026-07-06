@@ -279,11 +279,36 @@ export function esSetCropping(client: ApiClient, on: boolean) {
 
 const CROP_RECT_KEYS = ['cropX', 'cropY', 'cropW', 'cropH'] as const;
 
-// esUpdate changes the draft and schedules a debounced live preview.
+// Draft writes during a slider drag are coalesced to one per animation frame:
+// the develop panel has ~30 controls, so applying every pointer-move
+// synchronously re-rendered all of them (plus the loupe and histogram) and
+// made dragging stutter. flushDraft merges the pending patch once per frame.
+let pendingPatch: Partial<Params> | null = null;
+let draftRaf = 0;
+function flushDraft() {
+  draftRaf = 0;
+  const patch = pendingPatch;
+  pendingPatch = null;
+  if (!patch) return;
+  const s = useEditSession.getState();
+  if (s.draft) setState({ draft: { ...s.draft, ...patch } });
+}
+// esFlushDraft applies any frame-pending patch immediately — call before
+// reading the draft for a commit so nothing in flight is lost.
+export function esFlushDraft() {
+  if (draftRaf) {
+    cancelAnimationFrame(draftRaf);
+    flushDraft();
+  }
+}
+
+// esUpdate changes the draft (coalesced to a frame) and schedules a debounced
+// live preview.
 export function esUpdate(client: ApiClient, patch: Partial<Params>) {
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
-  setState({ draft: { ...s.draft, ...patch } });
+  pendingPatch = { ...(pendingPatch ?? {}), ...patch };
+  if (!draftRaf) draftRaf = requestAnimationFrame(flushDraft);
   // While cropping, the preview shows the crop-stripped frame, so moving the
   // rectangle needs no backend render — the overlay updates from the draft
   // directly. Only a change beyond the crop rectangle (e.g. the angle) does.
@@ -339,6 +364,7 @@ function persist(client: ApiClient, params: Params, ids: number[]) {
 // esCommit persists the draft (merged with an optional final patch) to every
 // photo in the selection and records it in the undo history.
 export function esCommit(client: ApiClient, patch?: Partial<Params>) {
+  esFlushDraft(); // apply any frame-pending slider move before snapshotting
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
   const params = patch ? { ...s.draft, ...patch } : s.draft;
@@ -420,6 +446,7 @@ export function esStep(client: ApiClient, control: ControlId, dir: 1 | -1, big =
     patch = spec.set(next);
   }
   esUpdate(client, patch);
+  esFlushDraft(); // a discrete key step should land in the draft immediately
   window.clearTimeout(commitTimer);
   commitTimer = window.setTimeout(() => esCommit(client), 600);
 }

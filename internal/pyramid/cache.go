@@ -334,16 +334,31 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 // bit of resampling quality — and the look applied after the downscale.
 // Input must be a freshly RAW-decoded image (no look applied).
 func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGamma float64, edits *edit.Params) error {
-	// Crop/straighten first, at decode resolution, so the 2048 the preview
-	// targets is 2048 of the cropped frame — the loupe box is sized to match.
-	src = ApplyGeometry(src, edits)
-	b := src.Bounds()
-	long := max(b.Dx(), b.Dy())
-	dst := src
-	if long > 2048 {
-		w, h := b.Dx()*2048/long, b.Dy()*2048/long
-		dst = image.NewRGBA(image.Rect(0, 0, max(1, w), max(1, h)))
-		xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, b, xdraw.Src, nil)
+	// Always returns a fresh buffer (a copy even when no downscale is needed),
+	// so the later in-place ApplyLook never mutates WritePreview's input — the
+	// caller may hand in a shared, cached decode.
+	scale := func(img *image.RGBA) *image.RGBA {
+		b := img.Bounds()
+		long := max(b.Dx(), b.Dy())
+		w, h := b.Dx(), b.Dy()
+		if long > 2048 {
+			w, h = b.Dx()*2048/long, b.Dy()*2048/long
+		}
+		dst := image.NewRGBA(image.Rect(0, 0, max(1, w), max(1, h)))
+		xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), img, b, xdraw.Src, nil)
+		return dst
+	}
+
+	// A straighten angle rotate-samples every output pixel, so on the
+	// interactive path do it AFTER the downscale (≈4× fewer pixels than the
+	// full decode) — the committed cache render still straightens at full
+	// resolution. A pure crop is a cheap sub-image, so crop first to keep the
+	// preview at 2048 of the cropped region rather than 2048 of the frame.
+	var dst *image.RGBA
+	if edits != nil && edits.CropAngle != 0 {
+		dst = ApplyGeometry(scale(src), edits)
+	} else {
+		dst = scale(ApplyGeometry(src, edits))
 	}
 	ApplyLook(dst, lookGamma, edits)
 	return c.writeJPEG(dst, cacheKey, "2048", editHash, 80)

@@ -48,20 +48,20 @@ function aspectRatioFrac(key: string, fdw: number, fdh: number): number | null {
 function CropToolbar({
   client,
   aspectKey,
-  setAspectKey,
+  onPickAspect,
 }: {
   client: ApiClient;
   aspectKey: string;
-  setAspectKey: (k: string) => void;
+  onPickAspect: (k: string) => void;
 }) {
   return (
-    <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-md border bg-background/85 px-2 py-1 backdrop-blur">
+    <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-md border bg-background/85 px-2 py-1 backdrop-blur">
       {ASPECT_PRESETS.map((p) => (
         <Button
           key={p.key}
           size="sm"
           variant={aspectKey === p.key ? 'secondary' : 'ghost'}
-          onClick={() => setAspectKey(p.key)}
+          onClick={() => onPickAspect(p.key)}
         >
           {p.label}
         </Button>
@@ -264,6 +264,23 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
+  // Selecting an aspect preset snaps the crop to the largest centered
+  // rectangle of that ratio; Free leaves the current crop and only constrains
+  // later handle drags.
+  const applyAspect = (key: string) => {
+    setAspectKey(key);
+    const rf = aspectRatioFrac(key, fdw, fdh);
+    if (!rf) return;
+    let w = 1;
+    let h = 1 / rf;
+    if (h > 1) {
+      h = 1;
+      w = rf;
+    }
+    esUpdate(client, { cropX: (1 - w) / 2, cropY: (1 - h) / 2, cropW: w, cropH: h });
+    esCommit(client);
+  };
+
   const onImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!wbPicking) return;
     e.stopPropagation();
@@ -329,7 +346,7 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
         </div>
       )}
       {cropping ? (
-        <CropToolbar client={client} aspectKey={aspectKey} setAspectKey={setAspectKey} />
+        <CropToolbar client={client} aspectKey={aspectKey} onPickAspect={applyAspect} />
       ) : (
         <ZoomToolbar scale={scale} isFit={zoom === 'fit'} setZoom={setZoom} />
       )}

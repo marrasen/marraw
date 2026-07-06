@@ -198,6 +198,28 @@ func (e *Params) Hash() string {
 	return hex.EncodeToString(sum[:])[:12]
 }
 
+// LibrawInputsHash hashes only the fields that change the LibRaw decode
+// (exposure, WB, brightness/gamma/shadow, highlight recovery, NR, demosaic,
+// CA). The geometry (crop/straighten) and look stages run on top of the
+// decoded pixels, so two edits differing only in those share one decode —
+// this keys the preview decode cache, letting look/geometry sliders skip the
+// ~400 ms demosaic. Always returns a fixed-width hash (never BaseHash), so a
+// deterministic edit whose LibRaw subset happens to be neutral still keys
+// apart from the auto-brighten base render.
+func (e *Params) LibrawInputsHash() string {
+	l := Params{
+		ExpEV: e.ExpEV, ExpPreserve: e.ExpPreserve,
+		WBMode: e.WBMode, WBMul: e.WBMul, WBTemp: e.WBTemp, WBTint: e.WBTint, WBKelvin: e.WBKelvin,
+		Bright: e.Bright, Gamma: e.Gamma, Shadow: e.Shadow,
+		Highlight: e.Highlight, NRThreshold: e.NRThreshold, FBDDNoiseRd: e.FBDDNoiseRd, MedPasses: e.MedPasses,
+		Demosaic: e.Demosaic, CARed: e.CARed, CABlue: e.CABlue,
+	}
+	l.Normalize()
+	b, _ := json.Marshal(&l)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
 // Parse decodes stored edit-params JSON.
 func Parse(paramsJSON string) (*Params, error) {
 	var e Params
