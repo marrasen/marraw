@@ -54,10 +54,9 @@ export function FilterBar({ shownCount, totalCount }: { shownCount: number; tota
       {view === 'grid' && (
         <>
           <Separator orientation="vertical" className="h-5" />
-          <div className="flex items-center gap-2" title="Thumbnail size">
-            <ZoomIn className="size-4 text-muted-foreground" />
+          <div className="flex w-40 items-center gap-2" title="Thumbnail size">
+            <ZoomIn className="size-4 shrink-0 text-muted-foreground" />
             <Slider
-              className="w-28"
               value={cellSize}
               min={120}
               max={400}

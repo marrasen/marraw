@@ -325,14 +325,16 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
             <ToggleGroupItem value="kelvin" className="flex-1">
               Kelvin
             </ToggleGroupItem>
-            <ToggleGroupItem value="custom" className="flex-1" disabled={draft.wbMode !== 'custom'}>
-              Picked
-            </ToggleGroupItem>
           </ToggleGroup>
           <Button
             size="icon-sm"
-            variant={wbPicking ? 'default' : 'outline'}
-            title="Pick white balance: click a neutral gray in the image"
+            variant={wbPicking || draft.wbMode === 'custom' ? 'default' : 'outline'}
+            className={cn(wbPicking && 'ring-2 ring-ring ring-offset-1 ring-offset-background')}
+            title={
+              draft.wbMode === 'custom'
+                ? 'Picked white balance — click to pick a new neutral gray'
+                : 'Pick white balance: click a neutral gray in the image'
+            }
             onClick={() => esSetWBPicking(!wbPicking)}
           >
             <Pipette />
