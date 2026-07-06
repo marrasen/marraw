@@ -147,6 +147,12 @@ try {
   mw.esUpdate({ cropAngle: 7 });
   await sleep(80);
   R.straightenCss = [...document.querySelectorAll('img')].some((im) => (im.style.transform || '').includes('rotate'));
+  // A near-full crop at an angle must auto-shrink to stay clear of the black
+  // wedge the rotation exposes.
+  mw.esUpdate({ cropX: 0.05, cropY: 0.05, cropW: 0.9, cropH: 0.9 });
+  mw.esUpdate({ cropAngle: 14 });
+  await until(() => es().draft.cropW < 0.9, 3000, 'crop fit to angle').catch(() => {});
+  R.cropFitsAngle = es().draft.cropW < 0.9 && es().draft.cropW > 0.3;
   // Apply a half-frame crop through the dev bridge, then exit crop mode.
   mw.esUpdate({ cropX: 0.2, cropY: 0.2, cropW: 0.5, cropH: 0.5, cropAngle: 0 });
   await sleep(50);

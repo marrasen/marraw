@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Params } from '@/api/edits';
 import { cn } from '@/lib/utils';
+import { fitCropToRotation, rectCornersCovered } from '@/lib/crop';
 
 // Which edges a drag moves. Corner/edge handles set one or both; an interior
 // drag moves the whole rectangle.
@@ -33,11 +34,13 @@ function currentRect(draft: Params): Rect {
 export function CropOverlay({
   draft,
   ratioFrac,
+  frameAspect,
   onChange,
   onCommit,
 }: {
   draft: Params;
   ratioFrac: number | null;
+  frameAspect: number; // full-frame displayed width / height (for rotation math)
   onChange: (patch: Partial<Params>) => void;
   onCommit: () => void;
 }) {
@@ -55,10 +58,20 @@ export function CropOverlay({
     rectRef.current = rc;
     setRectState(rc);
   };
+  // Resync from the draft when it changes externally, and keep the crop clear
+  // of the black wedge the straighten angle exposes: as the angle changes the
+  // rect is shrunk to the largest inscribed rectangle and pushed back to the
+  // draft. fitCropToRotation is idempotent, so once fitted this settles.
   useEffect(() => {
-    if (!drag.current) setRect(currentRect(draft));
+    if (drag.current) return;
+    const base = currentRect(draft);
+    const fitted = fitCropToRotation(base, draft.cropAngle, frameAspect);
+    setRect(fitted);
+    if (fitted !== base) {
+      onChange({ cropX: fitted.x, cropY: fitted.y, cropW: fitted.w, cropH: fitted.h });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.cropX, draft.cropY, draft.cropW, draft.cropH]);
+  }, [draft.cropX, draft.cropY, draft.cropW, draft.cropH, draft.cropAngle, frameAspect]);
 
   const pointFrac = (e: React.PointerEvent): [number, number] => {
     const el = rootRef.current!;
@@ -127,6 +140,9 @@ export function CropOverlay({
     rc.h = Math.min(rc.h, 1 - Math.max(0, rc.y));
     rc.x = clamp01(rc.x);
     rc.y = clamp01(rc.y);
+    // With a straighten angle, a move that would expose the black wedge is
+    // rejected — the handle stops at the rotated image's edge.
+    if (draft.cropAngle !== 0 && !rectCornersCovered(rc, draft.cropAngle, frameAspect)) return;
     setRect(rc); // local only — no store write while dragging
   };
 

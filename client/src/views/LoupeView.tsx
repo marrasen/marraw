@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
 import { esClearPreview, esCommit, esPickWB, esSetCropping, esUpdate, useEditSession } from '@/lib/editSession';
 import { useUIStore } from '@/stores/uiStore';
-import { displayDims as fullDisplayDims, renderedDims, ASPECT_PRESETS } from '@/lib/crop';
+import { displayDims as fullDisplayDims, renderedDims, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
 import type { Params } from '@/api/edits';
 
@@ -304,7 +304,13 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
       h = 1;
       w = rf;
     }
-    esUpdate(client, { cropX: (1 - w) / 2, cropY: (1 - h) / 2, cropW: w, cropH: h });
+    // Shrink to the black-free region if a straighten angle is set.
+    const fitted = fitCropToRotation(
+      { x: (1 - w) / 2, y: (1 - h) / 2, w, h },
+      draft?.cropAngle ?? 0,
+      fdw / fdh,
+    );
+    esUpdate(client, { cropX: fitted.x, cropY: fitted.y, cropW: fitted.w, cropH: fitted.h });
     esCommit(client);
   };
 
@@ -363,6 +369,7 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
               <CropOverlay
                 draft={draft}
                 ratioFrac={aspectRatioFrac(aspectKey, fdw, fdh)}
+                frameAspect={fdw / fdh}
                 onChange={(patch) => esUpdate(client, patch)}
                 onCommit={() => esCommit(client)}
               />
