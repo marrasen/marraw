@@ -147,6 +147,7 @@ func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma 
 	// external editing.
 	rgba = pyramid.ApplyGeometry(rgba, params)
 	pyramid.ApplyLook(rgba, lookGamma, params)
+	pyramid.ApplyDetail(rgba, params)
 	out := resizeRGBA(rgba, longEdge)
 	return jpeg.Encode(f, out, &jpeg.Options{Quality: quality})
 }

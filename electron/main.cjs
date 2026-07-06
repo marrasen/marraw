@@ -86,7 +86,10 @@ async function createWindow() {
   if (process.env.MARRAW_LOUPE) query.loupe = '1';
   if (DEV) {
     const qs = new URLSearchParams(query).toString();
-    await win.loadURL(`http://localhost:5173/?${qs}`);
+    // Vite auto-increments its port when 5173 is taken by another project;
+    // MARRAW_VITE_PORT points dev Electron at the right instance.
+    const vitePort = process.env.MARRAW_VITE_PORT || '5173';
+    await win.loadURL(`http://localhost:${vitePort}/?${qs}`);
     win.webContents.openDevTools({ mode: 'detach' });
   } else {
     await win.loadFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'), { query });

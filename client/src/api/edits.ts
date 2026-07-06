@@ -67,6 +67,10 @@ export interface Params {
     splitHighlightHue: number;
     splitHighlightAmt: number;
     vignette: number;
+    texture: number;
+    clarity: number;
+    dehaze: number;
+    sharpen: number;
     demosaic: DemosaicType;
     caRed: number;
     caBlue: number;

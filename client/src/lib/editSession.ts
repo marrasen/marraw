@@ -45,6 +45,10 @@ export const NEUTRAL: Params = {
   splitHighlightHue: 0,
   splitHighlightAmt: 0,
   vignette: 0,
+  texture: 0,
+  clarity: 0,
+  dehaze: 0,
+  sharpen: 0,
   // The server stores the default as "" — same generated-union lie as wbMode.
   demosaic: '' as Params['demosaic'],
   caRed: 0,
@@ -81,6 +85,10 @@ export type ControlId =
   | 'splitHighlightHue'
   | 'splitHighlightAmt'
   | 'vignette'
+  | 'texture'
+  | 'clarity'
+  | 'dehaze'
+  | 'sharpen'
   | 'nrThreshold'
   | 'fbddNoiseRd'
   | 'medPasses'
@@ -153,6 +161,10 @@ export const CONTROL_SPECS: Record<ControlId, ControlSpec> = {
   splitHighlightHue: { kind: 'numeric', min: 0, max: 359, step: 5, bigStep: 30, get: (p) => p.splitHighlightHue, set: (v) => ({ splitHighlightHue: v }) },
   splitHighlightAmt: { kind: 'numeric', min: 0, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.splitHighlightAmt, set: (v) => ({ splitHighlightAmt: v }) },
   vignette: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.vignette, set: (v) => ({ vignette: v }) },
+  texture: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.texture, set: (v) => ({ texture: v }) },
+  clarity: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.clarity, set: (v) => ({ clarity: v }) },
+  dehaze: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.dehaze, set: (v) => ({ dehaze: v }) },
+  sharpen: { kind: 'numeric', min: 0, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.sharpen, set: (v) => ({ sharpen: v }) },
   highlight: {
     kind: 'cycle', values: [0, 1, 2, 5],
     get: (p) => p.highlight,

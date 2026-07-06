@@ -96,6 +96,15 @@ type Params struct {
 	// Vignette darkens (>0) or brightens (<0) toward the corners.
 	Vignette float64 `json:"vignette" validate:"gte=-1,lte=1"`
 
+	// Detail controls, applied after the look stage (pyramid.ApplyDetail).
+	// Texture and Clarity are local-contrast ops at fine vs. midtone-weighted
+	// large radius; Dehaze subtracts (or, negative, adds) the estimated
+	// atmospheric veil; Sharpen is an unsharp mask at output resolution.
+	Texture float64 `json:"texture" validate:"gte=-1,lte=1"`
+	Clarity float64 `json:"clarity" validate:"gte=-1,lte=1"`
+	Dehaze  float64 `json:"dehaze" validate:"gte=-1,lte=1"`
+	Sharpen float64 `json:"sharpen" validate:"gte=0,lte=1"`
+
 	// Raw-pipeline controls. CARed/CABlue are chromatic-aberration channel
 	// scales (±1 slider ≈ ±0.2% channel magnification).
 	Demosaic Demosaic `json:"demosaic" validate:"omitempty,oneof=vng ppg ahd dht"`

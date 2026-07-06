@@ -8,8 +8,17 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  fillFrom,
   ...props
-}: SliderPrimitive.Root.Props) {
+}: SliderPrimitive.Root.Props & {
+  /**
+   * Value the filled range grows from. Defaults to `min` (the classic
+   * left-anchored fill); pass the control's neutral value to make the fill
+   * run from that point to the thumb — e.g. from the center for ±sliders
+   * whose default is 0.
+   */
+  fillFrom?: number
+}) {
   // One thumb per actual value. A plain-number value must yield ONE thumb —
   // the previous [min, max] fallback rendered a phantom second thumb that
   // broke base-ui's click-on-track value jumping.
@@ -22,6 +31,14 @@ function Slider({
         : defaultValue != null
           ? [defaultValue]
           : [min]
+
+  // Custom fill origin: base-ui's Indicator always anchors at the track
+  // start, so an origin-anchored fill is drawn by hand from percentages.
+  const pctOf = (v: number) =>
+    max === min ? 0 : (Math.min(max, Math.max(min, v)) - min) / (max - min) * 100
+  const useOriginFill = fillFrom != null && _values.length === 1
+  const valPct = pctOf(_values[0])
+  const originPct = pctOf(fillFrom ?? min)
 
   return (
     <SliderPrimitive.Root
@@ -39,10 +56,21 @@ function Slider({
           data-slot="slider-track"
           className="relative grow overflow-hidden rounded-full bg-muted select-none data-horizontal:h-1 data-horizontal:w-full data-vertical:h-full data-vertical:w-1"
         >
-          <SliderPrimitive.Indicator
-            data-slot="slider-range"
-            className="bg-primary select-none data-horizontal:h-full data-vertical:w-full"
-          />
+          {useOriginFill ? (
+            <span
+              data-slot="slider-range"
+              className="absolute h-full rounded-full bg-primary select-none"
+              style={{
+                left: `${Math.min(valPct, originPct)}%`,
+                width: `${Math.abs(valPct - originPct)}%`,
+              }}
+            />
+          ) : (
+            <SliderPrimitive.Indicator
+              data-slot="slider-range"
+              className="bg-primary select-none data-horizontal:h-full data-vertical:w-full"
+            />
+          )}
         </SliderPrimitive.Track>
         {Array.from({ length: _values.length }, (_, index) => (
           <SliderPrimitive.Thumb

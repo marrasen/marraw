@@ -302,6 +302,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	rgba = ApplyGeometry(rgba, edits)
 	if level == "full" {
 		ApplyLook(rgba, gamma, edits)
+		ApplyDetail(rgba, edits)
 		if err := c.writeTiles(rgba, photo.CacheKey, editHash); err != nil {
 			return err
 		}
@@ -311,6 +312,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// these sizes.
 	scaled := scaleToLongEdge(rgba, 2048)
 	ApplyLook(scaled, gamma, edits)
+	ApplyDetail(scaled, edits)
 	return c.WriteLevels(scaled, photo.CacheKey, editHash, 2048, 1024, 512, 256)
 }
 
@@ -434,6 +436,7 @@ func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGam
 		dst = scale(ApplyGeometry(src, edits))
 	}
 	ApplyLook(dst, lookGamma, edits)
+	ApplyDetail(dst, edits)
 	return c.writeJPEG(dst, cacheKey, "2048", editHash, 80)
 }
 

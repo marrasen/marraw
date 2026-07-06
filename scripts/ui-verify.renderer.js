@@ -101,7 +101,9 @@ try {
   }
 
   // --- WB controls present -------------------------------------------------
-  R.wbControls = ['As shot', 'Auto', 'Kelvin', 'Picked'].every((t) => buttons().some((b) => b.textContent.trim() === t));
+  // Picked mode lives in the icon-only pipette button (identified by title).
+  R.wbControls = ['As shot', 'Auto', 'Kelvin'].every((t) => buttons().some((b) => b.textContent.trim() === t)) &&
+    buttons().some((b) => (b.title || '').toLowerCase().includes('white balance'));
   R.wbSliders = !!sliderRowByLabel('Temperature') && !!sliderRowByLabel('Tint');
   R.newSliders = !!sliderRowByLabel('Gamma') && !!sliderRowByLabel('Shadow slope') && !!sliderRowByLabel('Median passes');
   R.highlightButtons = ['Clip', 'Unclip', 'Blend', 'Rebuild'].every((t) => buttons().some((b) => b.textContent.trim() === t));

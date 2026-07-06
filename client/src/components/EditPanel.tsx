@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Star, Check, X, Pipette, Undo2, Redo2, Crop } from 'lucide-react';
+import { Star, Check, X, Pipette, Undo2, Redo2, Crop, ChevronRight, RotateCcw } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
@@ -28,6 +28,7 @@ import {
   esUndo,
   esUpdate,
   useEditSession,
+  NEUTRAL,
   type ControlId,
 } from '@/lib/editSession';
 
@@ -170,10 +171,35 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
     onFocusControl: () => esSetActive(control),
   });
 
+  // Clear button handler: preview + persist the default in one go.
+  const clear = (patch: Partial<Params>) => {
+    update(patch);
+    commit(patch);
+  };
+
+  const changed = {
+    crop: groupChanged(draft, ['cropX', 'cropY', 'cropW', 'cropH', 'cropAngle']),
+    tone: groupChanged(draft, [
+      'expEV', 'expPreserve', 'bright', 'gamma', 'shadow',
+      'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
+    ]),
+    presence: groupChanged(draft, ['clarity', 'texture', 'dehaze']),
+    wb: groupChanged(draft, ['wbMode', 'wbMul', 'wbTemp', 'wbTint', 'wbKelvin']),
+    color: groupChanged(draft, [
+      'saturation', 'vibrance',
+      'splitShadowHue', 'splitShadowAmt', 'splitHighlightHue', 'splitHighlightAmt',
+    ]),
+    effects: groupChanged(draft, ['vignette']),
+    detail: groupChanged(draft, [
+      'sharpen', 'highlight', 'nrThreshold', 'fbddNoiseRd', 'medPasses',
+      'demosaic', 'caRed', 'caBlue',
+    ]),
+  };
+
   const kelvinMode = draft.wbMode === 'kelvin';
   return (
-    <div className="flex flex-col gap-4 p-4 text-sm">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-2.5 p-3 text-sm">
+      <div className="flex items-center gap-2 px-1">
         <h2 className="font-medium">Develop</h2>
         {targetCount > 1 && (
           <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">
@@ -190,110 +216,130 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         </span>
       </div>
 
-      <Section>Crop &amp; straighten</Section>
-      <Button
-        size="sm"
-        variant={cropping ? 'default' : 'outline'}
-        className="justify-start"
-        onClick={() => {
-          // The overlay lives in the loupe, so entering crop opens it.
-          if (!cropping) setView('loupe');
-          esSetCropping(client, !cropping);
-        }}
-        title="Crop &amp; straighten (R)"
-      >
-        <Crop data-icon="inline-start" />
-        {cropping ? 'Done cropping' : 'Crop'}
-        <kbd className="ml-auto text-[10px] opacity-60">R</kbd>
-      </Button>
-      <EditSlider
-        label="Straighten"
-        value={draft.cropAngle}
-        display={draft.cropAngle === 0 ? '0°' : `${draft.cropAngle > 0 ? '+' : ''}${draft.cropAngle.toFixed(1)}°`}
-        min={-15}
-        max={15}
-        step={0.1}
-        onChange={(v) => update({ cropAngle: v })}
-        onCommit={(v) => commit({ cropAngle: v })}
-        active={activeControl === 'cropAngle'}
-        // Straightening opens the crop overlay, where the angle previews as an
-        // instant client-side rotation instead of a backend re-render.
-        onFocusControl={() => {
-          esSetActive('cropAngle');
-          if (!cropping) {
-            setView('loupe');
-            esSetCropping(client, true);
-          }
-        }}
-      />
+      <Group id="crop" title="Crop & straighten" changed={changed.crop}>
+        <Button
+          size="sm"
+          variant={cropping ? 'default' : 'outline'}
+          className="justify-start"
+          onClick={() => {
+            // The overlay lives in the loupe, so entering crop opens it.
+            if (!cropping) setView('loupe');
+            esSetCropping(client, !cropping);
+          }}
+          title="Crop &amp; straighten (R)"
+        >
+          <Crop data-icon="inline-start" />
+          {cropping ? 'Done cropping' : 'Crop'}
+          <kbd className="ml-auto text-[10px] opacity-60">R</kbd>
+        </Button>
+        <EditSlider
+          label="Straighten"
+          value={draft.cropAngle}
+          display={draft.cropAngle === 0 ? '0°' : `${draft.cropAngle > 0 ? '+' : ''}${draft.cropAngle.toFixed(1)}°`}
+          min={-15}
+          max={15}
+          step={0.1}
+          neutral={0}
+          onChange={(v) => update({ cropAngle: v })}
+          onCommit={(v) => commit({ cropAngle: v })}
+          onClear={() => clear({ cropAngle: 0 })}
+          active={activeControl === 'cropAngle'}
+          // Straightening opens the crop overlay, where the angle previews as an
+          // instant client-side rotation instead of a backend re-render.
+          onFocusControl={() => {
+            esSetActive('cropAngle');
+            if (!cropping) {
+              setView('loupe');
+              esSetCropping(client, true);
+            }
+          }}
+        />
+      </Group>
 
-      <Section>Tone</Section>
-      <EditSlider
-        label="Exposure"
-        hotkey="E"
-        value={draft.expEV}
-        display={`${draft.expEV >= 0 ? '+' : ''}${draft.expEV.toFixed(2)} EV`}
-        min={-2}
-        max={3}
-        step={0.05}
-        onChange={(v) => update({ expEV: v })}
-        onCommit={(v) => commit({ expEV: v })}
-        {...num('expEV')}
-      />
-      <EditSlider
-        label="Preserve highlights"
-        value={draft.expPreserve}
-        display={draft.expPreserve === 0 ? 'Off' : draft.expPreserve.toFixed(2)}
-        min={0}
-        max={1}
-        step={0.05}
-        onChange={(v) => update({ expPreserve: v })}
-        onCommit={(v) => commit({ expPreserve: v })}
-        {...num('expPreserve')}
-      />
-      <EditSlider
-        label="Brightness"
-        hotkey="B"
-        value={draft.bright === 0 ? 1 : draft.bright}
-        display={`${(draft.bright === 0 ? 1 : draft.bright).toFixed(2)}×`}
-        min={0.25}
-        max={4}
-        step={0.05}
-        onChange={(v) => update({ bright: v })}
-        onCommit={(v) => commit({ bright: v })}
-        {...num('bright')}
-      />
-      <EditSlider
-        label="Gamma"
-        hotkey="G"
-        value={draft.gamma === 0 ? 2.222 : draft.gamma}
-        display={(draft.gamma === 0 ? 2.222 : draft.gamma).toFixed(2)}
-        min={1}
-        max={3.5}
-        step={0.05}
-        onChange={(v) => update({ gamma: v })}
-        onCommit={(v) => commit({ gamma: v })}
-        {...num('gamma')}
-      />
-      <EditSlider
-        label="Shadow slope"
-        hotkey="S"
-        value={draft.shadow === 0 ? 4.5 : draft.shadow}
-        display={(draft.shadow === 0 ? 4.5 : draft.shadow).toFixed(1)}
-        min={1}
-        max={12}
-        step={0.5}
-        onChange={(v) => update({ shadow: v })}
-        onCommit={(v) => commit({ shadow: v })}
-        {...num('shadow')}
-      />
-      <PctSlider label="Contrast" hotkey="C" field="contrast" draft={draft} update={update} commit={commit} {...num('contrast')} />
-      <PctSlider label="Whites" field="whites" draft={draft} update={update} commit={commit} {...num('whites')} />
-      <PctSlider label="Blacks" field="blacks" draft={draft} update={update} commit={commit} {...num('blacks')} />
-      <PctSlider label="Shadows" field="toneShadows" draft={draft} update={update} commit={commit} {...num('toneShadows')} />
-      <PctSlider label="Highlights" field="toneHighlights" draft={draft} update={update} commit={commit} {...num('toneHighlights')} />
+      <Group id="tone" title="Tone" changed={changed.tone}>
+        <EditSlider
+          label="Exposure"
+          hotkey="E"
+          value={draft.expEV}
+          display={`${draft.expEV >= 0 ? '+' : ''}${draft.expEV.toFixed(2)} EV`}
+          min={-2}
+          max={3}
+          step={0.05}
+          neutral={0}
+          onChange={(v) => update({ expEV: v })}
+          onCommit={(v) => commit({ expEV: v })}
+          onClear={() => clear({ expEV: 0 })}
+          {...num('expEV')}
+        />
+        <EditSlider
+          label="Preserve highlights"
+          value={draft.expPreserve}
+          display={draft.expPreserve === 0 ? 'Off' : draft.expPreserve.toFixed(2)}
+          min={0}
+          max={1}
+          step={0.05}
+          neutral={0}
+          onChange={(v) => update({ expPreserve: v })}
+          onCommit={(v) => commit({ expPreserve: v })}
+          onClear={() => clear({ expPreserve: 0 })}
+          {...num('expPreserve')}
+        />
+        <EditSlider
+          label="Brightness"
+          hotkey="B"
+          value={draft.bright === 0 ? 1 : draft.bright}
+          display={`${(draft.bright === 0 ? 1 : draft.bright).toFixed(2)}×`}
+          min={0.25}
+          max={4}
+          step={0.05}
+          neutral={1}
+          onChange={(v) => update({ bright: v })}
+          onCommit={(v) => commit({ bright: v })}
+          onClear={() => clear({ bright: 0 })}
+          {...num('bright')}
+        />
+        <EditSlider
+          label="Gamma"
+          hotkey="G"
+          value={draft.gamma === 0 ? 2.222 : draft.gamma}
+          display={(draft.gamma === 0 ? 2.222 : draft.gamma).toFixed(2)}
+          min={1}
+          max={3.5}
+          step={0.05}
+          neutral={2.222}
+          onChange={(v) => update({ gamma: v })}
+          onCommit={(v) => commit({ gamma: v })}
+          onClear={() => clear({ gamma: 0 })}
+          {...num('gamma')}
+        />
+        <EditSlider
+          label="Shadow slope"
+          hotkey="S"
+          value={draft.shadow === 0 ? 4.5 : draft.shadow}
+          display={(draft.shadow === 0 ? 4.5 : draft.shadow).toFixed(1)}
+          min={1}
+          max={12}
+          step={0.5}
+          neutral={4.5}
+          onChange={(v) => update({ shadow: v })}
+          onCommit={(v) => commit({ shadow: v })}
+          onClear={() => clear({ shadow: 0 })}
+          {...num('shadow')}
+        />
+        <PctSlider label="Contrast" hotkey="C" field="contrast" draft={draft} update={update} commit={commit} {...num('contrast')} />
+        <PctSlider label="Whites" field="whites" draft={draft} update={update} commit={commit} {...num('whites')} />
+        <PctSlider label="Blacks" field="blacks" draft={draft} update={update} commit={commit} {...num('blacks')} />
+        <PctSlider label="Shadows" field="toneShadows" draft={draft} update={update} commit={commit} {...num('toneShadows')} />
+        <PctSlider label="Highlights" field="toneHighlights" draft={draft} update={update} commit={commit} {...num('toneHighlights')} />
+      </Group>
 
-      <Section>White balance</Section>
+      <Group id="presence" title="Presence" changed={changed.presence}>
+        <PctSlider label="Clarity" field="clarity" draft={draft} update={update} commit={commit} {...num('clarity')} />
+        <PctSlider label="Texture" field="texture" draft={draft} update={update} commit={commit} {...num('texture')} />
+        <PctSlider label="Dehaze" field="dehaze" draft={draft} update={update} commit={commit} {...num('dehaze')} />
+      </Group>
+
+      <Group id="wb" title="White balance" changed={changed.wb}>
       <div className={cn('flex flex-col gap-1.5 rounded-md', activeControl === 'wbMode' && 'ring-2 ring-ring ring-offset-2 ring-offset-background')}>
         <span className="text-xs text-muted-foreground">
           Mode <kbd className="text-[10px] opacity-60">W</kbd>
@@ -351,8 +397,10 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           min={2000}
           max={12000}
           step={50}
+          neutral={5500}
           onChange={(v) => update({ wbKelvin: v })}
           onCommit={(v) => commit({ wbKelvin: v })}
+          onClear={() => clear({ wbKelvin: 5500 })}
           {...num('wbKelvin')}
         />
       ) : (
@@ -364,9 +412,11 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           min={-100}
           max={100}
           step={2}
+          neutral={0}
           disabled={draft.wbMode === 'auto'}
           onChange={(v) => update({ wbTemp: v / 100 })}
           onCommit={(v) => commit({ wbTemp: v / 100 })}
+          onClear={() => clear({ wbTemp: 0 })}
           {...num('wbTemp')}
         />
       )}
@@ -378,87 +428,110 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         min={-100}
         max={100}
         step={2}
+        neutral={0}
         disabled={draft.wbMode === 'auto'}
         onChange={(v) => update({ wbTint: v / 100 })}
         onCommit={(v) => commit({ wbTint: v / 100 })}
+        onClear={() => clear({ wbTint: 0 })}
         {...num('wbTint')}
       />
+      </Group>
 
-      <Section>Color</Section>
-      <PctSlider label="Saturation" hotkey="A" field="saturation" draft={draft} update={update} commit={commit} {...num('saturation')} />
-      <PctSlider label="Vibrance" hotkey="V" field="vibrance" draft={draft} update={update} commit={commit} {...num('vibrance')} />
-      <HueSlider label="Shadow tint" field="splitShadowHue" draft={draft} update={update} commit={commit} {...num('splitShadowHue')} />
-      <AmtSlider label="Shadow tint amount" field="splitShadowAmt" draft={draft} update={update} commit={commit} {...num('splitShadowAmt')} />
-      <HueSlider label="Highlight tint" field="splitHighlightHue" draft={draft} update={update} commit={commit} {...num('splitHighlightHue')} />
-      <AmtSlider label="Highlight tint amount" field="splitHighlightAmt" draft={draft} update={update} commit={commit} {...num('splitHighlightAmt')} />
+      <Group id="color" title="Color" changed={changed.color}>
+        <PctSlider label="Saturation" hotkey="A" field="saturation" draft={draft} update={update} commit={commit} {...num('saturation')} />
+        <PctSlider label="Vibrance" hotkey="V" field="vibrance" draft={draft} update={update} commit={commit} {...num('vibrance')} />
+        <HueSlider label="Shadow tint" field="splitShadowHue" draft={draft} update={update} commit={commit} {...num('splitShadowHue')} />
+        <AmtSlider label="Shadow tint amount" field="splitShadowAmt" draft={draft} update={update} commit={commit} {...num('splitShadowAmt')} />
+        <HueSlider label="Highlight tint" field="splitHighlightHue" draft={draft} update={update} commit={commit} {...num('splitHighlightHue')} />
+        <AmtSlider label="Highlight tint amount" field="splitHighlightAmt" draft={draft} update={update} commit={commit} {...num('splitHighlightAmt')} />
+      </Group>
 
-      <Section>Effects</Section>
-      <PctSlider label="Vignette" hotkey="O" field="vignette" draft={draft} update={update} commit={commit} {...num('vignette')} />
+      <Group id="effects" title="Effects" changed={changed.effects}>
+        <PctSlider label="Vignette" hotkey="O" field="vignette" draft={draft} update={update} commit={commit} {...num('vignette')} />
+      </Group>
 
-      <Section>Detail</Section>
-      <ButtonRow
-        label="Highlight recovery"
-        hotkey="H"
-        active={activeControl === 'highlight'}
-        options={HIGHLIGHT_OPTIONS}
-        value={draft.highlight}
-        onChange={(v) => {
-          update({ highlight: v });
-          commit({ highlight: v });
-        }}
-      />
+      <Group id="detail" title="Detail" changed={changed.detail}>
+        <EditSlider
+          label="Sharpen"
+          value={draft.sharpen * 100}
+          display={draft.sharpen === 0 ? 'Off' : String(Math.round(draft.sharpen * 100))}
+          min={0}
+          max={100}
+          step={2}
+          neutral={0}
+          onChange={(v) => update({ sharpen: v / 100 })}
+          onCommit={(v) => commit({ sharpen: v / 100 })}
+          onClear={() => clear({ sharpen: 0 })}
+          {...num('sharpen')}
+        />
+        <ButtonRow
+          label="Highlight recovery"
+          hotkey="H"
+          active={activeControl === 'highlight'}
+          options={HIGHLIGHT_OPTIONS}
+          value={draft.highlight}
+          onChange={(v) => {
+            update({ highlight: v });
+            commit({ highlight: v });
+          }}
+        />
 
-      <EditSlider
-        label="Noise reduction"
-        hotkey="N"
-        value={draft.nrThreshold}
-        display={draft.nrThreshold === 0 ? 'Off' : String(Math.round(draft.nrThreshold))}
-        min={0}
-        max={1000}
-        step={25}
-        onChange={(v) => update({ nrThreshold: v })}
-        onCommit={(v) => commit({ nrThreshold: v })}
-        {...num('nrThreshold')}
-      />
+        <EditSlider
+          label="Noise reduction"
+          hotkey="N"
+          value={draft.nrThreshold}
+          display={draft.nrThreshold === 0 ? 'Off' : String(Math.round(draft.nrThreshold))}
+          min={0}
+          max={1000}
+          step={25}
+          neutral={0}
+          onChange={(v) => update({ nrThreshold: v })}
+          onCommit={(v) => commit({ nrThreshold: v })}
+          onClear={() => clear({ nrThreshold: 0 })}
+          {...num('nrThreshold')}
+        />
 
-      <ButtonRow
-        label="FBDD denoise"
-        active={activeControl === 'fbddNoiseRd'}
-        options={FBDD_OPTIONS}
-        value={draft.fbddNoiseRd}
-        onChange={(v) => {
-          update({ fbddNoiseRd: v });
-          commit({ fbddNoiseRd: v });
-        }}
-      />
+        <ButtonRow
+          label="FBDD denoise"
+          active={activeControl === 'fbddNoiseRd'}
+          options={FBDD_OPTIONS}
+          value={draft.fbddNoiseRd}
+          onChange={(v) => {
+            update({ fbddNoiseRd: v });
+            commit({ fbddNoiseRd: v });
+          }}
+        />
 
-      <EditSlider
-        label="Median passes"
-        value={draft.medPasses}
-        display={draft.medPasses === 0 ? 'Off' : String(draft.medPasses)}
-        min={0}
-        max={5}
-        step={1}
-        onChange={(v) => update({ medPasses: v })}
-        onCommit={(v) => commit({ medPasses: v })}
-        {...num('medPasses')}
-      />
+        <EditSlider
+          label="Median passes"
+          value={draft.medPasses}
+          display={draft.medPasses === 0 ? 'Off' : String(draft.medPasses)}
+          min={0}
+          max={5}
+          step={1}
+          neutral={0}
+          onChange={(v) => update({ medPasses: v })}
+          onCommit={(v) => commit({ medPasses: v })}
+          onClear={() => clear({ medPasses: 0 })}
+          {...num('medPasses')}
+        />
 
-      <ButtonRow
-        label="Demosaic"
-        hotkey="D"
-        active={activeControl === 'demosaic'}
-        options={DEMOSAIC_OPTIONS}
-        // Same generated-union lie as wbMode: the stored default is "".
-        value={(draft.demosaic as string) || 'auto'}
-        onChange={(v) => {
-          const patch = { demosaic: (v === 'auto' ? '' : v) as Params['demosaic'] };
-          update(patch);
-          commit(patch);
-        }}
-      />
-      <PctSlider label="CA red/cyan" field="caRed" draft={draft} update={update} commit={commit} {...num('caRed')} />
-      <PctSlider label="CA blue/yellow" field="caBlue" draft={draft} update={update} commit={commit} {...num('caBlue')} />
+        <ButtonRow
+          label="Demosaic"
+          hotkey="D"
+          active={activeControl === 'demosaic'}
+          options={DEMOSAIC_OPTIONS}
+          // Same generated-union lie as wbMode: the stored default is "".
+          value={(draft.demosaic as string) || 'auto'}
+          onChange={(v) => {
+            const patch = { demosaic: (v === 'auto' ? '' : v) as Params['demosaic'] };
+            update(patch);
+            commit(patch);
+          }}
+        />
+        <PctSlider label="CA red/cyan" field="caRed" draft={draft} update={update} commit={commit} {...num('caRed')} />
+        <PctSlider label="CA blue/yellow" field="caBlue" draft={draft} update={update} commit={commit} {...num('caBlue')} />
+      </Group>
 
       <Separator />
 
@@ -493,8 +566,60 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
   );
 }
 
-function Section({ children }: { children: React.ReactNode }) {
-  return <h3 className="-mb-2 mt-1 text-xs font-medium text-muted-foreground/80">{children}</h3>;
+// isDefault reports whether one param still holds its stored default —
+// used for the per-group "has adjustments" dot and the per-slider clear
+// buttons. The WB mode and demosaic defaults are stored as "" (see the
+// generated-union notes above); everything else defaults to NEUTRAL.
+function isDefault(draft: Params, key: keyof Params): boolean {
+  const v = draft[key];
+  if (key === 'wbMode') return (v as string) === '' || v === 'camera';
+  if (key === 'wbMul') return (v as number[]).every((m) => m === 0);
+  if (key === 'demosaic') return (v as string) === '';
+  return v === NEUTRAL[key];
+}
+
+function groupChanged(draft: Params, keys: (keyof Params)[]): boolean {
+  return keys.some((k) => !isDefault(draft, k));
+}
+
+// Group is one collapsible develop-panel section. The open state persists
+// per group in localStorage; a dot in the header marks a group holding
+// non-default values, so a collapsed group still shows it carries edits.
+function Group({
+  id,
+  title,
+  changed,
+  children,
+}: {
+  id: string;
+  title: string;
+  changed?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(() => localStorage.getItem(`marraw:editGroup:${id}`) !== '0');
+  const toggle = () => {
+    setOpen(!open);
+    localStorage.setItem(`marraw:editGroup:${id}`, open ? '0' : '1');
+  };
+  return (
+    <section className="overflow-hidden rounded-lg border bg-card">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 bg-muted/40 px-2.5 py-2 text-left transition-colors hover:bg-muted/70"
+        onClick={toggle}
+        aria-expanded={open}
+      >
+        <ChevronRight
+          className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')}
+        />
+        <span className="text-xs font-medium">{title}</span>
+        {changed && (
+          <span className="ml-auto size-1.5 shrink-0 rounded-full bg-primary" title="Has adjustments" />
+        )}
+      </button>
+      {open && <div className="flex flex-col gap-3.5 p-3">{children}</div>}
+    </section>
+  );
 }
 
 // The ±1 params rendered as ±100 sliders share everything but the field.
@@ -507,6 +632,9 @@ type PctField =
   | 'saturation'
   | 'vibrance'
   | 'vignette'
+  | 'texture'
+  | 'clarity'
+  | 'dehaze'
   | 'caRed'
   | 'caBlue';
 
@@ -538,8 +666,13 @@ function PctSlider({
       min={-100}
       max={100}
       step={2}
+      neutral={0}
       onChange={(v) => update({ [field]: v / 100 })}
       onCommit={(v) => commit({ [field]: v / 100 })}
+      onClear={() => {
+        update({ [field]: 0 });
+        commit({ [field]: 0 });
+      }}
       active={active}
       onFocusControl={onFocusControl}
     />
@@ -571,8 +704,13 @@ function HueSlider({
       min={0}
       max={359}
       step={5}
+      neutral={0}
       onChange={(v) => update({ [field]: v })}
       onCommit={(v) => commit({ [field]: v })}
+      onClear={() => {
+        update({ [field]: 0 });
+        commit({ [field]: 0 });
+      }}
       active={active}
       onFocusControl={onFocusControl}
     />
@@ -604,8 +742,13 @@ function AmtSlider({
       min={0}
       max={100}
       step={2}
+      neutral={0}
       onChange={(v) => update({ [field]: v / 100 })}
       onCommit={(v) => commit({ [field]: v / 100 })}
+      onClear={() => {
+        update({ [field]: 0 });
+        commit({ [field]: 0 });
+      }}
       active={active}
       onFocusControl={onFocusControl}
     />
@@ -661,11 +804,13 @@ export function EditSlider({
   min,
   max,
   step,
+  neutral,
   disabled,
   active,
   onFocusControl,
   onChange,
   onCommit,
+  onClear,
 }: {
   label: string;
   hotkey?: string;
@@ -674,17 +819,23 @@ export function EditSlider({
   min: number;
   max: number;
   step: number;
+  /** Display-space default: the fill runs from here to the thumb, and the
+   * clear button shows only while the value differs from it. */
+  neutral?: number;
   disabled?: boolean;
   active?: boolean;
   onFocusControl?: () => void;
   onChange: (v: number) => void;
   onCommit: (v: number) => void;
+  /** Resets the control to its default (shown only when neutral is set). */
+  onClear?: () => void;
 }) {
   // During a drag the thumb tracks a local value, so it stays smooth even
   // while the store update (which re-renders the whole panel) is coalesced to
   // one frame. `dragging === null` means idle → follow the prop.
   const [dragging, setDragging] = useState<number | null>(null);
   const shown = dragging ?? value;
+  const changed = neutral != null && Math.abs(value - neutral) > 1e-9;
   return (
     <div
       className={cn(
@@ -694,17 +845,36 @@ export function EditSlider({
       )}
       onPointerDown={onFocusControl}
     >
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-center justify-between gap-1">
         <span className="text-xs text-muted-foreground">
           {label} {hotkey && <kbd className="text-[10px] opacity-60">{hotkey}</kbd>}
         </span>
-        <span className="text-xs tabular-nums">{display}</span>
+        <span className="ml-auto text-xs tabular-nums">{display}</span>
+        {onClear && neutral != null && (
+          <button
+            type="button"
+            className={cn(
+              'text-muted-foreground transition-colors hover:text-foreground',
+              !changed && 'invisible',
+            )}
+            title={`Reset ${label.toLowerCase()}`}
+            aria-label={`Reset ${label.toLowerCase()}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDragging(null);
+              onClear();
+            }}
+          >
+            <RotateCcw className="size-3" />
+          </button>
+        )}
       </div>
       <Slider
         value={shown}
         min={min}
         max={max}
         step={step}
+        fillFrom={neutral}
         disabled={disabled}
         onValueChange={(v) => {
           setDragging(v as number);
@@ -763,8 +933,10 @@ function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
         min={-2}
         max={2}
         step={0.25}
+        neutral={0}
         onChange={setEv}
         onCommit={setEv}
+        onClear={() => setEv(0)}
       />
       <EditSlider
         label="Contrast adjustment"
@@ -773,8 +945,10 @@ function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
         min={-100}
         max={100}
         step={2}
+        neutral={0}
         onChange={(v) => setContrast(v / 100)}
         onCommit={(v) => setContrast(v / 100)}
+        onClear={() => setContrast(0)}
       />
       <EditSlider
         label="Saturation adjustment"
@@ -783,8 +957,10 @@ function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
         min={-100}
         max={100}
         step={2}
+        neutral={0}
         onChange={(v) => setSaturation(v / 100)}
         onCommit={(v) => setSaturation(v / 100)}
+        onClear={() => setSaturation(0)}
       />
       <Button
         size="sm"
