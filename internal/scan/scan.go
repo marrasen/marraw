@@ -4,7 +4,9 @@ package scan
 
 import (
 	"context"
+	"encoding/json"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,8 +15,8 @@ import (
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
+	"github.com/marrasen/marraw/internal/sidecar"
 	"github.com/marrasen/marraw/internal/store"
-	"os"
 )
 
 var rawExts = map[string]bool{
@@ -82,7 +84,119 @@ func (s *Scanner) OpenFolder(ctx context.Context, path string) (int64, int, erro
 	if err != nil {
 		return 0, 0, err
 	}
+	// Reconcile portable sidecars: adopt edits copied in with the folder, and
+	// backfill sidecars for catalog-only intent. Best-effort — a folder must
+	// still open if sidecar I/O fails.
+	if err := s.importSidecars(ctx, folderID, abs, entries); err != nil {
+		log.Printf("scan: import sidecars %s: %v", abs, err)
+	}
 	return folderID, count, nil
+}
+
+// importSidecars reconciles each RAW's on-disk sidecar with its catalog row.
+// When a sidecar is present and newer it overwrites the row (last-writer-wins,
+// enforced in the store); when a sidecar is absent but the row carries intent,
+// a sidecar is written so the folder becomes self-contained. Returns after
+// notifying subscribers if any row changed.
+func (s *Scanner) importSidecars(ctx context.Context, folderID int64, folderPath string, entries []store.FileEntry) error {
+	photos, err := s.DB.ListPhotos(ctx, folderID)
+	if err != nil {
+		return err
+	}
+	byName := make(map[string]store.Photo, len(photos))
+	for _, p := range photos {
+		byName[p.FileName] = p
+	}
+
+	var applied int
+	for _, e := range entries {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		rawPath := filepath.Join(folderPath, e.Name)
+		sc, err := sidecar.Read(rawPath)
+		if err != nil {
+			log.Printf("scan: read sidecar %s: %v", e.Name, err)
+			continue
+		}
+		if sc != nil {
+			if s.applySidecar(ctx, folderID, e, sc) {
+				applied++
+			}
+			continue
+		}
+		// No sidecar on disk: backfill one from existing catalog intent, unless
+		// sidecar writes are disabled (importing above still runs regardless).
+		if p, ok := byName[e.Name]; ok && hasIntent(p) && s.DB.SidecarWritesEnabled(ctx) {
+			editJSON := ""
+			if p.EditParams.Valid {
+				editJSON = p.EditParams.String
+			}
+			f := sidecar.Build(p.FileName, p.FileSize, p.Rating, p.Flag, editJSON, sidecarUpdatedMs(p))
+			if err := sidecar.Write(rawPath, f); err != nil {
+				log.Printf("scan: backfill sidecar %s: %v", e.Name, err)
+			}
+		}
+	}
+	if applied > 0 && s.OnPhotosChanged != nil {
+		s.OnPhotosChanged(folderID)
+	}
+	return nil
+}
+
+// applySidecar validates a sidecar against the file it names and, if it wins
+// the last-writer-wins check, writes its intent into the catalog. Returns
+// whether the row changed.
+func (s *Scanner) applySidecar(ctx context.Context, folderID int64, e store.FileEntry, sc *sidecar.File) bool {
+	// A sidecar whose recorded size disagrees with the file it sits beside was
+	// almost certainly left over from a different file; ignore it rather than
+	// apply the wrong edit.
+	if sc.FileSize != 0 && sc.FileSize != e.Size {
+		log.Printf("scan: sidecar %s size mismatch (%d vs %d), ignoring", e.Name, sc.FileSize, e.Size)
+		return false
+	}
+
+	var editJSON *string
+	editHash := edit.BaseHash
+	if len(sc.Edit) > 0 {
+		ep, err := edit.Parse(string(sc.Edit))
+		if err != nil {
+			log.Printf("scan: sidecar %s malformed edit, importing rating/flag only: %v", e.Name, err)
+		} else {
+			ep.Normalize()
+			if !ep.IsNeutral() {
+				// Re-marshal the normalized params so the stored JSON and edit
+				// hash match exactly what the editor would have written.
+				if b, err := json.Marshal(ep); err == nil {
+					str := string(b)
+					editJSON = &str
+					editHash = ep.Hash()
+				}
+			}
+		}
+	}
+
+	ok, err := s.DB.ApplyImportedEdit(ctx, folderID, e.Name, sc.Rating, sc.Flag, editJSON, editHash, sc.UpdatedAt)
+	if err != nil {
+		log.Printf("scan: apply sidecar %s: %v", e.Name, err)
+		return false
+	}
+	return ok
+}
+
+// hasIntent reports whether a photo carries portable intent worth mirroring to
+// a sidecar (a rating, a cull flag, or a non-neutral edit).
+func hasIntent(p store.Photo) bool {
+	return p.Rating != 0 || p.Flag != 0 || p.EditParams.Valid
+}
+
+// sidecarUpdatedMs is the timestamp to record in a backfilled sidecar; 0 for a
+// row that predates the updated_at column.
+func sidecarUpdatedMs(p store.Photo) int64 {
+	if p.UpdatedAt.Valid {
+		return p.UpdatedAt.Int64
+	}
+	return 0
 }
 
 // MetaCount returns how many photos in the folder still need metadata.

@@ -89,6 +89,14 @@ type FolderInfo struct {
 	PhotoCount int    `json:"photoCount"`
 }
 
+// AppSettings is the client-facing application preferences record.
+type AppSettings struct {
+	// SidecarWrites mirrors edits/rating/flag to portable .marraw.json files
+	// next to each RAW, so copying a folder carries the work to another
+	// machine. Importing existing sidecars happens regardless of this flag.
+	SidecarWrites bool `json:"sidecarWrites"`
+}
+
 // DeleteResult reports how many photos DeletePhotos moved to the trash.
 type DeleteResult struct {
 	Deleted int `json:"deleted"`

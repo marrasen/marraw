@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/marrasen/aprot"
 
@@ -355,15 +356,17 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 		jsonPtr = &s
 		hash = params.Hash()
 	}
-	if err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash); err != nil {
+	if err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli()); err != nil {
 		return err
 	}
 
 	// Warm the grid thumb for the new state so the grid updates without a
-	// scroll-triggered fetch racing the patch.
+	// scroll-triggered fetch racing the patch, and mirror the new intent to
+	// the photo's portable sidecar.
 	if p, err := e.deps.DB.GetPhoto(context.WithoutCancel(ctx), photoID); err == nil {
 		h := hash
 		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{{ID: photoID, EditHash: &h}})
+		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)
 		go e.deps.Cache.Ensure(context.Background(), p, "512", hash, decode.PriorityVisible)
 	}
 	return nil

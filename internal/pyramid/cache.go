@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
+	"sync/atomic"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/sync/errgroup"
@@ -61,7 +63,11 @@ func TileGrid(p store.Photo, edits *edit.Params) (cols, rows int) {
 }
 
 type Cache struct {
-	dir  string
+	// dir is the on-disk cache root. It is swappable at runtime (the user can
+	// relocate the cache from Settings), so every access goes through Dir();
+	// an atomic pointer keeps the hot path (PathFor on every image serve)
+	// lock-free.
+	dir  atomic.Pointer[string]
 	pool *decode.Pool
 	db   *store.DB
 	// OnPhotoChanged, when set, is called after the cache corrects a photo
@@ -73,10 +79,77 @@ func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	return &Cache{dir: dir, pool: pool, db: db}, nil
+	c := &Cache{pool: pool, db: db}
+	c.dir.Store(&dir)
+	return c, nil
 }
 
-func (c *Cache) Dir() string { return c.dir }
+func (c *Cache) Dir() string { return *c.dir.Load() }
+
+// Relocate switches the cache to newDir and wipes the previous location — the
+// previews there are regenerable, so a moved cache starts fresh rather than
+// orphaning gigabytes. New renders write to newDir immediately; the switch is
+// atomic, and the wipe is best-effort and never touches a path that contains
+// (or sits inside) the new one.
+func (c *Cache) Relocate(newDir string) error {
+	newDir = filepath.Clean(newDir)
+	old := c.Dir()
+	if strings.EqualFold(old, newDir) {
+		return nil
+	}
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		return err
+	}
+	c.dir.Store(&newDir)
+	if old != "" && !nested(old, newDir) {
+		os.RemoveAll(old)
+	}
+	return nil
+}
+
+// Stat walks the cache and returns its total size in bytes and file count.
+func (c *Cache) Stat() (totalBytes, files int64) {
+	filepath.WalkDir(c.Dir(), func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			totalBytes += info.Size()
+			files++
+		}
+		return nil
+	})
+	return totalBytes, files
+}
+
+// Clear deletes every cached rendition, leaving the (empty) cache directory in
+// place. Returns the first removal error, if any.
+func (c *Cache) Clear() error {
+	dir := c.Dir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var firstErr error
+	for _, e := range entries {
+		if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// nested reports whether a and b are the same directory or one contains the
+// other — the guard that stops Relocate's wipe from deleting the new cache.
+func nested(a, b string) bool {
+	sep := string(filepath.Separator)
+	al := strings.ToLower(filepath.Clean(a)) + sep
+	bl := strings.ToLower(filepath.Clean(b)) + sep
+	return strings.HasPrefix(al, bl) || strings.HasPrefix(bl, al)
+}
 
 // renderVersion is baked into cache file names; bump it whenever the
 // rendering pipeline changes (tone curve, gamma, …) so stale renditions
@@ -87,13 +160,13 @@ const renderVersion = "r7"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
-	return filepath.Join(c.dir, cacheKey[:2],
+	return filepath.Join(c.Dir(), cacheKey[:2],
 		fmt.Sprintf("%s_%s_%s_%s.jpg", cacheKey, level, editHash, renderVersion))
 }
 
 // PathForTile is the cache file location for one full-resolution tile.
 func (c *Cache) PathForTile(cacheKey string, tx, ty int, editHash string) string {
-	return filepath.Join(c.dir, cacheKey[:2],
+	return filepath.Join(c.Dir(), cacheKey[:2],
 		fmt.Sprintf("%s_t%dx%d_%s_%s.jpg", cacheKey, tx, ty, editHash, renderVersion))
 }
 

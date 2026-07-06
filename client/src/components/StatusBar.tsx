@@ -1,3 +1,4 @@
+import { Settings } from 'lucide-react';
 import { useConnection } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { TaskTray } from '@/components/TaskTray';
@@ -7,6 +8,7 @@ export function StatusBar({ shown, total }: { shown: number; total: number }) {
   const { state } = useConnection();
   const selection = useUIStore((s) => s.selection);
   const view = useUIStore((s) => s.view);
+  const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
 
   return (
     <div className="flex h-6 shrink-0 items-center gap-3 border-t px-3 text-[11px] text-muted-foreground">
@@ -18,6 +20,13 @@ export function StatusBar({ shown, total }: { shown: number; total: number }) {
           )}
         />
       </span>
+      <button
+        className="flex items-center gap-1 hover:text-foreground"
+        onClick={() => setSettingsOpen(true)}
+        title="Settings"
+      >
+        <Settings className="size-3.5" />
+      </button>
       <TaskTray />
       <span className="ml-auto whitespace-nowrap">
         {shown}/{total} photos

@@ -3,6 +3,7 @@ import { FolderTree } from '@/components/FolderTree';
 import { FilterBar } from '@/components/FilterBar';
 import { EditPanel } from '@/components/EditPanel';
 import { ExportDialog } from '@/components/ExportDialog';
+import { SettingsDialog } from '@/components/SettingsDialog';
 import { StatusBar } from '@/components/StatusBar';
 import { GridView } from '@/views/GridView';
 import { LoupeView } from '@/views/LoupeView';
@@ -10,6 +11,7 @@ import { useKeyboard } from '@/lib/keyboard';
 import { usePhotos } from '@/lib/usePhotos';
 import { useUIStore } from '@/stores/uiStore';
 import { useEffect } from 'react';
+import { Settings } from 'lucide-react';
 import { openFolder } from '@/api/library';
 import { useApiClient } from '@/api/client';
 
@@ -39,11 +41,19 @@ export default function App() {
         {folderId != null ? (
           <Workspace folderId={folderId} />
         ) : (
-          <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          <main className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
             Pick a folder with RAW photos on the left to get started.
+            <button
+              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs hover:bg-accent hover:text-foreground"
+              onClick={() => useUIStore.getState().setSettingsOpen(true)}
+            >
+              <Settings className="size-3.5" />
+              Settings
+            </button>
           </main>
         )}
       </div>
+      <SettingsDialog />
       <Toaster position="bottom-right" />
     </div>
   );

@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 type DB struct {
 	*sql.DB
@@ -85,6 +85,14 @@ func (db *DB) migrate(ctx context.Context) error {
 			if _, err := tx.ExecContext(ctx,
 				`ALTER TABLE photos ADD COLUMN base_exp_ev REAL`); err != nil {
 				return fmt.Errorf("store: migrate v4: %w", err)
+			}
+		}
+		if v < 5 {
+			// Last-writer-wins timestamp (unix millis) for portable edit
+			// sidecars; NULL = never touched, so any sidecar wins on import.
+			if _, err := tx.ExecContext(ctx,
+				`ALTER TABLE photos ADD COLUMN updated_at INTEGER`); err != nil {
+				return fmt.Errorf("store: migrate v5: %w", err)
 			}
 		}
 	}

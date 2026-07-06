@@ -28,6 +28,7 @@ interface UIState {
 
   clipboard: Params | null;
   exportOpen: boolean;
+  settingsOpen: boolean;
 
   // Grid cell target width (zoom slider in the gallery).
   cellSize: number;
@@ -47,6 +48,7 @@ interface UIState {
   setVisibleIds: (ids: number[]) => void;
   setClipboard: (p: Params | null) => void;
   setExportOpen: (open: boolean) => void;
+  setSettingsOpen: (open: boolean) => void;
   setCellSize: (px: number) => void;
   setLoupeZoom: (z: 'fit' | number) => void;
 }
@@ -65,6 +67,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   visibleIds: [],
   clipboard: null,
   exportOpen: false,
+  settingsOpen: false,
   cellSize: 220,
   loupeZoom: 'fit',
 
@@ -153,6 +156,7 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   setClipboard: (p) => set({ clipboard: p }),
   setExportOpen: (open) => set({ exportOpen: open }),
+  setSettingsOpen: (open) => set({ settingsOpen: open }),
   setCellSize: (px) => set({ cellSize: Math.min(400, Math.max(120, px)) }),
   setLoupeZoom: (z) =>
     set({ loupeZoom: z === 'fit' ? z : Math.min(4, Math.max(0.05, z)) }),

@@ -58,7 +58,14 @@ func main() {
 	pool := decode.NewPool(runtime.NumCPU())
 	defer pool.Close()
 
-	cache, err := pyramid.New(filepath.Join(*dataDir, "cache", "previews"), pool, db)
+	// The preview cache lives under the data dir by default, but the user can
+	// relocate it (Settings). A stored custom directory wins at startup.
+	defaultCacheDir := filepath.Join(*dataDir, "cache", "previews")
+	cacheDir := defaultCacheDir
+	if custom := db.CacheDir(context.Background()); custom != "" {
+		cacheDir = custom
+	}
+	cache, err := pyramid.New(cacheDir, pool, db)
 	if err != nil {
 		log.Fatalf("open cache: %v", err)
 	}
@@ -67,7 +74,7 @@ func main() {
 
 	scanner := &scan.Scanner{DB: db, Cache: cache, Pool: pool}
 
-	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner}
+	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, DefaultCacheDir: defaultCacheDir}
 	registry, _, _, _ := api.NewRegistry(deps)
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any

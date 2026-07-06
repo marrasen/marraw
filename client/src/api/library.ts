@@ -17,6 +17,10 @@ export const Flag = {
 } as const;
 export type FlagType = typeof Flag[keyof typeof Flag];
 
+export interface AppSettings {
+    sidecarWrites: boolean;
+}
+
 export interface DeleteResult {
     deleted: number;
 }
@@ -85,6 +89,19 @@ deletePhotos.method = 'Library.DeletePhotos' as const;
 
 export function subscribeDeletePhotos(client: ApiClient, ids: number[], callback: (data: DeleteResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<DeleteResult>('Library.DeletePhotos', [ids], callback, onError, options);
+}
+
+
+export function getAppSettings(client: ApiClient, options?: RequestOptions): Promise<AppSettings> {
+    return client.request<AppSettings>('Library.GetAppSettings', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+getAppSettings.method = 'Library.GetAppSettings' as const;
+
+export function subscribeGetAppSettings(client: ApiClient, callback: (data: AppSettings) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<AppSettings>('Library.GetAppSettings', [], callback, onError, options);
 }
 
 
@@ -192,6 +209,19 @@ export function subscribeSetRating(client: ApiClient, ids: number[], rating: num
 }
 
 
+export function setSidecarWrites(client: ApiClient, enabled: boolean, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Library.SetSidecarWrites', [enabled], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setSidecarWrites.method = 'Library.SetSidecarWrites' as const;
+
+export function subscribeSetSidecarWrites(client: ApiClient, enabled: boolean, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Library.SetSidecarWrites', [enabled], callback, onError, options);
+}
+
+
 export function setVisible(client: ApiClient, folderID: number, ids: number[], options?: RequestOptions): Promise<void> {
     return client.request<void>('Library.SetVisible', [folderID, ids], options);
 }
@@ -223,6 +253,20 @@ export function useDeletePhotos(ids: number[], options?: UseQueryOptions<DeleteR
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [ids], _subscribe: { method: 'Library.DeletePhotos', params: [ids] } });
+}
+
+/**
+ * Subscribes to `Library.GetAppSettings` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useGetAppSettings(options?: UseQueryOptions<AppSettings>): UseQueryResult<AppSettings> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => getAppSettings(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'Library.GetAppSettings', params: [] } });
 }
 
 /**
@@ -341,6 +385,21 @@ export function useSetRating(ids: number[], rating: number, options?: UseQueryOp
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [ids, rating], _subscribe: { method: 'Library.SetRating', params: [ids, rating] } });
+}
+
+/**
+ * Subscribes to `Library.SetSidecarWrites` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetSidecarWrites(enabled: boolean, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, enabled: boolean) => setSidecarWrites(client, enabled, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [enabled], _subscribe: { method: 'Library.SetSidecarWrites', params: [enabled] } });
 }
 
 /**

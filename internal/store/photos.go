@@ -41,6 +41,10 @@ type Photo struct {
 	// auto-brighten lift, used to seed the exposure dial so the camera-mimic
 	// compensation is visible in the develop values. Invalid = not measured.
 	BaseExpEV sql.NullFloat64
+	// UpdatedAt is the unix-millis timestamp of the last intent change
+	// (rating, flag, or edit), used to reconcile against portable sidecars by
+	// last-writer-wins. Invalid = never touched.
+	UpdatedAt sql.NullInt64
 }
 
 // Path returns the absolute file path of the photo.
@@ -138,14 +142,14 @@ func (db *DB) SyncFolder(ctx context.Context, folderID int64, folderPath string,
 const photoCols = `p.id, p.folder_id, f.path, p.file_name, p.file_size, p.mtime_ns, p.cache_key,
 	p.meta_loaded, p.width, p.height, p.orientation, p.make, p.model,
 	p.iso, p.shutter, p.aperture, p.focal_len, p.taken_at, p.rating, p.flag, p.edit_params, p.edit_hash,
-	p.look_gamma, p.base_exp_ev`
+	p.look_gamma, p.base_exp_ev, p.updated_at`
 
 func scanPhoto(row interface{ Scan(...any) error }) (Photo, error) {
 	var p Photo
 	err := row.Scan(&p.ID, &p.FolderID, &p.FolderPath, &p.FileName, &p.FileSize, &p.MtimeNs, &p.CacheKey,
 		&p.MetaLoaded, &p.Width, &p.Height, &p.Orientation, &p.Make, &p.Model,
 		&p.ISO, &p.Shutter, &p.Aperture, &p.FocalLen, &p.TakenAt, &p.Rating, &p.Flag, &p.EditParams, &p.EditHash,
-		&p.LookGamma, &p.BaseExpEV)
+		&p.LookGamma, &p.BaseExpEV, &p.UpdatedAt)
 	return p, err
 }
 
@@ -252,23 +256,23 @@ func int64Placeholders(ids []int64) (string, []any) {
 	return strings.Repeat("?,", len(ids)-1) + "?", args
 }
 
-func (db *DB) SetRating(ctx context.Context, ids []int64, rating int) error {
+func (db *DB) SetRating(ctx context.Context, ids []int64, rating int, updatedAtMs int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	ph, args := int64Placeholders(ids)
-	_, err := db.ExecContext(ctx, `UPDATE photos SET rating = ? WHERE id IN (`+ph+`)`,
-		append([]any{rating}, args...)...)
+	_, err := db.ExecContext(ctx, `UPDATE photos SET rating = ?, updated_at = ? WHERE id IN (`+ph+`)`,
+		append([]any{rating, updatedAtMs}, args...)...)
 	return err
 }
 
-func (db *DB) SetFlag(ctx context.Context, ids []int64, flag int) error {
+func (db *DB) SetFlag(ctx context.Context, ids []int64, flag int, updatedAtMs int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
 	ph, args := int64Placeholders(ids)
-	_, err := db.ExecContext(ctx, `UPDATE photos SET flag = ? WHERE id IN (`+ph+`)`,
-		append([]any{flag}, args...)...)
+	_, err := db.ExecContext(ctx, `UPDATE photos SET flag = ?, updated_at = ? WHERE id IN (`+ph+`)`,
+		append([]any{flag, updatedAtMs}, args...)...)
 	return err
 }
 
@@ -305,8 +309,28 @@ func (db *DB) DeletePhotos(ctx context.Context, ids []int64) error {
 }
 
 // SetEdit stores the edit params JSON (nil clears) and its hash.
-func (db *DB) SetEdit(ctx context.Context, id int64, paramsJSON *string, hash string) error {
-	_, err := db.ExecContext(ctx, `UPDATE photos SET edit_params = ?, edit_hash = ? WHERE id = ?`,
-		paramsJSON, hash, id)
+func (db *DB) SetEdit(ctx context.Context, id int64, paramsJSON *string, hash string, updatedAtMs int64) error {
+	_, err := db.ExecContext(ctx, `UPDATE photos SET edit_params = ?, edit_hash = ?, updated_at = ? WHERE id = ?`,
+		paramsJSON, hash, updatedAtMs, id)
 	return err
+}
+
+// ApplyImportedEdit applies portable intent read from a sidecar to a photo,
+// but only when the incoming timestamp is newer than the stored one
+// (last-writer-wins). A NULL stored timestamp — a freshly scanned row, or one
+// that predates sidecars — always loses, so a copied-in folder adopts its
+// sidecars. Returns whether the row was updated.
+func (db *DB) ApplyImportedEdit(ctx context.Context, folderID int64, fileName string,
+	rating, flag int, editJSON *string, editHash string, updatedAtMs int64) (bool, error) {
+	res, err := db.ExecContext(ctx, `
+		UPDATE photos SET rating = ?, flag = ?, edit_params = ?, edit_hash = ?, updated_at = ?
+		WHERE folder_id = ? AND file_name = ?
+		  AND (updated_at IS NULL OR updated_at < ?)`,
+		rating, flag, editJSON, editHash, updatedAtMs,
+		folderID, fileName, updatedAtMs)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }

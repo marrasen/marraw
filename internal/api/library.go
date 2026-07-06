@@ -4,15 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/marrasen/aprot"
 
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/sidecar"
 	"github.com/marrasen/marraw/internal/store"
 	"github.com/marrasen/marraw/internal/trash"
 )
@@ -101,8 +104,27 @@ const (
 	settingFavoriteFolders = "favoriteFolders"
 	settingRecentFolders   = "recentFolders"
 	folderPrefsKey         = "folderPrefs"
+	appSettingsKey         = "appSettings"
 	maxRecentFolders       = 8
 )
+
+// GetAppSettings returns the application preferences. Subscription query: a
+// SetSidecarWrites call pushes an update.
+func (l *Library) GetAppSettings(ctx context.Context) (*AppSettings, error) {
+	aprot.RegisterRefreshTrigger(ctx, appSettingsKey)
+	return &AppSettings{
+		SidecarWrites: l.deps.DB.SidecarWritesEnabled(ctx),
+	}, nil
+}
+
+// SetSidecarWrites toggles whether edits are mirrored to portable sidecars.
+func (l *Library) SetSidecarWrites(ctx context.Context, enabled bool) error {
+	if err := l.deps.DB.SetSidecarWrites(ctx, enabled); err != nil {
+		return err
+	}
+	aprot.TriggerRefresh(ctx, appSettingsKey)
+	return nil
+}
 
 // GetFolderPrefs returns favourite and recently opened folders. Subscription
 // query: adding a favourite or opening a folder pushes an update.
@@ -204,7 +226,7 @@ func (l *Library) SetRating(ctx context.Context, ids []int64, rating int) error 
 	if rating < 0 || rating > 5 {
 		return aprot.ErrInvalidParams("rating must be 0..5")
 	}
-	if err := l.deps.DB.SetRating(ctx, ids, rating); err != nil {
+	if err := l.deps.DB.SetRating(ctx, ids, rating, time.Now().UnixMilli()); err != nil {
 		return err
 	}
 	patches := make([]PhotoPatch, len(ids))
@@ -212,12 +234,13 @@ func (l *Library) SetRating(ctx context.Context, ids []int64, rating int) error 
 		patches[i] = PhotoPatch{ID: id, Rating: &rating}
 	}
 	l.deps.PatchPhotos(ctx, patches)
+	l.deps.writeSidecars(ctx, ids)
 	return nil
 }
 
 // SetFlag sets the cull flag of the given photos.
 func (l *Library) SetFlag(ctx context.Context, ids []int64, flag Flag) error {
-	if err := l.deps.DB.SetFlag(ctx, ids, FlagToInt(flag)); err != nil {
+	if err := l.deps.DB.SetFlag(ctx, ids, FlagToInt(flag), time.Now().UnixMilli()); err != nil {
 		return err
 	}
 	patches := make([]PhotoPatch, len(ids))
@@ -225,6 +248,7 @@ func (l *Library) SetFlag(ctx context.Context, ids []int64, flag Flag) error {
 		patches[i] = PhotoPatch{ID: id, Flag: &flag}
 	}
 	l.deps.PatchPhotos(ctx, patches)
+	l.deps.writeSidecars(ctx, ids)
 	return nil
 }
 
@@ -247,6 +271,15 @@ func (l *Library) DeletePhotos(ctx context.Context, ids []int64) (*DeleteResult,
 	}
 	if err := l.deps.DB.DeletePhotos(ctx, ids); err != nil {
 		return nil, err
+	}
+	// Remove orphaned sidecars so a deleted photo leaves nothing behind. Best
+	// effort: a stray sidecar is harmless (no matching RAW is ever read).
+	for _, p := range photos {
+		if scPath := sidecar.PathFor(p.Path()); scPath != "" {
+			if err := os.Remove(scPath); err != nil && !os.IsNotExist(err) {
+				log.Printf("api: remove sidecar %s: %v", p.FileName, err)
+			}
+		}
 	}
 	for f := range folders {
 		aprot.TriggerRefresh(ctx, photosKey(f))

@@ -24,6 +24,9 @@ type Deps struct {
 	Cache   *pyramid.Cache
 	Handles *decode.HandleCache
 	Scanner *scan.Scanner
+	// DefaultCacheDir is the built-in preview-cache location (under the app
+	// data dir); System.SetCacheDir("") restores it.
+	DefaultCacheDir string
 
 	mu     sync.RWMutex
 	server *aprot.Server
@@ -101,6 +104,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.Register(library)
 	registry.Register(edits)
 	registry.Register(export)
+	registry.Register(&System{deps: deps})
 
 	registry.RegisterEnumFor(library, FlagValues())
 	registry.RegisterEnumFor(edits, edit.WBModeValues())
