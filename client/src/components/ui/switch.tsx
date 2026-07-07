@@ -7,7 +7,9 @@ function Switch({ className, ...props }: SwitchPrimitive.Root.Props) {
     <SwitchPrimitive.Root
       data-slot="switch"
       className={cn(
-        "relative h-5 w-[34px] shrink-0 rounded-full bg-input transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-checked:bg-primary data-disabled:opacity-50",
+        // Base UI renders the root as an inline <span>; without a block-ish
+        // display the w/h utilities are ignored and the track collapses to 0×0.
+        "relative inline-block h-5 w-[34px] shrink-0 rounded-full bg-input transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-checked:bg-primary data-disabled:opacity-50",
         className,
       )}
       {...props}
