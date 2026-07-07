@@ -111,7 +111,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
         showCloseButton={false}
-        className="flex w-[680px] max-w-none flex-col gap-0 overflow-hidden rounded-[14px] border-glass-border p-0"
+        className="flex w-[680px] max-w-none flex-col gap-0 overflow-hidden rounded-[14px] border-glass-border p-0 sm:max-w-none"
       >
         <div className="flex items-center border-b px-[22px] py-[17px]">
           <div className="flex flex-col gap-0.5">

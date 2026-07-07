@@ -35,6 +35,23 @@ if (shot === 'cull') {
   ui().setMode('develop');
   await until(() => mw.useEditSession.getState().draft != null);
   mw.useEditSession.setState({ wbPicking: true });
+  // Hover the image so the magnifier + RGB readout render.
+  await sleep(1500);
+  const box = document.querySelector('.overflow-auto .m-auto');
+  if (box) {
+    const r = box.getBoundingClientRect();
+    box.dispatchEvent(
+      new PointerEvent('pointermove', {
+        bubbles: true,
+        clientX: r.left + r.width * 0.45,
+        clientY: r.top + r.height * 0.55,
+      }),
+    );
+  }
+} else if (shot === 'addfolder') {
+  ui().setAddFolderOpen(true);
+} else if (shot === 'shortcuts') {
+  ui().setShortcutsOpen(true);
 } else if (shot === 'light') {
   document.documentElement.classList.remove('dark');
 } else if (shot === 'palette') {

@@ -53,6 +53,7 @@ function buildCommands(hasFolder: boolean): Command[] {
   out.push(
     { id: 'add-folder', label: 'Add folder to library…', group: 'Actions', run: () => ui().setAddFolderOpen(true) },
     { id: 'settings', label: 'Settings…', group: 'Actions', run: () => ui().setSettingsOpen(true) },
+    { id: 'shortcuts', label: 'Keyboard shortcuts', group: 'Actions', hint: '?', run: () => ui().setShortcutsOpen(true) },
   );
   if (hasFolder) {
     out.push(

@@ -88,7 +88,7 @@ function PickerBody({ onClose }: { onClose: () => void }) {
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         showCloseButton={false}
-        className="flex h-[520px] w-[760px] max-w-none flex-col gap-0 overflow-hidden rounded-[14px] border-glass-border bg-card p-0"
+        className="flex h-[520px] w-[760px] max-w-none flex-col gap-0 overflow-hidden rounded-[14px] border-glass-border bg-card p-0 sm:max-w-none"
       >
         <div className="flex items-center border-b px-[22px] py-[15px]">
           <div className="flex flex-col gap-0.5">
@@ -111,21 +111,24 @@ function PickerBody({ onClose }: { onClose: () => void }) {
             <span className="px-2 pb-2 text-[10px] tracking-[.07em] text-faint uppercase">
               Quick access
             </span>
-            {drives?.map((d) => (
-              <button
-                key={d.path}
-                className={cn(
-                  'flex h-8 items-center gap-2 rounded-[7px] px-2.5 text-[12.5px]',
-                  location != null && samePath(location, d.path)
-                    ? 'bg-sidebar-accent text-foreground'
-                    : 'text-secondary-foreground hover:bg-accent',
-                )}
-                onClick={() => setPath(d.path)}
-              >
-                <HardDrive className="size-3.5 shrink-0 opacity-85" strokeWidth={1.5} />
-                <span className="truncate">{d.name}</span>
-              </button>
-            ))}
+            {drives?.map((d) => {
+              const Icon = /^[A-Z]:$/i.test(d.name) ? HardDrive : Folder;
+              return (
+                <button
+                  key={d.path}
+                  className={cn(
+                    'flex h-8 items-center gap-2 rounded-[7px] px-2.5 text-[12.5px]',
+                    location != null && samePath(location, d.path)
+                      ? 'bg-sidebar-accent text-foreground'
+                      : 'text-secondary-foreground hover:bg-accent',
+                  )}
+                  onClick={() => setPath(d.path)}
+                >
+                  <Icon className="size-3.5 shrink-0 opacity-85" strokeWidth={1.5} />
+                  <span className="truncate">{d.name}</span>
+                </button>
+              );
+            })}
           </div>
 
           {location == null ? (

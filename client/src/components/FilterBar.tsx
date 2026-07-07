@@ -27,7 +27,16 @@ const FLAG_ITEMS: { value: FlagFilter; label: string }[] = [
   { value: 'exclude', label: 'Excluded' },
 ];
 
-export function FilterBar({ shownCount, totalCount }: { shownCount: number; totalCount: number }) {
+export function FilterBar({
+  shownCount,
+  totalCount,
+  scan,
+}: {
+  shownCount: number;
+  totalCount: number;
+  /** A running header-indexing scan flips the count to "N ready / M". */
+  scan?: { current: number; total: number } | null;
+}) {
   const minRating = useUIStore((s) => s.minRating);
   const flagFilter = useUIStore((s) => s.flagFilter);
   const setFilters = useUIStore((s) => s.setFilters);
@@ -99,10 +108,17 @@ export function FilterBar({ shownCount, totalCount }: { shownCount: number; tota
         </>
       )}
 
-      <span className="font-mono text-xs text-secondary-foreground">
-        <span className="text-foreground">{shownCount.toLocaleString()}</span> shown{' '}
-        <span className="text-faint">/ {totalCount.toLocaleString()}</span>
-      </span>
+      {scan ? (
+        <span className="font-mono text-xs text-secondary-foreground">
+          <span className="text-foreground">{scan.current.toLocaleString()}</span> ready{' '}
+          <span className="text-faint">/ {Math.max(scan.total, totalCount).toLocaleString()}</span>
+        </span>
+      ) : (
+        <span className="font-mono text-xs text-secondary-foreground">
+          <span className="text-foreground">{shownCount.toLocaleString()}</span> shown{' '}
+          <span className="text-faint">/ {totalCount.toLocaleString()}</span>
+        </span>
+      )}
     </div>
   );
 }

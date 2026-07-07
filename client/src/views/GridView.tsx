@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { Check } from 'lucide-react';
 import { setVisible, type Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
@@ -147,7 +148,12 @@ function GridCell({ photo, w, h }: { photo: Photo; w: number; h: number }) {
         />
       )}
       {multiSelect && selected && (
-        <div className="pointer-events-none absolute inset-0 rounded border-2 border-primary" />
+        <>
+          <div className="pointer-events-none absolute inset-0 rounded border-2 border-primary" />
+          <div className="absolute top-1.5 left-1.5 flex size-4 items-center justify-center rounded-[5px] bg-primary">
+            <Check className="size-[11px] text-primary-foreground" strokeWidth={2.5} />
+          </div>
+        </>
       )}
       {isFocus && (
         <div

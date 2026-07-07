@@ -134,6 +134,13 @@ export function useKeyboard() {
 
       const key = e.key.toLowerCase();
 
+      // ? toggles the keyboard-shortcuts reference.
+      if (e.key === '?') {
+        e.preventDefault();
+        s.setShortcutsOpen(!s.shortcutsOpen);
+        return;
+      }
+
       // G in Cull blows the scrubber into the contact sheet (elsewhere G
       // stays the Gamma control hotkey).
       if (key === 'g' && s.mode === 'cull') {
@@ -192,7 +199,9 @@ export function useKeyboard() {
           else if (s.focusId != null && s.mode === 'library' && s.view === 'grid') s.setMode('cull');
           break;
         case 'Escape':
-          if (es.cropping) {
+          if (s.shortcutsOpen) {
+            s.setShortcutsOpen(false);
+          } else if (es.cropping) {
             esSetCropping(client, false);
           } else if (es.wbPicking) {
             esSetWBPicking(false);

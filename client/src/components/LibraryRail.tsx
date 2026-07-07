@@ -180,6 +180,20 @@ function Group({
     void saveRoots(client, ordered.flatMap((g) => g.roots));
   };
 
+  // Drag a group header onto another group to reorder ("drag also works").
+  const onDropGroup = (e: React.DragEvent) => {
+    const from = e.dataTransfer.getData('marraw/group');
+    if (!from || samePath(from, group.parentPath)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const moving = groups.find((g) => samePath(g.parentPath, from));
+    if (!moving) return;
+    const ordered = groups.filter((g) => !samePath(g.parentPath, from));
+    const idx = ordered.findIndex((g) => samePath(g.parentPath, group.parentPath));
+    ordered.splice(idx, 0, moving);
+    void saveRoots(client, ordered.flatMap((g) => g.roots));
+  };
+
   const rescanAll = () => {
     for (const r of group.roots) void openFolder(client, r.path).catch(() => {});
     toast.success(`Rescanning ${group.roots.length} shoot${group.roots.length === 1 ? '' : 's'}`);
@@ -216,6 +230,14 @@ function Group({
           <ContextMenuTrigger
             className="flex cursor-default flex-col gap-px rounded-md px-2 pt-2 pb-1 hover:bg-accent"
             onClick={toggleOpen}
+            draggable
+            onDragStart={(e: React.DragEvent) =>
+              e.dataTransfer.setData('marraw/group', group.parentPath)
+            }
+            onDragOver={(e: React.DragEvent) => {
+              if (e.dataTransfer.types.includes('marraw/group')) e.preventDefault();
+            }}
+            onDrop={onDropGroup}
           >
             <div className="flex items-center gap-[7px]">
               <span
@@ -473,6 +495,10 @@ function RenameEditor({
           Display name only. Folder on disk stays{' '}
           <span className="font-mono text-[10.5px] text-secondary-foreground">{diskName}</span>.
         </span>
+      </div>
+      <div className="border-t pt-2 text-[11px] leading-normal text-faint">
+        Need to rename the folder itself? Use{' '}
+        <span className="text-secondary-foreground">Rename on disk…</span> in the menu.
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import { TopBar } from '@/components/TopBar';
 import { LibraryRail } from '@/components/LibraryRail';
 import { AddFolderDialog } from '@/components/AddFolderDialog';
 import { CommandPalette } from '@/components/CommandPalette';
+import { ShortcutsOverlay } from '@/components/ShortcutsOverlay';
 import { FilterBar } from '@/components/FilterBar';
 import { EditPanel } from '@/components/EditPanel';
 import { ExportDialog } from '@/components/ExportDialog';
@@ -17,6 +18,7 @@ import { CullView } from '@/views/CullView';
 import { DevelopView } from '@/views/DevelopView';
 import { useKeyboard } from '@/lib/keyboard';
 import { usePhotos } from '@/lib/usePhotos';
+import { useFolderScan } from '@/lib/useFolderScan';
 import { openRoot, samePath, saveRoots, useLibraryRoots } from '@/lib/library';
 import { openFolder } from '@/api/library';
 import { useApiClient } from '@/api/client';
@@ -99,6 +101,7 @@ export default function App() {
       <AddFolderDialog />
       <SettingsDialog />
       <CommandPalette />
+      <ShortcutsOverlay />
       <Toaster position="bottom-right" />
     </div>
   );
@@ -139,8 +142,10 @@ function EmptyLibrary() {
 function Workspace({ folderId }: { folderId: number }) {
   const view = useUIStore((s) => s.view);
   const mode = useUIStore((s) => s.mode);
+  const folderPath = useUIStore((s) => s.folderPath);
   const { all, visible } = usePhotos(folderId);
   const picked = all.filter((p) => p.flag === 'pick').length;
+  const scan = useFolderScan(folderPath);
 
   // ?loupe=1 jumps straight into loupe on the first photo (UI smoke test).
   useEffect(() => {
@@ -161,9 +166,9 @@ function Workspace({ folderId }: { folderId: number }) {
           <CullView photos={visible} />
         ) : structured ? (
           <>
-            <FilterBar shownCount={visible.length} totalCount={all.length} />
+            <FilterBar shownCount={visible.length} totalCount={all.length} scan={scan} />
             <GridView photos={visible} folderId={folderId} />
-            <StatusBar shown={visible.length} total={all.length} picked={picked} />
+            <StatusBar shown={visible.length} total={all.length} picked={picked} scan={scan} />
           </>
         ) : (
           <DevelopView photos={visible} all={all} />

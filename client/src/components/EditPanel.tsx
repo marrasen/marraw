@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw } from 'lucide-react';
+import { Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw, Image as ImageIcon } from 'lucide-react';
+import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
@@ -57,6 +58,10 @@ const DEMOSAIC_OPTIONS = [
 // Display for the ±1 sliders shown as ±100.
 const pct = (v: number) => (v === 0 ? '0' : `${v > 0 ? '+' : ''}${Math.round(v * 100)}`);
 
+// WB dial gradient tracks per the handoff eyedropper plate.
+const TEMP_GRADIENT = 'bg-gradient-to-r from-[#6fa8ff] via-[#e9e3d0] to-[#ffb066]';
+const TINT_GRADIENT = 'bg-gradient-to-r from-[#5cd06e] via-[#d9d9d9] to-[#c86fd0]';
+
 export function EditPanel({ photos }: { photos: Photo[] }) {
   const client = useApiClient();
   const selection = useUIStore((s) => s.selection);
@@ -76,12 +81,13 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
   }, [idsKey]);
 
   if (focusId == null) {
-    return <div className="p-4 text-sm text-muted-foreground">Select a photo to edit.</div>;
+    return <PanelPlaceholder />;
   }
   // A multi-photo selection swaps the panel for relative adjustment: deltas
-  // that add to each photo's own current values (handoff "BATCH").
+  // that add to each photo's own current values (handoff "BATCH"). Keyed by
+  // the selection so a different set starts from zero deltas.
   if (ids.length > 1) {
-    return <BatchSection client={client} ids={ids} />;
+    return <BatchSection key={ids.join(',')} client={client} ids={ids} />;
   }
   const photo = photos.find((p) => p.id === focusId);
   return (
@@ -89,6 +95,30 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
       {photo && <PhotoHeader photo={photo} />}
       {photo && <Histogram photo={photo} />}
       <DevelopPanel client={client} targetCount={ids.length} />
+    </div>
+  );
+}
+
+// PanelPlaceholder: nothing focused yet (handoff "SCANNING" right panel).
+function PanelPlaceholder() {
+  const folderPath = useUIStore((s) => s.folderPath);
+  const scan = useFolderScan(folderPath);
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+      <div className="flex size-11 items-center justify-center rounded-xl border bg-black/5 dark:bg-white/3">
+        <ImageIcon className="size-5 text-faint" strokeWidth={1.4} />
+      </div>
+      <span className="text-[12.5px] leading-normal text-faint">
+        {scan ? (
+          <>
+            Select a photo to develop
+            <br />
+            once previews are ready
+          </>
+        ) : (
+          'Select a photo to develop.'
+        )}
+      </span>
     </div>
   );
 }
@@ -418,6 +448,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           onChange={(v) => update({ wbKelvin: v })}
           onCommit={(v) => commit({ wbKelvin: v })}
           onClear={() => clear({ wbKelvin: 5500 })}
+          gradient={TEMP_GRADIENT}
           {...num('wbKelvin')}
         />
       ) : (
@@ -434,6 +465,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           onChange={(v) => update({ wbTemp: v / 100 })}
           onCommit={(v) => commit({ wbTemp: v / 100 })}
           onClear={() => clear({ wbTemp: 0 })}
+          gradient={TEMP_GRADIENT}
           {...num('wbTemp')}
         />
       )}
@@ -450,6 +482,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         onChange={(v) => update({ wbTint: v / 100 })}
         onCommit={(v) => commit({ wbTint: v / 100 })}
         onClear={() => clear({ wbTint: 0 })}
+        gradient={TINT_GRADIENT}
         {...num('wbTint')}
       />
       </Group>
@@ -828,6 +861,7 @@ export function EditSlider({
   onChange,
   onCommit,
   onClear,
+  gradient,
 }: {
   label: string;
   hotkey?: string;
@@ -846,6 +880,8 @@ export function EditSlider({
   onCommit: (v: number) => void;
   /** Resets the control to its default (shown only when neutral is set). */
   onClear?: () => void;
+  /** Gradient track (WB dials); replaces the value fill. */
+  gradient?: string;
 }) {
   // During a drag the thumb tracks a local value, so it stays smooth even
   // while the store update (which re-renders the whole panel) is coalesced to
@@ -892,6 +928,7 @@ export function EditSlider({
         max={max}
         step={step}
         fillFrom={neutral}
+        gradient={gradient}
         disabled={disabled}
         onValueChange={(v) => {
           setDragging(v as number);
@@ -934,13 +971,9 @@ function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
   const [pos, setPos] = useState<Record<Field, number>>({ expEV: 0, contrast: 0, saturation: 0 });
   const [busy, setBusy] = useState(0);
   // Applied totals live in a ref updated optimistically at send time, so
-  // rapid consecutive releases each carry only their own increment.
+  // rapid consecutive releases each carry only their own increment. The
+  // component is keyed by the selection, so both start at zero per set.
   const applied = useRef<Record<Field, number>>({ expEV: 0, contrast: 0, saturation: 0 });
-  const idsKey = ids.join(',');
-  useEffect(() => {
-    setPos({ expEV: 0, contrast: 0, saturation: 0 });
-    applied.current = { expEV: 0, contrast: 0, saturation: 0 };
-  }, [idsKey]);
 
   const commit = (field: Field) => (v: number) => {
     setPos((p) => ({ ...p, [field]: v }));

@@ -410,6 +410,16 @@ export function CinemaImage({
     setCursor([(e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height]);
   };
 
+  // Live RGB readout under the pipette.
+  const sample = usePixelSampler(shownSrc, wbPicking);
+  const sampledRGB = (() => {
+    if (!wbPicking || !cursor || !sample) return null;
+    const x = Math.min(sample.width - 1, Math.max(0, Math.round(cursor[0] * sample.width)));
+    const y = Math.min(sample.height - 1, Math.max(0, Math.round(cursor[1] * sample.height)));
+    const i = (y * sample.width + x) * 4;
+    return [sample.data[i], sample.data[i + 1], sample.data[i + 2]] as const;
+  })();
+
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden bg-inset">
       <div
@@ -443,10 +453,7 @@ export function CinemaImage({
             <DecodedImage
               src={src}
               onShown={setShownSrc}
-              className={cn(
-                'absolute inset-0 size-full transition-[filter] duration-200',
-                firstDecode && 'blur-[9px]',
-              )}
+              className="absolute inset-0 size-full"
               // While cropping, the straighten angle is a live client-side
               // rotation of the flat frame — instant, full-resolution feedback
               // — matched exactly by the backend crop on commit.
@@ -475,7 +482,7 @@ export function CinemaImage({
               />
             )}
             {wbPicking && cursor && (
-              <Magnifier src={shownSrc} boxW={boxW} boxH={boxH} cursor={cursor} />
+              <Magnifier src={shownSrc} boxW={boxW} boxH={boxH} cursor={cursor} rgb={sampledRGB} />
             )}
           </div>
         ) : (
@@ -550,18 +557,58 @@ export function CinemaImage({
   );
 }
 
+// usePixelSampler decodes the shown rendition into readable pixels while
+// the WB pipette is up, so the readout tag can show the RGB under the
+// cursor (the /img endpoint is CORS-open; preview blobs are same-origin).
+function usePixelSampler(src: string, active: boolean): ImageData | null {
+  const [data, setData] = useState<ImageData | null>(null);
+  useEffect(() => {
+    if (!active || !src) return;
+    let alive = true;
+    const ac = new AbortController();
+    fetch(src, { signal: ac.signal })
+      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))
+      .then((b) => createImageBitmap(b))
+      .then((bmp) => {
+        if (!alive) {
+          bmp.close();
+          return;
+        }
+        const c = document.createElement('canvas');
+        c.width = bmp.width;
+        c.height = bmp.height;
+        const ctx = c.getContext('2d', { willReadFrequently: true })!;
+        ctx.drawImage(bmp, 0, 0);
+        setData(ctx.getImageData(0, 0, bmp.width, bmp.height));
+        bmp.close();
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      ac.abort();
+      // Release the decoded pixels once the pipette goes away (or the
+      // rendition changes) — an ImageData of a 2048 frame is not small.
+      setData(null);
+    };
+  }, [src, active]);
+  return active ? data : null;
+}
+
 // Magnifier: the WB pipette's loupe — a 138px circle showing the pixels
-// under the (hidden) cursor at 3×, with a pixel grid and an accent target.
+// under the (hidden) cursor at 3×, with a pixel grid, an accent target,
+// and the sampled-RGB readout tag.
 function Magnifier({
   src,
   boxW,
   boxH,
   cursor,
+  rgb,
 }: {
   src: string;
   boxW: number;
   boxH: number;
   cursor: [number, number];
+  rgb: readonly [number, number, number] | null;
 }) {
   const ZOOM = 3;
   const SIZE = 138;
@@ -601,6 +648,20 @@ function Magnifier({
         style={{ left: SIZE - 20, top: SIZE - 22 }}
         strokeWidth={1.6}
       />
+      {rgb && (
+        <div
+          className="absolute flex items-center gap-2 rounded-[9px] border border-white/15 bg-[rgba(12,14,18,.78)] px-[11px] py-[7px] whitespace-nowrap shadow-[0_14px_34px_-12px_rgba(0,0,0,.6)] backdrop-blur-md"
+          style={{ left: SIZE + 12, top: 44 }}
+        >
+          <div
+            className="size-5 rounded-[5px] border border-white/30"
+            style={{ background: `rgb(${rgb[0]},${rgb[1]},${rgb[2]})` }}
+          />
+          <span className="font-mono text-[11px] text-[#c4c7cc] tabular-nums">
+            R{rgb[0]} G{rgb[1]} B{rgb[2]}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

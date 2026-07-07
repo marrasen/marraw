@@ -16,6 +16,7 @@ interface UIState {
   view: View;
   addFolderOpen: boolean;
   paletteOpen: boolean;
+  shortcutsOpen: boolean;
   // Cull: the contact sheet (G) and the time-gap grouping threshold in
   // minutes (null = off, one flat grid). Persisted across sessions.
   contactSheet: boolean;
@@ -50,6 +51,7 @@ interface UIState {
   setMode: (m: Mode) => void;
   setAddFolderOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
+  setShortcutsOpen: (open: boolean) => void;
   setContactSheet: (open: boolean) => void;
   setGapMinutes: (min: number | null) => void;
   setFolder: (id: number, path: string) => void;
@@ -76,6 +78,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   view: 'grid',
   addFolderOpen: false,
   paletteOpen: false,
+  shortcutsOpen: false,
   contactSheet: false,
   gapMinutes: (() => {
     const raw = localStorage.getItem('marraw:gapMinutes');
@@ -105,6 +108,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     ),
   setAddFolderOpen: (open) => set({ addFolderOpen: open }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
+  setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setContactSheet: (open) => set({ contactSheet: open }),
   setGapMinutes: (min) => {
     localStorage.setItem('marraw:gapMinutes', min == null ? 'off' : String(min));

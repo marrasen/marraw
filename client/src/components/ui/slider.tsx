@@ -9,6 +9,7 @@ function Slider({
   min = 0,
   max = 100,
   fillFrom,
+  gradient,
   ...props
 }: SliderPrimitive.Root.Props & {
   /**
@@ -18,6 +19,12 @@ function Slider({
    * whose default is 0.
    */
   fillFrom?: number
+  /**
+   * Gradient track classes (e.g. the WB temperature blue→amber ramp). The
+   * whole track shows the gradient and no fill range is drawn — the thumb
+   * position IS the value.
+   */
+  gradient?: string
 }) {
   // One thumb per actual value. A plain-number value must yield ONE thumb —
   // the previous [min, max] fallback rendered a phantom second thumb that
@@ -54,9 +61,12 @@ function Slider({
       <SliderPrimitive.Control className="relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:min-h-40 data-vertical:w-auto data-vertical:flex-col">
         <SliderPrimitive.Track
           data-slot="slider-track"
-          className="relative grow overflow-hidden rounded-full bg-input select-none data-horizontal:h-[3px] data-horizontal:w-full data-vertical:h-full data-vertical:w-[3px]"
+          className={cn(
+            "relative grow overflow-hidden rounded-full select-none data-horizontal:h-[3px] data-horizontal:w-full data-vertical:h-full data-vertical:w-[3px]",
+            gradient ?? "bg-input",
+          )}
         >
-          {useOriginFill ? (
+          {gradient ? null : useOriginFill ? (
             <span
               data-slot="slider-range"
               className="absolute h-full rounded-full bg-primary select-none"

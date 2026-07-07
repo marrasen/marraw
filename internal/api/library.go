@@ -29,9 +29,11 @@ type Library struct {
 func (l *Library) ListDrives(ctx context.Context) ([]DriveInfo, error) {
 	var out []DriveInfo
 	if home, err := os.UserHomeDir(); err == nil {
-		pictures := filepath.Join(home, "Pictures")
-		if _, err := os.Stat(pictures); err == nil {
-			out = append(out, DriveInfo{Path: pictures, Name: "Pictures"})
+		for _, name := range []string{"Pictures", "Desktop"} {
+			dir := filepath.Join(home, name)
+			if _, err := os.Stat(dir); err == nil {
+				out = append(out, DriveInfo{Path: dir, Name: name})
+			}
 		}
 	}
 	for letter := 'A'; letter <= 'Z'; letter++ {
