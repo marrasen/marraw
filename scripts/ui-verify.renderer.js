@@ -431,6 +431,42 @@ try {
   // --- task tray exists ------------------------------------------------------
   R.taskTray = !!document.querySelector('[data-testid="task-tray"]');
 
+  // --- export progress chip lives in the cinema HUD --------------------------
+  // Regression: the task chip only mounted inside TopBar, which is unmounted
+  // in Develop/Cull — exports launched there ran with no visible progress
+  // (and no done/failed toast, since that hook lived in the same component).
+  ui().setMode('develop');
+  await until(() => ui().mode === 'develop', 5000, 'develop mode for export chip');
+  await sleep(300);
+  R.cinemaNoTopBar = !document.querySelector('[data-testid="task-tray"]');
+  const expDest = ui().folderPath.replace(/[\\/][^\\/]+[\\/]?$/, '') + '\\marraw-uitest-export';
+  await mw.startExport({
+    photoIds: [ui().visibleIds[0]],
+    destDir: expDest,
+    format: 'jpeg',
+    jpegQuality: 90,
+    longEdge: 1024,
+    colorSpace: 'srgb',
+    createDir: true,
+  });
+  // A concurrent background job (prerender on a cold daemon) collapses the
+  // single chip into the "N tasks" summary pill — accept either.
+  R.cinemaExportChip = !!(await until(
+    () =>
+      [...document.querySelectorAll('span')].some((s) => s.textContent.trim().startsWith('Exporting 1 photo')) ||
+      [...document.querySelectorAll('span')].some((s) => /^\d+ tasks$/.test(s.textContent.trim())),
+    15000,
+    'export chip in cinema HUD',
+  ));
+  R.cinemaExportToast = !!(await until(
+    () => [...document.querySelectorAll('[data-sonner-toast]')].some((t) => t.textContent.includes('Exporting 1 photo done')),
+    60000,
+    'export done toast in cinema mode',
+  ));
+  ui().setMode('library');
+  ui().setView('grid');
+  await sleep(300);
+
   // --- loupe 1:1: tiles sharpen, switches bridge via 2048, neighbors prefetch
   // Own try/catch: a timeout here (e.g. a slow cold full render) must not
   // skip the edit-state cleanup below.

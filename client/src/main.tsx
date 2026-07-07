@@ -20,7 +20,8 @@ if (import.meta.env.DEV) {
     import('@/stores/uiStore'),
     import('@/lib/editSession'),
     import('@/lib/uiSettings'),
-  ]).then(([ui, es, us]) => {
+    import('@/api/export'),
+  ]).then(([ui, es, us, ex]) => {
     (window as unknown as Record<string, unknown>).__marraw = {
       useUIStore: ui.useUIStore,
       useEditSession: es.useEditSession,
@@ -33,6 +34,7 @@ if (import.meta.env.DEV) {
       // Server-persisted UI settings (optimistic store write + server call).
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),
+      startExport: (req: unknown) => ex.startExport(client, req as never),
     };
   });
 }

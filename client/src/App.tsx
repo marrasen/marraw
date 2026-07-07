@@ -13,6 +13,7 @@ import { EditPanel } from '@/components/EditPanel';
 import { ExportDialog } from '@/components/ExportDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { StatusBar } from '@/components/StatusBar';
+import { TaskToasts } from '@/components/TaskTray';
 import { GridView } from '@/views/GridView';
 import { CullView } from '@/views/CullView';
 import { DevelopView } from '@/views/DevelopView';
@@ -108,6 +109,7 @@ export default function App() {
       <SettingsDialog />
       <CommandPalette />
       <ShortcutsOverlay />
+      <TaskToasts />
       <Toaster position="bottom-right" />
     </div>
   );
