@@ -10,6 +10,13 @@ import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
 import { DIALS, type DialKey } from '@/lib/dials';
+import {
+  newAutoPreset,
+  OFFSET_KEYS,
+  type AutoPreset,
+  type OffsetKey,
+} from '@/lib/autoPresets';
+import type { AutoSection } from '@/lib/editSession';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
@@ -27,7 +34,7 @@ function formatBytes(n: number): string {
   return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
 }
 
-const SECTIONS = ['General', 'Toolbars', 'Cache', 'Sidecars', 'Performance'] as const;
+const SECTIONS = ['General', 'Toolbars', 'Auto presets', 'Cache', 'Sidecars', 'Performance'] as const;
 type Section = (typeof SECTIONS)[number];
 
 /**
@@ -75,6 +82,7 @@ export function SettingsDialog() {
           <div className="flex-1 overflow-y-auto p-5">
             {open && section === 'General' && <GeneralSection />}
             {open && section === 'Toolbars' && <ToolbarsSection />}
+            {open && section === 'Auto presets' && <AutoPresetsSection />}
             {open && section === 'Cache' && <CacheSection />}
             {open && section === 'Sidecars' && <SidecarSection />}
             {open && section === 'Performance' && <PerformanceSection />}
@@ -192,6 +200,156 @@ function DialPickerRow({
         {DIALS.map((d) => chip(value.includes(d.key), d.label, () => toggle(d.key)))}
       </div>
     </div>
+  );
+}
+
+// AutoPresetsSection: user-configurable "creative autos" — each preset runs
+// the chosen auto sections, then adds its style offsets. Presets 1–9 are
+// reachable via Ctrl+1..9 and the command palette.
+function AutoPresetsSection() {
+  const presets = useUIStore((s) => s.autoPresets);
+  const setPresets = useUIStore((s) => s.setAutoPresets);
+
+  const update = (i: number, patch: Partial<AutoPreset>) => {
+    const next = presets.slice();
+    next[i] = { ...next[i], ...patch };
+    setPresets(next);
+  };
+
+  const sectionChips: { key: AutoSection; label: string }[] = [
+    { key: 'tone', label: 'Tone' },
+    { key: 'wb', label: 'White balance' },
+    { key: 'color', label: 'Colour' },
+  ];
+
+  return (
+    <div className="flex flex-col">
+      <div className="pb-4">
+        <div className="text-sm font-medium">Creative auto presets</div>
+        <div className="mt-0.5 text-xs leading-normal text-muted-foreground">
+          A preset runs the selected autos on the photo, then adds your style offsets on top.
+          Apply the first nine with Ctrl+1…9 or from the Ctrl+K palette.
+        </div>
+      </div>
+      {presets.map((p, i) => (
+        <div key={p.id} className="mb-3 rounded-[10px] border p-3">
+          <div className="flex items-center gap-2">
+            <span className="w-5 text-center font-mono text-[11px] text-muted-foreground">
+              {i < 9 ? `${i + 1}` : '·'}
+            </span>
+            <input
+              className="h-8 flex-1 rounded-lg border border-input bg-secondary px-2 text-xs outline-none focus:border-ring dark:bg-white/5"
+              value={p.name}
+              onChange={(e) => update(i, { name: e.target.value })}
+              aria-label="Preset name"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setPresets(presets.filter((x) => x.id !== p.id))}
+            >
+              Delete
+            </Button>
+          </div>
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 text-[11px] text-muted-foreground">Auto</span>
+            {sectionChips.map((c) => {
+              const selected = p.sections.includes(c.key);
+              return (
+                <button
+                  key={c.key}
+                  className={cn(
+                    'h-7 rounded-lg border px-2.5 text-xs',
+                    selected
+                      ? 'border-primary/60 bg-primary/15 font-medium text-accent-text'
+                      : 'border-input text-muted-foreground hover:text-foreground',
+                  )}
+                  aria-pressed={selected}
+                  onClick={() =>
+                    update(i, {
+                      sections: selected
+                        ? p.sections.filter((s) => s !== c.key)
+                        : sectionChips.map((x) => x.key).filter((k) => k === c.key || p.sections.includes(k)),
+                    })
+                  }
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5">
+            {OFFSET_KEYS.map((o) => (
+              <OffsetInput
+                key={`${p.id}:${o.key}`}
+                label={o.label}
+                offsetKey={o.key}
+                value={p.offsets[o.key] ?? 0}
+                onChange={(v) => {
+                  const offsets = { ...p.offsets };
+                  if (v === 0) delete offsets[o.key];
+                  else offsets[o.key] = v;
+                  update(i, { offsets });
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+      <div>
+        <Button variant="outline" size="sm" onClick={() => setPresets([...presets, newAutoPreset()])}>
+          Add preset
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// OffsetInput edits one style delta: exposure in EV, everything else in the
+// panel's ±100 units. Commits on blur/Enter so partial typing never lands.
+function OffsetInput({
+  label,
+  offsetKey,
+  value,
+  onChange,
+}: {
+  label: string;
+  offsetKey: OffsetKey;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const ev = offsetKey === 'expEV';
+  const display = (v: number) => (ev ? String(v) : String(Math.round(v * 100)));
+  const [text, setText] = useState(display(value));
+  // Re-sync the field when the committed value changes (e.g. clamped) —
+  // derived state during render, not an effect.
+  const [prev, setPrev] = useState(value);
+  if (value !== prev) {
+    setPrev(value);
+    setText(display(value));
+  }
+  const commit = () => {
+    const n = Number(text);
+    if (!Number.isFinite(n)) {
+      setText(display(value));
+      return;
+    }
+    const v = ev ? Math.max(-2, Math.min(2, n)) : Math.max(-1, Math.min(1, n / 100));
+    onChange(Math.round(v * 100) / 100);
+  };
+  return (
+    <label className="flex items-center gap-2">
+      <span className="w-20 shrink-0 text-xs text-muted-foreground">{label}</span>
+      <input
+        className="h-7 w-16 rounded-lg border border-input bg-secondary px-2 text-right font-mono text-xs outline-none focus:border-ring dark:bg-white/5"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && commit()}
+        onBlur={commit}
+        aria-label={`${label} offset`}
+      />
+      <span className="font-mono text-[10px] text-muted-foreground">{ev ? 'EV' : '±100'}</span>
+    </label>
   );
 }
 

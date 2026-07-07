@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { toast } from 'sonner';
 import type { ApiClient } from '@/api/client';
 import {
+  autoAdjust,
   getEditParams,
   pasteEditParams,
   pickWhiteBalance,
@@ -17,6 +18,7 @@ import {
   setEditParams,
   type Params,
 } from '@/api/edits';
+import type { AutoPreset } from '@/lib/autoPresets';
 
 export const NEUTRAL: Params = {
   expEV: 0,
@@ -517,6 +519,54 @@ export function esReset(client: ApiClient) {
       pushHistory(photoId, draft);
     })
     .catch((err) => toast.error((err as Error).message));
+}
+
+// Sections the backend's AutoAdjust can compute; 'all' expands server-side.
+export type AutoSection = 'tone' | 'wb' | 'color';
+
+// esAuto asks the backend to compute auto values for the given sections of
+// the focused photo and applies the merged result (preview + persist + undo
+// via esApplyParams). On a multi-selection the focused photo's auto result
+// applies to all targets — the same semantics as paste and the WB picker.
+export async function esAuto(client: ApiClient, sections: (AutoSection | 'all')[]) {
+  const s = useEditSession.getState();
+  if (s.photoId == null || !s.draft) return;
+  esFlushDraft();
+  try {
+    const params = await autoAdjust(client, s.photoId, useEditSession.getState().draft!, sections);
+    esApplyParams(client, params);
+  } catch (err) {
+    toast.error(`Auto adjust failed: ${(err as Error).message}`);
+  }
+}
+
+// esApplyAutoPreset runs a creative auto: the preset's auto sections first
+// (skipped when empty — an offsets-only preset), then its style offsets on
+// top, clamped to the control ranges. One history entry, one persist.
+export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
+  const s = useEditSession.getState();
+  if (s.photoId == null || !s.draft) return;
+  esFlushDraft();
+  let base = useEditSession.getState().draft!;
+  if (preset.sections.length > 0) {
+    try {
+      base = await autoAdjust(client, s.photoId, base, preset.sections);
+    } catch (err) {
+      toast.error(`Auto adjust failed: ${(err as Error).message}`);
+      return;
+    }
+  }
+  const out = { ...base };
+  // Offset keys are restricted to direct zero-neutral numeric params
+  // (autoPresets.ts), so plain field addition is safe here.
+  const fields = out as unknown as Record<string, number>;
+  for (const [key, delta] of Object.entries(preset.offsets)) {
+    const spec = CONTROL_SPECS[key as ControlId];
+    if (!spec || spec.kind !== 'numeric' || typeof delta !== 'number') continue;
+    const v = fields[key] + delta;
+    fields[key] = Math.min(spec.max, Math.max(spec.min, Math.round(v * 100) / 100));
+  }
+  esApplyParams(client, out);
 }
 
 // esPickWB asks the backend to compute custom multipliers that neutralize

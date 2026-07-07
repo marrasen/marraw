@@ -6,7 +6,9 @@ import { toast } from 'sonner';
 import { applyRating as doRating, applyFlag as doFlag } from '@/lib/actions';
 import { useUIStore, selectionOrFocus } from '@/stores/uiStore';
 import {
+  esApplyAutoPreset,
   esApplyParams,
+  esAuto,
   esRedo,
   esSetActive,
   esSetCropping,
@@ -48,6 +50,8 @@ const CONTROL_KEYS: Record<string, ControlId> = {
 //   Ctrl+A/C/V    select all, copy/paste edit settings
 //   Ctrl+Z/Y      per-photo edit undo/redo
 //   Ctrl+E        export dialog
+//   Ctrl+U        auto dynamics (+Shift = auto colours, +Alt = auto everything)
+//   Ctrl+1..9     creative auto presets (Settings → Auto presets)
 export function useKeyboard() {
   const client = useApiClient();
 
@@ -125,6 +129,20 @@ export function useKeyboard() {
             e.preventDefault();
             s.setPaletteOpen(!s.paletteOpen);
             return;
+          case 'u': {
+            if (!es.draft) return;
+            e.preventDefault();
+            void esAuto(client, e.altKey ? ['all'] : e.shiftKey ? ['wb', 'color'] : ['tone']);
+            return;
+          }
+          case '1': case '2': case '3': case '4': case '5':
+          case '6': case '7': case '8': case '9': {
+            const preset = s.autoPresets[Number(e.key) - 1];
+            if (!preset || !es.draft) return;
+            e.preventDefault();
+            void esApplyAutoPreset(client, preset);
+            return;
+          }
         }
         return;
       }

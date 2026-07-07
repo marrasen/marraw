@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { FlagType, Photo, PhotoPatch } from '@/api/library';
 import type { Params } from '@/api/edits';
 import { loadDialKeys, type DialKey } from '@/lib/dials';
+import { AUTO_PRESETS_KEY, loadAutoPresets, type AutoPreset } from '@/lib/autoPresets';
 
 export type View = 'grid' | 'loupe';
 export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
@@ -28,6 +29,8 @@ interface UIState {
   // (Settings → Toolbars). Empty = none, the compact default. Persisted.
   cullDials: DialKey[];
   quickDials: DialKey[];
+  // Creative auto presets (Settings → Auto presets). Persisted.
+  autoPresets: AutoPreset[];
 
   focusId: number | null;
   anchorId: number | null;
@@ -66,6 +69,7 @@ interface UIState {
   setGapMinutes: (min: number | null) => void;
   setCullDials: (dials: DialKey[]) => void;
   setQuickDials: (dials: DialKey[]) => void;
+  setAutoPresets: (presets: AutoPreset[]) => void;
   setFolder: (id: number, path: string) => void;
   setView: (v: View) => void;
   focus: (id: number | null, opts?: { extend?: boolean; toggle?: boolean }) => void;
@@ -102,6 +106,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   })(),
   cullDials: loadDialKeys('marraw:cullDials'),
   quickDials: loadDialKeys('marraw:quickDials'),
+  autoPresets: loadAutoPresets(),
   focusId: null,
   anchorId: null,
   selection: new Set<number>(),
@@ -138,6 +143,10 @@ export const useUIStore = create<UIState>((set, get) => ({
   setQuickDials: (dials) => {
     localStorage.setItem('marraw:quickDials', JSON.stringify(dials));
     set({ quickDials: dials });
+  },
+  setAutoPresets: (presets) => {
+    localStorage.setItem(AUTO_PRESETS_KEY, JSON.stringify(presets));
+    set({ autoPresets: presets });
   },
 
   setFolder: (id, path) =>

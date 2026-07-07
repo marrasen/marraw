@@ -2,7 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
-import { esSetActive, esSetCropping, esSetWBPicking, type ControlId } from '@/lib/editSession';
+import {
+  esApplyAutoPreset,
+  esAuto,
+  esSetActive,
+  esSetCropping,
+  esSetWBPicking,
+  type ControlId,
+} from '@/lib/editSession';
+import type { AutoPreset } from '@/lib/autoPresets';
 import { useUIStore } from '@/stores/uiStore';
 
 interface Command {
@@ -34,7 +42,7 @@ const CONTROLS: { id: ControlId; label: string; hint?: string }[] = [
   { id: 'demosaic', label: 'Demosaic', hint: 'D' },
 ];
 
-function buildCommands(hasFolder: boolean): Command[] {
+function buildCommands(hasFolder: boolean, autoPresets: AutoPreset[]): Command[] {
   const ui = () => useUIStore.getState();
   const out: Command[] = [
     { id: 'mode-library', label: 'Go to Library', group: 'Modes', run: () => ui().setMode('library') },
@@ -65,6 +73,28 @@ function buildCommands(hasFolder: boolean): Command[] {
           ui().setMode('develop');
           esSetWBPicking(true);
         } },
+      { id: 'auto-tone', label: 'Auto dynamics', group: 'Develop', hint: 'Ctrl+U', run: (client) => {
+          ui().setMode('develop');
+          void esAuto(client, ['tone']);
+        } },
+      { id: 'auto-color', label: 'Auto colours', group: 'Develop', hint: 'Ctrl+⇧+U', run: (client) => {
+          ui().setMode('develop');
+          void esAuto(client, ['wb', 'color']);
+        } },
+      { id: 'auto-all', label: 'Auto everything', group: 'Develop', hint: 'Ctrl+Alt+U', run: (client) => {
+          ui().setMode('develop');
+          void esAuto(client, ['all']);
+        } },
+      ...autoPresets.map((p, i) => ({
+        id: `auto-preset-${p.id}`,
+        label: p.name,
+        group: 'Auto presets',
+        hint: i < 9 ? `Ctrl+${i + 1}` : undefined,
+        run: (client: ApiClient) => {
+          ui().setMode('develop');
+          void esApplyAutoPreset(client, p);
+        },
+      })),
       ...CONTROLS.map((c) => ({
         id: `ctl-${c.id}`,
         label: c.label,
@@ -88,12 +118,13 @@ export function CommandPalette() {
   const open = useUIStore((s) => s.paletteOpen);
   const setOpen = useUIStore((s) => s.setPaletteOpen);
   const hasFolder = useUIStore((s) => s.folderId != null);
+  const autoPresets = useUIStore((s) => s.autoPresets);
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const commands = useMemo(() => buildCommands(hasFolder), [hasFolder]);
+  const commands = useMemo(() => buildCommands(hasFolder, autoPresets), [hasFolder, autoPresets]);
   const q = query.trim().toLowerCase();
   const matches = useMemo(
     () => (q ? commands.filter((c) => c.label.toLowerCase().includes(q)) : commands),

@@ -323,6 +323,60 @@ func samplePatchLinear(img image.Image, x, y, lookGamma, satFactor float64) (r, 
 	return r / n, g / n, b / n
 }
 
+// AutoAdjust computes automatic values for the requested sections ("tone",
+// "wb", "color", or "all") from the current decode and returns the caller's
+// params with only those sections replaced. Nothing is persisted — the
+// client applies the result through the normal SetEditParams path.
+func (e *Edits) AutoAdjust(ctx context.Context, photoID int64, params edit.Params, sections []string) (*edit.Params, error) {
+	if len(sections) == 0 {
+		return nil, aprot.ErrInvalidParams("no auto sections requested")
+	}
+	var secs []pyramid.AutoSection
+	wb := false
+	for _, s := range sections {
+		switch pyramid.AutoSection(s) {
+		case "all":
+			secs = pyramid.AutoSectionValues()
+			wb = true
+		case pyramid.AutoWB:
+			wb = true
+		case pyramid.AutoTone, pyramid.AutoColor:
+			secs = append(secs, pyramid.AutoSection(s))
+		default:
+			return nil, aprot.ErrInvalidParams("unknown auto section: " + s)
+		}
+	}
+
+	out := params
+	if wb {
+		// Selecting LibRaw's auto WB changes the decode itself, so it must
+		// land before the statistics pass — tone and color are then measured
+		// on the neutralized image and the sections compose.
+		out.WBMode = edit.WBAuto
+		out.WBMul = [4]float64{}
+		out.WBTemp, out.WBTint, out.WBKelvin = 0, 0, 0
+	}
+
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	// Hot path: when wb wasn't requested the LibRaw inputs are unchanged, so
+	// this returns the cached decode from the last preview; when it was, the
+	// one half-size demosaic here also pre-warms the cache for the preview
+	// the client requests right after.
+	rgba, err := e.previewDecode(ctx, photoID, photo, &out)
+	if err != nil {
+		return nil, err
+	}
+	gamma := photo.LookGamma
+	if gamma == 0 {
+		gamma = pyramid.FallbackLookGamma
+	}
+	pyramid.AutoAdjust(rgba, gamma, &out, secs)
+	return &out, nil
+}
+
 // SetEditParams persists the edit state (neutral params clear it).
 func (e *Edits) SetEditParams(ctx context.Context, photoID int64, params edit.Params) error {
 	if err := e.saveEdit(ctx, photoID, &params); err != nil {

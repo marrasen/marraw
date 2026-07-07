@@ -15,6 +15,7 @@ import { Histogram } from '@/components/Histogram';
 import { useUIStore } from '@/stores/uiStore';
 import {
   esApplyParams,
+  esAuto,
   esCanRedo,
   esCanUndo,
   esCommit,
@@ -257,7 +258,16 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
             applies to {targetCount} photos
           </span>
         )}
-        <span className="ml-auto flex gap-1">
+        <span className="ml-auto flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-1.5 text-[11px]"
+            onClick={() => void esAuto(client, ['all'])}
+            title="Auto everything (Ctrl+Alt+U)"
+          >
+            Auto
+          </Button>
           <Button size="icon-sm" variant="ghost" disabled={!canUndo} onClick={() => esUndo(client)} title="Undo (Ctrl+Z)">
             <Undo2 />
           </Button>
@@ -308,7 +318,12 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         />
       </Group>
 
-      <Group id="tone" title="Tone" changed={changed.tone}>
+      <Group
+        id="tone"
+        title="Tone"
+        changed={changed.tone}
+        action={<AutoButton client={client} sections={['tone']} title="Auto dynamics (Ctrl+U)" />}
+      >
         <EditSlider
           label="Exposure"
           hotkey="E"
@@ -492,7 +507,12 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
       />
       </Group>
 
-      <Group id="color" title="Color" changed={changed.color}>
+      <Group
+        id="color"
+        title="Color"
+        changed={changed.color}
+        action={<AutoButton client={client} sections={['wb', 'color']} title="Auto colours (Ctrl+Shift+U)" />}
+      >
         <PctSlider label="Saturation" hotkey="A" field="saturation" draft={draft} update={update} commit={commit} {...num('saturation')} />
         <PctSlider label="Vibrance" hotkey="V" field="vibrance" draft={draft} update={update} commit={commit} {...num('vibrance')} />
         <HueSlider label="Shadow tint" field="splitShadowHue" draft={draft} update={update} commit={commit} {...num('splitShadowHue')} />
@@ -645,11 +665,15 @@ function Group({
   id,
   title,
   changed,
+  action,
   children,
 }: {
   id: string;
   title: string;
   changed?: boolean;
+  // Optional header action (e.g. a section Auto button) — rendered beside
+  // the toggle, outside it, since a button cannot nest in a button.
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(() => localStorage.getItem(`marraw:editGroup:${id}`) !== '0');
@@ -659,27 +683,52 @@ function Group({
   };
   return (
     <section>
-      <button
-        type="button"
-        className="group/hdr mt-3 mb-2 flex w-full items-center gap-1.5 text-left"
-        onClick={toggle}
-        aria-expanded={open}
-      >
-        <span className="text-[10px] tracking-[.06em] text-muted-foreground uppercase group-hover/hdr:text-foreground">
-          {title}
-        </span>
-        {changed && (
-          <span className="size-[5px] shrink-0 rounded-full bg-primary" title="Has adjustments" />
-        )}
-        <ChevronRight
-          className={cn(
-            'size-3 shrink-0 text-faint opacity-0 transition-transform group-hover/hdr:opacity-100',
-            open && 'rotate-90',
+      <div className="group/hdr mt-3 mb-2 flex items-center gap-1.5">
+        <button
+          type="button"
+          className="flex flex-1 items-center gap-1.5 text-left"
+          onClick={toggle}
+          aria-expanded={open}
+        >
+          <span className="text-[10px] tracking-[.06em] text-muted-foreground uppercase group-hover/hdr:text-foreground">
+            {title}
+          </span>
+          {changed && (
+            <span className="size-[5px] shrink-0 rounded-full bg-primary" title="Has adjustments" />
           )}
-        />
-      </button>
+          <ChevronRight
+            className={cn(
+              'size-3 shrink-0 text-faint opacity-0 transition-transform group-hover/hdr:opacity-100',
+              open && 'rotate-90',
+            )}
+          />
+        </button>
+        {action}
+      </div>
       {open && <div className="flex flex-col gap-[7px]">{children}</div>}
     </section>
+  );
+}
+
+// AutoButton is the small per-section (or global) auto-adjust trigger.
+function AutoButton({
+  client,
+  sections,
+  title,
+}: {
+  client: ApiClient;
+  sections: Parameters<typeof esAuto>[1];
+  title: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="rounded px-1 text-[10px] tracking-[.06em] text-faint uppercase hover:text-foreground"
+      onClick={() => void esAuto(client, sections)}
+      title={title}
+    >
+      Auto
+    </button>
   );
 }
 

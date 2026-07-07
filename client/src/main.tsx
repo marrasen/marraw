@@ -22,6 +22,7 @@ if (import.meta.env.DEV) {
         esUpdate: (patch: unknown) => es.esUpdate(client, patch as never),
         esCommit: () => es.esCommit(client),
         esSetCropping: (on: boolean) => es.esSetCropping(client, on),
+        esAuto: (sections: unknown) => es.esAuto(client, sections as never),
       };
     },
   );

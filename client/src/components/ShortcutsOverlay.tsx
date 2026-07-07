@@ -32,6 +32,8 @@ const CARDS: { title: string; rows: [string, string][] }[] = [
       ['Focus a control', 'E C T H S…'],
       ['Adjust', '+ / − · ⇧'],
       ['Copy / paste / crop', 'Ctrl+C Ctrl+V R'],
+      ['Auto tone / colours / all', 'Ctrl+U · +⇧ · +Alt'],
+      ['Auto presets', 'Ctrl+1–9'],
     ],
   },
 ];

@@ -95,6 +95,19 @@ export function subscribeApplyBatchEdit(client: ApiClient, ids: number[], delta:
 }
 
 
+export function autoAdjust(client: ApiClient, photoID: number, params: Params, sections: string[], options?: RequestOptions): Promise<Params> {
+    return client.request<Params>('Edits.AutoAdjust', [photoID, params, sections], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+autoAdjust.method = 'Edits.AutoAdjust' as const;
+
+export function subscribeAutoAdjust(client: ApiClient, photoID: number, params: Params, sections: string[], callback: (data: Params) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Params>('Edits.AutoAdjust', [photoID, params, sections], callback, onError, options);
+}
+
+
 export function getEditParams(client: ApiClient, photoID: number, options?: RequestOptions): Promise<Params> {
     return client.request<Params>('Edits.GetEditParams', [photoID], options);
 }
@@ -187,6 +200,21 @@ export function useApplyBatchEdit(ids: number[], delta: Delta, options?: UseQuer
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [ids, delta], _subscribe: { method: 'Edits.ApplyBatchEdit', params: [ids, delta] } });
+}
+
+/**
+ * Subscribes to `Edits.AutoAdjust` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useAutoAdjust(photoID: number, params: Params, sections: string[], options?: UseQueryOptions<Params>): UseQueryResult<Params> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, sections: string[]) => autoAdjust(client, photoID, params, sections, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, sections], _subscribe: { method: 'Edits.AutoAdjust', params: [photoID, params, sections] } });
 }
 
 /**

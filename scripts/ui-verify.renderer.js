@@ -137,6 +137,32 @@ try {
   key('Escape');
   await sleep(900); // let the step commit debounce settle before moving on
 
+  // --- auto adjustments: buttons present, Ctrl+U family lands, undo reverts
+  R.autoButtons =
+    buttons().some((b) => (b.title || '').startsWith('Auto dynamics')) &&
+    buttons().some((b) => (b.title || '').startsWith('Auto colours')) &&
+    buttons().some((b) => (b.title || '').startsWith('Auto everything'));
+  // Ctrl+U auto dynamics: the draft carries ~+1.75 EV from the slider click
+  // above, so auto tone must land a different (pulled-back) state.
+  const preAutoEV = es().draft.expEV;
+  const preAutoJSON = JSON.stringify(es().draft);
+  key('u', { ctrlKey: true });
+  await until(() => JSON.stringify(es().draft) !== preAutoJSON, 20000, 'auto tone landed');
+  R.autoTone =
+    es().draft.expEV < preAutoEV && es().draft.wbMode !== 'auto' && es().draft.saturation === 0
+      ? true
+      : `expEV ${preAutoEV} -> ${es().draft.expEV}, wb=${es().draft.wbMode}, sat=${es().draft.saturation}`;
+  await sleep(400);
+  // Ctrl+Shift+U auto colours: switches WB to auto and computes vibrance.
+  key('u', { ctrlKey: true, shiftKey: true });
+  await until(() => es().draft.wbMode === 'auto', 20000, 'auto colours landed');
+  R.autoColours = true;
+  await sleep(400);
+  key('z', { ctrlKey: true }); // one undo step reverts the whole auto
+  await sleep(300);
+  R.autoUndo = es().draft.wbMode !== 'auto' ? true : 'undo left wbMode=auto';
+  await sleep(400);
+
   // --- Kelvin mode swaps the temperature slider -----------------------------
   const kelvinBtn = buttons().find((b) => b.textContent.trim() === 'Kelvin');
   kelvinBtn.click();
