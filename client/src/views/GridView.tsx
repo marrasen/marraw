@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Download, Star, Trash2, X } from 'lucide-react';
+import { Download, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePhotos, setVisible, type Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { useUIStore } from '@/stores/uiStore';
 
-const CELL_GAP = 8;
+const CELL_GAP = 12;
 
 export function GridView({ photos, folderId }: { photos: Photo[]; folderId: number }) {
   const client = useApiClient();
@@ -40,7 +40,8 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
   const cellTarget = useUIStore((s) => s.cellSize);
   const cols = Math.max(1, Math.floor(width / cellTarget));
   const cellW = width > 0 ? Math.floor((width - CELL_GAP * (cols + 1)) / cols) : cellTarget;
-  const cellH = Math.floor(cellW * 0.72) + 28;
+  // Uniform 3:2 cells per the handoff grid spec (no filename strip).
+  const cellH = Math.floor((cellW * 2) / 3);
   const rowCount = Math.ceil(photos.length / cols);
 
   const setGrid = useUIStore((s) => s.setGrid);
@@ -173,18 +174,21 @@ function SelectionBar() {
 function GridCell({ photo, w, h }: { photo: Photo; w: number; h: number }) {
   const focusId = useUIStore((s) => s.focusId);
   const selected = useUIStore((s) => s.selection.has(photo.id));
+  const multiSelect = useUIStore((s) => s.selection.size > 1);
   const focus = useUIStore((s) => s.focus);
   const setView = useUIStore((s) => s.setView);
+  const [loaded, setLoaded] = useState(false);
   const level = w * window.devicePixelRatio > 256 ? '512' : '256';
   const isFocus = focusId === photo.id;
 
   return (
     <div
       className={cn(
-        'group relative flex cursor-pointer flex-col overflow-hidden rounded-md bg-muted/40',
-        selected && 'ring-2 ring-primary',
-        isFocus && 'ring-2 ring-ring',
+        'group relative cursor-pointer overflow-hidden rounded bg-inset',
         photo.flag === 'exclude' && 'opacity-40',
+        // Batch spec: selected cells tint + accent border; the range anchor
+        // (focus) gets the white ring.
+        multiSelect && selected && 'bg-primary/15',
       )}
       style={{ width: w, height: h }}
       onClick={(e) => focus(photo.id, { extend: e.shiftKey, toggle: e.ctrlKey || e.metaKey })}
@@ -192,27 +196,45 @@ function GridCell({ photo, w, h }: { photo: Photo; w: number; h: number }) {
         focus(photo.id);
         setView('loupe');
       }}
+      title={photo.fileName}
     >
+      {!loaded && <div className="skeleton-shimmer absolute inset-0" />}
       <img
         src={imgUrl(photo, level)}
         alt={photo.fileName}
         draggable={false}
         loading="lazy"
-        className="min-h-0 w-full flex-1 object-contain"
+        onLoad={() => setLoaded(true)}
+        className={cn('size-full object-cover', !loaded && 'opacity-0')}
       />
-      <div className="flex h-7 items-center gap-1 px-1.5 text-[11px] text-muted-foreground">
-        <span className="truncate">{photo.fileName}</span>
-        <span className="ml-auto flex items-center gap-0.5">
-          {photo.flag === 'pick' && <span className="size-2 rounded-full bg-emerald-500" aria-label="Pick" />}
-          {photo.flag === 'exclude' && <X className="size-3 text-red-500" aria-label="Excluded" />}
-          {photo.rating > 0 && (
-            <span className="flex items-center gap-px text-amber-400">
-              {photo.rating}
-              <Star className="size-3 fill-amber-400 text-amber-400" />
-            </span>
+      {photo.rating > 0 && (
+        <div className="absolute bottom-[5px] left-[5px] rounded bg-black/50 px-[5px] py-0.5 text-[9px] tracking-[.5px] text-rating">
+          {'★'.repeat(photo.rating)}
+        </div>
+      )}
+      {photo.flag !== 'none' && (
+        <div
+          className={cn(
+            'absolute top-1.5 right-1.5 size-[9px] rounded-[2px]',
+            photo.flag === 'pick' ? 'bg-success' : 'bg-destructive',
           )}
-        </span>
-      </div>
+          aria-label={photo.flag === 'pick' ? 'Pick' : 'Excluded'}
+        />
+      )}
+      {multiSelect && selected && (
+        <div className="pointer-events-none absolute inset-0 rounded border-2 border-primary" />
+      )}
+      {isFocus && (
+        <div
+          className={cn(
+            'pointer-events-none absolute inset-0 rounded border-2',
+            multiSelect && selected ? 'border-white' : 'border-primary',
+          )}
+        />
+      )}
+      {!isFocus && !multiSelect && selected && (
+        <div className="pointer-events-none absolute inset-0 rounded border-2 border-primary/60" />
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Star, Check, X, Pipette, Undo2, Redo2, Crop, ChevronRight, RotateCcw } from 'lucide-react';
+import { Pipette, Undo2, Redo2, Crop, ChevronRight, RotateCcw } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
@@ -91,52 +91,66 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
 }
 
 // PhotoHeader shows and edits the cull state of the focused photo — the
-// loupe itself stays clean, so stars/flags live here.
+// loupe itself stays clean, so stars/flags live here. Styled per the
+// handoff Library plate: mono filename, 24px P/X squares, amber star row,
+// mono EXIF line.
 function PhotoHeader({ photo }: { photo: Photo }) {
   const client = useApiClient();
+  const displayName = photo.fileName.split(/[\\/]/).pop() ?? photo.fileName;
   return (
-    <div className="flex flex-col gap-2 border-b p-4 text-sm">
-      <span className="truncate font-medium" title={photo.fileName}>
-        {photo.fileName}
-      </span>
-      <div className="flex items-center gap-2">
-        <div className="flex" role="group" aria-label="Rating">
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button
-              key={n}
-              className="p-0.5"
-              aria-label={`${n} stars`}
-              onClick={() => applyRating(client, [photo.id], photo.rating === n ? 0 : n)}
-            >
-              <Star
-                className={cn(
-                  'size-5',
-                  n <= photo.rating ? 'fill-amber-400 text-amber-400' : 'text-muted-foreground/40',
-                )}
-              />
-            </button>
-          ))}
+    <div className="flex flex-col border-b px-4 pt-[15px] pb-[13px]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate font-mono text-[12.5px]" title={photo.fileName}>
+          {displayName}
+        </span>
+        <div className="flex shrink-0 gap-1.5" role="group" aria-label="Flag">
+          <button
+            title="Pick (P)"
+            aria-pressed={photo.flag === 'pick'}
+            className={cn(
+              'flex size-6 items-center justify-center rounded-md border text-[11px] font-semibold',
+              photo.flag === 'pick'
+                ? 'border-success/45 bg-success/15 text-success-text'
+                : 'border-border text-muted-foreground hover:text-foreground',
+            )}
+            onClick={() => applyFlag(client, [photo.id], photo.flag === 'pick' ? 'none' : 'pick')}
+          >
+            P
+          </button>
+          <button
+            title="Exclude (X)"
+            aria-pressed={photo.flag === 'exclude'}
+            className={cn(
+              'flex size-6 items-center justify-center rounded-md border text-[11px] font-semibold',
+              photo.flag === 'exclude'
+                ? 'border-destructive/45 bg-destructive/15 text-danger-text'
+                : 'border-border text-muted-foreground hover:text-foreground',
+            )}
+            onClick={() =>
+              applyFlag(client, [photo.id], photo.flag === 'exclude' ? 'none' : 'exclude')
+            }
+          >
+            X
+          </button>
         </div>
-        <ToggleGroup
-          size="sm"
-          className="ml-auto"
-          value={[photo.flag]}
-          onValueChange={(groupValue) => {
-            const v = ((groupValue as string[])[0] ?? 'none') as Photo['flag'];
-            applyFlag(client, [photo.id], v);
-          }}
-        >
-          <ToggleGroupItem value="pick" title="Pick (P)" className="data-pressed:text-emerald-500">
-            <Check />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="exclude" title="Exclude (X)" className="data-pressed:text-red-500">
-            <X />
-          </ToggleGroupItem>
-        </ToggleGroup>
+      </div>
+      <div className="mt-2 flex" role="group" aria-label="Rating">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            className="pr-1 text-base leading-none"
+            aria-label={`${n} stars`}
+            onClick={() => applyRating(client, [photo.id], photo.rating === n ? 0 : n)}
+          >
+            <span className={n <= photo.rating ? 'text-rating' : 'text-black/25 dark:text-white/25'}>
+              ★
+            </span>
+          </button>
+        ))}
       </div>
       {photo.metaLoaded && (
-        <span className="text-xs text-muted-foreground">
-          {photo.model} · ISO {photo.iso} · {formatShutter(photo.shutter)} · f/{photo.aperture} ·{' '}
+        <span className="mt-2 font-mono text-[10.5px] text-muted-foreground">
+          {photo.model} · ƒ/{photo.aperture} · {formatShutter(photo.shutter)} · ISO {photo.iso} ·{' '}
           {Math.round(photo.focalLen)}mm
         </span>
       )}

@@ -143,6 +143,14 @@ ipcMain.handle('marraw:pick-directory', async () => {
 ipcMain.handle('marraw:reveal', (_ev, p) => {
   if (typeof p === 'string') shell.showItemInFolder(p);
 });
+ipcMain.handle('marraw:is-directory', (_ev, p) => {
+  if (typeof p !== 'string') return false;
+  try {
+    return require('node:fs').statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+});
 
 app.whenReady().then(createWindow);
 app.on('before-quit', () => {

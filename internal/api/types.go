@@ -83,6 +83,38 @@ type FolderPrefs struct {
 	Recents   []string `json:"recents"`
 }
 
+// LibraryRoot is one shoot folder added to the curated library. Roots are
+// grouped in the rail by their parent directory; order in the stored list is
+// the display order. Alias is a display-only rename — the folder on disk
+// keeps its name.
+type LibraryRoot struct {
+	Path              string `json:"path"`
+	Alias             string `json:"alias"`
+	IncludeSubfolders bool   `json:"includeSubfolders"`
+	// PhotoCount is the last known RAW count, refreshed by the client after
+	// each open/rescan — display only, never authoritative.
+	PhotoCount int `json:"photoCount"`
+}
+
+// PickEntry is one folder row in the Add-folder picker: a subdirectory with
+// its direct (non-recursive) RAW file count.
+type PickEntry struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	HasSubdirs bool   `json:"hasSubdirs"`
+	RawCount   int    `json:"rawCount"`
+}
+
+// RawTotal sums RAW files under the requested paths (picker footer).
+type RawTotal struct {
+	Files int `json:"files"`
+}
+
+// RenameResult carries the folder's path after an on-disk rename.
+type RenameResult struct {
+	Path string `json:"path"`
+}
+
 type FolderInfo struct {
 	FolderID   int64  `json:"folderId"`
 	Path       string `json:"path"`

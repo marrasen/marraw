@@ -30,7 +30,7 @@ func TestCopyFolderCarriesEditsViaSidecars(t *testing.T) {
 	writeFakeRaw(t, folderA, "IMG1.ARW", "the-first-frame")
 	writeFakeRaw(t, folderA, "IMG2.ARW", "second")
 
-	fidA, countA, err := desk.OpenFolder(ctx, folderA)
+	fidA, countA, err := desk.OpenFolder(ctx, folderA, false)
 	if err != nil {
 		t.Fatalf("open folder A: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestCopyFolderCarriesEditsViaSidecars(t *testing.T) {
 	}
 
 	// Re-open folder A: the backfill path writes sidecars for catalog intent.
-	if _, _, err := desk.OpenFolder(ctx, folderA); err != nil {
+	if _, _, err := desk.OpenFolder(ctx, folderA, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(sidecar.PathFor(filepath.Join(folderA, "IMG1.ARW"))); err != nil {
@@ -65,7 +65,7 @@ func TestCopyFolderCarriesEditsViaSidecars(t *testing.T) {
 
 	lapDB := openDB(t)
 	lap := &Scanner{DB: lapDB}
-	fidB, countB, err := lap.OpenFolder(ctx, folderB)
+	fidB, countB, err := lap.OpenFolder(ctx, folderB, false)
 	if err != nil {
 		t.Fatalf("open folder B: %v", err)
 	}

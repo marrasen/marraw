@@ -40,6 +40,93 @@ func IsRawFile(name string) bool {
 	return rawExts[strings.ToLower(filepath.Ext(name))]
 }
 
+// skipDirName filters noise directories out of recursive walks: exports,
+// select copies, thumbnail caches, our own preview cache, and dot/system
+// folders.
+func skipDirName(name string) bool {
+	l := strings.ToLower(name)
+	if strings.HasPrefix(l, ".") {
+		return true
+	}
+	switch l {
+	case "export", "exports", "_selects", "marraw-previews",
+		"$recycle.bin", "system volume information":
+		return true
+	}
+	return false
+}
+
+// CollectEntries lists the RAW files of root. Non-recursive is a flat
+// ReadDir; recursive is a breadth-first walk that skips noise directories,
+// follows directory symlinks one hop with a resolved-path loop guard, and
+// names each file by its path relative to root.
+func CollectEntries(ctx context.Context, root string, recursive bool) ([]store.FileEntry, error) {
+	type dirItem struct {
+		abs, rel string
+		depth    int
+	}
+	const maxDepth = 12
+
+	visited := map[string]bool{}
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		visited[strings.ToLower(r)] = true
+	}
+	queue := []dirItem{{abs: root, rel: "", depth: 0}}
+	entries := []store.FileEntry{}
+	for len(queue) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		d := queue[0]
+		queue = queue[1:]
+		dirents, err := os.ReadDir(d.abs)
+		if err != nil {
+			if d.rel == "" {
+				return nil, err
+			}
+			continue // an unreadable subfolder must not fail the whole scan
+		}
+		for _, de := range dirents {
+			name := de.Name()
+			isSymlink := de.Type()&os.ModeSymlink != 0
+			if de.IsDir() || isSymlink {
+				if !recursive || d.depth >= maxDepth || skipDirName(name) {
+					continue
+				}
+				child := filepath.Join(d.abs, name)
+				info, err := os.Stat(child) // resolves symlinks
+				if err != nil || !info.IsDir() {
+					continue
+				}
+				resolved, err := filepath.EvalSymlinks(child)
+				if err != nil {
+					continue
+				}
+				key := strings.ToLower(resolved)
+				if visited[key] {
+					continue
+				}
+				visited[key] = true
+				queue = append(queue, dirItem{abs: child, rel: filepath.Join(d.rel, name), depth: d.depth + 1})
+				continue
+			}
+			if !IsRawFile(name) {
+				continue
+			}
+			info, err := de.Info()
+			if err != nil {
+				continue
+			}
+			entries = append(entries, store.FileEntry{
+				Name:    filepath.Join(d.rel, name),
+				Size:    info.Size(),
+				MtimeNs: info.ModTime().UnixNano(),
+			})
+		}
+	}
+	return entries, nil
+}
+
 type Scanner struct {
 	DB    *store.DB
 	Cache *pyramid.Cache
@@ -50,31 +137,19 @@ type Scanner struct {
 }
 
 // OpenFolder syncs the folder's directory listing into the store (fast; no
-// decoding). The metadata backfill is driven separately by the API layer so
+// decoding). With recursive set, RAWs anywhere beneath the folder are
+// registered under it with their relative subpath as the file name — the
+// nested structure stays visible in the name, and Photo.Path() still joins
+// cleanly. The metadata backfill is driven separately by the API layer so
 // it can surface as a cancellable shared task.
-func (s *Scanner) OpenFolder(ctx context.Context, path string) (int64, int, error) {
+func (s *Scanner) OpenFolder(ctx context.Context, path string, recursive bool) (int64, int, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return 0, 0, err
 	}
-	dirents, err := os.ReadDir(abs)
+	entries, err := CollectEntries(ctx, abs, recursive)
 	if err != nil {
 		return 0, 0, err
-	}
-	var entries []store.FileEntry
-	for _, de := range dirents {
-		if de.IsDir() || !IsRawFile(de.Name()) {
-			continue
-		}
-		info, err := de.Info()
-		if err != nil {
-			continue
-		}
-		entries = append(entries, store.FileEntry{
-			Name:    de.Name(),
-			Size:    info.Size(),
-			MtimeNs: info.ModTime().UnixNano(),
-		})
 	}
 	folderID, err := s.DB.UpsertFolder(ctx, abs)
 	if err != nil {

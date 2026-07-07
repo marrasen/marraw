@@ -4,11 +4,18 @@ import type { Params } from '@/api/edits';
 
 export type View = 'grid' | 'loupe';
 export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
+// Top-level app mode (the top-bar segmented control). Library is the
+// structured window; Cull and Develop are cinema canvases. Export lives in
+// a dialog, not a mode.
+export type Mode = 'library' | 'cull' | 'develop';
 
 interface UIState {
+  mode: Mode;
   folderId: number | null;
   folderPath: string | null;
   view: View;
+  addFolderOpen: boolean;
+  paletteOpen: boolean;
 
   focusId: number | null;
   anchorId: number | null;
@@ -36,6 +43,9 @@ interface UIState {
   // photo navigation so a series can be compared at the same crop.
   loupeZoom: 'fit' | number;
 
+  setMode: (m: Mode) => void;
+  setAddFolderOpen: (open: boolean) => void;
+  setPaletteOpen: (open: boolean) => void;
   setFolder: (id: number, path: string) => void;
   setView: (v: View) => void;
   focus: (id: number | null, opts?: { extend?: boolean; toggle?: boolean }) => void;
@@ -54,9 +64,12 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
+  mode: 'library',
   folderId: null,
   folderPath: null,
   view: 'grid',
+  addFolderOpen: false,
+  paletteOpen: false,
   focusId: null,
   anchorId: null,
   selection: new Set<number>(),
@@ -70,6 +83,10 @@ export const useUIStore = create<UIState>((set, get) => ({
   settingsOpen: false,
   cellSize: 220,
   loupeZoom: 'fit',
+
+  setMode: (m) => set(m === 'library' ? { mode: m, view: 'grid' } : { mode: m, view: 'loupe' }),
+  setAddFolderOpen: (open) => set({ addFolderOpen: open }),
+  setPaletteOpen: (open) => set({ paletteOpen: open }),
 
   setFolder: (id, path) =>
     set({

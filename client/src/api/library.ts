@@ -47,6 +47,13 @@ export interface FolderPrefs {
     recents: string[];
 }
 
+export interface LibraryRoot {
+    path: string;
+    alias: string;
+    includeSubfolders: boolean;
+    photoCount: number;
+}
+
 export interface Photo {
     id: number;
     fileName: string;
@@ -76,6 +83,34 @@ export interface PhotoPatch {
 
 export interface PhotoPatchEvent {
     patches: PhotoPatch[];
+}
+
+export interface PickEntry {
+    name: string;
+    path: string;
+    hasSubdirs: boolean;
+    rawCount: number;
+}
+
+export interface RawTotal {
+    files: number;
+}
+
+export interface RenameResult {
+    path: string;
+}
+
+
+export function countRaws(client: ApiClient, paths: string[], recursive: boolean, options?: RequestOptions): Promise<RawTotal> {
+    return client.request<RawTotal>('Library.CountRaws', [paths, recursive], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+countRaws.method = 'Library.CountRaws' as const;
+
+export function subscribeCountRaws(client: ApiClient, paths: string[], recursive: boolean, callback: (data: RawTotal) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<RawTotal>('Library.CountRaws', [paths, recursive], callback, onError, options);
 }
 
 
@@ -118,6 +153,19 @@ export function subscribeGetFolderPrefs(client: ApiClient, callback: (data: Fold
 }
 
 
+export function getLibraryRoots(client: ApiClient, options?: RequestOptions): Promise<LibraryRoot[]> {
+    return client.request<LibraryRoot[]>('Library.GetLibraryRoots', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+getLibraryRoots.method = 'Library.GetLibraryRoots' as const;
+
+export function subscribeGetLibraryRoots(client: ApiClient, callback: (data: LibraryRoot[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<LibraryRoot[]>('Library.GetLibraryRoots', [], callback, onError, options);
+}
+
+
 export function listDir(client: ApiClient, path: string, options?: RequestOptions): Promise<DirEntry[]> {
     return client.request<DirEntry[]>('Library.ListDir', [path], options);
 }
@@ -128,6 +176,19 @@ listDir.method = 'Library.ListDir' as const;
 
 export function subscribeListDir(client: ApiClient, path: string, callback: (data: DirEntry[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<DirEntry[]>('Library.ListDir', [path], callback, onError, options);
+}
+
+
+export function listDirRaws(client: ApiClient, path: string, options?: RequestOptions): Promise<PickEntry[]> {
+    return client.request<PickEntry[]>('Library.ListDirRaws', [path], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+listDirRaws.method = 'Library.ListDirRaws' as const;
+
+export function subscribeListDirRaws(client: ApiClient, path: string, callback: (data: PickEntry[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<PickEntry[]>('Library.ListDirRaws', [path], callback, onError, options);
 }
 
 
@@ -170,6 +231,19 @@ export function subscribeOpenFolder(client: ApiClient, path: string, callback: (
 }
 
 
+export function renameFolderOnDisk(client: ApiClient, path: string, newName: string, options?: RequestOptions): Promise<RenameResult> {
+    return client.request<RenameResult>('Library.RenameFolderOnDisk', [path, newName], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+renameFolderOnDisk.method = 'Library.RenameFolderOnDisk' as const;
+
+export function subscribeRenameFolderOnDisk(client: ApiClient, path: string, newName: string, callback: (data: RenameResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<RenameResult>('Library.RenameFolderOnDisk', [path, newName], callback, onError, options);
+}
+
+
 export function setFavoriteFolders(client: ApiClient, paths: string[], options?: RequestOptions): Promise<void> {
     return client.request<void>('Library.SetFavoriteFolders', [paths], options);
 }
@@ -193,6 +267,19 @@ setFlag.method = 'Library.SetFlag' as const;
 
 export function subscribeSetFlag(client: ApiClient, ids: number[], flag: FlagType, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Library.SetFlag', [ids, flag], callback, onError, options);
+}
+
+
+export function setLibraryRoots(client: ApiClient, roots: LibraryRoot[], options?: RequestOptions): Promise<void> {
+    return client.request<void>('Library.SetLibraryRoots', [roots], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setLibraryRoots.method = 'Library.SetLibraryRoots' as const;
+
+export function subscribeSetLibraryRoots(client: ApiClient, roots: LibraryRoot[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Library.SetLibraryRoots', [roots], callback, onError, options);
 }
 
 
@@ -241,6 +328,21 @@ export function onPhotoPatchEvent(client: ApiClient, handler: PushHandler<PhotoP
 // React Hooks for Library
 
 /**
+ * Subscribes to `Library.CountRaws` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useCountRaws(paths: string[], recursive: boolean, options?: UseQueryOptions<RawTotal>): UseQueryResult<RawTotal> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, paths: string[], recursive: boolean) => countRaws(client, paths, recursive, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [paths, recursive], _subscribe: { method: 'Library.CountRaws', params: [paths, recursive] } });
+}
+
+/**
  * Subscribes to `Library.DeletePhotos` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -284,6 +386,20 @@ export function useGetFolderPrefs(options?: UseQueryOptions<FolderPrefs>): UseQu
 }
 
 /**
+ * Subscribes to `Library.GetLibraryRoots` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useGetLibraryRoots(options?: UseQueryOptions<LibraryRoot[]>): UseQueryResult<LibraryRoot[]> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => getLibraryRoots(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'Library.GetLibraryRoots', params: [] } });
+}
+
+/**
  * Subscribes to `Library.ListDir` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -296,6 +412,21 @@ export function useListDir(path: string, options?: UseQueryOptions<DirEntry[]>):
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Library.ListDir', params: [path] } });
+}
+
+/**
+ * Subscribes to `Library.ListDirRaws` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useListDirRaws(path: string, options?: UseQueryOptions<PickEntry[]>): UseQueryResult<PickEntry[]> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, path: string) => listDirRaws(client, path, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Library.ListDirRaws', params: [path] } });
 }
 
 /**
@@ -343,6 +474,21 @@ export function useOpenFolder(path: string, options?: UseQueryOptions<FolderInfo
 }
 
 /**
+ * Subscribes to `Library.RenameFolderOnDisk` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useRenameFolderOnDisk(path: string, newName: string, options?: UseQueryOptions<RenameResult>): UseQueryResult<RenameResult> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, path: string, newName: string) => renameFolderOnDisk(client, path, newName, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [path, newName], _subscribe: { method: 'Library.RenameFolderOnDisk', params: [path, newName] } });
+}
+
+/**
  * Subscribes to `Library.SetFavoriteFolders` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -370,6 +516,21 @@ export function useSetFlag(ids: number[], flag: FlagType, options?: UseQueryOpti
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [ids, flag], _subscribe: { method: 'Library.SetFlag', params: [ids, flag] } });
+}
+
+/**
+ * Subscribes to `Library.SetLibraryRoots` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetLibraryRoots(roots: LibraryRoot[], options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, roots: LibraryRoot[]) => setLibraryRoots(client, roots, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [roots], _subscribe: { method: 'Library.SetLibraryRoots', params: [roots] } });
 }
 
 /**

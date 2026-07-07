@@ -90,7 +90,13 @@ func hasSubdirs(path string) bool {
 // count. Fast: no decoding happens here — the metadata backfill and the
 // pre-render pass start in the background as cancellable shared tasks.
 func (l *Library) OpenFolder(ctx context.Context, path string) (*FolderInfo, error) {
-	folderID, count, err := l.deps.Scanner.OpenFolder(ctx, path)
+	// Library roots carry a per-root include-subfolders flag; folders opened
+	// outside the curated library scan flat.
+	recursive := false
+	if root, ok := l.rootFor(ctx, path); ok {
+		recursive = root.IncludeSubfolders
+	}
+	folderID, count, err := l.deps.Scanner.OpenFolder(ctx, path, recursive)
 	if err != nil {
 		return nil, aprot.ErrInvalidParams(err.Error())
 	}

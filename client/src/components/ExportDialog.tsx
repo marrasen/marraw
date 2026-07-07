@@ -23,14 +23,7 @@ import {
 } from '@/components/ui/select';
 import { useUIStore } from '@/stores/uiStore';
 
-declare global {
-  interface Window {
-    marraw?: {
-      pickDirectory: () => Promise<string | null>;
-      revealInExplorer: (path: string) => void;
-    };
-  }
-}
+import '@/lib/electron';
 
 const LAST_DIR_KEY = 'marraw.exportDir';
 

@@ -70,6 +70,56 @@ func (db *DB) UpsertFolder(ctx context.Context, path string) (int64, error) {
 	return id, err
 }
 
+// RenameFolderPaths moves a folder row (and any rows for folders nested
+// beneath it) to a new path after an on-disk rename. Photo rows are keyed by
+// folder id and are untouched; their cache keys are recomputed on the next
+// SyncFolder.
+func (db *DB) RenameFolderPaths(ctx context.Context, oldPath, newPath string) error {
+	oldPath = filepath.Clean(oldPath)
+	newPath = filepath.Clean(newPath)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE folders SET path = ? WHERE path = ? COLLATE NOCASE`, newPath, oldPath); err != nil {
+		return err
+	}
+	// Descendant rows: rewrite the prefix in Go (SQL substr counts
+	// characters, not bytes — unsafe for the byte-length prefix math).
+	rows, err := tx.QueryContext(ctx, `SELECT id, path FROM folders`)
+	if err != nil {
+		return err
+	}
+	prefix := oldPath + string(filepath.Separator)
+	type move struct {
+		id   int64
+		path string
+	}
+	var moves []move
+	for rows.Next() {
+		var m move
+		if err := rows.Scan(&m.id, &m.path); err != nil {
+			rows.Close()
+			return err
+		}
+		if len(m.path) > len(prefix) && strings.EqualFold(m.path[:len(prefix)], prefix) {
+			moves = append(moves, move{id: m.id, path: newPath + string(filepath.Separator) + m.path[len(prefix):]})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, m := range moves {
+		if _, err := tx.ExecContext(ctx, `UPDATE folders SET path = ? WHERE id = ?`, m.path, m.id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // FileEntry is one on-disk RAW file observed during a folder scan.
 type FileEntry struct {
 	Name    string
