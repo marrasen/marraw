@@ -6,6 +6,7 @@ import { useGetCacheInfo, clearCache, setCacheCap, setCacheDir } from '@/api/sys
 import { useApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
+import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
@@ -278,9 +279,9 @@ function AutoPresetsSection() {
               );
             })}
           </div>
-          <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5">
+          <div className="mt-2.5 grid grid-cols-2 gap-x-6 gap-y-2">
             {OFFSET_KEYS.map((o) => (
-              <OffsetInput
+              <OffsetSlider
                 key={`${p.id}:${o.key}`}
                 label={o.label}
                 offsetKey={o.key}
@@ -305,9 +306,10 @@ function AutoPresetsSection() {
   );
 }
 
-// OffsetInput edits one style delta: exposure in EV, everything else in the
-// panel's ±100 units. Commits on blur/Enter so partial typing never lands.
-function OffsetInput({
+// OffsetSlider edits one style delta as a center-anchored slider: exposure
+// in EV, everything else in the panel's ±100 units. Persists on release
+// (setAutoPresets writes localStorage per commit).
+function OffsetSlider({
   label,
   offsetKey,
   value,
@@ -319,37 +321,40 @@ function OffsetInput({
   onChange: (v: number) => void;
 }) {
   const ev = offsetKey === 'expEV';
-  const display = (v: number) => (ev ? String(v) : String(Math.round(v * 100)));
-  const [text, setText] = useState(display(value));
-  // Re-sync the field when the committed value changes (e.g. clamped) —
-  // derived state during render, not an effect.
-  const [prev, setPrev] = useState(value);
-  if (value !== prev) {
-    setPrev(value);
-    setText(display(value));
-  }
-  const commit = () => {
-    const n = Number(text);
-    if (!Number.isFinite(n)) {
-      setText(display(value));
-      return;
-    }
-    const v = ev ? Math.max(-2, Math.min(2, n)) : Math.max(-1, Math.min(1, n / 100));
-    onChange(Math.round(v * 100) / 100);
-  };
+  // Slider space: EV directly, ±1 params as ±100.
+  const toSlider = (v: number) => (ev ? v : Math.round(v * 100));
+  const fromSlider = (v: number) => (ev ? Math.round(v * 100) / 100 : v / 100);
+  // Thumb follows a local value during the drag (same pattern as EditSlider).
+  const [dragging, setDragging] = useState<number | null>(null);
+  const shown = dragging ?? toSlider(value);
+  const display = ev
+    ? `${shown >= 0 ? '+' : ''}${shown.toFixed(2)}`
+    : shown === 0
+      ? '0'
+      : `${shown > 0 ? '+' : ''}${Math.round(shown)}`;
   return (
-    <label className="flex items-center gap-2">
+    <div className="flex items-center gap-2.5">
       <span className="w-20 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <input
-        className="h-7 w-16 rounded-lg border border-input bg-secondary px-2 text-right font-mono text-xs outline-none focus:border-ring dark:bg-white/5"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && commit()}
-        onBlur={commit}
-        aria-label={`${label} offset`}
-      />
-      <span className="font-mono text-[10px] text-muted-foreground">{ev ? 'EV' : '±100'}</span>
-    </label>
+      <div className="min-w-0 flex-1">
+        <Slider
+          value={shown}
+          min={ev ? -2 : -100}
+          max={ev ? 2 : 100}
+          step={ev ? 0.05 : 2}
+          fillFrom={0}
+          aria-label={`${label} offset`}
+          onValueChange={(v) => setDragging(v as number)}
+          onValueCommitted={(v) => {
+            setDragging(null);
+            onChange(fromSlider(v as number));
+          }}
+        />
+      </div>
+      <span className="w-14 shrink-0 text-right font-mono text-[11px] text-foreground tabular-nums">
+        {display}
+        {ev && <span className="text-muted-foreground"> EV</span>}
+      </span>
+    </div>
   );
 }
 

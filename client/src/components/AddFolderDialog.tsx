@@ -236,12 +236,22 @@ function FolderList({
               onClick={() => e.hasSubdirs && onNavigate(e.path)}
               onDoubleClick={() => onNavigate(e.path)}
             >
-              <Checkbox
-                checked={isChecked}
-                disabled={!selectable}
-                onCheckedChange={() => onToggle(e.path, e.rawCount)}
+              {/* The hit-area wrapper isolates the checkbox from the row: the
+                  row navigates on click AND double-click, and two quick ticks
+                  on the bare checkbox bubbled up as a dblclick that opened
+                  the folder. The negative-margin padding also widens the
+                  16px target so near-misses toggle instead of navigating. */}
+              <span
+                className="-m-2 flex items-center p-2"
                 onClick={(ev) => ev.stopPropagation()}
-              />
+                onDoubleClick={(ev) => ev.stopPropagation()}
+              >
+                <Checkbox
+                  checked={isChecked}
+                  disabled={!selectable}
+                  onCheckedChange={() => onToggle(e.path, e.rawCount)}
+                />
+              </span>
               <Folder className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.5} />
               <span
                 className={cn(

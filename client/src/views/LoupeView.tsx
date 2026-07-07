@@ -8,7 +8,7 @@ import { Segmented } from '@/components/ui/segmented';
 import { ChipSpinner } from '@/components/ui/task-chip';
 import { cn } from '@/lib/utils';
 import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
-import { esClearPreview, esCommit, esPickWB, esSetCropping, esUpdate, useEditSession } from '@/lib/editSession';
+import { esClearPreview, esCommit, esPickWB, esPreviewSettled, esSetCropping, esUpdate, useEditSession } from '@/lib/editSession';
 import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
@@ -231,6 +231,20 @@ export function CinemaImage({
     return () => ro.disconnect();
   }, []);
 
+  // React delegates wheel listeners as passive, so preventDefault in the
+  // React onWheel below is silently ignored — a native non-passive listener
+  // is the only way to actually suppress Chromium's default for ctrl+wheel
+  // and trackpad pinch (which arrives as ctrl+wheel) over this surface.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const block = (ev: WheelEvent) => {
+      if (ev.ctrlKey) ev.preventDefault();
+    };
+    el.addEventListener('wheel', block, { passive: false });
+    return () => el.removeEventListener('wheel', block);
+  }, []);
+
   const [fdw, fdh] = fullDisplayDims(photo);
   // Once the flat frame is up we display the full frame; otherwise the
   // cropped render.
@@ -325,17 +339,35 @@ export function CinemaImage({
     }
   }, [photo.editHash, photo.id]);
 
+  // The hash-change clear above only fires while ALREADY at tile depth —
+  // committing at a lower zoom and zooming to 1:1 afterwards left the 2048
+  // preview blob up forever: it gates the tile layer off, so full resolution
+  // never rendered and no indicator showed. Once the session is settled
+  // (draft == committed, nothing rendering) the blob adds nothing over the
+  // committed renditions — drop it so the tiles take over. Mid-drag draft
+  // previews stay: tiles would regress to committed pixels under the pointer.
+  const esRendering = useEditSession((s) => s.rendering);
+  useEffect(() => {
+    if (level !== 'tiles' || cropping) return;
+    const p = useEditSession.getState().preview;
+    if (p && p.photoId === photo.id && esPreviewSettled()) esClearPreview();
+  }, [level, cropping, photo.id, preview, esRendering]);
+
   // Restore the pan ratio whenever the geometry or photo changes. `container`
   // must be a dep: at a numeric zoom boxW is container-independent, so on a
   // fresh mount (mode switch) it is already final while the container still
   // measures 0×0 — without it the restore never re-runs after measurement and
-  // the view sticks at the top-left corner.
+  // the view sticks at the top-left corner. slackX/slackY must be deps too:
+  // leaving crop mode restores the pan slack around an UNCHANGED box when the
+  // edit was straighten-only (the angle never changes the output size), and
+  // without a re-run the scroll stays at crop mode's zero — the slack padding
+  // then shows as the photo shoved far right and down.
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     el.scrollLeft = panRatio.current[0] * Math.max(0, el.scrollWidth - el.clientWidth);
     el.scrollTop = panRatio.current[1] * Math.max(0, el.scrollHeight - el.clientHeight);
-  }, [photo.id, boxW, boxH, container]);
+  }, [photo.id, boxW, boxH, slackX, slackY, container]);
 
   const onScroll = () => {
     const el = containerRef.current;
@@ -374,10 +406,19 @@ export function CinemaImage({
     };
   }, [boxW, boxH, slackX, slackY]);
 
+  // Wheel-zoom base: a trackpad pinch delivers wheel events faster than React
+  // re-renders, so deriving each step from the render-closure `scale` reads
+  // the same stale base several times per frame — most of the gesture is
+  // dropped and the zoom crawls, then jumps. The freshest target lives on a
+  // ref; the render-time sync keeps external zoom changes (buttons, fit, Z)
+  // authoritative, and is safe because setZoom lands in the store
+  // synchronously — any later render already reads the accumulated value.
+  const wheelZoomRef = useRef(scale);
+  wheelZoomRef.current = scale;
   const onWheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey) return;
-    e.preventDefault();
-    const next = Math.min(4, Math.max(0.05, scale * Math.exp(-e.deltaY * 0.0015)));
+    const next = Math.min(4, Math.max(0.05, wheelZoomRef.current * Math.exp(-e.deltaY * 0.0015)));
+    wheelZoomRef.current = next;
     const el = containerRef.current;
     if (el && haveDims) {
       // Anchor the image point under the cursor (map-style zoom): compute
@@ -472,6 +513,19 @@ export function CinemaImage({
 
   // Rendering indicator: tiles mounted but not decoded yet.
   const rendering = wantTiles && pendingTiles[0] > 0;
+
+  // Photo-switch indicator: the shown pixels still belong to another photo.
+  // Rapid culling outruns the decode pipeline and the double buffer keeps the
+  // previous frame up instead of flashing — correct, but without a signal it
+  // reads as the app freezing. Any preview blob counts as current while the
+  // edit session's preview is on this photo (drag frames land every few tens
+  // of milliseconds; flagging the swap gaps would blink the badge non-stop).
+  const showsCurrent =
+    shownSrc !== '' &&
+    (shownSrc.includes(`/img/${photo.id}/`) ||
+      (shownSrc.startsWith('blob:') && preview != null && preview.photoId === photo.id));
+  const loadingPhoto = haveDims && shownSrc !== '' && !showsCurrent;
+  const busy = rendering || loadingPhoto;
 
   // Parents embed the zoom cluster in their own control bars.
   const onZoomInfoRef = useRef(onZoomInfo);
@@ -593,14 +647,14 @@ export function CinemaImage({
         )}
       </div>
 
-      {/* Rendering full resolution: top progress line + centered badge. Both
-          stay mounted and fade instead of popping in and out; the fade-in
-          delay swallows tile loads that finish near-instantly, so stepping
-          through a warm burst never blinks the chrome. */}
+      {/* Rendering / loading: top progress line + centered badge. Both stay
+          mounted and fade instead of popping in and out; the fade-in delay
+          swallows tile loads and photo swaps that finish near-instantly, so
+          stepping through a warm burst never blinks the chrome. */}
       <div
         className={cn(
           'pointer-events-none absolute inset-x-0 top-0 z-40 h-0.5 bg-white/10 transition-opacity duration-200',
-          rendering ? 'opacity-100 delay-150' : 'opacity-0 delay-0',
+          busy ? 'opacity-100 delay-150' : 'opacity-0 delay-0',
         )}
       >
         <div className="animate-chip-indeterminate absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-primary to-[#aab0ff]/0" />
@@ -608,14 +662,18 @@ export function CinemaImage({
       <div
         className={cn(
           'glass pointer-events-none absolute left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl px-[18px] py-[13px] transition-opacity duration-200',
-          rendering ? 'opacity-100 delay-150' : 'opacity-0 delay-0',
+          busy ? 'opacity-100 delay-150' : 'opacity-0 delay-0',
         )}
         style={{ bottom: renderingBadgeBottom }}
       >
         <ChipSpinner className="size-[19px]" />
         <div className="flex flex-col gap-0.5">
-          <span className="text-[13.5px] font-semibold text-foreground">Rendering full resolution</span>
-          <span className="font-mono text-[11px] text-muted-foreground">1:1 tile · decoding RAW</span>
+          <span className="text-[13.5px] font-semibold text-foreground">
+            {loadingPhoto ? 'Loading photo' : 'Rendering full resolution'}
+          </span>
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {loadingPhoto ? 'decoding RAW preview' : '1:1 tile · decoding RAW'}
+          </span>
         </div>
       </div>
 

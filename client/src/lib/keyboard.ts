@@ -9,6 +9,7 @@ import {
   esApplyAutoPreset,
   esApplyParams,
   esAuto,
+  esMoveActive,
   esRedo,
   esSetActive,
   esSetCropping,
@@ -46,6 +47,7 @@ const CONTROL_KEYS: Record<string, ControlId> = {
 //   P / X / U     pick / exclude / unflag
 //   Enter         loupe view · Esc control → grid
 //   E B W T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
+//   Ctrl+↑/↓      focus the previous/next develop control
 //   +/- / Z / Space   zoom (loupe, no control focused; Z/Space toggle 1:1↔fit)
 //   Ctrl+A/C/V    select all, copy/paste edit settings
 //   Ctrl+Z/Y      per-photo edit undo/redo
@@ -141,6 +143,14 @@ export function useKeyboard() {
             if (!preset || !es.draft) return;
             e.preventDefault();
             void esApplyAutoPreset(client, preset);
+            return;
+          }
+          // Ctrl+↑/↓ walk the develop controls in panel order.
+          case 'arrowup':
+          case 'arrowdown': {
+            if (!es.draft || s.mode === 'cull') return;
+            e.preventDefault();
+            esMoveActive(e.key === 'ArrowDown' ? 1 : -1);
             return;
           }
         }

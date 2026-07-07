@@ -1,7 +1,10 @@
+import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 
 // The handoff "KEYBOARD" plate as an in-app reference, on ? (Shift+/).
-const CARDS: { title: string; rows: [string, string][] }[] = [
+// `wide` cards span the grid and lay their rows out in two columns — used
+// for the develop-control key map, which is long but shallow.
+const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
   {
     title: 'Navigate',
     rows: [
@@ -29,11 +32,34 @@ const CARDS: { title: string; rows: [string, string][] }[] = [
   {
     title: 'Develop',
     rows: [
-      ['Focus a control', 'E C T H S…'],
+      ['Prev / next control', 'Ctrl+↑ / Ctrl+↓'],
       ['Adjust', '+ / − · ⇧'],
       ['Copy / paste / crop', 'Ctrl+C Ctrl+V R'],
       ['Auto tone / colours / all', 'Ctrl+U · +⇧ · +Alt'],
       ['Auto presets', 'Ctrl+1–9'],
+    ],
+  },
+  // Mirrors CONTROL_KEYS in lib/keyboard.ts — press to focus, +/- to adjust.
+  {
+    title: 'Develop controls',
+    wide: true,
+    rows: [
+      ['Exposure', 'E'],
+      ['Brightness', 'B'],
+      ['Gamma', 'G'],
+      ['Shadow slope', 'S'],
+      ['Contrast', 'C'],
+      ['Saturation', 'A'],
+      ['Vibrance', 'V'],
+      ['Vignette', 'O'],
+      ['WB mode', 'W'],
+      ['Temperature', 'T'],
+      ['Tint', 'I'],
+      ['Kelvin', 'K'],
+      ['Highlight recovery', 'H'],
+      ['Noise reduction', 'N'],
+      ['Median passes', 'M'],
+      ['Demosaic', 'D'],
     ],
   },
 ];
@@ -55,9 +81,17 @@ export function ShortcutsOverlay() {
           {CARDS.map((card) => (
             <div
               key={card.title}
-              className="flex flex-col gap-[9px] rounded-xl border border-glass-border bg-card px-[18px] py-4 shadow-[0_30px_70px_-20px_rgba(0,0,0,.7)]"
+              className={cn(
+                'gap-[9px] rounded-xl border border-glass-border bg-card px-[18px] py-4 shadow-[0_30px_70px_-20px_rgba(0,0,0,.7)]',
+                card.wide ? 'col-span-2 grid grid-cols-2 gap-x-10' : 'flex flex-col',
+              )}
             >
-              <div className="mb-0.5 text-[10px] tracking-[.06em] text-muted-foreground uppercase">
+              <div
+                className={cn(
+                  'mb-0.5 text-[10px] tracking-[.06em] text-muted-foreground uppercase',
+                  card.wide && 'col-span-2',
+                )}
+              >
                 {card.title}
               </div>
               {card.rows.map(([label, keys]) => (

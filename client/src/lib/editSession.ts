@@ -189,6 +189,40 @@ export const CONTROL_SPECS: Record<ControlId, ControlSpec> = {
   cropAngle: { kind: 'numeric', min: -15, max: 15, step: 0.1, bigStep: 1, get: (p) => p.cropAngle, set: (v) => ({ cropAngle: v }) },
 };
 
+// Panel order (EditPanel top→bottom) for walking the focused control with
+// Ctrl+↑/↓. wbTemp and wbKelvin swap depending on the WB mode, so the walk
+// only ever visits the temperature dial that is actually rendered.
+const CONTROL_ORDER: ControlId[] = [
+  'cropAngle',
+  'expEV', 'expPreserve', 'bright', 'gamma', 'shadow',
+  'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
+  'clarity', 'texture', 'dehaze',
+  'wbMode', 'wbTemp', 'wbKelvin', 'wbTint',
+  'saturation', 'vibrance',
+  'splitShadowHue', 'splitShadowAmt', 'splitHighlightHue', 'splitHighlightAmt',
+  'vignette',
+  'sharpen', 'highlight', 'nrThreshold', 'fbddNoiseRd', 'medPasses',
+  'demosaic', 'caRed', 'caBlue',
+];
+
+// esMoveActive walks the keyboard focus to the previous/next develop control
+// in panel order (Ctrl+↑/↓). With nothing focused it enters at the end the
+// walk came from.
+export function esMoveActive(dir: 1 | -1) {
+  const s = useEditSession.getState();
+  if (!s.draft) return;
+  const kelvin = ((s.draft.wbMode as string) || 'camera') === 'kelvin';
+  const order = CONTROL_ORDER.filter((c) => (kelvin ? c !== 'wbTemp' : c !== 'wbKelvin'));
+  const cur = s.activeControl ? order.indexOf(s.activeControl) : -1;
+  const next =
+    cur < 0
+      ? dir > 0
+        ? 0
+        : order.length - 1
+      : Math.min(order.length - 1, Math.max(0, cur + dir));
+  setState({ activeControl: order[next] });
+}
+
 interface Preview {
   photoId: number;
   url: string; // object URL of the preview JPEG
@@ -208,6 +242,10 @@ interface EditSessionState {
   photoId: number | null;
   applyIds: number[]; // commit targets; >1 when multiple photos selected
   draft: Params | null;
+  // The previous photo's draft, kept through esLoad's null gap so panels can
+  // stay rendered (values snap when the new params land) instead of flashing
+  // a loading placeholder on every photo switch.
+  lastDraft: Params | null;
   loading: boolean;
   history: Record<number, HistoryEntry>;
   activeControl: ControlId | null;
@@ -221,6 +259,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   photoId: null,
   applyIds: [],
   draft: null,
+  lastDraft: null,
   loading: false,
   history: {},
   activeControl: null,
@@ -267,13 +306,33 @@ export function esClearPreview() {
   setState({ preview: null });
 }
 
+// esPreviewSettled reports whether the current preview blob shows nothing
+// beyond the committed state: no render in flight or queued, and the draft
+// equal to the history head (a drag or a pending esStep commit means the blob
+// carries uncommitted pixels the committed renditions don't have yet).
+export function esPreviewSettled(): boolean {
+  const s = useEditSession.getState();
+  if (s.rendering > 0 || previewPending || pendingPatch) return false;
+  if (s.photoId == null || !s.draft) return false;
+  const h = s.history[s.photoId];
+  return !h || sameParams(s.draft, h.stack[h.index]);
+}
+
 // esLoad opens an edit session for the newly focused photo.
 export async function esLoad(client: ApiClient, photoId: number, applyIds: number[]) {
   window.clearTimeout(commitTimer);
   previewPending = null;
   previewAbort?.abort();
   esClearPreview();
-  setState({ photoId, applyIds, draft: null, loading: true, wbPicking: false, cropping: false });
+  setState((s) => ({
+    photoId,
+    applyIds,
+    draft: null,
+    lastDraft: s.draft ?? s.lastDraft,
+    loading: true,
+    wbPicking: false,
+    cropping: false,
+  }));
   const params = await getEditParams(client, photoId).catch(() => null);
   if (useEditSession.getState().photoId !== photoId) return; // superseded
   const draft = params ?? { ...NEUTRAL };

@@ -1,7 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pin, PinOff } from 'lucide-react';
 import type { Photo } from '@/api/library';
-import type { Params } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { CinemaImage } from '@/views/LoupeView';
 import { CinemaHUD, PaletteChip } from '@/components/cinema/CinemaHUD';
@@ -138,9 +137,7 @@ function QuickDock({
   const client = useApiClient();
   const dials = useUIStore((s) => s.quickDials);
   const draft = useEditSession((s) => s.draft);
-  const held = useRef<Params | null>(null);
-  if (draft) held.current = draft;
-  const shown = draft ?? held.current;
+  const shown = useEditSession((s) => s.draft ?? s.lastDraft);
 
   return (
     <div

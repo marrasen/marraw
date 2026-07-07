@@ -188,8 +188,8 @@ function PhotoHeader({ photo }: { photo: Photo }) {
       </div>
       {photo.metaLoaded && (
         <span className="mt-2 font-mono text-[10.5px] text-muted-foreground">
-          {photo.model} · ƒ/{photo.aperture} · {formatShutter(photo.shutter)} · ISO {photo.iso} ·{' '}
-          {Math.round(photo.focalLen)}mm
+          {photo.model} · ƒ/{formatAperture(photo.aperture)} · {formatShutter(photo.shutter)} · ISO{' '}
+          {photo.iso} · {Math.round(photo.focalLen)}mm
         </span>
       )}
     </div>
@@ -202,8 +202,21 @@ function formatShutter(s: number): string {
   return `1/${Math.round(1 / s)}s`;
 }
 
+// EXIF apertures arrive as raw floats (5.599999999…); one decimal is how
+// f-numbers are spoken, and trailing .0 is dropped (ƒ/8, not ƒ/8.0).
+function formatAperture(a: number): string {
+  if (a <= 0) return '—';
+  return String(Math.round(a * 10) / 10);
+}
+
 function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount: number }) {
-  const draft = useEditSession((s) => s.draft);
+  const liveDraft = useEditSession((s) => s.draft);
+  // Falling back to the held previous draft keeps the panel rendered through
+  // esLoad's null gap: swapping everything for "Loading edits…" and back on
+  // each photo switch reads as flicker. Input is inert meanwhile
+  // (esUpdate/esCommit no-op on a null store draft); values snap when the
+  // new photo's params land.
+  const draft = useEditSession((s) => s.draft ?? s.lastDraft);
   const activeControl = useEditSession((s) => s.activeControl);
   const wbPicking = useEditSession((s) => s.wbPicking);
   const cropping = useEditSession((s) => s.cropping);
@@ -212,6 +225,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
   const setClipboard = useUIStore((s) => s.setClipboard);
   const clipboard = useUIStore((s) => s.clipboard);
   const setMode = useUIStore((s) => s.setMode);
+  const wbModeRef = useActiveScroll(activeControl === 'wbMode');
 
   if (!draft) return <div className="p-4 text-sm text-muted-foreground">Loading edits…</div>;
 
@@ -250,7 +264,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
 
   const kelvinMode = draft.wbMode === 'kelvin';
   return (
-    <div className="flex flex-col px-4 pt-1 pb-3 text-sm">
+    <div className={cn('flex flex-col px-4 pt-1 pb-3 text-sm', !liveDraft && 'pointer-events-none')}>
       <div className="flex items-center gap-2">
         <h2 className="text-[13px] font-medium">Develop</h2>
         {targetCount > 1 && (
@@ -291,8 +305,18 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           title="Crop &amp; straighten (R)"
         >
           <Crop data-icon="inline-start" />
-          {cropping ? 'Done cropping' : 'Crop'}
-          <kbd className="ml-auto text-[10px] opacity-60">R</kbd>
+          {cropping ? 'Done cropping' : 'Crop & straighten'}
+          <span className="ml-auto flex items-center gap-1.5">
+            {changed.crop && !cropping && (
+              <span
+                className="rounded-[4px] bg-primary/18 px-1 py-px text-[9px] font-semibold tracking-[.05em] text-accent-text uppercase"
+                title="A crop or straighten is applied"
+              >
+                on
+              </span>
+            )}
+            <kbd className="text-[10px] opacity-60">R</kbd>
+          </span>
         </Button>
         <EditSlider
           label="Straighten"
@@ -305,16 +329,13 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           onChange={(v) => update({ cropAngle: v })}
           onCommit={(v) => commit({ cropAngle: v })}
           onClear={() => clear({ cropAngle: 0 })}
-          active={activeControl === 'cropAngle'}
-          // Straightening opens the crop overlay, where the angle previews as an
-          // instant client-side rotation instead of a backend re-render.
-          onFocusControl={() => {
-            esSetActive('cropAngle');
-            if (!cropping) {
-              setMode('develop');
-              esSetCropping(client, true);
-            }
-          }}
+          // Deliberately NOT auto-entering crop mode here: doing it on
+          // pointerdown hid/relocated this very slider mid-gesture (Develop
+          // slides the drawer out, Library switches modes), and base-ui then
+          // recomputed the pointer against the moved track — every click
+          // slammed the angle to the -15° end. Outside crop mode the angle
+          // previews through the ordinary backend render path.
+          {...num('cropAngle')}
         />
       </Group>
 
@@ -407,7 +428,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
       </Group>
 
       <Group id="wb" title="White balance" changed={changed.wb}>
-      <div className={cn('flex flex-col gap-1.5 rounded-md', activeControl === 'wbMode' && 'ring-2 ring-ring ring-offset-2 ring-offset-background')}>
+      <div ref={wbModeRef} className={cn('flex flex-col gap-1.5 rounded-md', activeControl === 'wbMode' && 'ring-2 ring-ring ring-offset-2 ring-offset-background')}>
         <span className="text-xs text-muted-foreground">
           Mode <kbd className="text-[10px] opacity-60">W</kbd>
         </span>
@@ -634,11 +655,22 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        Drag a slider for a live preview; release to save. Press a control's key (E, B, W, …) and
-        use +/- to adjust; Esc returns to the image. Ctrl+Z/Ctrl+Y undo/redo per photo.
+        Drag a slider for a live preview; release to save. Press a control's key (E, B, W, …) or
+        walk with Ctrl+↑/↓, then +/- adjusts; Esc returns to the image. Ctrl+Z/Ctrl+Y undo/redo
+        per photo.
       </p>
     </div>
   );
+}
+
+// useActiveScroll keeps the keyboard-focused control visible: walking the
+// controls with Ctrl+↑/↓ (or a hotkey) scrolls the drawer to the ring.
+function useActiveScroll(active?: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
+  return ref;
 }
 
 // isDefault reports whether one param still holds its stored default —
@@ -881,8 +913,9 @@ function ButtonRow<V extends string | number>({
   onChange: (v: V) => void;
 }) {
   const selected = options.some((o) => o.value === value) ? value : options[0].value;
+  const ref = useActiveScroll(active);
   return (
-    <div className={cn('flex flex-col gap-1.5 rounded-md', active && 'ring-2 ring-ring ring-offset-2 ring-offset-background')}>
+    <div ref={ref} className={cn('flex flex-col gap-1.5 rounded-md', active && 'ring-2 ring-ring ring-offset-2 ring-offset-background')}>
       <span className="text-xs text-muted-foreground">
         {label} {hotkey && <kbd className="text-[10px] opacity-60">{hotkey}</kbd>}
       </span>
@@ -949,10 +982,12 @@ export function EditSlider({
   const [dragging, setDragging] = useState<number | null>(null);
   const shown = dragging ?? value;
   const changed = neutral != null && Math.abs(value - neutral) > 1e-9;
+  const ref = useActiveScroll(active);
   // One row per the develop-drawer plate: label · track · mono value, the
   // reset affordance surfacing only when the value left its default.
   return (
     <div
+      ref={ref}
       className={cn(
         'flex items-center gap-2.5 rounded-md',
         active && 'ring-2 ring-ring ring-offset-2 ring-offset-background',

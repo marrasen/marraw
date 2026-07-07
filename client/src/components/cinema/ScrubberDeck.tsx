@@ -111,7 +111,9 @@ export function ScrubberDeck({
         <span className="text-[9px] tracking-[.06em] text-muted-foreground uppercase">Groups</span>
         <span className="font-mono text-[13px] text-accent-text">{groups.length}</span>
       </div>
-      <div ref={scrollRef} className="no-scrollbar flex items-stretch overflow-x-auto">
+      {/* py/-my slack: the focused thumb scales past the row height and the
+          scroll container would otherwise clip the overhang. */}
+      <div ref={scrollRef} className="no-scrollbar -my-1.5 flex items-stretch overflow-x-auto py-1.5">
         {groups.map((g, i) => (
           <div key={i} className="flex shrink-0 items-stretch">
             {g.gapBeforeMin != null && g.gapBeforeMin > 0 && (
@@ -156,7 +158,12 @@ function StripThumb({
   return (
     <button
       data-strip-id={photo.id}
-      className="relative h-10 w-[60px] shrink-0 overflow-hidden rounded-[3px] bg-inset"
+      // The focused frame pops like a dock icon: a transform (layout-free, so
+      // neighbors and the centering scroll math stay put) with a lift shadow.
+      className={cn(
+        'relative h-10 w-[60px] shrink-0 overflow-hidden rounded-[3px] bg-inset transition-transform duration-150',
+        focused && 'z-10 scale-[1.22] shadow-[0_5px_16px_rgba(0,0,0,.5)]',
+      )}
       onClick={(e) => onFocus(photo.id, { extend: e.shiftKey, toggle: e.ctrlKey || e.metaKey })}
       title={photo.fileName}
     >
