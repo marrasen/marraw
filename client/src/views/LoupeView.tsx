@@ -362,9 +362,19 @@ export function CinemaImage({
   // edit was straighten-only (the angle never changes the output size), and
   // without a re-run the scroll stays at crop mode's zero — the slack padding
   // then shows as the photo shoved far right and down.
+  // Keyboard-pan tween state (see the loupePan effect below). Any effect that
+  // writes the scroll position directly must cancel an in-flight tween first,
+  // or the next frames would drag the view back toward a stale target.
+  const panTweenRaf = useRef(0);
+  const panTweenTarget = useRef<[number, number] | null>(null);
+  const cancelPanTween = () => {
+    cancelAnimationFrame(panTweenRaf.current);
+    panTweenTarget.current = null;
+  };
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    cancelPanTween();
     el.scrollLeft = panRatio.current[0] * Math.max(0, el.scrollWidth - el.clientWidth);
     el.scrollTop = panRatio.current[1] * Math.max(0, el.scrollHeight - el.clientHeight);
   }, [photo.id, boxW, boxH, slackX, slackY, container]);
@@ -379,6 +389,7 @@ export function CinemaImage({
     panRatio.current = [0.5, 0.5];
     const el = containerRef.current;
     if (!el) return;
+    cancelPanTween();
     el.scrollLeft = 0.5 * Math.max(0, el.scrollWidth - el.clientWidth);
     el.scrollTop = 0.5 * Math.max(0, el.scrollHeight - el.clientHeight);
   }, [centerTick]);
@@ -394,9 +405,12 @@ export function CinemaImage({
   // Shift+arrow pan: keyboard.ts accumulates viewport-fraction nudges in the
   // store (this component owns the scroll container, the keymap doesn't);
   // applying the not-yet-consumed difference means batched keydowns can't
-  // drop a press. The onScroll resync keeps the persisted panRatio truthful
-  // even if the browser defers the scroll event. In crop mode slack is 0,
-  // so the nudge naturally no-ops.
+  // drop a press. Each nudge eases toward its destination with the same
+  // 160 ms ease-out cubic as the zoom tween; the target accumulates across
+  // presses (base = in-flight target, not current scroll) so held-key repeats
+  // keep pushing it ahead while the tween chases — a glide, never a lost
+  // press. onScroll runs every frame so panRatio and the navigator stay
+  // truthful. In crop mode slack is 0, so the nudge naturally no-ops.
   const loupePan = useUIStore((s) => s.loupePan);
   const consumedPan = useRef(loupePan);
   useLayoutEffect(() => {
@@ -405,9 +419,22 @@ export function CinemaImage({
     if (dx === 0 && dy === 0) return;
     const el = containerRef.current;
     if (!el) return;
-    el.scrollLeft += dx * el.clientWidth;
-    el.scrollTop += dy * el.clientHeight;
-    onScroll();
+    const base = panTweenTarget.current ?? [el.scrollLeft, el.scrollTop];
+    const target: [number, number] = [base[0] + dx * el.clientWidth, base[1] + dy * el.clientHeight];
+    panTweenTarget.current = target;
+    const from: [number, number] = [el.scrollLeft, el.scrollTop];
+    const start = performance.now();
+    const DURATION = 160;
+    cancelAnimationFrame(panTweenRaf.current);
+    panTweenRaf.current = requestAnimationFrame(function tick(t) {
+      const p = Math.min(1, (t - start) / DURATION);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.scrollLeft = from[0] + (target[0] - from[0]) * eased;
+      el.scrollTop = from[1] + (target[1] - from[1]) * eased;
+      onScroll();
+      if (p < 1) panTweenRaf.current = requestAnimationFrame(tick);
+      else panTweenTarget.current = null;
+    });
   }, [loupePan]);
 
   // Navigator viewport: the visible region as fractions of the image box.
@@ -495,6 +522,7 @@ export function CinemaImage({
       // Capture only widens the drag beyond the container; a pointer that
       // can't be captured (synthetic test events) still pans.
     }
+    cancelPanTween(); // grabbing the photo mid-glide wins over the keyboard tween
     dragFrom.current = [e.clientX, e.clientY];
     setDragging(true);
   };

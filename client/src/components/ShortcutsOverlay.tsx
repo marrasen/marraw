@@ -33,7 +33,7 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
   {
     title: 'Develop',
     rows: [
-      ['Prev / next control', 'Ctrl+↑ / Ctrl+↓'],
+      ['Prev / next control', '↑ / ↓'],
       ['Adjust', '+ / − · ⇧'],
       ['Copy / paste / crop', 'Ctrl+C Ctrl+V R'],
       ['Auto tone / colours / all', 'Ctrl+U · +⇧ · +Alt'],

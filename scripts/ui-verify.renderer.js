@@ -177,6 +177,16 @@ try {
   R.ctrlDownSkipsClosed = es().activeControl === 'wbMode' ? true : `active=${es().activeControl}`;
   key('ArrowUp', { ctrlKey: true });
   R.ctrlUpSkipsClosed = es().activeControl === 'toneHighlights' ? true : `active=${es().activeControl}`;
+  // Plain ↑/↓ walk the controls too in a develop loupe (photo nav there is
+  // redundant with ←/→); the photo focus must not move.
+  const focusBeforeArrows = ui().focusId;
+  key('ArrowDown');
+  R.plainDownWalksControls = es().activeControl === 'wbMode' ? true : `active=${es().activeControl}`;
+  key('ArrowUp');
+  R.plainUpWalksControls =
+    es().activeControl === 'toneHighlights' && ui().focusId === focusBeforeArrows
+      ? true
+      : `active=${es().activeControl} focusMoved=${ui().focusId !== focusBeforeArrows}`;
   mw.setEditGroupOpen('presence', true);
   key('Escape');
   await sleep(150);
@@ -587,10 +597,10 @@ try {
     const selBefore = ui().selection.size;
     key('ArrowRight', { shiftKey: true });
     key('ArrowDown', { shiftKey: true });
-    await sleep(150);
+    await sleep(400); // pan eases over 160ms now — let the tween land
     const [dxp, dyp] = [pane2.scrollLeft - px, pane2.scrollTop - py];
     R.shiftArrowPans =
-      Math.abs(dxp - pane2.clientWidth * 0.2) <= 2 && Math.abs(dyp - pane2.clientHeight * 0.2) <= 2
+      Math.abs(dxp - pane2.clientWidth * 0.1) <= 2 && Math.abs(dyp - pane2.clientHeight * 0.1) <= 2
         ? true
         : `d=${dxp},${dyp} viewport=${pane2.clientWidth}x${pane2.clientHeight}`;
     R.shiftArrowKeepsSelection = ui().selection.size === selBefore ? true : `selection=${ui().selection.size}`;

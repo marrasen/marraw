@@ -36,13 +36,12 @@ function formatBytes(n: number): string {
   return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
 }
 
-const SECTIONS = ['General', 'Toolbars', 'Auto presets', 'Cache', 'Sidecars', 'Performance'] as const;
+const SECTIONS = ['General', 'Toolbars', 'Auto presets', 'Cache', 'Sidecars'] as const;
 type Section = (typeof SECTIONS)[number];
 
 /**
  * Settings (handoff plate "SETTINGS"): a 760×480 left-nav modal — General
- * (theme), Cache (location + usage meter + clear), Sidecars, Performance
- * (cache size limit).
+ * (theme), Cache (location + size limit + usage meter + clear), Sidecars.
  */
 export function SettingsDialog() {
   const open = useUIStore((s) => s.settingsOpen);
@@ -87,7 +86,6 @@ export function SettingsDialog() {
             {open && section === 'Auto presets' && <AutoPresetsSection />}
             {open && section === 'Cache' && <CacheSection />}
             {open && section === 'Sidecars' && <SidecarSection />}
-            {open && section === 'Performance' && <PerformanceSection />}
           </div>
         </div>
       </DialogContent>
@@ -402,6 +400,18 @@ function CacheSection() {
   const { data: info } = useGetCacheInfo();
   const [busy, setBusy] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [gb, setGb] = useState('');
+  useEffect(() => {
+    if (info && info.capBytes > 0) setGb(String(Math.round(info.capBytes / (1 << 30))));
+  }, [info]);
+
+  const applyCap = () => {
+    const n = Number(gb);
+    if (!Number.isFinite(n) || n < 1) return;
+    setCacheCap(client, Math.round(n))
+      .then(() => toast.success(`Cache limit set to ${Math.round(n)} GB`))
+      .catch((err) => toast.error((err as Error).message));
+  };
 
   const run = (fn: () => Promise<unknown>, done: string) => {
     setBusy(true);
@@ -464,6 +474,23 @@ function CacheSection() {
         }
       />
       <SettingRow
+        title="Preview cache limit"
+        description="When the cache grows past this size, the least-recently viewed previews are evicted in the background. Bigger caches keep more shoots instant."
+        control={
+          <div className="flex items-center gap-1.5">
+            <input
+              className="h-8 w-16 rounded-lg border border-input bg-secondary px-2 text-right font-mono text-xs outline-none focus:border-ring dark:bg-white/5"
+              value={gb}
+              onChange={(e) => setGb(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && applyCap()}
+              onBlur={applyCap}
+              aria-label="Cache limit in GB"
+            />
+            <span className="font-mono text-[11px] text-muted-foreground">GB</span>
+          </div>
+        }
+      />
+      <SettingRow
         title="On-disk usage"
         description={
           <div className="flex flex-col gap-2">
@@ -512,42 +539,5 @@ function CacheSection() {
         }
       />
     </div>
-  );
-}
-
-function PerformanceSection() {
-  const client = useApiClient();
-  const { data: info } = useGetCacheInfo();
-  const [gb, setGb] = useState('');
-  useEffect(() => {
-    if (info && info.capBytes > 0) setGb(String(Math.round(info.capBytes / (1 << 30))));
-  }, [info]);
-
-  const apply = () => {
-    const n = Number(gb);
-    if (!Number.isFinite(n) || n < 1) return;
-    setCacheCap(client, Math.round(n))
-      .then(() => toast.success(`Cache limit set to ${Math.round(n)} GB`))
-      .catch((err) => toast.error((err as Error).message));
-  };
-
-  return (
-    <SettingRow
-      title="Preview cache limit"
-      description="When the cache grows past this size, the least-recently viewed previews are evicted in the background. Bigger caches keep more shoots instant."
-      control={
-        <div className="flex items-center gap-1.5">
-          <input
-            className="h-8 w-16 rounded-lg border border-input bg-secondary px-2 text-right font-mono text-xs outline-none focus:border-ring dark:bg-white/5"
-            value={gb}
-            onChange={(e) => setGb(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && apply()}
-            onBlur={apply}
-            aria-label="Cache limit in GB"
-          />
-          <span className="font-mono text-[11px] text-muted-foreground">GB</span>
-        </div>
-      }
-    />
   );
 }

@@ -60,15 +60,32 @@ if (shot === 'cull') {
   ui().setExportOpen(true);
 } else if (shot === 'settings') {
   ui().setSettingsOpen(true);
+} else if (shot === 'sidecars') {
+  ui().setSettingsOpen(true);
+  await sleep(300);
+  [...document.querySelectorAll('button')].find((b) => b.textContent === 'Sidecars')?.click();
+} else if (shot === 'cache') {
+  ui().setSettingsOpen(true);
+  await sleep(300);
+  [...document.querySelectorAll('button')].find((b) => b.textContent === 'Cache')?.click();
+} else if (shot === 'develop-light') {
+  document.documentElement.classList.remove('dark');
+  // setState on the mirror: shows the dials without persisting server-side.
+  mw.useUIStore.setState({ quickDials: ['expEV', 'contrast', 'toneHighlights', 'toneShadows', 'wbTemp', 'wbMode'] });
+  ui().setMode('develop');
+} else if (shot === 'cull-light') {
+  document.documentElement.classList.remove('dark');
+  mw.useUIStore.setState({ cullDials: ['expEV', 'contrast', 'wbTemp'] });
+  ui().setMode('cull');
 } else if (shot === 'toolbars') {
   ui().setSettingsOpen(true);
   await sleep(300);
   [...document.querySelectorAll('button')].find((b) => b.textContent === 'Toolbars')?.click();
 } else if (shot === 'cull-dials') {
-  ui().setCullDials(['expEV', 'contrast', 'wbTemp']);
+  mw.useUIStore.setState({ cullDials: ['expEV', 'contrast', 'wbTemp'] });
   ui().setMode('cull');
 } else if (shot === 'develop-dials') {
-  ui().setQuickDials(['expEV', 'contrast', 'toneHighlights', 'toneShadows', 'wbTemp', 'vibrance']);
+  mw.useUIStore.setState({ quickDials: ['expEV', 'contrast', 'toneHighlights', 'toneShadows', 'wbTemp', 'vibrance'] });
   ui().setMode('develop');
 } else if (shot === 'batch') {
   const ids = ui().visibleIds;

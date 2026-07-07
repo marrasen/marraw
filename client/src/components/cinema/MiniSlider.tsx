@@ -33,7 +33,7 @@ export function MiniSlider({
     <div className="flex w-[82px] flex-col gap-[5px]">
       <div className="flex justify-between text-[10px] leading-none">
         <span className="text-secondary-foreground">{label}</span>
-        <span className="font-mono text-white tabular-nums">{display}</span>
+        <span className="font-mono text-foreground tabular-nums">{display}</span>
       </div>
       <Slider
         value={shown}

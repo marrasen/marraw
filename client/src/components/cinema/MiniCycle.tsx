@@ -26,7 +26,7 @@ export function MiniCycle({
     <div className="flex w-[82px] flex-col gap-[5px]">
       <span className="text-[10px] leading-none text-secondary-foreground">{label}</span>
       <button
-        className="flex h-[18px] items-center justify-center rounded-[5px] border border-input bg-white/5 font-mono text-[10px] leading-none text-white hover:border-ring"
+        className="flex h-[18px] items-center justify-center rounded-[5px] border border-input bg-white/5 font-mono text-[10px] leading-none text-foreground hover:border-ring"
         aria-label={`${label}: ${valueLabel(value)} — click for the next setting`}
         title="Click for the next setting"
         onClick={next}

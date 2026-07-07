@@ -42,12 +42,13 @@ const CONTROL_KEYS: Record<string, ControlId> = {
 };
 
 // useKeyboard installs the app-wide keymap:
-//   arrows        navigate (Shift extends the selection; pans in a loupe)
+//   arrows        navigate (Shift extends the selection; pans in a loupe);
+//                 in a develop loupe ↑/↓ focus the previous/next control
 //   1-5 / 0       set / clear rating
 //   P / X / U     pick / exclude / unflag
 //   Enter · Esc   forward / back a mode: Library ⇄ Cull ⇄ Develop
 //   E B W T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
-//   Ctrl+↑/↓      focus the previous/next develop control
+//   Ctrl+↑/↓      focus the previous/next develop control (alias of plain ↑/↓)
 //   +/- / Z / Space   zoom (loupe, no control focused; Z/Space toggle 1:1↔fit)
 //   Ctrl+A/C/V    select all, copy/paste edit settings
 //   Ctrl+Z/Y      per-photo edit undo/redo
@@ -202,7 +203,7 @@ export function useKeyboard() {
       // keep Shift+arrow selection extension).
       if (e.shiftKey && s.view === 'loupe' && !s.contactSheet && e.key.startsWith('Arrow')) {
         e.preventDefault();
-        const p = 0.2; // viewport fraction per press; key repeat makes it glide
+        const p = 0.1; // viewport fraction per press; key repeat makes it glide
         s.nudgeLoupePan(
           e.key === 'ArrowLeft' ? -p : e.key === 'ArrowRight' ? p : 0,
           e.key === 'ArrowUp' ? -p : e.key === 'ArrowDown' ? p : 0,
@@ -219,13 +220,18 @@ export function useKeyboard() {
           e.preventDefault();
           move(1);
           break;
+        // In a develop loupe ↑/↓ walk the controls instead: photo-nav there is
+        // redundant with ←/→ (rowStep is 1), and the grid/contact sheet keep
+        // their row navigation. Same gate as the control-letter hotkeys.
         case 'ArrowUp':
           e.preventDefault();
-          move(-rowStep);
+          if (es.draft && s.mode !== 'cull' && s.view === 'loupe') esMoveActive(-1);
+          else move(-rowStep);
           break;
         case 'ArrowDown':
           e.preventDefault();
-          move(rowStep);
+          if (es.draft && s.mode !== 'cull' && s.view === 'loupe') esMoveActive(1);
+          else move(rowStep);
           break;
         case '0':
         case '1':
