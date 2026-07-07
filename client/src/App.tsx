@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { TopBar } from '@/components/TopBar';
 import { LibraryRail } from '@/components/LibraryRail';
 import { AddFolderDialog } from '@/components/AddFolderDialog';
+import { CommandPalette } from '@/components/CommandPalette';
 import { FilterBar } from '@/components/FilterBar';
 import { EditPanel } from '@/components/EditPanel';
 import { ExportDialog } from '@/components/ExportDialog';
@@ -97,6 +98,7 @@ export default function App() {
       </div>
       <AddFolderDialog />
       <SettingsDialog />
+      <CommandPalette />
       <Toaster position="bottom-right" />
     </div>
   );

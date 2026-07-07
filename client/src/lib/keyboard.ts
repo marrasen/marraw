@@ -116,6 +116,10 @@ export function useKeyboard() {
             e.preventDefault();
             s.setExportOpen(true);
             return;
+          case 'k':
+            e.preventDefault();
+            s.setPaletteOpen(!s.paletteOpen);
+            return;
         }
         return;
       }
@@ -196,6 +200,8 @@ export function useKeyboard() {
             esSetActive(null);
           } else if (s.contactSheet) {
             s.setContactSheet(false);
+          } else if (s.mode === 'library' && s.view === 'grid' && s.selection.size > 1) {
+            s.clearSelection(); // "Esc to clear" on the batch selection bar
           } else {
             s.setMode('library');
           }

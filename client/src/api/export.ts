@@ -8,6 +8,13 @@ import type {
     UseQueryResult,
 } from './client';
 
+export const ColorSpace = {
+    Srgb: "srgb",
+    Adobergb: "adobergb",
+    Prophoto: "prophoto",
+} as const;
+export type ColorSpaceType = typeof ColorSpace[keyof typeof ColorSpace];
+
 export const ExportFormat = {
     Jpeg: "jpeg",
     Tiff16: "tiff16",
@@ -24,6 +31,7 @@ export interface ExportRequest {
     format: ExportFormatType;
     jpegQuality: number;
     longEdge: number;
+    colorSpace: ColorSpaceType;
     createDir: boolean;
 }
 

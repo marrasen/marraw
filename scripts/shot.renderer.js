@@ -35,6 +35,18 @@ if (shot === 'cull') {
   ui().setMode('develop');
   await until(() => mw.useEditSession.getState().draft != null);
   mw.useEditSession.setState({ wbPicking: true });
+} else if (shot === 'light') {
+  document.documentElement.classList.remove('dark');
+} else if (shot === 'palette') {
+  ui().setPaletteOpen(true);
+} else if (shot === 'export') {
+  ui().setExportOpen(true);
+} else if (shot === 'settings') {
+  ui().setSettingsOpen(true);
+} else if (shot === 'batch') {
+  const ids = ui().visibleIds;
+  ui().focus(ids[2]);
+  for (const id of ids.slice(3, 14)) ui().focus(id, { toggle: true });
 }
 // Let previews decode, then wake the chrome (capture fires on resolve).
 await sleep(3600);

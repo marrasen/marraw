@@ -44,6 +44,19 @@ const (
 
 func ExportFormatValues() []ExportFormat { return []ExportFormat{ExportJPEG, ExportTIFF16} }
 
+// ColorSpace selects the export output primaries.
+type ColorSpace string
+
+const (
+	ColorSpaceSRGB     ColorSpace = "srgb"
+	ColorSpaceAdobeRGB ColorSpace = "adobergb"
+	ColorSpaceProPhoto ColorSpace = "prophoto"
+)
+
+func ColorSpaceValues() []ColorSpace {
+	return []ColorSpace{ColorSpaceSRGB, ColorSpaceAdobeRGB, ColorSpaceProPhoto}
+}
+
 // Photo is the client-facing photo record.
 type Photo struct {
 	ID          int64   `json:"id"`

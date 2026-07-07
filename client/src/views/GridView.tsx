@@ -1,18 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Download, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
-import { deletePhotos, setVisible, type Photo } from '@/api/library';
+import { setVisible, type Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { useUIStore } from '@/stores/uiStore';
@@ -102,72 +91,7 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
           ))}
         </div>
       </div>
-      <SelectionBar />
     </div>
-  );
-}
-
-// SelectionBar floats over the grid while photos are selected: batch export
-// and move-to-trash for the whole selection.
-function SelectionBar() {
-  const client = useApiClient();
-  const selection = useUIStore((s) => s.selection);
-  const clearSelection = useUIStore((s) => s.clearSelection);
-  const setExportOpen = useUIStore((s) => s.setExportOpen);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  if (selection.size === 0) return null;
-
-  const doDelete = async () => {
-    const ids = [...selection];
-    setDeleting(true);
-    try {
-      const res = await deletePhotos(client, ids);
-      toast.success(`Moved ${res.deleted} photo${res.deleted === 1 ? '' : 's'} to the Recycle Bin`);
-      clearSelection();
-      setConfirmDelete(false);
-    } catch (err) {
-      toast.error(`Delete failed: ${(err as Error).message}`);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  return (
-    <>
-      <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border bg-background/90 px-3 py-1.5 text-sm shadow-md backdrop-blur">
-        <span className="text-muted-foreground">{selection.size} selected</span>
-        <Button size="sm" variant="outline" onClick={() => setExportOpen(true)}>
-          <Download data-icon="inline-start" />
-          Export
-        </Button>
-        <Button size="sm" variant="outline" className="text-destructive" onClick={() => setConfirmDelete(true)}>
-          <Trash2 data-icon="inline-start" />
-          Delete
-        </Button>
-        <Button size="sm" variant="ghost" onClick={clearSelection}>
-          Clear
-        </Button>
-      </div>
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete {selection.size} photos?</DialogTitle>
-            <DialogDescription>
-              The RAW files are moved to the Recycle Bin — you can restore them from there.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmDelete(false)} disabled={deleting}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={doDelete} disabled={deleting}>
-              {deleting ? 'Deleting…' : 'Move to Recycle Bin'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
   );
 }
 

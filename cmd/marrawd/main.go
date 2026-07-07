@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,7 +75,17 @@ func main() {
 
 	scanner := &scan.Scanner{DB: db, Cache: cache, Pool: pool}
 
-	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, DefaultCacheDir: defaultCacheDir}
+	// Cache size cap: the flag is the default; a Settings-dialog override
+	// persists in the store and wins at startup.
+	janitor := &pyramid.Janitor{Cache: cache}
+	janitor.SetCap(*cacheCap << 30)
+	if raw, err := db.GetSetting(context.Background(), "cacheCapGB"); err == nil && raw != "" {
+		if gb, err := strconv.ParseInt(raw, 10, 64); err == nil && gb > 0 {
+			janitor.SetCap(gb << 30)
+		}
+	}
+
+	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir}
 	registry, _, _, _ := api.NewRegistry(deps)
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any
@@ -101,7 +112,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	janitor := &pyramid.Janitor{Cache: cache, CapBytes: *cacheCap << 30}
 	go janitor.Run(ctx)
 
 	imgToken := token

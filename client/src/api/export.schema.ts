@@ -7,6 +7,7 @@ export const ExportRequestSchema = z.object({
     format: z.enum(["jpeg", "tiff16"]),
     jpegQuality: z.number().int().min(0).max(100),
     longEdge: z.number().int().min(0).max(65536),
+    colorSpace: z.union([z.literal(""), z.enum(["srgb", "adobergb", "prophoto"])]),
     createDir: z.boolean(),
 });
 

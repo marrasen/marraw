@@ -5,18 +5,24 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync/atomic"
 	"time"
 )
 
 // Janitor bounds the preview cache's disk usage: when the total size
-// exceeds cap bytes, the least-recently-served files are deleted until
+// exceeds the cap, the least-recently-served files are deleted until
 // usage drops to 80% of cap. The image handler touches mtimes on serve,
-// so mtime approximates last access.
+// so mtime approximates last access. The cap is atomic so the Settings
+// dialog can adjust it live.
 type Janitor struct {
 	Cache    *Cache
-	CapBytes int64
 	Interval time.Duration
+
+	capBytes atomic.Int64
 }
+
+func (j *Janitor) SetCap(bytes int64) { j.capBytes.Store(bytes) }
+func (j *Janitor) Cap() int64         { return j.capBytes.Load() }
 
 // Run sweeps once immediately, then on every interval tick until ctx ends.
 func (j *Janitor) Run(ctx context.Context) {
@@ -57,11 +63,12 @@ func (j *Janitor) sweep() {
 		total += info.Size()
 		return nil
 	})
-	if total <= j.CapBytes {
+	cap := j.Cap()
+	if total <= cap {
 		return
 	}
 	sort.Slice(files, func(a, b int) bool { return files[a].mtime.Before(files[b].mtime) })
-	target := j.CapBytes * 8 / 10
+	target := cap * 8 / 10
 	for _, f := range files {
 		if total <= target {
 			return

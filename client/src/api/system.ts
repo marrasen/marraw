@@ -13,6 +13,7 @@ export interface CacheInfo {
     bytes: number;
     files: number;
     isCustom: boolean;
+    capBytes: number;
 }
 
 
@@ -39,6 +40,19 @@ getCacheInfo.method = 'System.GetCacheInfo' as const;
 
 export function subscribeGetCacheInfo(client: ApiClient, callback: (data: CacheInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<CacheInfo>('System.GetCacheInfo', [], callback, onError, options);
+}
+
+
+export function setCacheCap(client: ApiClient, gb: number, options?: RequestOptions): Promise<CacheInfo> {
+    return client.request<CacheInfo>('System.SetCacheCap', [gb], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setCacheCap.method = 'System.SetCacheCap' as const;
+
+export function subscribeSetCacheCap(client: ApiClient, gb: number, callback: (data: CacheInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<CacheInfo>('System.SetCacheCap', [gb], callback, onError, options);
 }
 
 
@@ -82,6 +96,21 @@ export function useGetCacheInfo(options?: UseQueryOptions<CacheInfo>): UseQueryR
         [],
     );
     return useQuery(wrappedFn, { ...options, _subscribe: { method: 'System.GetCacheInfo', params: [] } });
+}
+
+/**
+ * Subscribes to `System.SetCacheCap` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetCacheCap(gb: number, options?: UseQueryOptions<CacheInfo>): UseQueryResult<CacheInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, gb: number) => setCacheCap(client, gb, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [gb], _subscribe: { method: 'System.SetCacheCap', params: [gb] } });
 }
 
 /**

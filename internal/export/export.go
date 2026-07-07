@@ -3,6 +3,7 @@
 package export
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -29,6 +30,10 @@ type Request struct {
 	Format      string // "jpeg" or "tiff16"
 	JpegQuality int    // 0 = 90
 	LongEdge    int    // 0 = full resolution
+	// ColorSpace selects the output primaries: "srgb" (default),
+	// "adobergb", or "prophoto". LibRaw converts during decode; JPEGs get a
+	// matching ICC profile embedded (sRGB stays untagged).
+	ColorSpace string
 }
 
 type Item struct {
@@ -66,7 +71,7 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 			if gctx.Err() != nil {
 				return gctx.Err()
 			}
-			err := exportOne(photo, filepath.Join(req.DestDir, outName), req.Format, quality, req.LongEdge)
+			err := exportOne(photo, filepath.Join(req.DestDir, outName), req.Format, quality, req.LongEdge, req.ColorSpace)
 			onItem(Item{PhotoID: photo.ID, FileName: outName, Err: err})
 			return nil
 		})
@@ -74,7 +79,7 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 	return g.Wait()
 }
 
-func exportOne(photo store.Photo, outPath, format string, quality, longEdge int) error {
+func exportOne(photo store.Photo, outPath, format string, quality, longEdge int, colorSpace string) error {
 	proc, err := libraw.New()
 	if err != nil {
 		return err
@@ -94,6 +99,7 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int)
 	if params == nil || params.Demosaic == "" {
 		lp.UserQual = libraw.DemosaicAHD
 	}
+	lp.OutputColor = ColorSpaceOutput(colorSpace)
 	if format == "tiff16" {
 		lp.OutputBPS = 16
 	}
@@ -117,7 +123,7 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int)
 	case "tiff16":
 		err = encodeTIFF16(f, img, longEdge)
 	default:
-		err = encodeJPEG(f, img, quality, longEdge, gamma, params)
+		err = encodeJPEG(f, img, quality, longEdge, gamma, params, ICCFor(colorSpace))
 	}
 	if err != nil {
 		f.Close()
@@ -131,7 +137,7 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int)
 	return os.Rename(tmp, outPath)
 }
 
-func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma float64, params *edit.Params) error {
+func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma float64, params *edit.Params, icc []byte) error {
 	if img.Bits != 8 {
 		return fmt.Errorf("export: jpeg needs 8-bit output, got %d", img.Bits)
 	}
@@ -149,7 +155,16 @@ func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma 
 	pyramid.ApplyLook(rgba, lookGamma, params)
 	pyramid.ApplyDetail(rgba, params)
 	out := resizeRGBA(rgba, longEdge)
-	return jpeg.Encode(f, out, &jpeg.Options{Quality: quality})
+	if icc == nil {
+		return jpeg.Encode(f, out, &jpeg.Options{Quality: quality})
+	}
+	// Wide gamut: encode to memory, then splice the ICC profile in.
+	buf := &bytes.Buffer{}
+	if err := jpeg.Encode(buf, out, &jpeg.Options{Quality: quality}); err != nil {
+		return err
+	}
+	_, err := f.Write(embedICCJPEG(buf.Bytes(), icc))
+	return err
 }
 
 func encodeTIFF16(f *os.File, img *libraw.Image, longEdge int) error {

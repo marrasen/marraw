@@ -23,6 +23,9 @@ type ExportRequest struct {
 	Format      ExportFormat `json:"format"`
 	JpegQuality int          `json:"jpegQuality" validate:"gte=0,lte=100"`
 	LongEdge    int          `json:"longEdge" validate:"gte=0,lte=65536"`
+	// ColorSpace picks the output primaries; empty = sRGB. JPEGs in wide
+	// spaces get a matching ICC profile embedded.
+	ColorSpace ColorSpace `json:"colorSpace" validate:"omitempty,oneof=srgb adobergb prophoto"`
 	// CreateDir creates DestDir if missing (the client asks the user first).
 	CreateDir bool `json:"createDir"`
 }
@@ -74,6 +77,7 @@ func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.Tas
 			Format:      format,
 			JpegQuality: req.JpegQuality,
 			LongEdge:    req.LongEdge,
+			ColorSpace:  string(req.ColorSpace),
 		}, func(it export.Item) {
 			mu.Lock()
 			done++

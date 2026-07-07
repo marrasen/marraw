@@ -183,7 +183,7 @@ try {
     thumbButtons[2].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
     await sleep(200);
     R.filmstripMultiSelect = ui().selection.size === 2;
-    R.batchBanner = [...document.querySelectorAll('span')].some((s) => s.textContent.includes('applies to 2 photos'));
+    R.batchBanner = [...document.querySelectorAll('span')].some((s) => s.textContent.includes('2 photos selected'));
     // back to single selection
     thumbButtons[0].dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await sleep(200);
@@ -230,19 +230,30 @@ try {
   key('u');
   await sleep(300);
 
-  // --- selection bar (batch delete/export buttons) --------------------------
+  // --- selection bar takes over the filter row on multi-select --------------
   ui().focus(ids0[0]);
+  ui().focus(ids0[1], { toggle: true });
   R.selectionBar = !!(await until(
-    () => buttons().find((b) => b.textContent.trim() === 'Delete') && buttons().find((b) => b.textContent.includes('Export') && b.closest('[class*="absolute"]')),
+    () =>
+      buttons().find((b) => b.textContent.trim() === 'Paste settings') &&
+      buttons().find((b) => b.textContent.trim() === 'Restore original') &&
+      [...document.querySelectorAll('span')].some((s) => s.textContent.trim() === 'selected'),
     5000,
     'selection bar',
   ));
+  key('Escape'); // Esc clears the selection
+  await sleep(200);
+  R.selectionEscClears = ui().selection.size <= 1;
+  ui().focus(ids0[0]);
 
-  // --- export dialog: labels + default dir ----------------------------------
+  // --- export dialog: segmented labels + default dir ------------------------
   key('e', { ctrlKey: true });
-  await until(() => document.querySelector('[data-slot="select-value"]'), 5000, 'export dialog');
-  const values = [...document.querySelectorAll('[data-slot="select-value"]')].map((e) => e.textContent.trim());
-  R.exportSelectLabels = values.includes('JPEG') && values.includes('Full size') ? true : values;
+  await until(() => document.querySelector('input[placeholder*="Destination"]'), 5000, 'export dialog');
+  const segTexts = [...document.querySelectorAll('[role="radio"]')].map((b) => b.textContent.trim());
+  R.exportSelectLabels =
+    ['JPEG', '16-bit TIFF', 'Full res', 'Long edge', 'sRGB', 'Adobe RGB', 'ProPhoto'].every((t) => segTexts.includes(t))
+      ? true
+      : segTexts;
   const destInput = document.querySelector('input[placeholder*="Destination"]');
   R.exportDefaultDir = destInput ? destInput.value : 'input missing';
   ui().setExportOpen(false);

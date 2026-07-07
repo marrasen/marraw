@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Pipette, Undo2, Redo2, Crop, ChevronRight, RotateCcw } from 'lucide-react';
+import { Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
@@ -9,7 +9,6 @@ import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Separator } from '@/components/ui/separator';
-import { Progress } from '@/components/ui/progress';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Histogram } from '@/components/Histogram';
 import { useUIStore } from '@/stores/uiStore';
@@ -79,13 +78,17 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
   if (focusId == null) {
     return <div className="p-4 text-sm text-muted-foreground">Select a photo to edit.</div>;
   }
+  // A multi-photo selection swaps the panel for relative adjustment: deltas
+  // that add to each photo's own current values (handoff "BATCH").
+  if (ids.length > 1) {
+    return <BatchSection client={client} ids={ids} />;
+  }
   const photo = photos.find((p) => p.id === focusId);
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       {photo && <PhotoHeader photo={photo} />}
       {photo && <Histogram photo={photo} />}
       <DevelopPanel client={client} targetCount={ids.length} />
-      {ids.length > 1 && <BatchSection client={client} ids={ids} />}
     </div>
   );
 }
@@ -922,84 +925,102 @@ const NULL_DELTA: Delta = {
 
 // BatchSection offers relative adjustments on top of the absolute controls
 // above (which already apply to the whole selection).
+// BatchSection is the whole right panel while several photos are selected:
+// relative deltas with NO apply button — each slider release applies the
+// increment since the last one, so thumbnails follow the drag and mixed
+// per-photo edits stay intact.
 function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
-  const [ev, setEv] = useState(0.5);
-  const [contrast, setContrast] = useState(0);
-  const [saturation, setSaturation] = useState(0);
-  const [progress, setProgress] = useState<number | null>(null);
+  type Field = 'expEV' | 'contrast' | 'saturation';
+  const [pos, setPos] = useState<Record<Field, number>>({ expEV: 0, contrast: 0, saturation: 0 });
+  const [busy, setBusy] = useState(0);
+  // Applied totals live in a ref updated optimistically at send time, so
+  // rapid consecutive releases each carry only their own increment.
+  const applied = useRef<Record<Field, number>>({ expEV: 0, contrast: 0, saturation: 0 });
+  const idsKey = ids.join(',');
+  useEffect(() => {
+    setPos({ expEV: 0, contrast: 0, saturation: 0 });
+    applied.current = { expEV: 0, contrast: 0, saturation: 0 };
+  }, [idsKey]);
 
-  const run = (fn: () => Promise<void>, label: string) => {
-    setProgress(0);
-    fn()
-      .then(() => toast.success(label))
+  const commit = (field: Field) => (v: number) => {
+    setPos((p) => ({ ...p, [field]: v }));
+    const inc = v - applied.current[field];
+    if (Math.abs(inc) < 1e-9) return;
+    applied.current[field] = v;
+    setBusy((n) => n + 1);
+    applyBatchEdit(client, ids, { ...NULL_DELTA, [field]: inc })
       .catch((err) => toast.error((err as Error).message))
-      .finally(() => setProgress(null));
+      .finally(() => setBusy((n) => n - 1));
   };
 
-  const noChange = ev === 0 && contrast === 0 && saturation === 0;
   return (
-    <div className="flex flex-col gap-3 border-t p-4 text-sm">
-      <h3 className="text-xs font-medium text-muted-foreground">Relative batch adjustment</h3>
-      <EditSlider
-        label="Exposure adjustment"
-        value={ev}
-        display={`${ev >= 0 ? '+' : ''}${ev.toFixed(2)} EV`}
-        min={-2}
-        max={2}
-        step={0.25}
-        neutral={0}
-        onChange={setEv}
-        onCommit={setEv}
-        onClear={() => setEv(0)}
-      />
-      <EditSlider
-        label="Contrast adjustment"
-        value={contrast * 100}
-        display={pct(contrast)}
-        min={-100}
-        max={100}
-        step={2}
-        neutral={0}
-        onChange={(v) => setContrast(v / 100)}
-        onCommit={(v) => setContrast(v / 100)}
-        onClear={() => setContrast(0)}
-      />
-      <EditSlider
-        label="Saturation adjustment"
-        value={saturation * 100}
-        display={pct(saturation)}
-        min={-100}
-        max={100}
-        step={2}
-        neutral={0}
-        onChange={(v) => setSaturation(v / 100)}
-        onCommit={(v) => setSaturation(v / 100)}
-        onClear={() => setSaturation(0)}
-      />
-      <Button
-        size="sm"
-        disabled={progress != null || noChange}
-        onClick={() =>
-          run(
-            () =>
-              applyBatchEdit(
-                client,
-                ids,
-                {
-                  ...NULL_DELTA,
-                  expEV: ev === 0 ? null : ev,
-                  contrast: contrast === 0 ? null : contrast,
-                  saturation: saturation === 0 ? null : saturation,
-                },
-                { onProgress: (cur, total) => setProgress((cur / total) * 100) },
-              ),
-            `Adjusted ${ids.length} photos`,
-          )
-        }
-      >
-        Apply to {ids.length} photos
-      </Button>
-      {progress != null && <Progress value={progress} />}
+    <div className="flex h-full flex-col overflow-y-auto">
+      <div className="border-b px-4 pt-[15px] pb-[13px]">
+        <span className="text-[10px] tracking-[.07em] text-muted-foreground uppercase">
+          Relative adjustment
+        </span>
+        <span className="mt-1.5 block text-[13px] text-foreground">{ids.length} photos selected</span>
+        <div className="mt-1 text-[11.5px] leading-snug text-muted-foreground">
+          Deltas add to each photo's own current value — mixed edits stay intact.
+        </div>
+      </div>
+      <div className="flex flex-col gap-4 p-4">
+        <EditSlider
+          label="Exposure"
+          value={pos.expEV}
+          display={`${pos.expEV >= 0 ? '+' : ''}${pos.expEV.toFixed(2)} EV`}
+          min={-2}
+          max={2}
+          step={0.05}
+          neutral={0}
+          onChange={(v) => setPos((p) => ({ ...p, expEV: v }))}
+          onCommit={commit('expEV')}
+          onClear={() => commit('expEV')(0)}
+        />
+        <EditSlider
+          label="Contrast"
+          value={pos.contrast * 100}
+          display={pct(pos.contrast)}
+          min={-100}
+          max={100}
+          step={2}
+          neutral={0}
+          onChange={(v) => setPos((p) => ({ ...p, contrast: v / 100 }))}
+          onCommit={(v) => commit('contrast')(v / 100)}
+          onClear={() => commit('contrast')(0)}
+        />
+        <EditSlider
+          label="Saturation"
+          value={pos.saturation * 100}
+          display={pct(pos.saturation)}
+          min={-100}
+          max={100}
+          step={2}
+          neutral={0}
+          onChange={(v) => setPos((p) => ({ ...p, saturation: v / 100 }))}
+          onCommit={(v) => commit('saturation')(v / 100)}
+          onClear={() => commit('saturation')(0)}
+        />
+        <div className="flex items-center gap-2 rounded-[9px] border border-primary/22 bg-primary/8 px-3 py-2.5">
+          <Info className="size-3.5 shrink-0 text-[#aab0ff]" strokeWidth={1.5} />
+          <span className="text-[11.5px] leading-snug text-secondary-foreground">
+            Absolute edits? Open one in Develop and Paste settings across.
+          </span>
+        </div>
+      </div>
+      <div className="mt-auto flex items-center gap-2 border-t px-4 py-[13px] text-[11.5px] text-muted-foreground">
+        {busy > 0 ? (
+          <>
+            <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+            Applying to {ids.length} photos…
+          </>
+        ) : (
+          <>
+            <span className="size-1.5 shrink-0 rounded-full bg-primary" />
+            Thumbnails update live as you drag
+          </>
+        )}
+      </div>
     </div>
   );
 }

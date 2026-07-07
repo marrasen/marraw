@@ -24,6 +24,8 @@ type Deps struct {
 	Cache   *pyramid.Cache
 	Handles *decode.HandleCache
 	Scanner *scan.Scanner
+	// Janitor bounds the preview cache; Settings adjusts its cap live.
+	Janitor *pyramid.Janitor
 	// DefaultCacheDir is the built-in preview-cache location (under the app
 	// data dir); System.SetCacheDir("") restores it.
 	DefaultCacheDir string
@@ -110,6 +112,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.RegisterEnumFor(edits, edit.WBModeValues())
 	registry.RegisterEnumFor(edits, edit.DemosaicValues())
 	registry.RegisterEnumFor(export, ExportFormatValues())
+	registry.RegisterEnumFor(export, ColorSpaceValues())
 	// PhotoPatchEvent is no longer broadcast as a push event — it is the
 	// payload of subscription patches — but registering it keeps the
 	// TypeScript types generated for the client-side patch reducer.
