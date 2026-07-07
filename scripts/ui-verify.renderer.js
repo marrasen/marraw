@@ -552,6 +552,82 @@ try {
     await sleep(150);
   }
 
+  // --- feedback round: Esc steps modes, + steps from fit, ⇧+arrows pan,
+  // quick dials come from the full control catalog ---------------------------
+  try {
+    mw.useEditSession.setState({ activeControl: null });
+
+    // Esc in Develop steps back to Cull, then Library (mirrors Enter).
+    ui().focus(photoA);
+    ui().setMode('develop');
+    await until(() => es().photoId === photoA && es().draft != null, 8000, 'develop session for esc check');
+    key('Escape');
+    R.escDevelopToCull = ui().mode === 'cull' ? true : `mode=${ui().mode}`;
+    key('Escape');
+    R.escCullToLibrary = ui().mode === 'library' ? true : `mode=${ui().mode}`;
+
+    // '+' in fit zooms one step out of the actual fit scale, not to ~1:1.
+    ui().setMode('cull');
+    await until(() => ui().view === 'loupe', 5000, 'cull loupe for zoom check');
+    ui().setLoupeZoom('fit');
+    await sleep(400); // zoom tween + fit-scale mirror settle
+    const fs = ui().loupeFitScale;
+    key('+');
+    R.plusFromFitSteps =
+      fs < 0.95 && Math.abs(ui().loupeZoom - fs * 1.25) < 1e-6
+        ? true
+        : `fitScale=${fs}, zoom=${ui().loupeZoom}`;
+
+    // ⇧+arrows pan the loupe by 20% of the viewport, without touching the
+    // selection (extension stays grid/contact-sheet behavior).
+    ui().setLoupeZoom(1);
+    await sleep(400);
+    const pane2 = document.querySelector('.overflow-auto');
+    const [px, py] = [pane2.scrollLeft, pane2.scrollTop];
+    const selBefore = ui().selection.size;
+    key('ArrowRight', { shiftKey: true });
+    key('ArrowDown', { shiftKey: true });
+    await sleep(150);
+    const [dxp, dyp] = [pane2.scrollLeft - px, pane2.scrollTop - py];
+    R.shiftArrowPans =
+      Math.abs(dxp - pane2.clientWidth * 0.2) <= 2 && Math.abs(dyp - pane2.clientHeight * 0.2) <= 2
+        ? true
+        : `d=${dxp},${dyp} viewport=${pane2.clientWidth}x${pane2.clientHeight}`;
+    R.shiftArrowKeepsSelection = ui().selection.size === selBefore ? true : `selection=${ui().selection.size}`;
+    ui().setLoupeZoom('fit');
+
+    // Quick dials from the expanded catalog: a spec-backed numeric dial
+    // (gamma, stored 0 = neutral 2.222) and a cycle chip (WB mode) render in
+    // the Develop dock and drive the draft through the spec's get/set.
+    const dialsBefore = ui().quickDials;
+    mw.useUIStore.setState({ quickDials: ['gamma', 'wbMode'] });
+    ui().setMode('develop');
+    await until(() => es().photoId === photoA && es().draft != null, 8000, 'develop session for dial check');
+    const miniByLabel = (label) =>
+      [...document.querySelectorAll('[class*="w-[82px]"]')].find(
+        (el) => el.querySelector('span')?.textContent.trim() === label,
+      );
+    const gammaMini = await until(() => miniByLabel('Gamma'), 5000, 'gamma quick dial');
+    const gammaShown = gammaMini.querySelectorAll('span')[1]?.textContent.trim();
+    R.quickDialGamma = gammaShown === '2.22' ? true : `display=${gammaShown}`;
+    const cycleBtn = miniByLabel('WB mode')?.querySelector('button');
+    if (cycleBtn && cycleBtn.textContent.trim() === 'As shot') {
+      cycleBtn.click();
+      await sleep(300);
+      R.quickDialCycle =
+        (es().draft.wbMode || 'camera') === 'auto' ? true : `wbMode=${es().draft.wbMode}`;
+    } else {
+      R.quickDialCycle = `WB mode chip: ${cycleBtn ? cycleBtn.textContent.trim() : 'not found'}`;
+    }
+    mw.useUIStore.setState({ quickDials: dialsBefore });
+  } catch (err) {
+    for (const name of [
+      'escDevelopToCull', 'escCullToLibrary', 'plusFromFitSteps',
+      'shiftArrowPans', 'shiftArrowKeepsSelection', 'quickDialGamma', 'quickDialCycle',
+    ])
+      R[name] = R[name] ?? String(err);
+  }
+
   // --- cleanup: reset edits on A and B, clear rating -------------------------
   for (const id of [photoA, photoB]) {
     ui().focus(id);

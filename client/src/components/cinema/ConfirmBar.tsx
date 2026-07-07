@@ -4,8 +4,9 @@ import type { Params } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { applyFlag, applyRating } from '@/lib/actions';
-import { DIALS, dialValue } from '@/lib/dials';
+import { DIALS } from '@/lib/dials';
 import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
+import { MiniCycle } from '@/components/cinema/MiniCycle';
 import { MiniSlider } from '@/components/cinema/MiniSlider';
 import { useUIStore } from '@/stores/uiStore';
 
@@ -92,20 +93,35 @@ export function ConfirmBar({
         <>
           <div className="h-9 w-px bg-white/15" />
           <div className={cn('flex items-center gap-4', !onDraft && 'pointer-events-none')}>
-            {DIALS.filter((d) => dials.includes(d.key)).map((d) => (
-              <MiniSlider
-                key={d.key}
-                label={d.label}
-                value={dialValue(shown, d.key)}
-                display={d.display(dialValue(shown, d.key))}
-                min={d.min}
-                max={d.max}
-                step={d.step}
-                neutral={0}
-                onChange={(v) => esUpdate(client, { [d.key]: v })}
-                onCommit={() => esCommit(client)}
-              />
-            ))}
+            {DIALS.filter((d) => dials.includes(d.key)).map((d) =>
+              d.kind === 'numeric' ? (
+                <MiniSlider
+                  key={d.key}
+                  label={d.label}
+                  value={d.value(shown)}
+                  display={d.display(d.value(shown))}
+                  min={d.min}
+                  max={d.max}
+                  step={d.step}
+                  neutral={d.neutral}
+                  onChange={(v) => esUpdate(client, d.patch(v))}
+                  onCommit={() => esCommit(client)}
+                />
+              ) : (
+                <MiniCycle
+                  key={d.key}
+                  label={d.label}
+                  value={d.value(shown)}
+                  values={d.values}
+                  valueLabel={d.valueLabel}
+                  onChange={(v) => {
+                    const patch = d.patch(v);
+                    esUpdate(client, patch);
+                    esCommit(client, patch);
+                  }}
+                />
+              ),
+            )}
           </div>
         </>
       )}

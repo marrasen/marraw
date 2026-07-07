@@ -42,10 +42,10 @@ const CONTROL_KEYS: Record<string, ControlId> = {
 };
 
 // useKeyboard installs the app-wide keymap:
-//   arrows        navigate (Shift extends the selection)
+//   arrows        navigate (Shift extends the selection; pans in a loupe)
 //   1-5 / 0       set / clear rating
 //   P / X / U     pick / exclude / unflag
-//   Enter         loupe view · Esc control → grid
+//   Enter · Esc   forward / back a mode: Library ⇄ Cull ⇄ Develop
 //   E B W T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
 //   Ctrl+↑/↓      focus the previous/next develop control
 //   +/- / Z / Space   zoom (loupe, no control focused; Z/Space toggle 1:1↔fit)
@@ -87,8 +87,9 @@ export function useKeyboard() {
 
       const zoomStep = (factor: number) => {
         if (s.view !== 'loupe') return;
-        // Stepping from 'fit' starts at 100%; the loupe resolves 'fit' itself.
-        const cur = s.loupeZoom === 'fit' ? 1 : s.loupeZoom;
+        // Stepping from 'fit' starts at the actual fit scale (mirrored out
+        // by the loupe), so + walks out of fit instead of jumping to 1:1.
+        const cur = s.loupeZoom === 'fit' ? s.loupeFitScale : s.loupeZoom;
         s.setLoupeZoom(cur * factor);
       };
 
@@ -197,6 +198,18 @@ export function useKeyboard() {
         return;
       }
 
+      // Shift+arrows pan the loupe image (the grid and the contact sheet
+      // keep Shift+arrow selection extension).
+      if (e.shiftKey && s.view === 'loupe' && !s.contactSheet && e.key.startsWith('Arrow')) {
+        e.preventDefault();
+        const p = 0.2; // viewport fraction per press; key repeat makes it glide
+        s.nudgeLoupePan(
+          e.key === 'ArrowLeft' ? -p : e.key === 'ArrowRight' ? p : 0,
+          e.key === 'ArrowUp' ? -p : e.key === 'ArrowDown' ? p : 0,
+        );
+        return;
+      }
+
       switch (e.key) {
         case 'ArrowLeft':
           e.preventDefault();
@@ -257,6 +270,8 @@ export function useKeyboard() {
             s.setContactSheet(false);
           } else if (s.mode === 'library' && s.view === 'grid' && s.selection.size > 1) {
             s.clearSelection(); // "Esc to clear" on the batch selection bar
+          } else if (s.mode === 'develop') {
+            s.setMode('cull'); // step back one mode; Esc again reaches Library
           } else {
             s.setMode('library');
           }

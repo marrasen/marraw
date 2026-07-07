@@ -9,7 +9,7 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
     title: 'Navigate',
     rows: [
       ['Move', '← ↑ → ↓'],
-      ['Extend', '⇧+arrow'],
+      ['Extend (grid)', '⇧+arrow'],
       ['Select all', 'Ctrl+A'],
     ],
   },
@@ -24,9 +24,10 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
   {
     title: 'View & modes',
     rows: [
-      ['Cull loupe / back', 'Enter · Esc'],
+      ['Mode forward / back', 'Enter · Esc'],
       ['Contact sheet', 'G'],
       ['Zoom 1:1 / fit', 'Z · Space'],
+      ['Pan (loupe)', '⇧+arrows'],
     ],
   },
   {

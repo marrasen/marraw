@@ -391,6 +391,25 @@ export function CinemaImage({
     panRatio.current = [rx, ry];
   };
 
+  // Shift+arrow pan: keyboard.ts accumulates viewport-fraction nudges in the
+  // store (this component owns the scroll container, the keymap doesn't);
+  // applying the not-yet-consumed difference means batched keydowns can't
+  // drop a press. The onScroll resync keeps the persisted panRatio truthful
+  // even if the browser defers the scroll event. In crop mode slack is 0,
+  // so the nudge naturally no-ops.
+  const loupePan = useUIStore((s) => s.loupePan);
+  const consumedPan = useRef(loupePan);
+  useLayoutEffect(() => {
+    const [dx, dy] = [loupePan[0] - consumedPan.current[0], loupePan[1] - consumedPan.current[1]];
+    consumedPan.current = loupePan;
+    if (dx === 0 && dy === 0) return;
+    const el = containerRef.current;
+    if (!el) return;
+    el.scrollLeft += dx * el.clientWidth;
+    el.scrollTop += dy * el.clientHeight;
+    onScroll();
+  }, [loupePan]);
+
   // Navigator viewport: the visible region as fractions of the image box.
   // With slack the box edge sits slackX from the scroll origin and the photo
   // can be partly off-screen in any direction, so the visible span is the
@@ -547,6 +566,13 @@ export function CinemaImage({
   useEffect(() => {
     onZoomInfoRef.current?.(scale);
   }, [scale]);
+
+  // Mirror the fit scale into the store: +/- zoom steps in keyboard.ts start
+  // from it while the zoom is 'fit'. Guarded on haveDims so the placeholder
+  // 1 never overwrites a real value.
+  useEffect(() => {
+    if (haveDims) useUIStore.getState().setLoupeFitScale(fitScale);
+  }, [fitScale, haveDims]);
 
   // Navigator drag / click pans the viewport to the pointed-at fraction.
   const panTo = (fx: number, fy: number) => {

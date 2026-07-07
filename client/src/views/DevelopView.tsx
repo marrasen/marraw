@@ -5,11 +5,12 @@ import { useApiClient } from '@/api/client';
 import { CinemaImage } from '@/views/LoupeView';
 import { CinemaHUD, PaletteChip } from '@/components/cinema/CinemaHUD';
 import { GapControl } from '@/components/cinema/GapControl';
+import { MiniCycle } from '@/components/cinema/MiniCycle';
 import { MiniSlider } from '@/components/cinema/MiniSlider';
 import { ScrubberDeck } from '@/components/cinema/ScrubberDeck';
 import { ZoomCluster } from '@/components/cinema/ZoomCluster';
 import { EditPanel } from '@/components/EditPanel';
-import { DIALS, dialValue } from '@/lib/dials';
+import { DIALS } from '@/lib/dials';
 import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
 import { groupByGap } from '@/lib/timeGaps';
 import { updateDevelopPinned } from '@/lib/uiSettings';
@@ -54,7 +55,7 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
         photos={photos}
         onZoomInfo={setScale}
         renderingBadgeBottom={216}
-        navigatorBottom={pinned ? 18 : 124}
+        navigatorBottom={pinned ? 18 : 150}
       />
       {!overlayActive && (
         <CinemaHUD
@@ -139,7 +140,7 @@ function QuickDock({
   return (
     <div
       className={cn(
-        'pointer-events-none absolute bottom-[100px] left-4 z-30 flex justify-center transition-opacity duration-300',
+        'pointer-events-none absolute bottom-[126px] left-4 z-30 flex justify-center transition-opacity duration-300',
         shifted ? 'right-[384px]' : 'right-4',
         hidden && 'opacity-0',
       )}
@@ -159,20 +160,35 @@ function QuickDock({
             Quick
           </span>
           <div className={cn('flex items-center gap-3.5', !draft && 'pointer-events-none')}>
-            {DIALS.filter((d) => dials.includes(d.key)).map((d) => (
-              <MiniSlider
-                key={d.key}
-                label={d.label}
-                value={dialValue(shown, d.key)}
-                display={d.display(dialValue(shown, d.key))}
-                min={d.min}
-                max={d.max}
-                step={d.step}
-                neutral={0}
-                onChange={(v) => esUpdate(client, { [d.key]: v })}
-                onCommit={() => esCommit(client)}
-              />
-            ))}
+            {DIALS.filter((d) => dials.includes(d.key)).map((d) =>
+              d.kind === 'numeric' ? (
+                <MiniSlider
+                  key={d.key}
+                  label={d.label}
+                  value={d.value(shown)}
+                  display={d.display(d.value(shown))}
+                  min={d.min}
+                  max={d.max}
+                  step={d.step}
+                  neutral={d.neutral}
+                  onChange={(v) => esUpdate(client, d.patch(v))}
+                  onCommit={() => esCommit(client)}
+                />
+              ) : (
+                <MiniCycle
+                  key={d.key}
+                  label={d.label}
+                  value={d.value(shown)}
+                  values={d.values}
+                  valueLabel={d.valueLabel}
+                  onChange={(v) => {
+                    const patch = d.patch(v);
+                    esUpdate(client, patch);
+                    esCommit(client, patch);
+                  }}
+                />
+              ),
+            )}
           </div>
           {zoom && <div className="h-9 w-px bg-white/15" />}
         </>

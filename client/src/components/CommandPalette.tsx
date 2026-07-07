@@ -109,7 +109,7 @@ function buildCommands(
         label: c.label,
         group: 'Develop',
         hint: c.hint,
-        run: (client) => {
+        run: (client: ApiClient) => {
           ui().setMode('develop');
           esSetActive(client, c.id);
         },

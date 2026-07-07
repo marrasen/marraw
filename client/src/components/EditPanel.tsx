@@ -631,9 +631,9 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         <PctSlider label="CA blue/yellow" field="caBlue" draft={draft} update={update} commit={commit} {...num('caBlue')} />
       </Group>
 
-      <Separator />
+      <Separator className="mt-3" />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -656,7 +656,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           Reset
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="mt-3 mb-1 text-xs text-muted-foreground">
         Drag a slider for a live preview; release to save. Press a control's key (E, B, W, …) or
         walk with Ctrl+↑/↓, then +/- adjusts; Esc returns to the image. Ctrl+Z/Ctrl+Y undo/redo
         per photo.

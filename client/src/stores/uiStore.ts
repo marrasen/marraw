@@ -84,6 +84,14 @@ interface UIState {
   loupeZoom: 'fit' | number;
   // Bumped to re-center the loupe pan (clicking Fit while already at fit).
   loupeCenterTick: number;
+  // The loupe's actual fit scale, mirrored out so keyboard zoom steps can
+  // start from it while loupeZoom is 'fit'.
+  loupeFitScale: number;
+  // Keyboard pan (Shift+arrows): cumulative nudge in viewport fractions.
+  // Cumulative (not per-press delta) because React batches back-to-back
+  // keydowns into one render — the loupe applies the difference it hasn't
+  // consumed yet, so no press is lost.
+  loupePan: [number, number];
 
   setMode: (m: Mode) => void;
   setAddFolderOpen: (open: boolean) => void;
@@ -108,6 +116,8 @@ interface UIState {
   setCellSize: (px: number) => void;
   setLoupeZoom: (z: 'fit' | number) => void;
   centerLoupe: () => void;
+  setLoupeFitScale: (scale: number) => void;
+  nudgeLoupePan: (dx: number, dy: number) => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -146,6 +156,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   cellSize: 220,
   loupeZoom: 'fit',
   loupeCenterTick: 0,
+  loupeFitScale: 1,
+  loupePan: [0, 0],
 
   setMode: (m) =>
     set(
@@ -264,6 +276,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   setLoupeZoom: (z) =>
     set({ loupeZoom: z === 'fit' ? z : Math.min(4, Math.max(0.05, z)) }),
   centerLoupe: () => set((s) => ({ loupeCenterTick: s.loupeCenterTick + 1 })),
+  setLoupeFitScale: (scale) => set({ loupeFitScale: scale }),
+  nudgeLoupePan: (dx, dy) =>
+    set((s) => ({ loupePan: [s.loupePan[0] + dx, s.loupePan[1] + dy] })),
 }));
 
 // selectionOrFocus returns the ids an action should apply to.

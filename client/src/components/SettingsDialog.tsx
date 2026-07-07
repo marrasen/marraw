@@ -10,7 +10,7 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
-import { DIALS, type DialKey } from '@/lib/dials';
+import { DIALS, type DialDef, type DialKey } from '@/lib/dials';
 import {
   newAutoPreset,
   OFFSET_KEYS,
@@ -194,14 +194,29 @@ function DialPickerRow({
       {label}
     </button>
   );
+  // The catalog is the full develop control set (33 controls), so the chips
+  // are clustered under the develop panel's section names for scannability.
+  const groups: { title: string; dials: DialDef[] }[] = [];
+  for (const d of DIALS) {
+    const g = groups[groups.length - 1];
+    if (g?.title === d.group) g.dials.push(d);
+    else groups.push({ title: d.group, dials: [d] });
+  }
   return (
     <div className="border-b py-4 first:pt-0 last:border-0">
       <div className="text-sm font-medium">{title}</div>
       <div className="mt-0.5 text-xs leading-normal text-muted-foreground">{description}</div>
-      <div className="mt-2.5 flex flex-wrap gap-1.5">
-        {chip(value.length === 0, 'None', () => onChange([]))}
-        {DIALS.map((d) => chip(value.includes(d.key), d.label, () => toggle(d.key)))}
-      </div>
+      <div className="mt-2.5">{chip(value.length === 0, 'None', () => onChange([]))}</div>
+      {groups.map((g) => (
+        <div key={g.title} className="mt-2.5">
+          <div className="mb-1.5 text-[10px] tracking-[.06em] text-muted-foreground uppercase">
+            {g.title}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {g.dials.map((d) => chip(value.includes(d.key), d.label, () => toggle(d.key)))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
