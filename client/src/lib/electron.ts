@@ -14,6 +14,7 @@ declare global {
       close: () => void;
       toggleFullScreen: () => void;
       isMax: () => Promise<boolean>;
+      openNewWindow: (folderPath?: string) => void;
       onMaxChange: (cb: (max: boolean) => void) => void;
       onFullScreenChange: (cb: (fs: boolean) => void) => void;
     };

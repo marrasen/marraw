@@ -31,10 +31,10 @@ try {
   R.photosLoaded = ui().visibleIds.length;
 
   // The control-presence checks need every collapsible edit group open; an
-  // interactive session may have persisted some collapsed. Set the state
-  // before the panel first mounts (it reads localStorage on mount).
+  // interactive session may have persisted some collapsed. The setter writes
+  // the store optimistically, so it applies before the panel mounts.
   for (const g of ['crop', 'tone', 'presence', 'wb', 'color', 'effects', 'detail'])
-    localStorage.setItem(`marraw:editGroup:${g}`, '1');
+    mw.setEditGroupOpen(g, true);
 
   // --- thumbnail-size slider renders at its designed width ------------------
   // Regression: width passed as className on the Slider root lost to the
@@ -44,7 +44,7 @@ try {
   R.thumbSliderWidth = thumbW >= 90 ? true : `width=${thumbW}px`;
 
   // --- ⌘K palette: theme commands flip the root class ----------------------
-  const themeBefore = localStorage.getItem('theme');
+  const themeBefore = ui().theme;
   ui().setPaletteOpen(true);
   await until(() => buttons().some((b) => b.textContent.includes('Theme: Light')), 5000, 'palette theme commands');
   buttons().find((b) => b.textContent.includes('Theme: Light')).click();
@@ -55,9 +55,9 @@ try {
   buttons().find((b) => b.textContent.includes('Theme: Dark')).click();
   await until(() => document.documentElement.classList.contains('dark'), 5000, 'dark theme restored');
   R.paletteThemeRestore = true;
-  // Don't leak the probe's theme choice into interactive sessions.
-  if (themeBefore != null) localStorage.setItem('theme', themeBefore);
-  else localStorage.removeItem('theme');
+  // Don't leak the probe's theme choice into interactive sessions (theme is
+  // server-persisted now, so the palette clicks above really changed it).
+  mw.setTheme(themeBefore);
 
   // --- keyboard focus + loupe -------------------------------------------
   key('ArrowRight');

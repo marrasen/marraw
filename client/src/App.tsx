@@ -20,6 +20,7 @@ import { useKeyboard } from '@/lib/keyboard';
 import { usePhotos } from '@/lib/usePhotos';
 import { useFolderScan } from '@/lib/useFolderScan';
 import { openRoot, samePath, saveRoots, useLibraryRoots } from '@/lib/library';
+import { UISettingsSync } from '@/lib/uiSettings';
 import { openFolder } from '@/api/library';
 import { useApiClient } from '@/api/client';
 import { useUIStore } from '@/stores/uiStore';
@@ -84,6 +85,7 @@ export default function App() {
 
   return (
     <div className="app-backdrop flex h-screen flex-col text-foreground">
+      <UISettingsSync />
       {/* Cinema modes are edge-to-edge; their floating HUD replaces the bar. */}
       {structured && <TopBar />}
       <div className="flex min-h-0 flex-1">

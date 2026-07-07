@@ -9,10 +9,9 @@ import { Segmented } from '@/components/ui/segmented';
 import { Slider } from '@/components/ui/slider';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
+import { updateExportDir } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
-
-const LAST_DIR_KEY = 'marraw.exportDir';
 
 const FORMAT_ITEMS: { value: ExportFormatType; label: string }[] = [
   { value: 'jpeg', label: 'JPEG' },
@@ -51,7 +50,9 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   useEffect(() => {
     if (!open) return;
     setNeedsCreate(false);
-    const last = localStorage.getItem(LAST_DIR_KEY);
+    // Read imperatively: a subscription echo must not clobber a path the
+    // user is typing while the dialog is open.
+    const last = useUIStore.getState().exportDir;
     setDestDir(last || (folderPath ? `${folderPath}\\Exports` : ''));
   }, [open, folderPath]);
 
@@ -83,7 +84,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
         colorSpace,
         createDir,
       });
-      localStorage.setItem(LAST_DIR_KEY, destDir);
+      updateExportDir(client, destDir);
       setOpen(false); // progress lives in the top-bar task chip
     } catch (err) {
       toast.error(`Export failed to start: ${(err as Error).message}`);

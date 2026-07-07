@@ -1,6 +1,6 @@
 // Creative auto presets (Settings → Auto presets): a named auto that runs
 // the chosen auto sections and then layers user style offsets on top.
-// Client-side only — stored in localStorage, applied via esApplyAutoPreset.
+// Persisted server-side (uiSettings), applied via esApplyAutoPreset.
 import type { AutoSection } from '@/lib/editSession';
 
 export interface AutoPreset {
@@ -37,38 +37,31 @@ export const OFFSET_KEYS: { key: OffsetKey; label: string }[] = [
   { key: 'clarity', label: 'Clarity' },
 ];
 
-export const AUTO_PRESETS_KEY = 'marraw:autoPresets';
-
 const SECTIONS: AutoSection[] = ['tone', 'wb', 'color'];
 const OFFSETS = new Set<string>(OFFSET_KEYS.map((o) => o.key));
 
-// loadAutoPresets reads the persisted presets, dropping anything malformed —
-// unknown sections and offset keys are filtered rather than rejected so the
-// list survives older/newer versions.
-export function loadAutoPresets(): AutoPreset[] {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(AUTO_PRESETS_KEY) ?? '[]');
-    if (!Array.isArray(raw)) return [];
-    const out: AutoPreset[] = [];
-    for (const p of raw) {
-      if (typeof p !== 'object' || p === null) continue;
-      const { id, name, sections, offsets } = p as Record<string, unknown>;
-      if (typeof id !== 'string' || typeof name !== 'string') continue;
-      const secs = Array.isArray(sections)
-        ? SECTIONS.filter((s) => sections.includes(s))
-        : [];
-      const offs: AutoPreset['offsets'] = {};
-      if (typeof offsets === 'object' && offsets !== null) {
-        for (const [k, v] of Object.entries(offsets)) {
-          if (OFFSETS.has(k) && typeof v === 'number' && v !== 0) offs[k as OffsetKey] = v;
-        }
+// sanitizeAutoPresets narrows stored presets to the client shape, dropping
+// anything malformed — unknown sections and offset keys are filtered rather
+// than rejected so the list survives older/newer versions.
+export function sanitizeAutoPresets(raw: unknown): AutoPreset[] {
+  if (!Array.isArray(raw)) return [];
+  const out: AutoPreset[] = [];
+  for (const p of raw) {
+    if (typeof p !== 'object' || p === null) continue;
+    const { id, name, sections, offsets } = p as Record<string, unknown>;
+    if (typeof id !== 'string' || typeof name !== 'string') continue;
+    const secs = Array.isArray(sections)
+      ? SECTIONS.filter((s) => sections.includes(s))
+      : [];
+    const offs: AutoPreset['offsets'] = {};
+    if (typeof offsets === 'object' && offsets !== null) {
+      for (const [k, v] of Object.entries(offsets)) {
+        if (OFFSETS.has(k) && typeof v === 'number' && v !== 0) offs[k as OffsetKey] = v;
       }
-      out.push({ id, name, sections: secs, offsets: offs });
     }
-    return out;
-  } catch {
-    return [];
+    out.push({ id, name, sections: secs, offsets: offs });
   }
+  return out;
 }
 
 export function newAutoPreset(): AutoPreset {

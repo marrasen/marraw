@@ -103,12 +103,15 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	library := &Library{deps: deps}
 	edits := &Edits{deps: deps}
 	export := &Export{deps: deps}
+	settings := &Settings{deps: deps}
 	registry.Register(library)
 	registry.Register(edits)
 	registry.Register(export)
 	registry.Register(&System{deps: deps})
+	registry.Register(settings)
 
 	registry.RegisterEnumFor(library, FlagValues())
+	registry.RegisterEnumFor(settings, ThemeValues())
 	registry.RegisterEnumFor(edits, edit.WBModeValues())
 	registry.RegisterEnumFor(edits, edit.DemosaicValues())
 	registry.RegisterEnumFor(export, ExportFormatValues())

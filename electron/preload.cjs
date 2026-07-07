@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('win', {
   close: () => ipcRenderer.send('win:close'),
   toggleFullScreen: () => ipcRenderer.send('win:toggleFullScreen'),
   isMax: () => ipcRenderer.invoke('win:isMax'),
+  // Opens another window in this instance; folderPath auto-opens there.
+  openNewWindow: (folderPath) => ipcRenderer.send('win:openNew', folderPath ?? null),
   onMaxChange: (cb) => ipcRenderer.on('win:maxChanged', (_e, v) => cb(v)),
   onFullScreenChange: (cb) => ipcRenderer.on('win:fullscreenChanged', (_e, v) => cb(v)),
 });

@@ -1,8 +1,11 @@
 import { create } from 'zustand';
 import type { FlagType, Photo, PhotoPatch } from '@/api/library';
+import type { UISettings } from '@/api/settings';
 import type { Params } from '@/api/edits';
-import { loadDialKeys, type DialKey } from '@/lib/dials';
-import { AUTO_PRESETS_KEY, loadAutoPresets, type AutoPreset } from '@/lib/autoPresets';
+import { sanitizeDialKeys, type DialKey } from '@/lib/dials';
+import { sanitizeAutoPresets, type AutoPreset } from '@/lib/autoPresets';
+
+export type Theme = 'dark' | 'light' | 'system';
 
 export type View = 'grid' | 'loupe';
 export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
@@ -21,16 +24,35 @@ interface UIState {
   shortcutsOpen: boolean;
   // OS fullscreen (F11) — mirrored from the Electron window so Esc can exit.
   fullscreen: boolean;
-  // Cull: the contact sheet (G) and the time-gap grouping threshold in
-  // minutes (null = off, one flat grid). Persisted across sessions.
+  // Cull: the contact sheet (G). Per-window, not persisted.
   contactSheet: boolean;
+
+  // ---- Server-persisted settings (settings table, one `uiSettings`
+  // subscription). This store is a read mirror: <UISettingsSync/> pushes
+  // every server snapshot in via applyUISettings, and writes go through the
+  // optimistic helpers in lib/uiSettings.ts — never set these directly.
+  // Cull time-gap grouping threshold in minutes (null = off, one flat grid).
   gapMinutes: number | null;
   // Develop dials pinned to the Cull confirm bar / Develop quick dock
-  // (Settings → Toolbars). Empty = none, the compact default. Persisted.
+  // (Settings → Toolbars). Empty = none, the compact default.
   cullDials: DialKey[];
   quickDials: DialKey[];
-  // Creative auto presets (Settings → Auto presets). Persisted.
+  // Creative auto presets (Settings → Auto presets).
   autoPresets: AutoPreset[];
+  theme: Theme;
+  // Last export destination directory ('' = none yet).
+  exportDir: string;
+  // Develop drawer pinned open.
+  developPinned: boolean;
+  // Edit-panel group id -> open (absent = open).
+  editGroups: Record<string, boolean>;
+  // Library-group display aliases / rail collapse state, keyed by the
+  // lowercased parent path (absent = no alias / open).
+  groupAliases: Record<string, string>;
+  railGroups: Record<string, boolean>;
+  // True once the first uiSettings snapshot has arrived.
+  settingsLoaded: boolean;
+  // ---- end server-persisted mirror
 
   focusId: number | null;
   anchorId: number | null;
@@ -68,10 +90,7 @@ interface UIState {
   setPaletteOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setContactSheet: (open: boolean) => void;
-  setGapMinutes: (min: number | null) => void;
-  setCullDials: (dials: DialKey[]) => void;
-  setQuickDials: (dials: DialKey[]) => void;
-  setAutoPresets: (presets: AutoPreset[]) => void;
+  applyUISettings: (s: UISettings) => void;
   setFolder: (id: number, path: string) => void;
   setView: (v: View) => void;
   focus: (id: number | null, opts?: { extend?: boolean; toggle?: boolean }) => void;
@@ -101,15 +120,17 @@ export const useUIStore = create<UIState>((set, get) => ({
   shortcutsOpen: false,
   fullscreen: false,
   contactSheet: false,
-  gapMinutes: (() => {
-    const raw = localStorage.getItem('marraw:gapMinutes');
-    if (raw === 'off') return null;
-    const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : 6;
-  })(),
-  cullDials: loadDialKeys('marraw:cullDials'),
-  quickDials: loadDialKeys('marraw:quickDials'),
-  autoPresets: loadAutoPresets(),
+  gapMinutes: 6,
+  cullDials: [],
+  quickDials: [],
+  autoPresets: [],
+  theme: 'dark',
+  exportDir: '',
+  developPinned: true,
+  editGroups: {},
+  groupAliases: {},
+  railGroups: {},
+  settingsLoaded: false,
   focusId: null,
   anchorId: null,
   selection: new Set<number>(),
@@ -136,22 +157,21 @@ export const useUIStore = create<UIState>((set, get) => ({
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setContactSheet: (open) => set({ contactSheet: open }),
-  setGapMinutes: (min) => {
-    localStorage.setItem('marraw:gapMinutes', min == null ? 'off' : String(min));
-    set({ gapMinutes: min });
-  },
-  setCullDials: (dials) => {
-    localStorage.setItem('marraw:cullDials', JSON.stringify(dials));
-    set({ cullDials: dials });
-  },
-  setQuickDials: (dials) => {
-    localStorage.setItem('marraw:quickDials', JSON.stringify(dials));
-    set({ quickDials: dials });
-  },
-  setAutoPresets: (presets) => {
-    localStorage.setItem(AUTO_PRESETS_KEY, JSON.stringify(presets));
-    set({ autoPresets: presets });
-  },
+  // Server snapshot in (wire shapes sanitized to the client types).
+  applyUISettings: (s) =>
+    set({
+      theme: s.theme,
+      gapMinutes: s.gapMinutes === 0 ? null : s.gapMinutes,
+      cullDials: sanitizeDialKeys(s.cullDials),
+      quickDials: sanitizeDialKeys(s.quickDials),
+      autoPresets: sanitizeAutoPresets(s.autoPresets),
+      exportDir: s.exportDir,
+      developPinned: s.developPinned,
+      editGroups: s.editGroups,
+      groupAliases: s.groupAliases,
+      railGroups: s.railGroups,
+      settingsLoaded: true,
+    }),
 
   setFolder: (id, path) =>
     set({

@@ -12,6 +12,7 @@ import { EditPanel } from '@/components/EditPanel';
 import { DIALS, dialValue } from '@/lib/dials';
 import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
 import { groupByGap } from '@/lib/timeGaps';
+import { updateDevelopPinned } from '@/lib/uiSettings';
 import { useIdle } from '@/lib/useIdle';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
@@ -24,11 +25,12 @@ import { useUIStore } from '@/stores/uiStore';
  * keeps the take in reach.
  */
 export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) {
+  const client = useApiClient();
   const focusId = useUIStore((s) => s.focusId);
   const gapMinutes = useUIStore((s) => s.gapMinutes);
   const cropping = useEditSession((s) => s.cropping);
   const wbPicking = useEditSession((s) => s.wbPicking);
-  const [pinned, setPinned] = useState(() => localStorage.getItem('marraw:developPinned') !== '0');
+  const pinned = useUIStore((s) => s.developPinned);
   const idle = useIdle();
   const [scale, setScale] = useState(1);
 
@@ -43,12 +45,7 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
   }
 
   const overlayActive = cropping || wbPicking;
-  const togglePin = () => {
-    setPinned((v) => {
-      localStorage.setItem('marraw:developPinned', v ? '0' : '1');
-      return !v;
-    });
-  };
+  const togglePin = () => updateDevelopPinned(client, !pinned);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">

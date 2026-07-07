@@ -6,7 +6,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { useApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
+import { updateGapMinutes } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 
 const PRESETS: { min: number; hint?: string }[] = [
@@ -22,8 +24,10 @@ const PRESETS: { min: number; hint?: string }[] = [
  * mapped to how photographers shoot, a custom minute value, or Off.
  */
 export function GapControl({ glass }: { glass?: boolean }) {
+  const client = useApiClient();
   const gapMinutes = useUIStore((s) => s.gapMinutes);
-  const setGapMinutes = useUIStore((s) => s.setGapMinutes);
+  const setGapMinutes = (min: number | null) =>
+    updateGapMinutes(client, min == null ? null : Math.max(1, Math.round(min)));
   const [custom, setCustom] = useState(String(gapMinutes ?? 6));
   const isPreset = gapMinutes != null && PRESETS.some((p) => p.min === gapMinutes);
 

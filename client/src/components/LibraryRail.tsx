@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  AppWindow,
   ArrowDown,
   ArrowUp,
   Check,
@@ -39,14 +40,13 @@ import {
   useLibraryRoots,
   type RootGroup,
 } from '@/lib/library';
+import { updateGroupAlias, updateRailGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 
-// Group display aliases are a pure client display preference.
-const groupAliasKey = (parent: string) => `marraw:groupAlias:${parent.toLowerCase()}`;
-const groupOpenKey = (parent: string) => `marraw:railGroup:${parent.toLowerCase()}`;
-
-function groupName(g: RootGroup) {
-  return localStorage.getItem(groupAliasKey(g.parentPath)) || g.parentName;
+// Group display aliases are a pure display preference, persisted server-side
+// (uiSettings.groupAliases, keyed by the lowercased parent path).
+function groupName(g: RootGroup, aliases: Record<string, string>) {
+  return aliases[g.parentPath.toLowerCase()] || g.parentName;
 }
 
 /**
@@ -58,9 +58,9 @@ export function LibraryRail() {
   const { roots } = useLibraryRoots();
   const [filter, setFilter] = useState('');
   const [renaming, setRenaming] = useState<string | null>(null); // root path or "group:<parent>"
-  const [, bump] = useState(0); // group alias/open state lives in localStorage
   const setAddFolderOpen = useUIStore((s) => s.setAddFolderOpen);
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
+  const groupAliases = useUIStore((s) => s.groupAliases);
 
   const groups = useMemo(() => groupRoots(roots), [roots]);
   const q = filter.trim().toLowerCase();
@@ -70,7 +70,7 @@ export function LibraryRail() {
           ...g,
           roots: g.roots.filter((r) => rootName(r).toLowerCase().includes(q)),
         }))
-        .filter((g) => g.roots.length > 0 || groupName(g).toLowerCase().includes(q))
+        .filter((g) => g.roots.length > 0 || groupName(g, groupAliases).toLowerCase().includes(q))
     : groups;
 
   return (
@@ -112,7 +112,6 @@ export function LibraryRail() {
                 renaming={renaming}
                 setRenaming={setRenaming}
                 forceOpen={q !== ''}
-                onChanged={() => bump((n) => n + 1)}
               />
             ))}
           </div>
@@ -147,7 +146,6 @@ function Group({
   renaming,
   setRenaming,
   forceOpen,
-  onChanged,
 }: {
   group: RootGroup;
   groupIndex: number;
@@ -156,19 +154,14 @@ function Group({
   renaming: string | null;
   setRenaming: (v: string | null) => void;
   forceOpen: boolean;
-  onChanged: () => void;
 }) {
   const client = useApiClient();
-  const [open, setOpen] = useState(() => localStorage.getItem(groupOpenKey(group.parentPath)) !== '0');
+  const groupAliases = useUIStore((s) => s.groupAliases);
+  const open = useUIStore((s) => s.railGroups[group.parentPath.toLowerCase()] !== false);
   const groupRenameId = `group:${group.parentPath.toLowerCase()}`;
   const showRows = open || forceOpen;
 
-  const toggleOpen = () => {
-    setOpen((v) => {
-      localStorage.setItem(groupOpenKey(group.parentPath), v ? '0' : '1');
-      return !v;
-    });
-  };
+  const toggleOpen = () => updateRailGroupOpen(client, group.parentPath, !open);
 
   // Move the whole group block up/down in the stored root order.
   const moveGroup = (dir: -1 | 1) => {
@@ -212,16 +205,15 @@ function Group({
     <div className="flex flex-col gap-px">
       {renaming === groupRenameId ? (
         <RenameEditor
-          initial={groupName(group)}
+          initial={groupName(group, groupAliases)}
           diskName={group.parentName}
           onSubmit={(alias) => {
-            if (alias && alias !== group.parentName) {
-              localStorage.setItem(groupAliasKey(group.parentPath), alias);
-            } else {
-              localStorage.removeItem(groupAliasKey(group.parentPath));
-            }
+            updateGroupAlias(
+              client,
+              group.parentPath,
+              alias && alias !== group.parentName ? alias : '',
+            );
             setRenaming(null);
-            onChanged();
           }}
           onCancel={() => setRenaming(null)}
         />
@@ -249,7 +241,7 @@ function Group({
                 ▶
               </span>
               <span className="flex-1 truncate font-semibold text-foreground">
-                {groupName(group)}
+                {groupName(group, groupAliases)}
               </span>
             </div>
             <span className="truncate pl-4 font-mono text-[10px] text-faint" title={group.parentPath}>
@@ -258,7 +250,9 @@ function Group({
           </ContextMenuTrigger>
           <ContextMenuContent>
             <div className="flex flex-col gap-px px-2.5 pt-1.5 pb-2">
-              <span className="truncate font-semibold text-foreground">{groupName(group)}</span>
+              <span className="truncate font-semibold text-foreground">
+                {groupName(group, groupAliases)}
+              </span>
               <span className="truncate font-mono text-[10px] text-faint">
                 {group.parentPath} · {group.roots.length} shoot{group.roots.length === 1 ? '' : 's'}
               </span>
@@ -416,6 +410,12 @@ function ShootRow({
         <ContextMenuSeparator />
         <ContextMenuItem hint="Enter" onClick={openInCull}>
           <Play /> <span className="flex-1 text-foreground">Open in Cull</span>
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => window.win?.openNewWindow(root.path)}
+          disabled={!window.win}
+        >
+          <AppWindow /> <span className="flex-1">Open in new window</span>
         </ContextMenuItem>
         <ContextMenuItem hint="F2" onClick={onRename}>
           <Pencil /> <span className="flex-1">Rename…</span>

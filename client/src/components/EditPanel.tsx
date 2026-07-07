@@ -12,6 +12,7 @@ import { Slider } from '@/components/ui/slider';
 import { Separator } from '@/components/ui/separator';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Histogram } from '@/components/Histogram';
+import { updateEditGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 import {
   esApplyParams,
@@ -692,7 +693,7 @@ function groupChanged(draft: Params, keys: (keyof Params)[]): boolean {
 // Group is one collapsible develop-panel section, drawn flat per the
 // develop-drawer plate: an uppercase eyebrow header with the "has
 // adjustments" dot, rows beneath, no card chrome. Open state persists per
-// group in localStorage.
+// group in the catalog (uiSettings, absent = open).
 function Group({
   id,
   title,
@@ -708,11 +709,9 @@ function Group({
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(() => localStorage.getItem(`marraw:editGroup:${id}`) !== '0');
-  const toggle = () => {
-    setOpen(!open);
-    localStorage.setItem(`marraw:editGroup:${id}`, open ? '0' : '1');
-  };
+  const client = useApiClient();
+  const open = useUIStore((s) => s.editGroups[id] !== false);
+  const toggle = () => updateEditGroupOpen(client, id, !open);
   return (
     <section>
       <div className="group/hdr mt-3 mb-2 flex items-center gap-1.5">

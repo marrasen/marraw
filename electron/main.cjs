@@ -1,5 +1,8 @@
 // marraw Electron shell: spawns the Go daemon, waits for its READY
 // handshake, and loads the client pointed at the daemon's port + token.
+// Single-instance: relaunching the exe opens a new window in the running
+// instance instead of a second process (two daemons on one SQLite file
+// clobbered each other's settings).
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
@@ -65,13 +68,27 @@ async function startDaemon() {
   return { port, token };
 }
 
-async function createWindow() {
+// One daemon per app instance, however many windows race into createWindow.
+let backendPromise = null;
+let startupFailed = false;
+function ensureDaemon() {
+  backendPromise ??= startDaemon();
+  return backendPromise;
+}
+
+const windows = new Set();
+
+async function createWindow(opts = {}) {
+  // { initial?, openFolder? }
   let backend;
   try {
-    backend = await startDaemon();
+    backend = await ensureDaemon();
   } catch (err) {
-    dialog.showErrorBox('marraw', `Cannot start backend: ${err.message}`);
-    app.quit();
+    if (!startupFailed) {
+      startupFailed = true;
+      dialog.showErrorBox('marraw', `Cannot start backend: ${err.message}`);
+      app.quit();
+    }
     return;
   }
 
@@ -93,26 +110,27 @@ async function createWindow() {
       backgroundThrottling: !UITEST,
     },
   });
+  windows.add(win);
+  win.on('closed', () => windows.delete(win));
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
-  // Baked-in window controls (frameless): renderer buttons drive these, and
-  // the maximize/fullscreen state flows back so glyphs and Esc behave.
-  ipcMain.on('win:minimize', () => win.minimize());
-  ipcMain.on('win:toggleMax', () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
-  ipcMain.on('win:close', () => win.close());
-  ipcMain.on('win:toggleFullScreen', () => win.setFullScreen(!win.isFullScreen()));
-  ipcMain.handle('win:isMax', () => win.isMaximized());
+  // Maximize/fullscreen state flows back so glyphs and Esc behave. These are
+  // window events (not ipcMain), so per-window registration is correct.
   win.on('maximize', () => win.webContents.send('win:maxChanged', true));
   win.on('unmaximize', () => win.webContents.send('win:maxChanged', false));
   win.on('enter-full-screen', () => win.webContents.send('win:fullscreenChanged', true));
   win.on('leave-full-screen', () => win.webContents.send('win:fullscreenChanged', false));
 
   const query = { apiPort: String(backend.port), token: backend.token };
-  if (process.env.MARRAW_OPEN_FOLDER) query.openFolder = process.env.MARRAW_OPEN_FOLDER;
-  if (process.env.MARRAW_LOUPE) query.loupe = '1';
-  if (process.env.MARRAW_SHOT) query.shot = process.env.MARRAW_SHOT; // scripts/shot.mjs
+  if (opts.openFolder) query.openFolder = opts.openFolder;
+  if (opts.initial) {
+    // Env-derived params apply only to the first window (harness/dev hooks).
+    if (process.env.MARRAW_OPEN_FOLDER && !query.openFolder) query.openFolder = process.env.MARRAW_OPEN_FOLDER;
+    if (process.env.MARRAW_LOUPE) query.loupe = '1';
+    if (process.env.MARRAW_SHOT) query.shot = process.env.MARRAW_SHOT; // scripts/shot.mjs
+  }
 
   if (DEV) {
     const qs = new URLSearchParams(query).toString();
@@ -122,11 +140,16 @@ async function createWindow() {
     await win.loadURL(`http://localhost:${vitePort}/?${qs}`);
     // The detached DevTools window opens right on top of the app window —
     // in harness runs that occlusion is what used to stall rAF (see UITEST).
-    if (!UITEST) win.webContents.openDevTools({ mode: 'detach' });
+    // Only the initial window auto-opens it (Ctrl+Shift+I elsewhere).
+    if (!UITEST && opts.initial) win.webContents.openDevTools({ mode: 'detach' });
   } else {
     await win.loadFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'), { query });
   }
 
+  if (opts.initial) runHarnessHooks(win);
+}
+
+function runHarnessHooks(win) {
   // Scripted UI verification: MARRAW_UITEST=<renderer-script.js> runs the
   // script in the page (async IIFE, must return a JSON-serializable value),
   // prints it as a UITEST_RESULT line, and exits — used by
@@ -168,6 +191,24 @@ async function createWindow() {
   }
 }
 
+// Baked-in window controls (frameless): renderer buttons drive these, routed
+// to the window that sent the message so every window controls itself.
+const senderWin = (e) => BrowserWindow.fromWebContents(e.sender);
+ipcMain.on('win:minimize', (e) => senderWin(e)?.minimize());
+ipcMain.on('win:toggleMax', (e) => {
+  const w = senderWin(e);
+  if (w) w.isMaximized() ? w.unmaximize() : w.maximize();
+});
+ipcMain.on('win:close', (e) => senderWin(e)?.close());
+ipcMain.on('win:toggleFullScreen', (e) => {
+  const w = senderWin(e);
+  w?.setFullScreen(!w.isFullScreen());
+});
+ipcMain.handle('win:isMax', (e) => senderWin(e)?.isMaximized() ?? false);
+ipcMain.on('win:openNew', (_e, folderPath) => {
+  void createWindow({ openFolder: typeof folderPath === 'string' && folderPath ? folderPath : undefined });
+});
+
 ipcMain.handle('marraw:pick-directory', async () => {
   const res = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
   return res.canceled ? null : res.filePaths[0];
@@ -184,7 +225,25 @@ ipcMain.handle('marraw:is-directory', (_ev, p) => {
   }
 });
 
-app.whenReady().then(createWindow);
+// Single instance: a second launch hands its MARRAW_OPEN_FOLDER over via
+// additionalData (the first instance can't see the second's env) and exits;
+// we answer by opening a new window. Harness runs bypass the lock — they
+// must own their process to read UITEST_RESULT from its stdout.
+const gotLock = UITEST ? true : app.requestSingleInstanceLock({
+  openFolder: process.env.MARRAW_OPEN_FOLDER ?? null,
+});
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_e, _argv, _wd, additionalData) => {
+    const folder =
+      additionalData && typeof additionalData.openFolder === 'string' && additionalData.openFolder
+        ? additionalData.openFolder
+        : undefined;
+    void createWindow({ openFolder: folder });
+  });
+  app.whenReady().then(() => createWindow({ initial: true }));
+}
 app.on('before-quit', () => {
   quitting = true;
 });

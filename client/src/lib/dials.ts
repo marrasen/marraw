@@ -29,14 +29,8 @@ export function dialValue(params: Params | null, key: DialKey): number {
   return params?.[key] ?? 0;
 }
 
-// loadDialKeys reads a persisted toolbar-dial selection, dropping anything
-// that is not a known dial. Default is none — the compact toolbar.
-export function loadDialKeys(storageKey: string): DialKey[] {
-  try {
-    const raw: unknown = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
-    if (!Array.isArray(raw)) return [];
-    return DIALS.map((d) => d.key).filter((k) => raw.includes(k));
-  } catch {
-    return [];
-  }
+// sanitizeDialKeys narrows a stored toolbar-dial selection to known dials,
+// in canonical render order. Default is none — the compact toolbar.
+export function sanitizeDialKeys(raw: string[]): DialKey[] {
+  return DIALS.map((d) => d.key).filter((k) => raw.includes(k));
 }

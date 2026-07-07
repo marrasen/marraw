@@ -18,6 +18,7 @@ import {
   type OffsetKey,
 } from '@/lib/autoPresets';
 import type { AutoSection } from '@/lib/editSession';
+import { updateAutoPresets, updateCullDials, updateQuickDials } from '@/lib/uiSettings';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
@@ -140,10 +141,11 @@ function GeneralSection() {
 // ToolbarsSection: which develop dials float in the Cull confirm bar and
 // the Develop quick dock. None (the default) keeps those bars compact.
 function ToolbarsSection() {
+  const client = useApiClient();
   const cullDials = useUIStore((s) => s.cullDials);
   const quickDials = useUIStore((s) => s.quickDials);
-  const setCullDials = useUIStore((s) => s.setCullDials);
-  const setQuickDials = useUIStore((s) => s.setQuickDials);
+  const setCullDials = (dials: DialKey[]) => updateCullDials(client, dials);
+  const setQuickDials = (dials: DialKey[]) => updateQuickDials(client, dials);
   return (
     <div className="flex flex-col">
       <DialPickerRow
@@ -208,8 +210,9 @@ function DialPickerRow({
 // the chosen auto sections, then adds its style offsets. Presets 1–9 are
 // reachable via Ctrl+1..9 and the command palette.
 function AutoPresetsSection() {
+  const client = useApiClient();
   const presets = useUIStore((s) => s.autoPresets);
-  const setPresets = useUIStore((s) => s.setAutoPresets);
+  const setPresets = (next: AutoPreset[]) => updateAutoPresets(client, next);
 
   const update = (i: number, patch: Partial<AutoPreset>) => {
     const next = presets.slice();
@@ -308,7 +311,7 @@ function AutoPresetsSection() {
 
 // OffsetSlider edits one style delta as a center-anchored slider: exposure
 // in EV, everything else in the panel's ±100 units. Persists on release
-// (setAutoPresets writes localStorage per commit).
+// (each commit writes the preset list to the catalog).
 function OffsetSlider({
   label,
   offsetKey,
