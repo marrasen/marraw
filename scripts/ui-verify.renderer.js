@@ -160,6 +160,27 @@ try {
   key('Escape');
   await sleep(900); // let the step commit debounce settle before moving on
 
+  // --- hotkey into a closed group auto-opens it -----------------------------
+  mw.setEditGroupOpen('tone', false);
+  await sleep(150);
+  key('e');
+  await sleep(150);
+  R.hotkeyOpensGroup =
+    es().activeControl === 'expEV' && ui().editGroups.tone !== false && !!sliderRowByLabel('Exposure')
+      ? true
+      : `active=${es().activeControl} tone=${ui().editGroups.tone} row=${!!sliderRowByLabel('Exposure')}`;
+
+  // --- Ctrl+↑/↓ skips controls inside closed groups --------------------------
+  mw.setEditGroupOpen('presence', false);
+  mw.useEditSession.setState({ activeControl: 'toneHighlights' });
+  key('ArrowDown', { ctrlKey: true });
+  R.ctrlDownSkipsClosed = es().activeControl === 'wbMode' ? true : `active=${es().activeControl}`;
+  key('ArrowUp', { ctrlKey: true });
+  R.ctrlUpSkipsClosed = es().activeControl === 'toneHighlights' ? true : `active=${es().activeControl}`;
+  mw.setEditGroupOpen('presence', true);
+  key('Escape');
+  await sleep(150);
+
   // --- auto adjustments: buttons present, Ctrl+U family lands, undo reverts
   R.autoButtons =
     buttons().some((b) => (b.title || '').startsWith('Auto dynamics')) &&

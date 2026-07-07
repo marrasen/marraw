@@ -19,6 +19,8 @@ import {
   type Params,
 } from '@/api/edits';
 import type { AutoPreset } from '@/lib/autoPresets';
+import { updateEditGroupOpen } from '@/lib/uiSettings';
+import { useUIStore } from '@/stores/uiStore';
 
 export const NEUTRAL: Params = {
   expEV: 0,
@@ -205,22 +207,41 @@ const CONTROL_ORDER: ControlId[] = [
   'demosaic', 'caRed', 'caBlue',
 ];
 
+// The develop-panel sections (EditPanel's Group components) and which one
+// holds each control. Selecting a control opens its group; Ctrl+↑/↓ skips
+// controls whose group is closed. Open state lives in uiStore.editGroups
+// (absent = open), server-persisted via updateEditGroupOpen.
+export type GroupId = 'crop' | 'tone' | 'presence' | 'wb' | 'color' | 'effects' | 'detail';
+
+const CONTROL_GROUP: Record<ControlId, GroupId> = {
+  cropAngle: 'crop',
+  expEV: 'tone', expPreserve: 'tone', bright: 'tone', gamma: 'tone', shadow: 'tone',
+  contrast: 'tone', whites: 'tone', blacks: 'tone', toneShadows: 'tone', toneHighlights: 'tone',
+  clarity: 'presence', texture: 'presence', dehaze: 'presence',
+  wbMode: 'wb', wbTemp: 'wb', wbKelvin: 'wb', wbTint: 'wb',
+  saturation: 'color', vibrance: 'color',
+  splitShadowHue: 'color', splitShadowAmt: 'color', splitHighlightHue: 'color', splitHighlightAmt: 'color',
+  vignette: 'effects',
+  sharpen: 'detail', highlight: 'detail', nrThreshold: 'detail', fbddNoiseRd: 'detail',
+  medPasses: 'detail', demosaic: 'detail', caRed: 'detail', caBlue: 'detail',
+};
+
 // esMoveActive walks the keyboard focus to the previous/next develop control
-// in panel order (Ctrl+↑/↓). With nothing focused it enters at the end the
-// walk came from.
+// in panel order (Ctrl+↑/↓), skipping controls in closed groups. With nothing
+// focused it enters at the end the walk came from; with no open control in
+// that direction it stays put.
 export function esMoveActive(dir: 1 | -1) {
   const s = useEditSession.getState();
   if (!s.draft) return;
+  const groups = useUIStore.getState().editGroups;
   const kelvin = ((s.draft.wbMode as string) || 'camera') === 'kelvin';
   const order = CONTROL_ORDER.filter((c) => (kelvin ? c !== 'wbTemp' : c !== 'wbKelvin'));
-  const cur = s.activeControl ? order.indexOf(s.activeControl) : -1;
-  const next =
-    cur < 0
-      ? dir > 0
-        ? 0
-        : order.length - 1
-      : Math.min(order.length - 1, Math.max(0, cur + dir));
-  setState({ activeControl: order[next] });
+  let i = s.activeControl ? order.indexOf(s.activeControl) : -1;
+  if (i < 0) i = dir > 0 ? -1 : order.length;
+  do {
+    i += dir;
+  } while (i >= 0 && i < order.length && groups[CONTROL_GROUP[order[i]]] === false);
+  if (i >= 0 && i < order.length) setState({ activeControl: order[i] });
 }
 
 interface Preview {
@@ -348,7 +369,15 @@ export function esSetApplyIds(ids: number[]) {
   setState({ applyIds: ids });
 }
 
-export function esSetActive(control: ControlId | null) {
+// esSetActive focuses a develop control. A control jumped to by hotkey or
+// the command palette may sit in a closed group — open the group first
+// (optimistic uiStore write + server persist) so the row mounts, and
+// useActiveScroll scrolls to it, with the ring on.
+export function esSetActive(client: ApiClient, control: ControlId | null) {
+  const group = control ? CONTROL_GROUP[control] : null;
+  if (group && useUIStore.getState().editGroups[group] === false) {
+    updateEditGroupOpen(client, group, true);
+  }
   setState({ activeControl: control });
 }
 

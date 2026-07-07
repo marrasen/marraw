@@ -109,9 +109,9 @@ function buildCommands(
         label: c.label,
         group: 'Develop',
         hint: c.hint,
-        run: () => {
+        run: (client) => {
           ui().setMode('develop');
-          esSetActive(c.id);
+          esSetActive(client, c.id);
         },
       })),
     );

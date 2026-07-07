@@ -193,7 +193,7 @@ export function useKeyboard() {
 
       if (CONTROL_KEYS[key] && es.draft && s.mode !== 'cull') {
         e.preventDefault();
-        esSetActive(CONTROL_KEYS[key]);
+        esSetActive(client, CONTROL_KEYS[key]);
         return;
       }
 
@@ -252,7 +252,7 @@ export function useKeyboard() {
           } else if (es.wbPicking) {
             esSetWBPicking(false);
           } else if (es.activeControl != null) {
-            esSetActive(null);
+            esSetActive(client, null);
           } else if (s.contactSheet) {
             s.setContactSheet(false);
           } else if (s.mode === 'library' && s.view === 'grid' && s.selection.size > 1) {

@@ -32,6 +32,7 @@ import {
   useEditSession,
   NEUTRAL,
   type ControlId,
+  type GroupId,
 } from '@/lib/editSession';
 
 const HIGHLIGHT_OPTIONS = [
@@ -235,7 +236,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
 
   const num = (control: ControlId) => ({
     active: activeControl === control,
-    onFocusControl: () => esSetActive(control),
+    onFocusControl: () => esSetActive(client, control),
   });
 
   // Clear button handler: preview + persist the default in one go.
@@ -701,7 +702,9 @@ function Group({
   action,
   children,
 }: {
-  id: string;
+  // Must match CONTROL_GROUP in editSession so hotkey/palette selection can
+  // open the right section and Ctrl+↑/↓ can skip closed ones.
+  id: GroupId;
   title: string;
   changed?: boolean;
   // Optional header action (e.g. a section Auto button) — rendered beside
