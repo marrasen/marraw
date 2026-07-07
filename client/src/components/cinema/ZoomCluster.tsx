@@ -11,6 +11,7 @@ import { useUIStore } from '@/stores/uiStore';
 export function ZoomCluster({ scale }: { scale: number }) {
   const zoom = useUIStore((s) => s.loupeZoom);
   const setZoom = useUIStore((s) => s.setLoupeZoom);
+  const centerLoupe = useUIStore((s) => s.centerLoupe);
   const isFit = zoom === 'fit';
   return (
     <div className="flex items-center gap-2.5">
@@ -22,7 +23,11 @@ export function ZoomCluster({ scale }: { scale: number }) {
           { value: '1:1', label: '1:1' },
         ]}
         value={isFit ? 'fit' : '1:1'}
-        onValueChange={(v) => setZoom(v === 'fit' ? 'fit' : 1)}
+        onValueChange={(v) => {
+          // Re-clicking the active Fit recenters a panned-away photo.
+          if (v === 'fit' && isFit) centerLoupe();
+          else setZoom(v === 'fit' ? 'fit' : 1);
+        }}
         className="border-0 bg-white/5"
       />
       <div className="w-[110px]">

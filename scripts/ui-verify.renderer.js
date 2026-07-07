@@ -36,6 +36,29 @@ try {
   for (const g of ['crop', 'tone', 'presence', 'wb', 'color', 'effects', 'detail'])
     localStorage.setItem(`marraw:editGroup:${g}`, '1');
 
+  // --- thumbnail-size slider renders at its designed width ------------------
+  // Regression: width passed as className on the Slider root lost to the
+  // root's own data-horizontal:w-full and the track collapsed to ~12px.
+  const thumbSlider = document.querySelector('[title="Thumbnail size"] [data-slot="slider"]');
+  const thumbW = thumbSlider ? thumbSlider.getBoundingClientRect().width : 0;
+  R.thumbSliderWidth = thumbW >= 90 ? true : `width=${thumbW}px`;
+
+  // --- ⌘K palette: theme commands flip the root class ----------------------
+  const themeBefore = localStorage.getItem('theme');
+  ui().setPaletteOpen(true);
+  await until(() => buttons().some((b) => b.textContent.includes('Theme: Light')), 5000, 'palette theme commands');
+  buttons().find((b) => b.textContent.includes('Theme: Light')).click();
+  await until(() => document.documentElement.classList.contains('light'), 5000, 'light theme applied');
+  R.paletteThemeLight = true;
+  ui().setPaletteOpen(true);
+  await until(() => buttons().some((b) => b.textContent.includes('Theme: Dark')), 5000, 'palette reopened');
+  buttons().find((b) => b.textContent.includes('Theme: Dark')).click();
+  await until(() => document.documentElement.classList.contains('dark'), 5000, 'dark theme restored');
+  R.paletteThemeRestore = true;
+  // Don't leak the probe's theme choice into interactive sessions.
+  if (themeBefore != null) localStorage.setItem('theme', themeBefore);
+  else localStorage.removeItem('theme');
+
   // --- keyboard focus + loupe -------------------------------------------
   key('ArrowRight');
   await until(() => ui().focusId != null, 5000, 'focus via arrow');
@@ -476,6 +499,23 @@ try {
     R.loupeSpaceToggle = spaceToFit && ui().loupeZoom === 1 ? true : `fit=${spaceToFit}, then ${ui().loupeZoom}`;
 
     ui().setLoupeZoom('fit');
+
+    // --- re-clicking the active Fit button recenters a panned photo -------
+    await sleep(400); // zoom tween + pan-ratio restore settle
+    const centered = () =>
+      Math.abs(pane.scrollLeft - (pane.scrollWidth - pane.clientWidth) / 2) <= 1 &&
+      Math.abs(pane.scrollTop - (pane.scrollHeight - pane.clientHeight) / 2) <= 1;
+    pt('pointerdown', 400, 300);
+    pt('pointermove', 250, 200);
+    pt('pointerup', 250, 200);
+    await sleep(100);
+    const offCenter = !centered();
+    buttons().find((b) => b.textContent.trim() === 'Fit')?.click();
+    await sleep(150);
+    R.fitReclickCenters =
+      offCenter && centered()
+        ? true
+        : `offCenter=${offCenter} scroll=${pane.scrollLeft},${pane.scrollTop}`;
   } catch (err) {
     R.loupe11Bridge = R.loupe11Bridge ?? String(err);
     R.loupe11Prefetch = R.loupe11Prefetch ?? String(err);
@@ -484,6 +524,7 @@ try {
     R.loupe11TileScale = R.loupe11TileScale ?? String(err);
     R.loupeSpaceToggle = R.loupeSpaceToggle ?? String(err);
     R.loupeNoScrollbar = R.loupeNoScrollbar ?? String(err);
+    R.fitReclickCenters = R.fitReclickCenters ?? String(err);
   }
   for (let i = 0; i < 3 && ui().view !== 'grid'; i++) {
     key('Escape');

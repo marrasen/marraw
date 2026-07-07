@@ -11,6 +11,7 @@ import {
   type ControlId,
 } from '@/lib/editSession';
 import type { AutoPreset } from '@/lib/autoPresets';
+import { useTheme } from '@/components/theme-provider';
 import { useUIStore } from '@/stores/uiStore';
 
 interface Command {
@@ -42,7 +43,11 @@ const CONTROLS: { id: ControlId; label: string; hint?: string }[] = [
   { id: 'demosaic', label: 'Demosaic', hint: 'D' },
 ];
 
-function buildCommands(hasFolder: boolean, autoPresets: AutoPreset[]): Command[] {
+function buildCommands(
+  hasFolder: boolean,
+  autoPresets: AutoPreset[],
+  setTheme: (t: 'dark' | 'light' | 'system') => void,
+): Command[] {
   const ui = () => useUIStore.getState();
   const out: Command[] = [
     { id: 'mode-library', label: 'Go to Library', group: 'Modes', run: () => ui().setMode('library') },
@@ -62,6 +67,10 @@ function buildCommands(hasFolder: boolean, autoPresets: AutoPreset[]): Command[]
     { id: 'add-folder', label: 'Add folder to library…', group: 'Actions', run: () => ui().setAddFolderOpen(true) },
     { id: 'settings', label: 'Settings…', group: 'Actions', run: () => ui().setSettingsOpen(true) },
     { id: 'shortcuts', label: 'Keyboard shortcuts', group: 'Actions', hint: '?', run: () => ui().setShortcutsOpen(true) },
+    // "D" toggles dark/light; these set an explicit theme by name.
+    { id: 'theme-dark', label: 'Theme: Dark', group: 'Appearance', run: () => setTheme('dark') },
+    { id: 'theme-light', label: 'Theme: Light', group: 'Appearance', run: () => setTheme('light') },
+    { id: 'theme-system', label: 'Theme: Follow system', group: 'Appearance', run: () => setTheme('system') },
   );
   if (hasFolder) {
     out.push(
@@ -119,12 +128,16 @@ export function CommandPalette() {
   const setOpen = useUIStore((s) => s.setPaletteOpen);
   const hasFolder = useUIStore((s) => s.folderId != null);
   const autoPresets = useUIStore((s) => s.autoPresets);
+  const { setTheme } = useTheme();
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const commands = useMemo(() => buildCommands(hasFolder, autoPresets), [hasFolder, autoPresets]);
+  const commands = useMemo(
+    () => buildCommands(hasFolder, autoPresets, setTheme),
+    [hasFolder, autoPresets, setTheme],
+  );
   const q = query.trim().toLowerCase();
   const matches = useMemo(
     () => (q ? commands.filter((c) => c.label.toLowerCase().includes(q)) : commands),

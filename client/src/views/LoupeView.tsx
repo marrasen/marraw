@@ -369,6 +369,20 @@ export function CinemaImage({
     el.scrollTop = panRatio.current[1] * Math.max(0, el.scrollHeight - el.clientHeight);
   }, [photo.id, boxW, boxH, slackX, slackY, container]);
 
+  // Clicking Fit while already at fit recenters: reset the persisted pan
+  // ratio and snap the scroll back to the middle of the slack range.
+  const centerTick = useUIStore((s) => s.loupeCenterTick);
+  const lastCenterTick = useRef(centerTick);
+  useLayoutEffect(() => {
+    if (centerTick === lastCenterTick.current) return;
+    lastCenterTick.current = centerTick;
+    panRatio.current = [0.5, 0.5];
+    const el = containerRef.current;
+    if (!el) return;
+    el.scrollLeft = 0.5 * Math.max(0, el.scrollWidth - el.clientWidth);
+    el.scrollTop = 0.5 * Math.max(0, el.scrollHeight - el.clientHeight);
+  }, [centerTick]);
+
   const onScroll = () => {
     const el = containerRef.current;
     if (!el) return;

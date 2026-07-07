@@ -60,6 +60,8 @@ interface UIState {
   // Loupe zoom: 'fit' or a scale factor (1 = 100%). Deliberately survives
   // photo navigation so a series can be compared at the same crop.
   loupeZoom: 'fit' | number;
+  // Bumped to re-center the loupe pan (clicking Fit while already at fit).
+  loupeCenterTick: number;
 
   setMode: (m: Mode) => void;
   setAddFolderOpen: (open: boolean) => void;
@@ -86,6 +88,7 @@ interface UIState {
   setSettingsOpen: (open: boolean) => void;
   setCellSize: (px: number) => void;
   setLoupeZoom: (z: 'fit' | number) => void;
+  centerLoupe: () => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -121,6 +124,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   settingsOpen: false,
   cellSize: 220,
   loupeZoom: 'fit',
+  loupeCenterTick: 0,
 
   setMode: (m) =>
     set(
@@ -239,6 +243,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setCellSize: (px) => set({ cellSize: Math.min(400, Math.max(120, px)) }),
   setLoupeZoom: (z) =>
     set({ loupeZoom: z === 'fit' ? z : Math.min(4, Math.max(0.05, z)) }),
+  centerLoupe: () => set((s) => ({ loupeCenterTick: s.loupeCenterTick + 1 })),
 }));
 
 // selectionOrFocus returns the ids an action should apply to.

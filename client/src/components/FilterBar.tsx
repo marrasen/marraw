@@ -91,15 +91,19 @@ export function FilterBar({
         <>
           <div className="flex items-center gap-2" title="Thumbnail size">
             <LayoutGrid className="size-[13px] shrink-0 text-muted-foreground" strokeWidth={1.5} />
-            <Slider
-              value={cellSize}
-              min={120}
-              max={400}
-              step={20}
-              onValueChange={(v) => setCellSize(v as number)}
-              aria-label="Thumbnail size"
-              className="w-[104px]"
-            />
+            {/* Fixed-width wrapper, not className on the root: the root's own
+                data-horizontal:w-full outranks a width utility passed in and
+                collapses the track to its intrinsic (thumb-only) width. */}
+            <div className="w-[104px]">
+              <Slider
+                value={cellSize}
+                min={120}
+                max={400}
+                step={20}
+                onValueChange={(v) => setCellSize(v as number)}
+                aria-label="Thumbnail size"
+              />
+            </div>
             <span className="w-[42px] font-mono text-[11px] text-muted-foreground tabular-nums">
               {cellSize}px
             </span>
