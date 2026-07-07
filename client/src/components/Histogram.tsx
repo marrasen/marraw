@@ -44,8 +44,15 @@ export function Histogram({ photo }: { photo: Photo }) {
   }, [photo.id, photo.editHash, photo.cacheKey, previewBlob]);
 
   return (
-    <div className="border-b px-4 py-3">
-      <canvas ref={canvasRef} data-testid="histogram" width={256} height={72} className="w-full rounded-sm bg-black/50" />
+    <div className="px-4 pt-[13px]">
+      {/* Histograms stay on a dark inset in both themes (handoff tokens). */}
+      <canvas
+        ref={canvasRef}
+        data-testid="histogram"
+        width={256}
+        height={52}
+        className="h-[52px] w-full rounded-md border border-white/10 bg-inset"
+      />
     </div>
   );
 }
@@ -86,9 +93,9 @@ function drawHistogram(canvas: HTMLCanvasElement, bins: Bins) {
 
   ctx.globalCompositeOperation = 'screen';
   const channels: [Uint32Array, string][] = [
-    [bins.r, 'rgba(239,68,68,0.85)'],
-    [bins.g, 'rgba(34,197,94,0.85)'],
-    [bins.b, 'rgba(96,165,250,0.85)'],
+    [bins.r, 'rgba(240,90,90,0.55)'],
+    [bins.g, 'rgba(90,220,120,0.55)'],
+    [bins.b, 'rgba(90,140,240,0.55)'],
   ];
   for (const [bin, color] of channels) {
     ctx.fillStyle = color;

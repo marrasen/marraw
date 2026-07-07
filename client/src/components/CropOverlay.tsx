@@ -35,12 +35,15 @@ export function CropOverlay({
   draft,
   ratioFrac,
   frameAspect,
+  pxDims,
   onChange,
   onCommit,
 }: {
   draft: Params;
   ratioFrac: number | null;
   frameAspect: number; // full-frame displayed width / height (for rotation math)
+  /** Full-frame pixel dimensions, for the center ratio · size pill. */
+  pxDims?: [number, number];
   onChange: (patch: Partial<Params>) => void;
   onCommit: () => void;
 }) {
@@ -170,17 +173,40 @@ export function CropOverlay({
     />
   );
 
+  // Center pill: aspect (reduced to a friendly ratio when close) + pixel
+  // dimensions of the crop.
+  const pill = (() => {
+    if (!pxDims) return null;
+    const w = Math.round(rect.w * pxDims[0]);
+    const h = Math.round(rect.h * pxDims[1]);
+    if (w <= 0 || h <= 0) return null;
+    const r = w / h;
+    const known: [string, number][] = [
+      ['1:1', 1],
+      ['3:2', 3 / 2],
+      ['2:3', 2 / 3],
+      ['4:5', 4 / 5],
+      ['5:4', 5 / 4],
+      ['4:3', 4 / 3],
+      ['3:4', 3 / 4],
+      ['16:9', 16 / 9],
+      ['9:16', 9 / 16],
+    ];
+    const hit = known.find(([, kr]) => Math.abs(kr - r) / kr < 0.01);
+    return { ratio: hit ? hit[0] : r.toFixed(2), dims: `${w.toLocaleString()} × ${h.toLocaleString()}` };
+  })();
+
   return (
     <div ref={rootRef} className="absolute inset-0 z-10 touch-none select-none" data-testid="crop-overlay">
-      {/* Dark mask outside the crop, as four panels. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 bg-black/55" style={{ height: box.top }} />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-black/55" style={{ height: pct(1 - rect.y - rect.h) }} />
-      <div className="pointer-events-none absolute left-0 bg-black/55" style={{ top: box.top, height: box.height, width: box.left }} />
-      <div className="pointer-events-none absolute right-0 bg-black/55" style={{ top: box.top, height: box.height, width: pct(1 - rect.x - rect.w) }} />
+      {/* Dim scrim outside the crop, as four panels. */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 bg-[rgba(4,6,9,.62)]" style={{ height: box.top }} />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-[rgba(4,6,9,.62)]" style={{ height: pct(1 - rect.y - rect.h) }} />
+      <div className="pointer-events-none absolute left-0 bg-[rgba(4,6,9,.62)]" style={{ top: box.top, height: box.height, width: box.left }} />
+      <div className="pointer-events-none absolute right-0 bg-[rgba(4,6,9,.62)]" style={{ top: box.top, height: box.height, width: pct(1 - rect.x - rect.w) }} />
 
       {/* The crop rectangle. */}
       <div
-        className={cn('absolute border border-white/80', active && 'border-white')}
+        className={cn('absolute border border-white/85', active && 'border-white')}
         style={box}
         onPointerDown={onPointerDown('move')}
         onPointerMove={onPointerMove}
@@ -188,21 +214,37 @@ export function CropOverlay({
       >
         {/* Rule-of-thirds guides. */}
         <div className="pointer-events-none absolute inset-0">
-          <div className="absolute inset-y-0 left-1/3 w-px bg-white/25" />
-          <div className="absolute inset-y-0 left-2/3 w-px bg-white/25" />
-          <div className="absolute inset-x-0 top-1/3 h-px bg-white/25" />
-          <div className="absolute inset-x-0 top-2/3 h-px bg-white/25" />
+          <div className="absolute inset-y-0 left-1/3 w-px bg-white/28" />
+          <div className="absolute inset-y-0 left-2/3 w-px bg-white/28" />
+          <div className="absolute inset-x-0 top-1/3 h-px bg-white/28" />
+          <div className="absolute inset-x-0 top-2/3 h-px bg-white/28" />
         </div>
-        {/* Edge handles. */}
-        {handle('n', 'left-1/4 right-1/4 -top-1 h-2 cursor-ns-resize')}
-        {handle('s', 'left-1/4 right-1/4 -bottom-1 h-2 cursor-ns-resize')}
-        {handle('w', 'top-1/4 bottom-1/4 -left-1 w-2 cursor-ew-resize')}
-        {handle('e', 'top-1/4 bottom-1/4 -right-1 w-2 cursor-ew-resize')}
-        {/* Corner handles. */}
-        {handle('nw', '-top-1.5 -left-1.5 size-3 border-t-2 border-l-2 border-white cursor-nwse-resize')}
-        {handle('ne', '-top-1.5 -right-1.5 size-3 border-t-2 border-r-2 border-white cursor-nesw-resize')}
-        {handle('sw', '-bottom-1.5 -left-1.5 size-3 border-b-2 border-l-2 border-white cursor-nesw-resize')}
-        {handle('se', '-bottom-1.5 -right-1.5 size-3 border-b-2 border-r-2 border-white cursor-nwse-resize')}
+        {/* Corner L marks (drawn) + their grab areas. */}
+        <div className="pointer-events-none absolute -top-0.5 -left-0.5 size-[22px] border-t-[3px] border-l-[3px] border-white" />
+        <div className="pointer-events-none absolute -top-0.5 -right-0.5 size-[22px] border-t-[3px] border-r-[3px] border-white" />
+        <div className="pointer-events-none absolute -bottom-0.5 -left-0.5 size-[22px] border-b-[3px] border-l-[3px] border-white" />
+        <div className="pointer-events-none absolute -bottom-0.5 -right-0.5 size-[22px] border-b-[3px] border-r-[3px] border-white" />
+        {/* Edge bar handles. */}
+        <div className="pointer-events-none absolute -top-0.5 left-1/2 h-1 w-[30px] -translate-x-1/2 rounded-[2px] bg-white" />
+        <div className="pointer-events-none absolute -bottom-0.5 left-1/2 h-1 w-[30px] -translate-x-1/2 rounded-[2px] bg-white" />
+        <div className="pointer-events-none absolute top-1/2 -left-0.5 h-[30px] w-1 -translate-y-1/2 rounded-[2px] bg-white" />
+        <div className="pointer-events-none absolute top-1/2 -right-0.5 h-[30px] w-1 -translate-y-1/2 rounded-[2px] bg-white" />
+        {/* Ratio · size pill. */}
+        {pill && (
+          <div className="pointer-events-none absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-[7px] border border-white/15 bg-[rgba(12,14,18,.6)] px-[9px] py-1 font-mono text-[11px] whitespace-nowrap backdrop-blur-md">
+            <span className="text-accent-text">{pill.ratio}</span>
+            <span className="text-muted-foreground">{pill.dims}</span>
+          </div>
+        )}
+        {/* Invisible grab areas. */}
+        {handle('n', 'left-6 right-6 -top-1.5 h-3 cursor-ns-resize')}
+        {handle('s', 'left-6 right-6 -bottom-1.5 h-3 cursor-ns-resize')}
+        {handle('w', 'top-6 bottom-6 -left-1.5 w-3 cursor-ew-resize')}
+        {handle('e', 'top-6 bottom-6 -right-1.5 w-3 cursor-ew-resize')}
+        {handle('nw', '-top-2 -left-2 size-6 cursor-nwse-resize')}
+        {handle('ne', '-top-2 -right-2 size-6 cursor-nesw-resize')}
+        {handle('sw', '-bottom-2 -left-2 size-6 cursor-nesw-resize')}
+        {handle('se', '-bottom-2 -right-2 size-6 cursor-nwse-resize')}
       </div>
     </div>
   );

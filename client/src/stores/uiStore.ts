@@ -16,6 +16,10 @@ interface UIState {
   view: View;
   addFolderOpen: boolean;
   paletteOpen: boolean;
+  // Cull: the contact sheet (G) and the time-gap grouping threshold in
+  // minutes (null = off, one flat grid). Persisted across sessions.
+  contactSheet: boolean;
+  gapMinutes: number | null;
 
   focusId: number | null;
   anchorId: number | null;
@@ -46,6 +50,8 @@ interface UIState {
   setMode: (m: Mode) => void;
   setAddFolderOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
+  setContactSheet: (open: boolean) => void;
+  setGapMinutes: (min: number | null) => void;
   setFolder: (id: number, path: string) => void;
   setView: (v: View) => void;
   focus: (id: number | null, opts?: { extend?: boolean; toggle?: boolean }) => void;
@@ -70,6 +76,13 @@ export const useUIStore = create<UIState>((set, get) => ({
   view: 'grid',
   addFolderOpen: false,
   paletteOpen: false,
+  contactSheet: false,
+  gapMinutes: (() => {
+    const raw = localStorage.getItem('marraw:gapMinutes');
+    if (raw === 'off') return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 6;
+  })(),
   focusId: null,
   anchorId: null,
   selection: new Set<number>(),
@@ -84,9 +97,19 @@ export const useUIStore = create<UIState>((set, get) => ({
   cellSize: 220,
   loupeZoom: 'fit',
 
-  setMode: (m) => set(m === 'library' ? { mode: m, view: 'grid' } : { mode: m, view: 'loupe' }),
+  setMode: (m) =>
+    set(
+      m === 'library'
+        ? { mode: m, view: 'grid', contactSheet: false }
+        : { mode: m, view: 'loupe' },
+    ),
   setAddFolderOpen: (open) => set({ addFolderOpen: open }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
+  setContactSheet: (open) => set({ contactSheet: open }),
+  setGapMinutes: (min) => {
+    localStorage.setItem('marraw:gapMinutes', min == null ? 'off' : String(min));
+    set({ gapMinutes: min });
+  },
 
   setFolder: (id, path) =>
     set({

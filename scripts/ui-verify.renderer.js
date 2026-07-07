@@ -16,7 +16,7 @@ const until = async (fn, ms = 15000, what = 'condition') => {
 const key = (k, mods = {}) =>
   window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...mods }));
 const buttons = () => [...document.querySelectorAll('button')];
-const stripImgs = () => [...document.querySelectorAll('div.h-24 img')];
+const stripImgs = () => [...document.querySelectorAll('[data-testid="filmstrip"] img')];
 const sliderRowByLabel = (label) => {
   const span = [...document.querySelectorAll('span')].find((s) => s.textContent.trim().startsWith(label));
   return span ? span.closest('div')?.parentElement : null;
@@ -36,6 +36,10 @@ try {
   key('Enter');
   await until(() => ui().view === 'loupe', 5000, 'loupe view');
   R.loupe = true;
+  // Enter drops into the Cull confirm loupe (design handoff); the develop
+  // control checks below run against the Develop cinema drawer instead.
+  ui().setMode('develop');
+  await sleep(300);
   await until(() => es().draft != null, 15000, 'edit session loaded');
   const photoA = ui().focusId;
 
@@ -174,7 +178,7 @@ try {
   key('3');
   await until(() => document.querySelector('[data-testid="strip-rating"]'), 5000, 'filmstrip rating badge');
   R.filmstripBadge = true;
-  const thumbButtons = [...document.querySelectorAll('div.h-24 button')];
+  const thumbButtons = [...document.querySelectorAll('[data-testid="filmstrip"] button')];
   if (thumbButtons.length >= 3) {
     thumbButtons[2].dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
     await sleep(200);

@@ -84,6 +84,8 @@ async function createWindow() {
   const query = { apiPort: String(backend.port), token: backend.token };
   if (process.env.MARRAW_OPEN_FOLDER) query.openFolder = process.env.MARRAW_OPEN_FOLDER;
   if (process.env.MARRAW_LOUPE) query.loupe = '1';
+  if (process.env.MARRAW_SHOT) query.shot = process.env.MARRAW_SHOT; // scripts/shot.mjs
+
   if (DEV) {
     const qs = new URLSearchParams(query).toString();
     // Vite auto-increments its port when 5173 is taken by another project;

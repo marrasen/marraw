@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Maximize, Square, Star, Check, X } from 'lucide-react';
+import { Crop as CropIcon, Pipette, Star, Check, X } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
+import { Segmented } from '@/components/ui/segmented';
+import { ChipSpinner } from '@/components/ui/task-chip';
 import { cn } from '@/lib/utils';
 import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
 import { esClearPreview, esCommit, esPickWB, esSetCropping, esUpdate, useEditSession } from '@/lib/editSession';
@@ -13,6 +15,8 @@ import { displayDims as fullDisplayDims, renderedDims, fitCropToRotation, ASPECT
 import { CropOverlay } from '@/components/CropOverlay';
 import type { Params } from '@/api/edits';
 
+// LoupeView is kept as the plain full-viewer wrapper (legacy view state);
+// the cinema modes compose CinemaImage + their own floating chrome instead.
 export function LoupeView({ photos }: { photos: Photo[] }) {
   const focusId = useUIStore((s) => s.focusId);
   const photo = photos.find((p) => p.id === focusId) ?? photos[0];
@@ -26,7 +30,7 @@ export function LoupeView({ photos }: { photos: Photo[] }) {
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <MainImage photo={photo} photos={photos} />
+      <CinemaImage photo={photo} photos={photos} />
       <Filmstrip photos={photos} currentId={photo.id} />
     </div>
   );
@@ -44,34 +48,62 @@ function aspectRatioFrac(key: string, fdw: number, fdh: number): number | null {
   return (ratio * fdh) / fdw;
 }
 
-// CropToolbar shows aspect presets plus reset/done while the crop overlay is
-// active, in the same slot the zoom toolbar normally occupies.
-function CropToolbar({
+// CropBar: the glass control bar of the crop overlay — aspect presets, the
+// bipolar Straighten dial, and Reset / Done (handoff plate "CROP").
+function CropBar({
   client,
   aspectKey,
+  angle,
   onPickAspect,
 }: {
   client: ApiClient;
   aspectKey: string;
+  angle: number;
   onPickAspect: (k: string) => void;
 }) {
+  const [dragging, setDragging] = useState<number | null>(null);
+  const shown = dragging ?? angle;
   return (
-    <div className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-md border bg-background/85 px-2 py-1 backdrop-blur">
-      {ASPECT_PRESETS.map((p) => (
-        <Button
-          key={p.key}
-          size="sm"
-          variant={aspectKey === p.key ? 'secondary' : 'ghost'}
-          onClick={() => onPickAspect(p.key)}
-        >
-          {p.label}
-        </Button>
-      ))}
-      <span className="mx-1 h-4 w-px bg-border" />
+    <div className="glass absolute bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3.5 rounded-[13px] px-4 py-2.5">
+      <Segmented
+        aria-label="Aspect ratio"
+        size="sm"
+        items={ASPECT_PRESETS.map((p) => ({ value: p.key, label: p.label }))}
+        value={aspectKey}
+        onValueChange={onPickAspect}
+        className="border-0 bg-white/5"
+      />
+      <div className="h-[26px] w-px bg-white/15" />
+      <div className="flex items-center gap-2.5">
+        <span className="text-[11.5px] text-muted-foreground">Straighten</span>
+        <Slider
+          className="w-[150px]"
+          value={shown}
+          min={-15}
+          max={15}
+          step={0.1}
+          fillFrom={0}
+          aria-label="Straighten"
+          onValueChange={(v) => {
+            setDragging(v as number);
+            esUpdate(client, { cropAngle: v as number });
+          }}
+          onValueCommitted={(v) => {
+            setDragging(null);
+            esCommit(client, { cropAngle: v as number });
+          }}
+        />
+        <span className="w-[44px] text-right font-mono text-[11.5px] tabular-nums">
+          {shown >= 0 ? '+' : ''}
+          {shown.toFixed(1)}°
+        </span>
+      </div>
+      <div className="h-[26px] w-px bg-white/15" />
       <Button
         size="sm"
         variant="ghost"
-        onClick={() => esUpdate(client, { cropX: 0, cropY: 0, cropW: 1, cropH: 1 })}
+        className="text-muted-foreground"
+        onClick={() => esUpdate(client, { cropX: 0, cropY: 0, cropW: 1, cropH: 1, cropAngle: 0 })}
         title="Reset crop to the full frame"
       >
         Reset
@@ -143,10 +175,29 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
   }, [photos, photo, active]);
 }
 
-function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
+// CinemaImage is the shared photo engine of every cinema surface: the
+// pannable/zoomable image with tile sharpening, plus its own floating
+// furniture (zoom bar, navigator, rendering indicator, crop overlay, WB
+// eyedropper). `hideChrome` lets Cull swap the zoom furniture for its
+// confirm bar while the photo sits at fit.
+export function CinemaImage({
+  photo,
+  photos,
+  hideChrome,
+}: {
+  photo: Photo;
+  photos: Photo[];
+  hideChrome?: boolean;
+}) {
   const client = useApiClient();
   const containerRef = useRef<HTMLDivElement>(null);
   const [container, setContainer] = useState<[number, number]>([0, 0]);
+  // Tiles mounted but not yet decoded — drives the rendering indicator.
+  const [pendingTiles, setPendingTiles] = useState<[number, number]>([0, 0]); // [pending, loaded]
+  // Visible-region fractions for the navigator inset.
+  const [viewport, setViewport] = useState<[number, number, number, number]>([0, 0, 1, 1]);
+  // Cursor position (fractions of the image box) while the WB pipette is up.
+  const [cursor, setCursor] = useState<[number, number] | null>(null);
   const zoom = useUIStore((s) => s.loupeZoom);
   const setZoom = useUIStore((s) => s.setLoupeZoom);
   const preview = useEditSession((s) => s.preview);
@@ -231,6 +282,30 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
     const ry = el.scrollHeight > el.clientHeight ? el.scrollTop / (el.scrollHeight - el.clientHeight) : 0.5;
     panRatio.current = [rx, ry];
   };
+
+  // Navigator viewport: the visible region as fractions of the image box.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const vw = Math.min(1, el.clientWidth / boxW);
+      const vh = Math.min(1, el.clientHeight / boxH);
+      const vx = boxW > el.clientWidth ? el.scrollLeft / boxW : 0;
+      const vy = boxH > el.clientHeight ? el.scrollTop / boxH : 0;
+      setViewport([vx, vy, vw, vh]);
+    };
+    const schedule = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    el.addEventListener('scroll', schedule);
+    update();
+    return () => {
+      el.removeEventListener('scroll', schedule);
+      cancelAnimationFrame(raf);
+    };
+  }, [boxW, boxH]);
 
   const onWheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey) return;
@@ -323,13 +398,25 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
     void esPickWB(client, Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y)));
   };
 
+  // Rendering indicator: tiles mounted but not decoded yet. The first jump
+  // to 1:1 (no tile landed) also blurs the soft 2048 underlay so "still
+  // resolving" can never read as "this shot is blurry".
+  const rendering = wantTiles && pendingTiles[0] > 0;
+  const firstDecode = rendering && pendingTiles[1] === 0;
+
+  const onMagnifierMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!wbPicking) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setCursor([(e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height]);
+  };
+
   return (
-    <div className="relative min-h-0 flex-1">
+    <div className="relative min-h-0 flex-1 overflow-hidden bg-inset">
       <div
         ref={containerRef}
         className={cn(
-          'no-scrollbar flex size-full touch-none overflow-auto bg-black/40 select-none',
-          wbPicking ? 'cursor-crosshair' : dragging ? 'cursor-grabbing' : pannable && 'cursor-grab',
+          'no-scrollbar flex size-full touch-none overflow-auto select-none',
+          wbPicking ? 'cursor-none' : dragging ? 'cursor-grabbing' : pannable && 'cursor-grab',
         )}
         onScroll={onScroll}
         onWheel={onWheel}
@@ -344,11 +431,22 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
             className={cn('relative m-auto shrink-0', cropping && 'overflow-hidden bg-black')}
             style={{ width: boxW, height: boxH }}
             onClick={onImageClick}
+            onPointerMove={onMagnifierMove}
+            onPointerLeave={() => setCursor(null)}
+            onContextMenu={(e) => {
+              if (wbPicking) {
+                e.preventDefault();
+                useEditSession.setState({ wbPicking: false });
+              }
+            }}
           >
             <DecodedImage
               src={src}
               onShown={setShownSrc}
-              className="absolute inset-0 size-full"
+              className={cn(
+                'absolute inset-0 size-full transition-[filter] duration-200',
+                firstDecode && 'blur-[9px]',
+              )}
               // While cropping, the straighten angle is a live client-side
               // rotation of the flat frame — instant, full-resolution feedback
               // — matched exactly by the backend crop on commit.
@@ -363,6 +461,7 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
                 boxW={boxW}
                 boxH={boxH}
                 container={containerRef}
+                onProgress={(pending, loaded) => setPendingTiles([pending, loaded])}
               />
             )}
             {cropping && draft && (
@@ -370,9 +469,13 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
                 draft={draft}
                 ratioFrac={aspectRatioFrac(aspectKey, fdw, fdh)}
                 frameAspect={fdw / fdh}
+                pxDims={[fdw, fdh]}
                 onChange={(patch) => esUpdate(client, patch)}
                 onCommit={() => esCommit(client)}
               />
+            )}
+            {wbPicking && cursor && (
+              <Magnifier src={shownSrc} boxW={boxW} boxH={boxH} cursor={cursor} />
             )}
           </div>
         ) : (
@@ -382,51 +485,254 @@ function MainImage({ photo, photos }: { photo: Photo; photos: Photo[] }) {
           </div>
         )}
       </div>
-      {wbPicking && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-md border bg-background/85 px-3 py-1 text-xs backdrop-blur">
-          Click a neutral gray area to set white balance — Esc to cancel
+
+      {/* Rendering full resolution: top progress line + centered badge. */}
+      {rendering && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-40 h-0.5 bg-white/10">
+          <div className="animate-chip-indeterminate absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-primary to-[#aab0ff]/0" />
         </div>
       )}
+      {firstDecode && (
+        <div className="glass pointer-events-none absolute top-1/2 left-1/2 z-40 flex -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-xl px-[18px] py-[13px]">
+          <ChipSpinner className="size-[19px]" />
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[13.5px] font-semibold text-foreground">Rendering full resolution</span>
+            <span className="font-mono text-[11px] text-muted-foreground">1:1 tile · decoding RAW</span>
+          </div>
+        </div>
+      )}
+
+      {/* Crop mode chip (top left, replaces the HUD status cluster). */}
+      {cropping && (
+        <div className="glass absolute top-4 left-[18px] z-40 flex items-center gap-2.5 rounded-[9px] px-3 py-[7px]">
+          <CropIcon className="size-[13px] text-accent-text" strokeWidth={1.5} />
+          <span className="text-[12.5px] font-semibold">Crop</span>
+          <span className="font-mono text-[11px] text-muted-foreground">R to exit</span>
+        </div>
+      )}
+
+      {/* WB eyedropper hint bar. */}
+      {wbPicking && (
+        <div className="glass absolute bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl px-4 py-2.5 text-[12.5px]">
+          <Pipette className="size-[15px] text-accent-text" strokeWidth={1.5} />
+          <span className="text-secondary-foreground">Click a neutral gray to set white balance</span>
+          <span className="h-4 w-px bg-white/15" />
+          <span className="text-muted-foreground">
+            Right-click resets · <span className="font-mono text-secondary-foreground">Esc</span> cancels
+          </span>
+        </div>
+      )}
+
       {cropping ? (
-        <CropToolbar client={client} aspectKey={aspectKey} onPickAspect={applyAspect} />
+        <CropBar
+          client={client}
+          aspectKey={aspectKey}
+          angle={draft?.cropAngle ?? 0}
+          onPickAspect={applyAspect}
+        />
       ) : (
-        <ZoomToolbar scale={scale} isFit={zoom === 'fit'} setZoom={setZoom} />
+        !hideChrome &&
+        !wbPicking && (
+          <>
+            <ZoomBar
+              photos={photos}
+              photo={photo}
+              scale={scale}
+              isFit={zoom === 'fit'}
+              setZoom={setZoom}
+              rendering={rendering}
+            />
+            <NavigatorInset photo={photo} scale={scale} viewport={viewport} isFit={zoom === 'fit'} />
+          </>
+        )
       )}
     </div>
   );
 }
 
-function ZoomToolbar({
+// Magnifier: the WB pipette's loupe — a 138px circle showing the pixels
+// under the (hidden) cursor at 3×, with a pixel grid and an accent target.
+function Magnifier({
+  src,
+  boxW,
+  boxH,
+  cursor,
+}: {
+  src: string;
+  boxW: number;
+  boxH: number;
+  cursor: [number, number];
+}) {
+  const ZOOM = 3;
+  const SIZE = 138;
+  const [fx, fy] = cursor;
+  return (
+    <div
+      className="pointer-events-none absolute z-40"
+      style={{ left: fx * boxW - SIZE / 2, top: fy * boxH - SIZE / 2, width: SIZE, height: SIZE }}
+    >
+      <div className="absolute inset-0 overflow-hidden rounded-full border-2 border-white shadow-[0_12px_34px_-8px_rgba(0,0,0,.7)]">
+        <img
+          src={src}
+          alt=""
+          draggable={false}
+          className="absolute max-w-none"
+          style={{
+            width: boxW * ZOOM,
+            height: boxH * ZOOM,
+            left: SIZE / 2 - fx * boxW * ZOOM,
+            top: SIZE / 2 - fy * boxH * ZOOM,
+          }}
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundImage:
+              'repeating-linear-gradient(0deg,rgba(0,0,0,.14) 0 1px,transparent 1px 14px),repeating-linear-gradient(90deg,rgba(0,0,0,.14) 0 1px,transparent 1px 14px)',
+          }}
+        />
+        <div
+          className="absolute top-1/2 left-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 border-[1.5px] border-primary"
+          style={{ boxShadow: '0 0 0 1px rgba(0,0,0,.7)' }}
+        />
+      </div>
+      <Pipette
+        className="absolute size-[22px] text-white drop-shadow-[0_2px_4px_rgba(0,0,0,.6)]"
+        style={{ left: SIZE - 20, top: SIZE - 22 }}
+        strokeWidth={1.6}
+      />
+    </div>
+  );
+}
+
+// NavigatorInset: the 200px glass minimap (bottom right) with the visible
+// region outlined; click to recenter the pan there.
+function NavigatorInset({
+  photo,
+  scale,
+  viewport,
+  isFit,
+}: {
+  photo: Photo;
+  scale: number;
+  viewport: [number, number, number, number];
+  isFit: boolean;
+}) {
+  const [vx, vy, vw, vh] = viewport;
+  const zoomed = vw < 0.999 || vh < 0.999;
+  if (isFit && !zoomed) return null;
+  return (
+    <div className="glass absolute right-[18px] bottom-[18px] z-30 w-[200px] rounded-[11px] p-[9px]">
+      <div className="mb-[7px] flex items-center justify-between">
+        <span className="text-[10px] tracking-[.06em] text-muted-foreground uppercase">Navigator</span>
+        <span className="font-mono text-[10.5px] text-accent-text tabular-nums">
+          {Math.round(scale * 100)}%
+        </span>
+      </div>
+      <div className="relative overflow-hidden rounded-md">
+        <img src={imgUrl(photo, '256')} alt="" draggable={false} className="block w-full" />
+        {zoomed && (
+          <div
+            className="absolute rounded-[2px] border-[1.5px] border-white"
+            style={{
+              left: `${vx * 100}%`,
+              top: `${vy * 100}%`,
+              width: `${vw * 100}%`,
+              height: `${vh * 100}%`,
+              boxShadow: '0 0 0 999px rgba(0,0,0,.34)',
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ZoomBar: the glass zoom control (handoff plate "LOUPE") — frame stepper,
+// Fit/1:1 segmented, zoom slider + readout, and the rendering state while
+// 1:1 tiles decode.
+function ZoomBar({
+  photos,
+  photo,
   scale,
   isFit,
   setZoom,
+  rendering,
 }: {
+  photos: Photo[];
+  photo: Photo;
   scale: number;
   isFit: boolean;
   setZoom: (z: 'fit' | number) => void;
+  rendering: boolean;
 }) {
+  const idx = photos.findIndex((p) => p.id === photo.id);
+  const move = (delta: number) => {
+    const next = photos[idx + delta];
+    if (next) useUIStore.getState().focus(next.id);
+  };
   return (
-    <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border bg-background/85 px-2 py-1 backdrop-blur">
-      <Button size="sm" variant={isFit ? 'secondary' : 'ghost'} onClick={() => setZoom('fit')} title="Fit (Z or Space)">
-        <Maximize data-icon="inline-start" />
-        Fit
-      </Button>
-      <Button size="sm" variant={!isFit && Math.abs(scale - 1) < 0.01 ? 'secondary' : 'ghost'} onClick={() => setZoom(1)} title="100% (Z or Space)">
-        <Square data-icon="inline-start" />
-        1:1
-      </Button>
-      <Slider
-        className="w-36"
-        value={Math.round(scale * 100)}
-        min={5}
-        max={400}
-        step={5}
-        onValueChange={(v) => setZoom((v as number) / 100)}
-        aria-label="Zoom"
+    <div className="glass absolute bottom-[18px] left-1/2 z-30 flex -translate-x-1/2 items-center gap-3.5 rounded-[13px] px-4 py-2.5">
+      <div className="flex items-center gap-[7px] font-mono text-xs text-secondary-foreground">
+        <button
+          className="flex size-[26px] items-center justify-center rounded-[7px] border border-white/15 text-muted-foreground hover:text-foreground disabled:opacity-40"
+          disabled={idx <= 0}
+          onClick={() => move(-1)}
+          aria-label="Previous photo"
+        >
+          ‹
+        </button>
+        <span className="tabular-nums">
+          {(idx + 1).toLocaleString()} / {photos.length.toLocaleString()}
+        </span>
+        <button
+          className="flex size-[26px] items-center justify-center rounded-[7px] border border-white/15 text-muted-foreground hover:text-foreground disabled:opacity-40"
+          disabled={idx >= photos.length - 1}
+          onClick={() => move(1)}
+          aria-label="Next photo"
+        >
+          ›
+        </button>
+      </div>
+      <div className="h-[26px] w-px bg-white/15" />
+      <Segmented
+        aria-label="Zoom mode"
+        size="sm"
+        items={[
+          { value: 'fit', label: 'Fit' },
+          { value: '1:1', label: '1:1' },
+        ]}
+        value={isFit ? 'fit' : '1:1'}
+        onValueChange={(v) => setZoom(v === 'fit' ? 'fit' : 1)}
+        className="border-0 bg-white/5"
       />
-      <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">
-        {Math.round(scale * 100)}%
-      </span>
+      <div className="flex items-center gap-2.5">
+        <button className="text-[15px] text-muted-foreground" onClick={() => setZoom(Math.max(0.05, scale * 0.8))} aria-label="Zoom out">
+          −
+        </button>
+        <Slider
+          className="w-[150px]"
+          value={Math.round(scale * 100)}
+          min={5}
+          max={400}
+          step={5}
+          onValueChange={(v) => setZoom((v as number) / 100)}
+          aria-label="Zoom"
+        />
+        <button className="text-[15px] text-muted-foreground" onClick={() => setZoom(Math.min(4, scale * 1.25))} aria-label="Zoom in">
+          +
+        </button>
+        {rendering ? (
+          <span className="flex w-[110px] items-center gap-2 font-mono text-[11.5px] text-[#aab0ff]">
+            <ChipSpinner className="size-[13px]" />
+            Rendering {Math.round(scale * 100)}%
+          </span>
+        ) : (
+          <span className="w-[42px] text-right font-mono text-[11.5px] tabular-nums">
+            {Math.round(scale * 100)}%
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -445,6 +751,7 @@ function TileLayer({
   boxW,
   boxH,
   container,
+  onProgress,
 }: {
   photo: Photo;
   dw: number; // rendered (crop-aware) display width
@@ -452,12 +759,22 @@ function TileLayer({
   boxW: number;
   boxH: number;
   container: React.RefObject<HTMLDivElement | null>;
+  /** Reports (pending, loaded) tile counts for the rendering indicator. */
+  onProgress?: (pending: number, loaded: number) => void;
 }) {
   const cols = Math.ceil(dw / TILE_SIZE);
   const rows = Math.ceil(dh / TILE_SIZE);
   const scale = boxW / dw;
   // Tile keys mounted so far.
   const [tiles, setTiles] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState(0);
+  const onProgressRef = useRef(onProgress);
+  onProgressRef.current = onProgress;
+  useEffect(() => {
+    onProgressRef.current?.(Math.max(0, tiles.length - loaded), loaded);
+  }, [tiles.length, loaded]);
+  // Component unmount (leaving 1:1 or switching photo) clears the indicator.
+  useEffect(() => () => onProgressRef.current?.(0, 0), []);
 
   useEffect(() => {
     const el = container.current;
@@ -506,7 +823,15 @@ function TileLayer({
       >
         {tiles.map((k) => {
           const [tx, ty] = k.split(',').map(Number);
-          return <Tile key={k} src={tileUrl(photo, tx, ty)} left={tx * TILE_SIZE} top={ty * TILE_SIZE} />;
+          return (
+            <Tile
+              key={k}
+              src={tileUrl(photo, tx, ty)}
+              left={tx * TILE_SIZE}
+              top={ty * TILE_SIZE}
+              onSettled={() => setLoaded((n) => n + 1)}
+            />
+          );
         })}
       </div>
     </div>
@@ -515,14 +840,37 @@ function TileLayer({
 
 // Tile renders at its natural size (the server decides edge-tile dimensions)
 // and fades in once loaded; a 404 off the rendered edge stays invisible.
-function Tile({ src, left, top }: { src: string; left: number; top: number }) {
+// onSettled fires on load AND error so the rendering indicator never hangs
+// on an edge tile that does not exist.
+function Tile({
+  src,
+  left,
+  top,
+  onSettled,
+}: {
+  src: string;
+  left: number;
+  top: number;
+  onSettled?: () => void;
+}) {
   const [loaded, setLoaded] = useState(false);
+  const settled = useRef(false);
+  const settle = () => {
+    if (!settled.current) {
+      settled.current = true;
+      onSettled?.();
+    }
+  };
   return (
     <img
       src={src}
       alt=""
       draggable={false}
-      onLoad={() => setLoaded(true)}
+      onLoad={() => {
+        setLoaded(true);
+        settle();
+      }}
+      onError={settle}
       className="absolute max-w-none transition-opacity duration-150"
       style={{ left, top, opacity: loaded ? 1 : 0 }}
     />
@@ -573,7 +921,7 @@ export function DecodedImage({
   return <img src={shown} draggable={false} alt="" className={className} style={style} />;
 }
 
-function Filmstrip({ photos, currentId }: { photos: Photo[]; currentId: number }) {
+export function Filmstrip({ photos, currentId }: { photos: Photo[]; currentId: number }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const focus = useUIStore((s) => s.focus);
   const selection = useUIStore((s) => s.selection);
@@ -592,7 +940,11 @@ function Filmstrip({ photos, currentId }: { photos: Photo[]; currentId: number }
   }, [currentIndex]);
 
   return (
-    <div ref={scrollRef} className="h-24 shrink-0 overflow-x-auto border-t">
+    <div
+      ref={scrollRef}
+      data-testid="filmstrip"
+      className="no-scrollbar h-16 w-[720px] max-w-[80vw] shrink-0 overflow-x-auto"
+    >
       <div className="relative h-full" style={{ width: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((item) => {
           const p = photos[item.index];

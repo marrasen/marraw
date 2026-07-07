@@ -12,7 +12,8 @@ import { ExportDialog } from '@/components/ExportDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { StatusBar } from '@/components/StatusBar';
 import { GridView } from '@/views/GridView';
-import { LoupeView } from '@/views/LoupeView';
+import { CullView } from '@/views/CullView';
+import { DevelopView } from '@/views/DevelopView';
 import { useKeyboard } from '@/lib/keyboard';
 import { usePhotos } from '@/lib/usePhotos';
 import { openRoot, samePath, saveRoots, useLibraryRoots } from '@/lib/library';
@@ -69,14 +70,17 @@ export default function App() {
   useDropFolder();
   const folderId = useUIStore((s) => s.folderId);
   const mode = useUIStore((s) => s.mode);
+  const view = useUIStore((s) => s.view);
   const { roots, isLoading } = useLibraryRoots();
   const empty = roots.length === 0 && folderId == null;
+  const structured = folderId == null || (mode === 'library' && view === 'grid');
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <TopBar />
+      {/* Cinema modes are edge-to-edge; their floating HUD replaces the bar. */}
+      {structured && <TopBar />}
       <div className="flex min-h-0 flex-1">
-        {mode === 'library' && (
+        {structured && (
           <aside className="w-[214px] shrink-0 border-r">
             <LibraryRail />
           </aside>
@@ -145,20 +149,25 @@ function Workspace({ folderId }: { folderId: number }) {
     }
   }, [visible]);
 
+  // Legacy view='loupe' inside Library opens the Develop cinema — the old
+  // in-place loupe grew into that surface.
+  const structured = mode === 'library' && view === 'grid';
   return (
     <>
       <main className="flex min-w-0 flex-1 flex-col">
-        {mode === 'library' && view === 'grid' ? (
+        {mode === 'cull' ? (
+          <CullView photos={visible} />
+        ) : structured ? (
           <>
             <FilterBar shownCount={visible.length} totalCount={all.length} />
             <GridView photos={visible} folderId={folderId} />
             <StatusBar shown={visible.length} total={all.length} picked={picked} />
           </>
         ) : (
-          <LoupeView photos={visible} />
+          <DevelopView photos={visible} all={all} />
         )}
       </main>
-      {(mode === 'library' || mode === 'develop') && (
+      {structured && (
         <aside className="w-[300px] shrink-0 border-l">
           <EditPanel photos={all} />
         </aside>

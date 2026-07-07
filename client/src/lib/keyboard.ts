@@ -66,6 +66,10 @@ export function useKeyboard() {
         const next = cur < 0 ? 0 : Math.min(ids.length - 1, Math.max(0, cur + delta));
         s.focus(ids[next], { extend: e.shiftKey });
       };
+      // Vertical arrows move by a row: the grid's live column count, the
+      // contact sheet's fixed 8, one frame in a loupe.
+      const rowStep =
+        s.mode === 'cull' && s.contactSheet ? 8 : s.mode === 'library' && s.view === 'grid' ? s.gridCols : 1;
 
       const applyRating = (n: number) => doRating(client, selectionOrFocus(), n);
       const applyFlag = (flag: FlagType) => doFlag(client, selectionOrFocus(), flag);
@@ -116,16 +120,25 @@ export function useKeyboard() {
         return;
       }
 
-      // R toggles crop mode (needs the loupe, where the overlay lives).
+      // R toggles crop mode (needs a loupe surface, where the overlay lives).
       if (e.key.toLowerCase() === 'r' && es.draft) {
         e.preventDefault();
-        if (!es.cropping) s.setView('loupe');
+        if (!es.cropping && s.mode === 'library') s.setView('loupe');
         esSetCropping(client, !es.cropping);
         return;
       }
 
       const key = e.key.toLowerCase();
-      if (CONTROL_KEYS[key] && es.draft) {
+
+      // G in Cull blows the scrubber into the contact sheet (elsewhere G
+      // stays the Gamma control hotkey).
+      if (key === 'g' && s.mode === 'cull') {
+        e.preventDefault();
+        s.setContactSheet(!s.contactSheet);
+        return;
+      }
+
+      if (CONTROL_KEYS[key] && es.draft && s.mode !== 'cull') {
         e.preventDefault();
         esSetActive(CONTROL_KEYS[key]);
         return;
@@ -142,11 +155,11 @@ export function useKeyboard() {
           break;
         case 'ArrowUp':
           e.preventDefault();
-          move(s.view === 'grid' ? -s.gridCols : -1);
+          move(-rowStep);
           break;
         case 'ArrowDown':
           e.preventDefault();
-          move(s.view === 'grid' ? s.gridCols : 1);
+          move(rowStep);
           break;
         case '0':
         case '1':
@@ -169,9 +182,10 @@ export function useKeyboard() {
           applyFlag('none');
           break;
         case 'Enter':
-          // In crop mode, Enter applies the crop rather than entering loupe.
+          // In crop mode, Enter applies the crop rather than switching mode.
           if (es.cropping) esSetCropping(client, false);
-          else if (s.focusId != null) s.setView('loupe');
+          else if (s.contactSheet) s.setContactSheet(false);
+          else if (s.focusId != null && s.mode === 'library' && s.view === 'grid') s.setMode('cull');
           break;
         case 'Escape':
           if (es.cropping) {
@@ -180,8 +194,10 @@ export function useKeyboard() {
             esSetWBPicking(false);
           } else if (es.activeControl != null) {
             esSetActive(null);
+          } else if (s.contactSheet) {
+            s.setContactSheet(false);
           } else {
-            s.setView('grid');
+            s.setMode('library');
           }
           break;
         case '+':

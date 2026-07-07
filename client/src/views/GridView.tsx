@@ -194,7 +194,8 @@ function GridCell({ photo, w, h }: { photo: Photo; w: number; h: number }) {
       onClick={(e) => focus(photo.id, { extend: e.shiftKey, toggle: e.ctrlKey || e.metaKey })}
       onDoubleClick={() => {
         focus(photo.id);
-        setView('loupe');
+        // Double-click drops the frame into the Cull confirm loupe.
+        useUIStore.getState().setMode('cull');
       }}
       title={photo.fileName}
     >
