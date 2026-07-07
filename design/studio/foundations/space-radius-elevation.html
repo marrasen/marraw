@@ -1,0 +1,97 @@
+<!-- @dsCard group="Foundations" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Space, Radius &amp; Elevation</title>
+<style>
+  :root{
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--popover:#1A1F23;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--primary:#2DD4BF;--accent:#1B2A2B;
+    --hair:rgba(255,255,255,.06);--shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:64ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .grid{display:grid;grid-template-columns:1fr;gap:18px}
+  @media(min-width:900px){.grid{grid-template-columns:1.15fr 1fr}}
+  .stage{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:16px;padding:22px;box-shadow:var(--shadow-2)}
+  .stage.full{grid-column:1/-1}
+  .stage-lbl{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:18px}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+
+  /* spacing */
+  .sp{display:flex;align-items:center;gap:14px;padding:7px 0}
+  .sp .bar{height:14px;background:linear-gradient(90deg,var(--primary),color-mix(in oklab,var(--primary) 30%,transparent));border-radius:3px;box-shadow:0 0 0 1px var(--hair)}
+  .sp .lab{font-family:var(--font-mono);font-size:11.5px;color:var(--fg);width:66px}
+  .sp .px{font-family:var(--font-mono);font-size:11px;color:var(--muted-fg)}
+
+  /* radius */
+  .radii{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end}
+  .rad{text-align:center}
+  .rad .box{width:78px;height:60px;background:var(--card);border:1px solid var(--border);box-shadow:var(--lift);border-top:1px solid color-mix(in oklab,var(--primary) 26%,var(--border))}
+  .rad .cap{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-fg);margin-top:8px}
+  .rad .cap b{display:block;color:var(--fg);font-weight:500}
+
+  /* elevation */
+  .elev{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .el{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;min-height:78px;display:flex;flex-direction:column;justify-content:space-between}
+  .el.e0{box-shadow:none}
+  .el.e1{box-shadow:var(--shadow-1),var(--lift)}
+  .el.e2{box-shadow:var(--shadow-1),var(--lift);background:var(--popover)}
+  .el.e3{box-shadow:var(--shadow-2),var(--lift);background:var(--popover)}
+  .el .nm{font-size:13px;font-weight:600;color:var(--fg)}
+  .el .d{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-fg);line-height:1.4}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Foundations · Space · Radius · Elevation</p>
+    <h1>Metrics &amp; depth</h1>
+    <p class="lede">A 4px spacing grid keeps dense control panels tidy. Radii are deliberately tight for a precise, instrument-like feel, and elevation is cool and shallow — panels lift with a 1px light top-edge, never with heavy drop shadows.</p>
+  </header>
+
+  <div class="grid">
+    <section class="stage theme-dark">
+      <div class="stage-lbl"><span>Spacing · 4px grid</span><span>rem</span></div>
+      <div class="sp"><span class="lab">space-1</span><span class="bar" style="width:4px"></span><span class="px">4px · 0.25rem</span></div>
+      <div class="sp"><span class="lab">space-2</span><span class="bar" style="width:8px"></span><span class="px">8px · 0.5rem</span></div>
+      <div class="sp"><span class="lab">space-3</span><span class="bar" style="width:12px"></span><span class="px">12px · 0.75rem</span></div>
+      <div class="sp"><span class="lab">space-4</span><span class="bar" style="width:16px"></span><span class="px">16px · 1rem</span></div>
+      <div class="sp"><span class="lab">space-5</span><span class="bar" style="width:20px"></span><span class="px">20px · 1.25rem</span></div>
+      <div class="sp"><span class="lab">space-6</span><span class="bar" style="width:24px"></span><span class="px">24px · 1.5rem</span></div>
+      <div class="sp"><span class="lab">space-8</span><span class="bar" style="width:32px"></span><span class="px">32px · 2rem</span></div>
+      <div class="sp"><span class="lab">space-10</span><span class="bar" style="width:40px"></span><span class="px">40px · 2.5rem</span></div>
+    </section>
+
+    <section class="stage theme-dark">
+      <div class="stage-lbl"><span>Radius</span><span>--radius: 0.5rem</span></div>
+      <div class="radii">
+        <div class="rad"><div class="box" style="border-radius:4px"></div><div class="cap"><b>sm</b>4px</div></div>
+        <div class="rad"><div class="box" style="border-radius:6px"></div><div class="cap"><b>md</b>6px</div></div>
+        <div class="rad"><div class="box" style="border-radius:8px"></div><div class="cap"><b>lg · base</b>8px</div></div>
+        <div class="rad"><div class="box" style="border-radius:12px"></div><div class="cap"><b>xl</b>12px</div></div>
+        <div class="rad"><div class="box" style="border-radius:9999px;width:60px"></div><div class="cap"><b>full</b>pill</div></div>
+      </div>
+      <div class="stage-lbl" style="margin:24px 0 14px"><span>Elevation</span><span>cool · shallow</span></div>
+      <div class="elev">
+        <div class="el e0"><span class="nm">Flat</span><span class="d">grid cells · inline<br>no shadow</span></div>
+        <div class="el e1"><span class="nm">Panel</span><span class="d">sidebars · cards<br>shadow-1 + lift</span></div>
+        <div class="el e2"><span class="nm">Popover</span><span class="d">menus · tooltips<br>raised surface</span></div>
+        <div class="el e3"><span class="nm">Overlay</span><span class="d">dialogs<br>shadow-2 + lift</span></div>
+      </div>
+    </section>
+  </div>
+
+  <p class="foot">Shadcn radius tokens derive from <b>--radius</b>: sm = calc(r − 4px) · md = calc(r − 2px) · lg = r · xl = calc(r + 4px)</p>
+</div>
+</body>
+</html>

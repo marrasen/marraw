@@ -1,0 +1,274 @@
+<!-- @dsCard group="Explorations · Whole-app" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>marraw · A · Focus / Command</title>
+<style>
+  :root{
+    --bg:#0F1214; --titlebar:#0d1113; --side:#121619; --work:#0d1012; --panel:#14181B; --card:#171B1E; --popover:#1A1F23;
+    --muted:#242c31; --muted-fg:#8B99A3; --fg:#E8EDF2; --border:#232b31; --input:#1c2226;
+    --primary:#2DD4BF; --primary-fg:#04211d; --accent:#1B2A2B; --ring:#2DD4BF;
+    --success:#34D399; --warning:#F5B14C; --destructive:#F0616D; --info:#38BDF8;
+    --radius:8px;
+    --shadow-1:0 1px 2px rgba(0,0,0,.5); --shadow-2:0 18px 44px -14px rgba(0,0,0,.7);
+    --lift:inset 0 1px 0 rgba(255,255,255,.05); --track-in:inset 0 1px 2px rgba(0,0,0,.55);
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1200px 560px at 100% -12%,#14201f 0%,transparent 58%),#070a0b;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:34px clamp(16px,4vw,44px) 48px}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  .wrap{max-width:1340px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--primary);display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,var(--primary),transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:74ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:24px}
+  .foot{margin-top:20px;font-family:var(--font-mono);font-size:11px;line-height:1.7;color:#5f6d75}
+  .foot b{color:#8fa0a8;font-weight:500}
+
+  .stage{overflow-x:auto;padding-bottom:4px}
+
+  /* ---- window ---- */
+  .app{width:1280px;height:820px;margin:0 auto;position:relative;border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-2);background:var(--bg);color:var(--fg);display:flex;flex-direction:column}
+
+  /* titlebar */
+  .tb{display:flex;align-items:center;gap:12px;height:40px;flex:none;padding:0 14px;background:var(--titlebar);border-bottom:1px solid var(--border);position:relative;z-index:60}
+  .lights{display:flex;gap:8px}
+  .lights i{width:11px;height:11px;border-radius:50%}
+  .lights .r{background:#f0616d}.lights .y{background:#f5b14c}.lights .g{background:#34d399}
+  .tb .title{font-size:12px;color:var(--muted-fg);font-family:var(--font-mono)}
+  .tb .title b{color:var(--fg);font-weight:500}
+  .tb .grow{flex:1}
+  .tb .cmd{height:26px;display:inline-flex;align-items:center;gap:8px;padding:0 9px 0 11px;border-radius:8px;border:1px solid var(--border);background:var(--input);color:var(--muted-fg);font-size:12px;box-shadow:var(--track-in)}
+  .tb .cmd svg{width:13px;height:13px}
+  .tb .cmd .kbd{font-family:var(--font-mono);font-size:10px;color:var(--muted-fg);border:1px solid var(--border);border-radius:4px;padding:1px 5px;background:var(--card)}
+  .tb .icbtn{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;color:var(--muted-fg);border:1px solid transparent}
+  .tb .icbtn svg{width:15px;height:15px}
+
+  /* shell = rail + main */
+  .shell{flex:1;display:flex;min-height:0}
+
+  /* left icon rail — mode switcher */
+  .rail{width:60px;flex:none;background:var(--side);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:stretch;padding:10px 0;z-index:50}
+  .rail .mode{position:relative;display:flex;flex-direction:column;align-items:center;gap:5px;padding:11px 0;color:var(--muted-fg);cursor:pointer}
+  .rail .mode svg{width:20px;height:20px}
+  .rail .mode .lbl{font-size:9.5px;letter-spacing:.04em}
+  .rail .mode.on{color:var(--primary);background:color-mix(in oklab,var(--primary) 12%,transparent)}
+  .rail .mode.on::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:2px;border-radius:0 2px 2px 0;background:var(--primary)}
+  .rail .sp{flex:1}
+
+  /* main surface */
+  .main{position:relative;flex:1;min-width:0;background:var(--work);overflow:hidden}
+
+  /* the single maximal photo */
+  .canvas{position:absolute;left:0;top:0;right:0;bottom:100px;display:grid;place-items:center;padding:52px 340px 40px 60px}
+  .photo{position:relative;width:100%;max-width:760px;aspect-ratio:3/2;border-radius:6px;box-shadow:0 24px 70px -20px rgba(0,0,0,.85),0 0 0 1px rgba(0,0,0,.4);
+    background:
+      radial-gradient(120% 130% at 34% 26%,#3a5a5f 0%,#20343c 44%,#0f1a1f 100%),
+      linear-gradient(135deg,#2b3f4a,#0f1a1f 62%,#3a5a5f)}
+  .photo::after{content:"";position:absolute;inset:0;border-radius:6px;box-shadow:inset 0 0 140px rgba(0,0,0,.6),inset 0 0 40px rgba(0,0,0,.35);pointer-events:none}
+  .photo .chip{position:absolute;left:14px;bottom:14px;z-index:2;display:inline-flex;align-items:center;gap:10px;background:rgba(6,9,11,.5);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:6px 10px;backdrop-filter:blur(6px)}
+  .photo .chip .fn{font-family:var(--font-mono);font-size:11px;color:#e6edf1}
+  .photo .chip .exif{font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,.62)}
+  .photo .chip .stars{display:inline-flex;gap:2px}
+  .photo .chip .stars svg{width:12px;height:12px;stroke:rgba(255,255,255,.5);fill:none;stroke-width:1.6}
+  .photo .chip .stars svg.f{stroke:none;fill:var(--primary)}
+  .photo .chip .sep{width:1px;height:14px;background:rgba(255,255,255,.14)}
+
+  /* floating develop drawer */
+  .drawer{position:absolute;top:16px;right:16px;bottom:116px;width:300px;z-index:40;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-2),var(--lift);display:flex;flex-direction:column;overflow:hidden;font-size:13px;color:var(--fg)}
+  .dh{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border);flex:none}
+  .dh .grip{display:flex;flex-direction:column;gap:2px}
+  .dh .grip b{font-size:12.5px;font-weight:600}
+  .dh .grip span{font-family:var(--font-mono);font-size:10px;color:var(--muted-fg)}
+  .dh .rst{width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:var(--card);color:var(--muted-fg);display:grid;place-items:center;box-shadow:var(--lift);cursor:pointer}
+  .dh .rst svg{width:13px;height:13px}
+  .dbody{flex:1;overflow:hidden;display:flex;flex-direction:column}
+
+  .dhist{margin:12px 14px 2px;height:56px;border-radius:8px;background:linear-gradient(180deg,#0c1013,#0e1315);border:1px solid var(--border);overflow:hidden;box-shadow:var(--track-in);position:relative;flex:none}
+  .dhist svg{position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen}
+
+  .dsec{padding:11px 14px;border-top:1px solid var(--border);flex:none}
+  .dsec:first-of-type{border-top:0}
+  .dsec .t{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-fg);display:flex;justify-content:space-between;align-items:center;margin-bottom:11px}
+  .dsec .t .st{color:var(--primary);font-family:var(--font-mono);letter-spacing:0;font-size:9.5px}
+  .sld{margin-bottom:11px}.sld:last-child{margin-bottom:2px}
+  .sr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+  .sr .n{font-size:11.5px;color:#c3cdd3}.sr .v{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--muted-fg)}
+  .sr .v.on{color:var(--primary)}
+  .tk{position:relative;height:3px;border-radius:999px;background:var(--muted);box-shadow:var(--track-in)}
+  .cen{position:absolute;top:-2px;bottom:-2px;left:50%;width:1px;background:var(--muted-fg);opacity:.5}
+  .fl{position:absolute;top:0;height:100%;border-radius:999px;background:var(--primary)}
+  .th{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;background:var(--fg);border:1px solid rgba(0,0,0,.35);transform:translate(-50%,-50%);box-shadow:0 1px 2px rgba(0,0,0,.5)}
+  .th.on{background:var(--primary);border-color:transparent;box-shadow:0 0 0 3px color-mix(in oklab,var(--ring) 26%,transparent)}
+  .dfoot{margin-top:auto;padding:12px 14px;border-top:1px solid var(--border);flex:none}
+  .expbtn{width:100%;height:33px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12.5px;font-weight:600;border:0;display:flex;align-items:center;justify-content:center;gap:7px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22);cursor:pointer}
+  .expbtn svg{width:14px;height:14px}
+
+  /* bottom filmstrip */
+  .strip{position:absolute;left:0;right:0;bottom:0;height:100px;z-index:30;background:linear-gradient(180deg,rgba(11,14,15,0),var(--titlebar) 34%);border-top:1px solid var(--border);display:flex;align-items:center;gap:11px;padding:0 14px}
+  .strip .nav{width:28px;height:28px;flex:none;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--muted-fg);display:grid;place-items:center;cursor:pointer;box-shadow:var(--lift)}
+  .strip .nav svg{width:14px;height:14px}
+  .frames{display:flex;gap:9px;overflow:hidden;flex:1;padding:2px 1px}
+  .fr{position:relative;flex:none;width:96px;aspect-ratio:3/2;border-radius:7px;overflow:hidden;border:1px solid var(--border);opacity:.6;cursor:pointer}
+  .fr .ph{position:absolute;inset:0}
+  .fr .flag{position:absolute;top:4px;left:4px;width:7px;height:7px;border-radius:50%}
+  .fr .flag.p{background:var(--success)} .fr .flag.r{background:var(--destructive)}
+  .fr .dots{position:absolute;bottom:4px;left:0;right:0;display:flex;justify-content:center;gap:2px}
+  .fr .dots i{width:3px;height:3px;border-radius:50%;background:var(--primary)}
+  .fr.active{opacity:1;outline:2px solid var(--ring);outline-offset:2px;border-color:transparent;box-shadow:0 6px 18px -6px rgba(0,0,0,.7),0 0 0 4px color-mix(in oklab,var(--ring) 18%,transparent)}
+  .fr.rej .ph{filter:grayscale(.5) brightness(.6)}
+  .pos{flex:none;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--muted-fg);padding-left:2px}
+  .pos b{color:var(--fg);font-weight:500}
+
+  /* dim + command palette */
+  .dim{position:absolute;inset:0;z-index:70;background:rgba(6,9,11,.5)}
+  .palette{position:absolute;z-index:80;left:50%;top:74px;transform:translateX(-50%);width:520px;background:var(--popover);border:1px solid var(--border);border-radius:13px;box-shadow:var(--shadow-2),var(--lift);overflow:hidden}
+  .pq{display:flex;align-items:center;gap:11px;padding:14px 16px;border-bottom:1px solid var(--border)}
+  .pq .sic{width:17px;height:17px;color:var(--muted-fg);flex:none}
+  .pq .qtext{flex:1;font-size:15px;color:var(--fg)}
+  .pq .qtext .caret{display:inline-block;width:1.5px;height:17px;background:var(--primary);vertical-align:-3px;margin-left:1px}
+  .pq .kbd{font-family:var(--font-mono);font-size:10px;color:var(--muted-fg);border:1px solid var(--border);border-radius:5px;padding:2px 6px;background:var(--card)}
+  .plist{padding:6px}
+  .pgrp{font-size:9.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-fg);padding:8px 10px 5px}
+  .pi{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:8px;font-size:13.5px;color:var(--fg);cursor:pointer}
+  .pi .pic{width:16px;height:16px;color:var(--muted-fg);flex:none}
+  .pi .meta{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--muted-fg)}
+  .pi .kbd{font-family:var(--font-mono);font-size:10px;color:var(--muted-fg);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+  .pi.on{background:color-mix(in oklab,var(--primary) 15%,transparent);color:var(--primary)}
+  .pi.on .pic{color:var(--primary)}
+  .pi.on .meta{color:color-mix(in oklab,var(--primary) 80%,var(--fg))}
+  .pi.danger .pic{color:var(--destructive)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Exploration · Whole-app</p>
+    <h1>A · Focus / Command</h1>
+    <p class="lede">One maximal image on a near-black canvas. The three-pane shell is gone — a slim mode rail replaces the folder tree, the develop stack floats in as an on-demand drawer, and everything else is summoned by keyboard through a command palette. The photograph is the interface; the chrome only appears when you ask for it.</p>
+  </header>
+
+  <div class="stage">
+    <div class="app">
+      <!-- titlebar -->
+      <div class="tb">
+        <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+        <span class="title"><b>marraw</b> · Iceland</span>
+        <span class="grow"></span>
+        <span class="cmd"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>Search or run a command<span class="kbd">⌘K</span></span>
+        <span class="icbtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.3-2.6H10l-.3 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.3 2.6h4l.3-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"/></svg></span>
+      </div>
+
+      <div class="shell">
+        <!-- mode rail -->
+        <div class="rail">
+          <div class="mode"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span class="lbl">Library</span></div>
+          <div class="mode"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/><path d="M4 20h16"/></svg><span class="lbl">Cull</span></div>
+          <div class="mode on"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M4 12h4M16 12h4M12 4v4M12 16v4"/></svg><span class="lbl">Develop</span></div>
+          <div class="mode"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg><span class="lbl">Export</span></div>
+          <div class="sp"></div>
+          <div class="mode"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.3-2.6H10l-.3 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.3 2.6h4l.3-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"/></svg><span class="lbl">Settings</span></div>
+        </div>
+
+        <!-- main surface -->
+        <div class="main">
+          <!-- the one image -->
+          <div class="canvas">
+            <div class="photo">
+              <div class="chip">
+                <span class="fn">DSC07421.ARW</span>
+                <span class="sep"></span>
+                <span class="exif">ƒ/2.8 · 1/250 · ISO 400</span>
+                <span class="sep"></span>
+                <span class="stars">
+                  <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+                  <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+                  <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+                  <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+                  <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- floating develop drawer -->
+          <aside class="drawer">
+            <div class="dh">
+              <div class="grip"><b>Develop</b><span>DSC07421.ARW · 42.4MP</span></div>
+              <button class="rst" title="Reset all"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/></svg></button>
+            </div>
+            <div class="dbody">
+              <div class="dhist"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><path d="M0,40 L2,33 8,26 16,16 26,10 36,18 46,14 56,20 66,10 78,16 88,7 96,22 100,32 100,40Z" fill="#38BDF8" stroke="none" opacity=".7"/><path d="M0,40 L3,32 9,24 17,13 27,8 37,16 47,12 57,19 67,8 79,14 89,6 97,21 100,31 100,40Z" fill="#34D399" stroke="none" opacity=".7"/><path d="M0,40 L4,35 11,29 19,20 29,12 41,18 53,10 65,16 75,10 85,18 93,12 100,27 100,40Z" fill="#F0616D" stroke="none" opacity=".7"/></svg></div>
+
+              <div class="dsec">
+                <div class="t"><span>Light</span><span class="st">edited</span></div>
+                <div class="sld"><div class="sr"><span class="n">Exposure</span><span class="v on">+0.40</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:4%"></span><span class="th on" style="left:54%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="n">Contrast</span><span class="v on">+12</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:6%"></span><span class="th" style="left:56%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="n">Highlights</span><span class="v on">−38</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:31%;width:19%"></span><span class="th" style="left:31%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="n">Shadows</span><span class="v on">+24</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:12%"></span><span class="th" style="left:62%"></span></div></div>
+              </div>
+
+              <div class="dsec">
+                <div class="t"><span>Presence</span><span class="st">edited</span></div>
+                <div class="sld"><div class="sr"><span class="n">Vibrance</span><span class="v on">+18</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:9%"></span><span class="th" style="left:59%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="n">Clarity</span><span class="v on">+22</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:11%"></span><span class="th" style="left:61%"></span></div></div>
+              </div>
+            </div>
+            <div class="dfoot">
+              <button class="expbtn"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg>Export photo</button>
+            </div>
+          </aside>
+
+          <!-- bottom filmstrip -->
+          <div class="strip">
+            <button class="nav" aria-label="prev"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+            <div class="frames">
+              <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#6a5233,#241a12 55%,#8a6a3a)"></div><div class="dots"><i></i><i></i><i></i></div></div>
+              <div class="fr rej"><div class="ph" style="background:linear-gradient(135deg,#4a4a52,#1a1a1f 55%,#5c5c66)"></div><span class="flag r"></span></div>
+              <div class="fr active"><div class="ph" style="background:radial-gradient(120% 130% at 34% 26%,#3a5a5f,#20343c 44%,#0f1a1f)"></div><span class="flag p"></span><div class="dots"><i></i><i></i><i></i><i></i><i></i></div></div>
+              <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#334a5c,#12181f 60%,#4a6f86)"></div><span class="flag p"></span><div class="dots"><i></i><i></i><i></i><i></i></div></div>
+              <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#2f4a3a,#101a15 55%,#3f6a4f)"></div></div>
+              <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#5c3f52,#1f1219 55%,#7a5470)"></div><span class="flag p"></span><div class="dots"><i></i><i></i></div></div>
+              <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#54492f,#1a1710 55%,#6f6140)"></div></div>
+              <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#2b3f4a,#0f1a1f 60%,#3a5a5f)"></div><div class="dots"><i></i><i></i><i></i></div></div>
+              <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#3a2f5c,#14101f 55%,#54487a)"></div></div>
+            </div>
+            <div class="pos"><b>42</b> / 1,284</div>
+            <button class="nav" aria-label="next"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+          </div>
+
+          <!-- dim behind palette -->
+          <div class="dim"></div>
+
+          <!-- command palette -->
+          <div class="palette">
+            <div class="pq">
+              <svg class="sic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+              <span class="qtext">expo<span class="caret"></span></span>
+              <span class="kbd">⌘K</span>
+            </div>
+            <div class="plist">
+              <div class="pgrp">Adjust</div>
+              <div class="pi on"><svg class="pic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>Exposure<span class="meta">+EV</span></div>
+              <div class="pgrp">Actions</div>
+              <div class="pi"><svg class="pic" viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg>Export photos…<span class="kbd">⌘E</span></div>
+              <div class="pi"><svg class="pic" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>Set rating<span class="kbd">1–5</span></div>
+              <div class="pi danger"><svg class="pic" viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg>Reject<span class="kbd">X</span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">Trade-offs: <b>+</b> the image gets the whole frame and the keyboard-first flow is fast for power users · <b>+</b> chrome stays quiet, nothing competes with the photo · <b>−</b> discoverability suffers — new users can't see the folder tree or edit stack until they invoke them.</p>
+</div>
+</body>
+</html>

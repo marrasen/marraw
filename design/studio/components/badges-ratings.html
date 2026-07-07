@@ -1,0 +1,117 @@
+<!-- @dsCard group="Components" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Badges &amp; Ratings</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--primary:#2DD4BF;--primary-fg:#05211D;--accent:#1B2A2B;--ring:#2DD4BF;--success:#34D399;--warning:#F5B14C;--destructive:#F0616D;--info:#38BDF8;
+    --hair:rgba(255,255,255,.06);--shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .theme-light{--bg:#F5F7F9;--card:#FFFFFF;--muted:#EAEEF1;--muted-fg:#5A6672;--fg:#0F1214;--border:#DCE2E7;--primary:#0E9C8C;--primary-fg:#FFFFFF;--accent:#E3F3F0;--ring:#14B8A6;--success:#0E9C6E;--warning:#C77A17;--destructive:#DC2A3A;--info:#0C82C7;
+    --hair:rgba(16,20,24,.06);--shadow-1:0 1px 2px rgba(16,20,24,.08);--shadow-2:0 14px 34px -14px rgba(16,20,24,.2);--lift:inset 0 1px 0 rgba(255,255,255,.75);color-scheme:light}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:64ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .stages{display:grid;grid-template-columns:1fr;gap:18px}
+  @media(min-width:880px){.stages{grid-template-columns:1fr 1fr}}
+  .stage{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:16px;padding:22px;box-shadow:var(--shadow-2)}
+  .stage-lbl{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:18px}
+  .stage-lbl .dot::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--primary);margin-right:7px;vertical-align:middle;box-shadow:0 0 0 3px color-mix(in oklab,var(--primary) 22%,transparent)}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+  .rowlbl{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-fg);margin:0 0 10px;font-weight:600}
+  .cluster{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:20px}
+  .cluster:last-child{margin-bottom:0}
+
+  .stars{display:inline-flex;gap:3px}
+  .stars svg{width:18px;height:18px;stroke:var(--muted-fg);fill:none;stroke-width:1.6;stroke-linejoin:round}
+  .stars svg.f{stroke:none;fill:var(--primary)}
+  .stars.big svg{width:24px;height:24px}
+
+  .badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:500;border:1px solid var(--border);background:var(--card);color:var(--fg);box-shadow:var(--lift)}
+  .badge.count{font-family:var(--font-mono);font-variant-numeric:tabular-nums;min-width:22px;justify-content:center;padding:0 8px}
+  .badge.teal{background:color-mix(in oklab,var(--primary) 16%,transparent);border-color:color-mix(in oklab,var(--primary) 42%,var(--border));color:var(--primary)}
+  .badge.green{background:color-mix(in oklab,var(--success) 16%,transparent);border-color:color-mix(in oklab,var(--success) 42%,var(--border));color:var(--success)}
+  .badge.red{background:color-mix(in oklab,var(--destructive) 15%,transparent);border-color:color-mix(in oklab,var(--destructive) 42%,var(--border));color:var(--destructive)}
+  .badge .d{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .chip-raw{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.06em}
+
+  .labels{display:flex;gap:8px;flex-wrap:wrap}
+  .lab{display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 10px;border-radius:7px;font-size:12px;color:var(--fg);background:var(--card);border:1px solid var(--border);box-shadow:var(--lift)}
+  .lab .sw{width:9px;height:9px;border-radius:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Components · Status</p>
+    <h1>Ratings, flags &amp; badges</h1>
+    <p class="lede">The vocabulary of culling. Stars fill teal because a rating <i>is</i> an active choice. Flags and color labels keep their own conventional hues — they encode meaning, not interaction — while neutral pill badges carry counts and states.</p>
+  </header>
+
+  <div class="stages">
+    <section class="stage theme-dark">
+      <div class="stage-lbl"><span class="dot">Dark</span><span>rating · flags</span></div>
+
+      <p class="rowlbl">Star rating · 1–5</p>
+      <div class="cluster" style="gap:22px">
+        <span class="stars"><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></span>
+        <span class="stars big"><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></span>
+      </div>
+
+      <p class="rowlbl">Flags &amp; state</p>
+      <div class="cluster">
+        <span class="badge green"><span class="d"></span>Picked</span>
+        <span class="badge red"><span class="d"></span>Rejected</span>
+        <span class="badge">Unflagged</span>
+        <span class="badge teal">Edited</span>
+        <span class="badge chip-raw">RAW · ARW</span>
+      </div>
+
+      <p class="rowlbl">Counts</p>
+      <div class="cluster">
+        <span class="badge count">96</span>
+        <span class="badge count teal">12</span>
+        <span class="badge count" style="color:var(--muted-fg)">0</span>
+        <span class="badge">1,284 total</span>
+      </div>
+    </section>
+
+    <section class="stage theme-light">
+      <div class="stage-lbl"><span class="dot">Light</span><span>color labels</span></div>
+
+      <p class="rowlbl">Color labels</p>
+      <div class="cluster labels">
+        <span class="lab"><span class="sw" style="background:#DC2A3A"></span>Select</span>
+        <span class="lab"><span class="sw" style="background:#C77A17"></span>Review</span>
+        <span class="lab"><span class="sw" style="background:#0E9C6E"></span>Approved</span>
+        <span class="lab"><span class="sw" style="background:#0C82C7"></span>Client</span>
+        <span class="lab"><span class="sw" style="background:#7C5CFC"></span>Archive</span>
+      </div>
+
+      <p class="rowlbl">Rating</p>
+      <div class="cluster">
+        <span class="stars"><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></span>
+      </div>
+
+      <p class="rowlbl">State</p>
+      <div class="cluster">
+        <span class="badge green"><span class="d"></span>Picked</span>
+        <span class="badge teal">Edited</span>
+        <span class="badge count teal">12</span>
+        <span class="badge chip-raw">RAW · ARW</span>
+      </div>
+    </section>
+  </div>
+
+  <p class="foot">Built on <b>ui/badge.tsx</b> (cva variants) · stars = lucide Star, filled = <b>--primary</b> · labels are data categories, exempt from the accent rule</p>
+</div>
+</body>
+</html>

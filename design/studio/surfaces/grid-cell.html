@@ -1,0 +1,123 @@
+<!-- @dsCard group="App Surfaces" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Grid cell</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--primary:#2DD4BF;--accent:#1B2A2B;--ring:#2DD4BF;--success:#34D399;--destructive:#F0616D;
+    --shadow-1:0 1px 3px rgba(0,0,0,.55);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:66ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .stage{background:var(--bg);border:1px solid var(--border);border-radius:16px;padding:24px;box-shadow:var(--shadow-2)}
+  .stage-lbl{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:20px}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+  @media(min-width:680px){.grid{grid-template-columns:repeat(3,1fr)}}
+  .item{display:flex;flex-direction:column;gap:9px}
+  .cap{font-family:var(--font-mono);font-size:10px;color:var(--muted-fg);text-align:center}
+  .cap b{color:var(--primary);font-weight:500}
+
+  .cell{position:relative;border-radius:10px;overflow:hidden;border:1px solid var(--border);aspect-ratio:3/2;box-shadow:var(--shadow-1)}
+  .cell .ph{position:absolute;inset:0}
+  .cell.sel{outline:2px solid var(--ring);outline-offset:2px;border-color:transparent}
+  .cell.hover{outline:2px solid color-mix(in oklab,var(--ring) 45%,transparent);outline-offset:2px}
+  .cell.rej .ph{filter:grayscale(.55) brightness(.6)}
+  .top{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;padding:7px;background:linear-gradient(180deg,rgba(4,7,9,.55),transparent)}
+  .bot{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:7px 9px;background:linear-gradient(0deg,rgba(4,7,9,.7),transparent)}
+  .fn{font-family:var(--font-mono);font-size:10px;color:#e6edf1;text-shadow:0 1px 2px rgba(0,0,0,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stars{display:inline-flex;gap:2px}
+  .stars svg{width:12px;height:12px;stroke:rgba(255,255,255,.55);fill:none;stroke-width:1.6}
+  .stars svg.f{stroke:none;fill:var(--primary)}
+  .pill{display:inline-flex;align-items:center;gap:4px;height:19px;padding:0 7px;border-radius:999px;font-size:10px;font-weight:600;color:#fff;backdrop-filter:blur(4px)}
+  .pill svg{width:11px;height:11px;stroke-width:2.4}
+  .pill.pick{background:color-mix(in oklab,var(--success) 62%,rgba(0,0,0,.3))}
+  .pill.rej{background:color-mix(in oklab,var(--destructive) 62%,rgba(0,0,0,.3))}
+  .pill.edit{background:color-mix(in oklab,var(--primary) 55%,rgba(0,0,0,.3));color:#04211d}
+  .idx{font-family:var(--font-mono);font-size:9.5px;color:rgba(255,255,255,.7);background:rgba(4,7,9,.5);border-radius:5px;padding:1px 5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">App Surfaces · Library</p>
+    <h1>Grid cell</h1>
+    <p class="lede">The unit of culling. Metadata floats over the frame in soft gradient scrims so it never blocks the photo. Selection is a crisp 2px teal ring; picks and rejects keep their semantic colors; a rejected frame dims and desaturates so your eye skips it.</p>
+  </header>
+
+  <section class="stage theme-dark">
+    <div class="stage-lbl"><span>Cell states</span><span>3:2 · scrim overlays</span></div>
+    <div class="grid">
+
+      <div class="item">
+        <div class="cell sel">
+          <div class="ph" style="background:linear-gradient(135deg,#2b3f4a,#0f1a1f 60%,#3a5a5f)"></div>
+          <div class="top"><span class="idx">01</span><span class="pill pick"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>Pick</span></div>
+          <div class="bot"><span class="stars"><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></span><span class="fn">DSC07421</span></div>
+        </div>
+        <div class="cap"><b>Selected</b> · picked · ★5</div>
+      </div>
+
+      <div class="item">
+        <div class="cell">
+          <div class="ph" style="background:linear-gradient(135deg,#6a5233,#241a12 55%,#8a6a3a)"></div>
+          <div class="top"><span class="idx">02</span><span class="pill edit">EDIT</span></div>
+          <div class="bot"><span class="stars"><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></span><span class="fn">DSC07422</span></div>
+        </div>
+        <div class="cap">Edited · ★3</div>
+      </div>
+
+      <div class="item">
+        <div class="cell hover">
+          <div class="ph" style="background:linear-gradient(135deg,#334a5c,#12181f 60%,#4a6f86)"></div>
+          <div class="top"><span class="idx">03</span></div>
+          <div class="bot"><span class="stars"><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></span><span class="fn">DSC07423</span></div>
+        </div>
+        <div class="cap"><b>Hover</b> · ★4</div>
+      </div>
+
+      <div class="item">
+        <div class="cell rej">
+          <div class="ph" style="background:linear-gradient(135deg,#4a4a52,#1a1a1f 55%,#5c5c66)"></div>
+          <div class="top"><span class="idx">04</span><span class="pill rej"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>Reject</span></div>
+          <div class="bot"><span class="stars"></span><span class="fn">DSC07424</span></div>
+        </div>
+        <div class="cap"><b>Rejected</b> · dimmed</div>
+      </div>
+
+      <div class="item">
+        <div class="cell">
+          <div class="ph" style="background:linear-gradient(135deg,#2f4a3a,#101a15 55%,#3f6a4f)"></div>
+          <div class="top"><span class="idx">05</span></div>
+          <div class="bot"><span class="stars"><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></span><span class="fn">DSC07425</span></div>
+        </div>
+        <div class="cap">Unrated</div>
+      </div>
+
+      <div class="item">
+        <div class="cell">
+          <div class="ph" style="background:linear-gradient(135deg,#5c3f52,#1f1219 55%,#7a5470)"></div>
+          <div class="top"><span class="idx">06</span><span class="pill pick"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>Pick</span></div>
+          <div class="bot"><span class="stars"><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></span><span class="fn">DSC07426</span></div>
+        </div>
+        <div class="cap">Picked · ★2</div>
+      </div>
+
+    </div>
+  </section>
+
+  <p class="foot">Rendered by <b>GridView.tsx</b> (virtualized) · selection ring = <b>--ring</b> · overlays fade in on hover/selection</p>
+</div>
+</body>
+</html>

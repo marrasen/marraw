@@ -1,0 +1,283 @@
+<!-- @dsCard group="Explorations · Whole-app" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>marraw · C · Cinema Deck</title>
+<style>
+  :root{
+    --bg:#0F1214;--titlebar:#0d1113;--side:#121619;--work:#0d1012;--panel:#14181B;--card:#171B1E;--popover:#1A1F23;
+    --muted:#242c31;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#232b31;--input:#1c2226;
+    --primary:#2DD4BF;--primary-fg:#04211d;--accent:#1B2A2B;--ring:#2DD4BF;
+    --success:#34D399;--warning:#F5B14C;--destructive:#F0616D;--info:#38BDF8;
+    --radius:8px;
+    --shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-2:0 18px 44px -14px rgba(0,0,0,.7);
+    --lift:inset 0 1px 0 rgba(255,255,255,.05);--track-in:inset 0 1px 2px rgba(0,0,0,.55);
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+    /* glass */
+    --glass:rgba(13,17,19,.62);--glass-hi:rgba(20,26,29,.74);--hair:rgba(255,255,255,.08);
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:
+      radial-gradient(1200px 560px at 100% -12%,#14201f 0%,transparent 58%),#090c0e;
+    color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(14px,3vw,36px) 44px}
+  .wrap{max-width:1280px;margin:0 auto}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  /* ---------- page header ---------- */
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--primary);display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,var(--primary),transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:74ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:24px}
+  .foot{margin-top:22px;font-family:var(--font-mono);font-size:11px;color:#5f6d75}
+  .foot b{color:#8fa0a8;font-weight:500}
+
+  /* ---------- window ---------- */
+  .app{position:relative;width:100%;height:820px;border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-2);background:var(--bg);color:var(--fg);display:flex;flex-direction:column}
+
+  /* titlebar */
+  .tb{position:relative;z-index:6;display:flex;align-items:center;gap:12px;height:38px;padding:0 13px;background:var(--titlebar);border-bottom:1px solid var(--border)}
+  .lights{display:flex;gap:7px}
+  .lights i{width:11px;height:11px;border-radius:50%}
+  .lights .r{background:#f0616d}.lights .y{background:#f5b14c}.lights .g{background:#34d399}
+  .tb .title{font-size:12px;color:var(--muted-fg);font-family:var(--font-mono)}
+  .tb .title b{color:var(--fg);font-weight:500}
+  .tb .grow{flex:1}
+  .tb .icbtn{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;color:var(--muted-fg);border:1px solid transparent}
+  .tb .icbtn:hover{background:var(--card);border-color:var(--border)}
+  .tb .icbtn svg{width:15px;height:15px}
+
+  /* ---------- cinema canvas ---------- */
+  .canvas{position:relative;flex:1;min-height:0;overflow:hidden}
+  /* the photo fills everything */
+  .photo{position:absolute;inset:0;
+    background:
+      radial-gradient(120% 90% at 62% 30%,#5b7f86 0%,#33565f 32%,#1c333b 58%,#0d1a20 82%),
+      linear-gradient(200deg,#7a8a63 0%,transparent 40%),
+      linear-gradient(20deg,#2a1f2e 0%,transparent 55%);
+    background-blend-mode:screen,soft-light,normal}
+  /* subtle horizon / atmosphere bands so it reads as a landscape */
+  .photo::after{content:"";position:absolute;inset:0;
+    background:
+      linear-gradient(180deg,rgba(140,175,190,.14) 0%,transparent 30%),
+      linear-gradient(0deg,rgba(10,16,20,.55) 0%,transparent 34%),
+      radial-gradient(60% 40% at 30% 78%,rgba(245,177,76,.10),transparent 70%);}
+  /* cinematic vignette */
+  .vignette{position:absolute;inset:0;pointer-events:none;
+    box-shadow:
+      inset 0 0 180px 40px rgba(4,6,8,.72),
+      inset 0 0 60px 0 rgba(4,6,8,.45);
+    background:radial-gradient(130% 120% at 50% 46%,transparent 46%,rgba(4,6,8,.55) 100%)}
+  /* faint film grain via repeating gradient */
+  .grain{position:absolute;inset:0;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+    background:repeating-linear-gradient(0deg,#fff 0 1px,transparent 1px 2px)}
+
+  /* ---------- floating nav pill (top-left) ---------- */
+  .navpill{position:absolute;top:14px;left:14px;z-index:5;display:flex;align-items:center;gap:8px;height:30px;padding:0 12px 0 10px;
+    border-radius:999px;background:var(--glass);backdrop-filter:blur(14px) saturate(1.1);-webkit-backdrop-filter:blur(14px) saturate(1.1);
+    border:1px solid var(--hair);box-shadow:var(--shadow-1),var(--lift);color:var(--fg);font-size:12.5px}
+  .navpill svg{width:14px;height:14px;color:var(--muted-fg)}
+  .navpill b{font-weight:600}
+  .navpill .car{width:13px;height:13px;color:var(--muted-fg)}
+  .navpill:hover{background:var(--glass-hi)}
+  /* faint nav overlay peeking from left edge */
+  .navpeek{position:absolute;top:58px;left:0;z-index:4;width:186px;transform:translateX(-142px);
+    border-radius:0 12px 12px 0;background:var(--glass);backdrop-filter:blur(16px) saturate(1.1);-webkit-backdrop-filter:blur(16px) saturate(1.1);
+    border:1px solid var(--hair);border-left:0;box-shadow:var(--shadow-2);padding:8px 8px 10px;opacity:.9}
+  .navpeek .grip{position:absolute;right:6px;top:0;bottom:0;width:2px;margin:auto 0;height:34px;border-radius:2px;background:var(--muted)}
+  .navpeek .st{font-size:9.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);padding:4px 6px 7px}
+  .navpeek .ti{display:flex;align-items:center;gap:7px;padding:5px 7px;border-radius:6px;font-size:12px;color:var(--fg);position:relative}
+  .navpeek .ti svg{width:13px;height:13px;color:var(--muted-fg);flex:none}
+  .navpeek .ti .ct{margin-left:auto;font-family:var(--font-mono);font-size:9.5px;color:var(--muted-fg)}
+  .navpeek .ti.sel{background:color-mix(in oklab,var(--primary) 16%,transparent);color:var(--primary)}
+  .navpeek .ti.sel svg,.navpeek .ti.sel .ct{color:var(--primary)}
+
+  /* ---------- TOP HUD ---------- */
+  .hud{position:absolute;top:0;left:0;right:0;z-index:3;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;
+    height:52px;padding:0 18px;
+    background:linear-gradient(180deg,rgba(9,12,14,.72),rgba(9,12,14,.28) 70%,transparent);
+    backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--hair)}
+  .hud .l{display:flex;align-items:baseline;gap:12px;min-width:0;padding-left:150px}
+  .hud .fn{font-family:var(--font-mono);font-size:13px;color:var(--fg);letter-spacing:.01em}
+  .hud .exif{font-family:var(--font-mono);font-size:11px;color:var(--muted-fg);font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* center star rating */
+  .hud .stars{display:inline-flex;align-items:center;gap:3px;justify-self:center}
+  .hud .stars svg{width:16px;height:16px;stroke:rgba(255,255,255,.42);fill:none;stroke-width:1.7}
+  .hud .stars svg.f{stroke:none;fill:var(--primary)}
+  .hud .r{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+  .hud .conn{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:10.5px;color:var(--success)}
+  .hud .conn .d{width:6px;height:6px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px color-mix(in oklab,var(--success) 22%,transparent)}
+  .hud .gbtn{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--muted-fg);
+    background:rgba(20,24,27,.5);border:1px solid var(--hair)}
+  .hud .gbtn:hover{color:var(--fg);background:rgba(28,34,38,.7)}
+  .hud .gbtn svg{width:15px;height:15px}
+  .hud .gbtn.pick{color:var(--success);border-color:color-mix(in oklab,var(--success) 34%,transparent);background:color-mix(in oklab,var(--success) 12%,rgba(20,24,27,.5))}
+
+  /* ---------- BOTTOM DECK ---------- */
+  .deck{position:absolute;left:14px;right:14px;bottom:14px;z-index:5;display:grid;grid-template-columns:minmax(0,1fr) 480px;
+    border-radius:12px;background:var(--glass);backdrop-filter:blur(20px) saturate(1.15);-webkit-backdrop-filter:blur(20px) saturate(1.15);
+    border:1px solid var(--hair);box-shadow:var(--shadow-2),var(--lift);overflow:hidden}
+
+  /* filmstrip zone */
+  .strip{padding:12px 6px 12px 14px;min-width:0;display:flex;flex-direction:column;gap:9px;border-right:1px solid var(--hair)}
+  .strip .cap{display:flex;align-items:center;justify-content:space-between;padding-right:8px}
+  .strip .cap .t{font-size:9.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg)}
+  .strip .cap .c{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-fg);font-variant-numeric:tabular-nums}
+  .strip .cap .c b{color:var(--primary);font-weight:500}
+  .frames{display:flex;gap:9px;align-items:center;overflow:hidden;padding:3px 2px 2px}
+  .fr{position:relative;flex:none;width:88px;height:59px;border-radius:7px;overflow:hidden;border:1px solid var(--border);
+    box-shadow:0 1px 3px rgba(0,0,0,.5);opacity:.5;transition:none}
+  .fr .ph{position:absolute;inset:0}
+  .fr.rej .ph{filter:grayscale(.6) brightness(.55)}
+  .fr .fg{position:absolute;top:4px;left:4px;width:6px;height:6px;border-radius:50%}
+  .fr .fg.p{background:var(--success)}.fr .fg.r{background:var(--destructive)}
+  .fr .no{position:absolute;bottom:3px;right:5px;font-family:var(--font-mono);font-size:8px;color:rgba(230,237,241,.8)}
+  .fr.on{opacity:1;width:96px;height:64px;border-color:transparent;outline:2px solid var(--ring);outline-offset:2px;
+    box-shadow:0 10px 22px -8px rgba(0,0,0,.8),0 0 0 4px color-mix(in oklab,var(--ring) 16%,transparent);transform:translateY(-3px)}
+  .fr.dim{opacity:.34}
+
+  /* develop cluster zone */
+  .dev{padding:11px 14px 12px 15px;display:grid;grid-template-columns:104px 1fr;gap:12px;border-left:0}
+  .dev .hcol{display:flex;flex-direction:column;gap:7px}
+  .dhist{height:52px;border-radius:7px;background:linear-gradient(180deg,#0c1013,#0e1315);border:1px solid var(--hair);overflow:hidden;box-shadow:var(--track-in);position:relative}
+  .dhist svg{position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen}
+  .dhead{display:flex;align-items:center;justify-content:space-between}
+  .dhead .t{font-size:9.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-fg)}
+  .dhead .st{font-family:var(--font-mono);font-size:9.5px;color:var(--primary)}
+  .expbtn{height:30px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+  .expbtn svg{width:14px;height:14px;stroke-width:2.2}
+
+  /* slider grid: 2 columns of 3 */
+  .slds{display:grid;grid-template-columns:1fr 1fr;column-gap:16px;row-gap:9px;align-content:center}
+  .sld{min-width:0}
+  .sr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+  .sr .n{font-size:11px;color:#c3cdd3}
+  .sr .v{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10px;color:var(--muted-fg)}
+  .sr .v.on{color:var(--primary)}
+  .tk{position:relative;height:3px;border-radius:999px;background:var(--muted);box-shadow:var(--track-in)}
+  .cen{position:absolute;top:-2px;bottom:-2px;left:50%;width:1px;background:var(--muted-fg);opacity:.5}
+  .fl{position:absolute;top:0;height:100%;border-radius:999px;background:var(--primary)}
+  .th{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;background:var(--fg);border:1px solid rgba(0,0,0,.35);transform:translate(-50%,-50%);box-shadow:0 1px 2px rgba(0,0,0,.5)}
+  .th.on{background:var(--primary);border-color:transparent;box-shadow:0 0 0 3px color-mix(in oklab,var(--ring) 26%,transparent)}
+
+  @media(max-width:900px){
+    .deck{grid-template-columns:1fr}
+    .dev{border-top:1px solid var(--hair)}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Exploration · Whole-app</p>
+    <h1>C · Cinema Deck</h1>
+    <p class="lede">A darkroom rethink: the photograph fills the whole room, edge-to-edge behind a vignette, and every control collapses into a heads-up deck. A glass HUD rides the top edge, a translucent tray floats along the bottom, and navigation stays hidden until summoned — teal appears only on the frame you're holding and the control you're turning.</p>
+  </header>
+
+  <div class="app">
+    <!-- titlebar -->
+    <div class="tb">
+      <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+      <span class="title"><b>marraw</b> · Iceland</span>
+      <span class="grow"></span>
+      <span class="icbtn"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
+      <span class="icbtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.3-2.6H10l-.3 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.3 2.6h4l.3-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"/></svg></span>
+    </div>
+
+    <!-- cinema canvas -->
+    <div class="canvas">
+      <div class="photo"></div>
+      <div class="grain"></div>
+      <div class="vignette"></div>
+
+      <!-- floating nav pill -->
+      <div class="navpill">
+        <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <b>Iceland</b>
+        <svg class="car" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+
+      <!-- faint nav overlay peeking from left edge -->
+      <div class="navpeek">
+        <div class="grip"></div>
+        <div class="st">Library</div>
+        <div class="ti sel"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Iceland<span class="ct">1,284</span></div>
+        <div class="ti"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>South coast<span class="ct">420</span></div>
+        <div class="ti"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Highlands<span class="ct">512</span></div>
+      </div>
+
+      <!-- TOP HUD -->
+      <div class="hud">
+        <div class="l">
+          <span class="fn">DSC07421.ARW</span>
+          <span class="exif">ƒ/2.8 · 1/250 · ISO 400 · 24mm</span>
+        </div>
+        <div class="stars">
+          <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+          <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+          <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+          <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+          <svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+        </div>
+        <div class="r">
+          <span class="conn"><span class="d"></span>Connected · :8483</span>
+          <span class="gbtn pick" title="Picked"><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg></span>
+          <span class="gbtn" title="Info"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg></span>
+          <span class="gbtn" title="Fullscreen"><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></span>
+        </div>
+      </div>
+
+      <!-- BOTTOM DECK -->
+      <div class="deck">
+        <!-- filmstrip -->
+        <div class="strip">
+          <div class="cap">
+            <span class="t">Filmstrip</span>
+            <span class="c"><b>96</b> picked · 1,284</span>
+          </div>
+          <div class="frames">
+            <div class="fr dim"><div class="ph" style="background:linear-gradient(135deg,#6a5233,#241a12 55%,#8a6a3a)"></div><span class="fg p"></span><span class="no">7419</span></div>
+            <div class="fr rej dim"><div class="ph" style="background:linear-gradient(135deg,#4a4a52,#1a1a1f 55%,#5c5c66)"></div><span class="fg r"></span><span class="no">7420</span></div>
+            <div class="fr on"><div class="ph" style="background:linear-gradient(135deg,#3a5f66,#12262c 58%,#5b8f86)"></div><span class="fg p"></span><span class="no">7421</span></div>
+            <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#334a5c,#12181f 60%,#4a6f86)"></div><span class="fg p"></span><span class="no">7422</span></div>
+            <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#2f4a3a,#101a15 55%,#3f6a4f)"></div><span class="no">7423</span></div>
+            <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#5c3f52,#1f1219 55%,#7a5470)"></div><span class="fg p"></span><span class="no">7424</span></div>
+            <div class="fr dim"><div class="ph" style="background:linear-gradient(135deg,#2b3f4a,#0f1a1f 60%,#3a5a5f)"></div><span class="no">7425</span></div>
+            <div class="fr dim"><div class="ph" style="background:linear-gradient(135deg,#6a5233,#241a12 55%,#8a6a3a)"></div><span class="fg p"></span><span class="no">7426</span></div>
+          </div>
+        </div>
+
+        <!-- develop cluster -->
+        <div class="dev">
+          <div class="hcol">
+            <div class="dhead"><span class="t">Develop</span><span class="st">edited</span></div>
+            <div class="dhist">
+              <svg viewBox="0 0 100 40" preserveAspectRatio="none">
+                <path d="M0,40 L2,33 8,26 16,16 26,10 36,18 46,14 56,20 66,10 78,16 88,7 96,22 100,32 100,40Z" fill="#38BDF8" stroke="none" opacity=".7"/>
+                <path d="M0,40 L3,32 9,24 17,13 27,8 37,16 47,12 57,19 67,8 79,14 89,6 97,21 100,31 100,40Z" fill="#34D399" stroke="none" opacity=".7"/>
+                <path d="M0,40 L4,35 11,29 19,20 29,12 41,18 53,10 65,16 75,10 85,18 93,12 100,27 100,40Z" fill="#F0616D" stroke="none" opacity=".7"/>
+              </svg>
+            </div>
+            <div class="expbtn"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg>Export 96</div>
+          </div>
+
+          <div class="slds">
+            <div class="sld"><div class="sr"><span class="n">Exposure</span><span class="v on">+0.40</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:8%"></span><span class="th on" style="left:58%"></span></div></div>
+            <div class="sld"><div class="sr"><span class="n">Contrast</span><span class="v on">+12</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:6%"></span><span class="th on" style="left:56%"></span></div></div>
+            <div class="sld"><div class="sr"><span class="n">Highlights</span><span class="v on">−38</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:31%;width:19%"></span><span class="th on" style="left:31%"></span></div></div>
+            <div class="sld"><div class="sr"><span class="n">Shadows</span><span class="v on">+24</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:12%"></span><span class="th on" style="left:62%"></span></div></div>
+            <div class="sld"><div class="sr"><span class="n">Vibrance</span><span class="v on">+18</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:9%"></span><span class="th on" style="left:59%"></span></div></div>
+            <div class="sld"><div class="sr"><span class="n">Clarity</span><span class="v on">+22</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:11%"></span><span class="th on" style="left:61%"></span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot">Trade-offs: <b>+</b> maximal image, zero chrome — culling feels like a screening room · <b>+</b> HUD + deck keep hands on rate/develop without leaving the photo · <b>−</b> hidden nav and dense glass deck trade discoverability and at-a-glance grid scanning for immersion</p>
+</div>
+</body>
+</html>

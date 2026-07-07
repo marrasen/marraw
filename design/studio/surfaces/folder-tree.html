@@ -1,0 +1,96 @@
+<!-- @dsCard group="App Surfaces" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Folder tree</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--side:#121619;--card:#171B1E;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--input:#1c2226;--primary:#2DD4BF;--accent:#1B2A2B;--accent-fg:#c7d0d6;--ring:#2DD4BF;
+    --shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .theme-light{--bg:#F5F7F9;--side:#FBFCFD;--card:#FFFFFF;--muted:#EAEEF1;--muted-fg:#5A6672;--fg:#0F1214;--border:#DCE2E7;--input:#F1F4F6;--primary:#0E9C8C;--accent:#E9F5F2;--accent-fg:#0F1214;--ring:#14B8A6;
+    --shadow-2:0 14px 34px -14px rgba(16,20,24,.2);--lift:inset 0 1px 0 rgba(255,255,255,.75);color-scheme:light}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:64ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .stages{display:grid;grid-template-columns:1fr;gap:18px}
+  @media(min-width:760px){.stages{grid-template-columns:1fr 1fr}}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  .side{background:var(--side);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-2),var(--lift);overflow:hidden;color:var(--fg);width:100%}
+  .sh{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-bottom:1px solid var(--border)}
+  .sh .t{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-fg)}
+  .sh .add{width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:var(--card);color:var(--muted-fg);cursor:pointer;display:grid;place-items:center;box-shadow:var(--lift)}
+  .sh .add svg{width:14px;height:14px}
+  .tree{padding:8px}
+
+  .ti{display:flex;align-items:center;gap:7px;padding:6px 8px;border-radius:7px;font-size:13px;color:var(--fg);cursor:pointer;position:relative}
+  .ti:hover{background:var(--accent);color:var(--accent-fg)}
+  .ti .chev{width:13px;height:13px;color:var(--muted-fg);flex:none;transition:transform .15s}
+  .ti .chev.closed{transform:rotate(-90deg)}
+  .ti .chev.leaf{visibility:hidden}
+  .ti .ic{width:15px;height:15px;color:var(--muted-fg);flex:none}
+  .ti .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ti .ct{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--muted-fg)}
+  .ti.sel{background:color-mix(in oklab,var(--primary) 15%,transparent);color:var(--primary)}
+  .ti.sel .ic,.ti.sel .ct{color:var(--primary)}
+  .ti.sel::before{content:"";position:absolute;left:-8px;top:5px;bottom:5px;width:2px;border-radius:2px;background:var(--primary)}
+  .kids{margin-left:13px;padding-left:8px;border-left:1px solid var(--border)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">App Surfaces · Navigation</p>
+    <h1>Folder tree</h1>
+    <p class="lede">The left rail. A quiet, monochrome hierarchy where only the selected folder carries color — a teal fill, a matching left accent bar, and teal counts. Nesting is drawn with a single hairline guide so deep trees stay legible without visual noise.</p>
+  </header>
+
+  <div class="stages">
+    <section class="theme-dark" style="display:flex"><div class="side">
+      <div class="sh"><span class="t">Library</span><button class="add" title="Import folder"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div>
+      <div class="tree">
+        <div class="ti"><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">2026</span><span class="ct">2,144</span></div>
+        <div class="kids">
+          <div class="ti sel"><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">Iceland</span><span class="ct">1,284</span></div>
+          <div class="kids">
+            <div class="ti"><svg class="chev leaf" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">Day 1 · South coast</span><span class="ct">420</span></div>
+            <div class="ti"><svg class="chev leaf" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">Day 2 · Highlands</span><span class="ct">512</span></div>
+            <div class="ti"><svg class="chev leaf" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">Day 3 · Glacier</span><span class="ct">352</span></div>
+          </div>
+          <div class="ti"><svg class="chev closed" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">Norway</span><span class="ct">860</span></div>
+        </div>
+        <div class="ti"><svg class="chev closed" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">2025</span><span class="ct">6,910</span></div>
+        <div class="ti"><svg class="chev leaf" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M4 20h16"/></svg><span class="nm">Recent imports</span><span class="ct">96</span></div>
+      </div>
+    </div></section>
+
+    <section class="theme-light" style="display:flex"><div class="side">
+      <div class="sh"><span class="t">Library</span><button class="add" title="Import folder"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div>
+      <div class="tree">
+        <div class="ti"><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">2026</span><span class="ct">2,144</span></div>
+        <div class="kids">
+          <div class="ti sel"><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">Iceland</span><span class="ct">1,284</span></div>
+          <div class="kids">
+            <div class="ti"><svg class="chev leaf" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">Day 1 · South coast</span><span class="ct">420</span></div>
+            <div class="ti"><svg class="chev leaf" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">Day 2 · Highlands</span><span class="ct">512</span></div>
+          </div>
+          <div class="ti"><svg class="chev closed" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">Norway</span><span class="ct">860</span></div>
+        </div>
+        <div class="ti"><svg class="chev closed" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg><svg class="ic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">2025</span><span class="ct">6,910</span></div>
+      </div>
+    </div></section>
+  </div>
+
+  <p class="foot">Rendered by <b>FolderTree.tsx</b> · selected folder = <b>--primary</b> fill + left accent bar · nesting guide = 1px <b>--border</b></p>
+</div>
+</body>
+</html>

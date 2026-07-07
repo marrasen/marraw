@@ -1,0 +1,114 @@
+<!-- @dsCard group="Components" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Progress &amp; Tasks</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--primary:#2DD4BF;--primary-fg:#05211D;--accent:#1B2A2B;--ring:#2DD4BF;--success:#34D399;--track-in:inset 0 1px 2px rgba(0,0,0,.55);
+    --hair:rgba(255,255,255,.06);--shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);--skel:#232b31;--skel-hi:#2c353b;color-scheme:dark}
+  .theme-light{--bg:#F5F7F9;--card:#FFFFFF;--muted:#E4E9ED;--muted-fg:#5A6672;--fg:#0F1214;--border:#DCE2E7;--primary:#0E9C8C;--primary-fg:#FFFFFF;--accent:#E3F3F0;--ring:#14B8A6;--success:#0E9C6E;--track-in:inset 0 1px 2px rgba(16,20,24,.12);
+    --hair:rgba(16,20,24,.06);--shadow-1:0 1px 2px rgba(16,20,24,.08);--shadow-2:0 14px 34px -14px rgba(16,20,24,.2);--lift:inset 0 1px 0 rgba(255,255,255,.75);--skel:#E7ECEF;--skel-hi:#F2F5F7;color-scheme:light}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:64ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .stages{display:grid;grid-template-columns:1fr;gap:18px}
+  @media(min-width:880px){.stages{grid-template-columns:1fr 1fr}}
+  .stage{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:16px;padding:22px;box-shadow:var(--shadow-2)}
+  .stage-lbl{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:18px}
+  .stage-lbl .dot::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--primary);margin-right:7px;vertical-align:middle;box-shadow:0 0 0 3px color-mix(in oklab,var(--primary) 22%,transparent)}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+  .rowlbl{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-fg);margin:0 0 12px;font-weight:600}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  .pbar{height:6px;border-radius:999px;background:var(--muted);overflow:hidden;box-shadow:var(--track-in);margin-bottom:8px}
+  .pbar .v{height:100%;border-radius:999px;background:linear-gradient(90deg,color-mix(in oklab,var(--primary) 80%,#000),var(--primary));box-shadow:0 0 10px color-mix(in oklab,var(--primary) 55%,transparent)}
+  .pbar.indet .v{width:38%;animation:slide 1.3s ease-in-out infinite}
+  @keyframes slide{0%{margin-left:-38%}100%{margin-left:100%}}
+  .pmeta{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;color:var(--muted-fg);margin-bottom:20px}
+  .pmeta .pct{color:var(--primary)}
+
+  .task{display:flex;align-items:center;gap:12px;padding:11px 13px;background:var(--card);border:1px solid var(--border);border-radius:11px;box-shadow:var(--lift);margin-bottom:10px}
+  .task:last-child{margin-bottom:0}
+  .tic{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;flex:none;background:var(--accent);color:var(--primary)}
+  .tic svg{width:16px;height:16px}
+  .tic.done{background:color-mix(in oklab,var(--success) 18%,transparent);color:var(--success)}
+  .tbody{flex:1;min-width:0}
+  .trow{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
+  .tname{font-size:12.5px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tpct{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--primary)}
+  .tpct.muted{color:var(--muted-fg)}
+  .mini{height:4px;border-radius:999px;background:var(--muted);overflow:hidden;box-shadow:var(--track-in)}
+  .mini .v{height:100%;background:var(--primary);border-radius:999px}
+  .spin{width:15px;height:15px;border-radius:50%;border:2px solid color-mix(in oklab,var(--primary) 30%,transparent);border-top-color:var(--primary);animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  .skgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .skcell{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px;box-shadow:var(--lift)}
+  .sk{background:linear-gradient(90deg,var(--skel) 25%,var(--skel-hi) 37%,var(--skel) 63%);background-size:280% 100%;animation:sh 1.5s linear infinite;border-radius:6px}
+  @keyframes sh{to{background-position:-280% 0}}
+  .sk.img{aspect-ratio:3/2;margin-bottom:8px;border-radius:7px}
+  .sk.l1{height:8px;width:70%;margin-bottom:6px}
+  .sk.l2{height:7px;width:45%}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Components · Feedback</p>
+    <h1>Progress, tasks &amp; skeletons</h1>
+    <p class="lede">Everything expensive — thumbnail pyramids, exports, cache scans — runs in the background and reports through the task tray. Progress reads teal with a faint glow; percentages are mono and tabular; skeletons shimmer cool while previews decode.</p>
+  </header>
+
+  <div class="stages">
+    <section class="stage theme-dark">
+      <div class="stage-lbl"><span class="dot">Dark</span><span>tasks</span></div>
+
+      <p class="rowlbl">Determinate</p>
+      <div class="pbar"><div class="v" style="width:68%"></div></div>
+      <div class="pmeta"><span>Exporting JPEGs</span><span class="pct">68% · 8 of 12</span></div>
+
+      <p class="rowlbl">Indeterminate</p>
+      <div class="pbar indet"><div class="v"></div></div>
+      <div class="pmeta"><span>Scanning folder…</span><span>—</span></div>
+
+      <p class="rowlbl">Task tray</p>
+      <div class="task">
+        <div class="tic"><span class="spin"></span></div>
+        <div class="tbody"><div class="trow"><span class="tname">Building previews · Iceland_2026</span><span class="tpct">42%</span></div><div class="mini"><div class="v" style="width:42%"></div></div></div>
+      </div>
+      <div class="task">
+        <div class="tic done"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
+        <div class="tbody"><div class="trow"><span class="tname">Export complete · 12 photos</span><span class="tpct muted">done</span></div><div class="mini"><div class="v" style="width:100%"></div></div></div>
+      </div>
+    </section>
+
+    <section class="stage theme-light">
+      <div class="stage-lbl"><span class="dot">Light</span><span>skeletons</span></div>
+      <p class="rowlbl">Loading grid</p>
+      <div class="skgrid">
+        <div class="skcell"><div class="sk img"></div><div class="sk l1"></div><div class="sk l2"></div></div>
+        <div class="skcell"><div class="sk img"></div><div class="sk l1"></div><div class="sk l2"></div></div>
+        <div class="skcell"><div class="sk img"></div><div class="sk l1"></div><div class="sk l2"></div></div>
+        <div class="skcell"><div class="sk img"></div><div class="sk l1"></div><div class="sk l2"></div></div>
+        <div class="skcell"><div class="sk img"></div><div class="sk l1"></div><div class="sk l2"></div></div>
+        <div class="skcell"><div class="sk img"></div><div class="sk l1"></div><div class="sk l2"></div></div>
+      </div>
+      <p class="rowlbl" style="margin:20px 0 12px">Determinate</p>
+      <div class="pbar"><div class="v" style="width:34%"></div></div>
+      <div class="pmeta"><span>Clearing cache</span><span class="pct">34%</span></div>
+    </section>
+  </div>
+
+  <p class="foot">Progress via <b>ui/progress.tsx</b> · task tray = <b>TaskTray.tsx</b> · skeletons = <b>ui/skeleton.tsx</b> (cool shimmer)</p>
+</div>
+</body>
+</html>

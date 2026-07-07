@@ -1,0 +1,118 @@
+<!-- @dsCard group="App Surfaces" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Filter bar</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--bar:#14181B;--card:#171B1E;--muted:#242c31;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--input:#1c2226;--primary:#2DD4BF;--accent:#1B2A2B;--accent-fg:#8FE9DD;--ring:#2DD4BF;--success:#34D399;--destructive:#F0616D;
+    --track-in:inset 0 1px 2px rgba(0,0,0,.55);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .theme-light{--bg:#F5F7F9;--bar:#FFFFFF;--card:#FFFFFF;--muted:#DFE4E9;--muted-fg:#5A6672;--fg:#0F1214;--border:#DCE2E7;--input:#F1F4F6;--primary:#0E9C8C;--accent:#E3F3F0;--accent-fg:#0B6A5F;--ring:#14B8A6;--success:#0E9C6E;--destructive:#DC2A3A;
+    --track-in:inset 0 1px 2px rgba(16,20,24,.1);--shadow-2:0 14px 34px -14px rgba(16,20,24,.2);--lift:inset 0 1px 0 rgba(255,255,255,.75);color-scheme:light}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:66ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .lbl{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:#6b7880;margin:0 0 10px}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--bar);border:1px solid var(--border);border-radius:12px;padding:10px 12px;box-shadow:var(--shadow-2),var(--lift);color:var(--fg);margin-bottom:22px}
+  .bar:last-of-type{margin-bottom:0}
+  .grow{flex:1;min-width:20px}
+  .sep{width:1px;align-self:stretch;background:var(--border);margin:2px 2px}
+
+  .search{position:relative;display:flex;align-items:center;min-width:190px;flex:0 1 240px}
+  .search svg{position:absolute;left:10px;width:15px;height:15px;stroke:var(--muted-fg);pointer-events:none}
+  .search input{width:100%;height:32px;background:var(--input);border:1px solid var(--border);border-radius:8px;color:var(--fg);font-size:13px;padding:0 10px 0 32px;box-shadow:var(--track-in);outline:none}
+  .search input::placeholder{color:var(--muted-fg)}
+
+  .seg{display:inline-flex;background:var(--muted);border:1px solid var(--border);border-radius:9px;padding:3px;gap:2px}
+  .seg button{height:26px;padding:0 10px;border:0;background:transparent;border-radius:6px;color:var(--muted-fg);font-size:12px;font-family:var(--font-sans);cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .seg button svg{width:13px;height:13px}
+  .seg button.on{background:var(--card);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.4),var(--lift)}
+  .seg button.on.teal{color:var(--primary)}
+  .seg button.on.green{color:var(--success)} .seg button.on.red{color:var(--destructive)}
+
+  .rate{display:inline-flex;align-items:center;gap:2px;padding:0 4px}
+  .rate svg{width:15px;height:15px;stroke:var(--muted-fg);fill:none;stroke-width:1.6;cursor:pointer}
+  .rate svg.f{stroke:none;fill:var(--primary)}
+
+  .sel{height:32px;display:inline-flex;align-items:center;gap:8px;padding:0 10px;background:var(--input);border:1px solid var(--border);border-radius:8px;font-size:12.5px;color:var(--fg);box-shadow:var(--track-in);cursor:pointer}
+  .sel svg{width:13px;height:13px;color:var(--muted-fg)}
+
+  .zoom{display:inline-flex;align-items:center;gap:9px}
+  .zoom svg{width:15px;height:15px;color:var(--muted-fg)}
+  .ztrack{position:relative;width:104px;height:4px;border-radius:999px;background:var(--muted);box-shadow:var(--track-in)}
+  .ztrack .f{position:absolute;left:0;height:100%;width:58%;border-radius:999px;background:var(--primary)}
+  .ztrack .t{position:absolute;left:58%;top:50%;width:13px;height:13px;border-radius:50%;background:var(--fg);transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.4)}
+
+  .count{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted-fg);white-space:nowrap}
+  .count b{color:var(--primary);font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">App Surfaces · Toolbar</p>
+    <h1>Filter bar</h1>
+    <p class="lede">The workspace header — search, cull filters, sort, and thumbnail zoom on one quiet rail. Active filters light teal (or their semantic flag color); the live "shown / total" count stays mono and tabular at the far right so it never reflows the bar as numbers change.</p>
+  </header>
+
+  <p class="lbl">Dark · filters active</p>
+  <div class="bar theme-dark">
+    <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg><input placeholder="Filter by filename…"></div>
+    <div class="sep"></div>
+    <div class="seg">
+      <button class="on teal">All</button>
+      <button class="green"><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg>Picks</button>
+      <button class="red"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="rate" title="Rating ≥ 3">
+      <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+      <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+      <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+      <svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+      <svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+    </div>
+    <div class="grow"></div>
+    <div class="sel">Sort · Capture time <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div>
+    <div class="zoom"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div class="ztrack"><div class="f"></div><div class="t"></div></div></div>
+    <div class="sep"></div>
+    <div class="count"><b>96</b> / 1,284</div>
+  </div>
+
+  <p class="lbl">Light · default</p>
+  <div class="bar theme-light">
+    <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg><input placeholder="Filter by filename…"></div>
+    <div class="sep"></div>
+    <div class="seg">
+      <button class="on teal">All</button>
+      <button><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg>Picks</button>
+      <button><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="rate">
+      <svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+      <svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+      <svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+      <svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+      <svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+    </div>
+    <div class="grow"></div>
+    <div class="sel">Sort · Capture time <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div>
+    <div class="zoom"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><div class="ztrack"><div class="f"></div><div class="t"></div></div></div>
+    <div class="sep"></div>
+    <div class="count"><b>1,284</b> / 1,284</div>
+  </div>
+
+  <p class="foot">Rendered by <b>FilterBar.tsx</b> · thumbnail-size slider drives grid cell width · counts from the active filter</p>
+</div>
+</body>
+</html>

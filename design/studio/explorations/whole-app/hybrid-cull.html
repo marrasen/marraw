@@ -1,0 +1,237 @@
+<!-- @dsCard group="Refined · Whole-app" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Hybrid · Cull mode</title>
+<style>
+  :root{
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    --bg:#0F1214; --titlebar:#0c0f11; --rail:#0e1214; --side:#121619; --work:#0b0e10; --panel:#14181B; --card:#171B1E; --popover:#1A1F23; --muted:#242c31; --muted-fg:#8B99A3; --fg:#E8EDF2; --border:#232b31; --input:#1c2226; --primary:#2DD4BF; --primary-fg:#04211d; --accent:#1B2A2B; --accent-fg:#8FE9DD; --ring:#2DD4BF; --success:#34D399; --warning:#F5B14C; --destructive:#F0616D; --info:#38BDF8;
+    --radius:8px; --shadow-1:0 1px 2px rgba(0,0,0,.5); --shadow-2:0 20px 48px -16px rgba(0,0,0,.72); --lift:inset 0 1px 0 rgba(255,255,255,.05); --track-in:inset 0 1px 2px rgba(0,0,0,.55);
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1200px 560px at 100% -12%,#14201f 0%,transparent 58%),#090c0e;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(14px,3vw,36px) 44px}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .wrap{max-width:1180px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:72ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .lede b{color:#cdd6db;font-weight:500}
+  .head{margin-bottom:24px}
+  .foot{margin-top:22px;font-family:var(--font-mono);font-size:11px;color:#5f6d75;line-height:1.7} .foot b{color:#8fa0a8;font-weight:500}
+
+  .app{border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-2);background:var(--bg);color:var(--fg);display:flex;flex-direction:column;height:812px}
+
+  /* titlebar with command bar */
+  .tb{display:flex;align-items:center;gap:13px;height:42px;padding:0 13px;background:var(--titlebar);border-bottom:1px solid var(--border)}
+  .lights{display:flex;gap:7px}.lights i{width:11px;height:11px;border-radius:50%}
+  .lights .r{background:#f0616d}.lights .y{background:#f5b14c}.lights .g{background:#34d399}
+  .tb .title{font-family:var(--font-mono);font-size:12px;color:var(--muted-fg)}.tb .title b{color:var(--fg);font-weight:500}
+  .tb .grow{flex:1}
+  .cmd{display:flex;align-items:center;gap:9px;height:28px;width:290px;padding:0 10px;background:var(--input);border:1px solid var(--border);border-radius:8px;color:var(--muted-fg);font-size:12.5px;box-shadow:var(--track-in)}
+  .cmd svg{width:14px;height:14px}.cmd .k{margin-left:auto;font-family:var(--font-mono);font-size:10px;border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+  .ticon{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--muted-fg);border:1px solid transparent}
+  .ticon:hover{background:var(--card);border-color:var(--border)}.ticon svg{width:15px;height:15px}
+
+  .shell{flex:1;display:flex;min-height:0}
+  /* mode rail */
+  .rail{width:60px;flex:none;background:var(--rail);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:4px}
+  .mode{width:46px;height:46px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--muted-fg);position:relative;cursor:pointer}
+  .mode svg{width:18px;height:18px}.mode span{font-size:8.5px;letter-spacing:.02em}
+  .mode:hover{color:var(--fg);background:var(--accent)}
+  .mode.on{color:var(--primary);background:color-mix(in oklab,var(--primary) 15%,transparent)}
+  .mode.on::before{content:"";position:absolute;left:-10px;top:9px;bottom:9px;width:2px;border-radius:2px;background:var(--primary)}
+  .rail .sp{flex:1}
+
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  /* toolbar */
+  .toolbar{display:flex;align-items:center;gap:11px;height:46px;padding:0 13px;border-bottom:1px solid var(--border);background:var(--panel)}
+  .crumb{display:flex;align-items:center;gap:7px;height:30px;padding:0 10px;background:var(--input);border:1px solid var(--border);border-radius:8px;font-size:12.5px;color:var(--fg);box-shadow:var(--track-in)}
+  .crumb .dim{color:var(--muted-fg)}.crumb svg{width:13px;height:13px;color:var(--muted-fg)}
+  .chips{display:inline-flex;background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:3px;gap:2px}
+  .chips button{height:24px;padding:0 10px;border:0;background:transparent;border-radius:5px;color:var(--muted-fg);font-size:12px;font-family:var(--font-sans);cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .chips button svg{width:12px;height:12px}
+  .chips button.on{background:var(--card);color:var(--primary);box-shadow:0 1px 2px rgba(0,0,0,.4),var(--lift)}
+  .rfilter{display:inline-flex;align-items:center;gap:2px;padding:0 6px}
+  .rfilter svg{width:14px;height:14px;stroke:var(--muted-fg);fill:none;stroke-width:1.6}
+  .rfilter svg.f{stroke:none;fill:var(--primary)}
+  .grow{flex:1}
+  .count{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted-fg)}.count b{color:var(--primary)}
+
+  /* cull body */
+  .cull{flex:1;display:grid;grid-template-columns:1.05fr 1fr;min-height:0}
+  .sheet{background:var(--work);padding:12px;overflow:hidden;border-right:1px solid var(--border)}
+  .sheet-h{display:flex;justify-content:space-between;align-items:center;font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-fg);padding:2px 4px 11px}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+  .cell{position:relative;border-radius:7px;overflow:hidden;border:1px solid var(--border);aspect-ratio:3/2;box-shadow:0 1px 2px rgba(0,0,0,.5)}
+  .cell .ph{position:absolute;inset:0}
+  .cell.sel{outline:2px solid var(--ring);outline-offset:2px;border-color:transparent}
+  .cell.rej .ph{filter:grayscale(.55) brightness(.55)}
+  .cell .flag{position:absolute;top:5px;left:5px;width:6px;height:6px;border-radius:50%}
+  .cell .flag.p{background:var(--success)}.cell .flag.r{background:var(--destructive)}
+  .cell .dots{position:absolute;bottom:5px;left:6px;display:flex;gap:2px}
+  .cell .dots i{width:3px;height:3px;border-radius:50%;background:var(--primary)}
+  .cell .n{position:absolute;bottom:4px;right:6px;font-family:var(--font-mono);font-size:8px;color:rgba(230,237,241,.72)}
+
+  /* loupe column */
+  .loupe{display:flex;flex-direction:column;min-width:0;background:var(--work)}
+  .stage{position:relative;flex:1;min-height:0;display:grid;place-items:center;overflow:hidden}
+  .photo{position:absolute;inset:0;background:radial-gradient(120% 120% at 42% 34%,#39525e,#0e1518 60%,#1f2f38)}
+  .photo::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 140px rgba(0,0,0,.62)}
+  .nav{position:absolute;top:50%;transform:translateY(-50%);width:34px;height:34px;border-radius:50%;background:rgba(10,14,16,.55);border:1px solid rgba(255,255,255,.1);color:#e6edf1;display:grid;place-items:center;backdrop-filter:blur(6px);cursor:pointer;z-index:3}
+  .nav svg{width:16px;height:16px}.nav.prev{left:14px}.nav.next{right:14px}
+  .chip{position:absolute;z-index:3;display:inline-flex;align-items:center;gap:8px;height:26px;padding:0 10px;border-radius:8px;background:rgba(8,11,13,.5);border:1px solid rgba(255,255,255,.1);backdrop-filter:blur(6px);font-family:var(--font-mono);font-size:10.5px;color:rgba(230,237,241,.85)}
+  .chip.tl{top:14px;left:14px}.chip.tr{top:14px;right:14px;font-family:var(--font-sans)}
+  .chip .stars{display:inline-flex;gap:2px}.chip .stars svg{width:13px;height:13px;stroke:rgba(255,255,255,.5);fill:none;stroke-width:1.6}.chip .stars svg.f{stroke:none;fill:var(--primary)}
+  .chip .pick{display:inline-flex;align-items:center;gap:5px;color:var(--success);font-size:11.5px}.chip .pick svg{width:13px;height:13px}
+
+  /* inline triage develop */
+  .triage{border-top:1px solid var(--border);background:var(--panel);padding:12px 14px;display:grid;grid-template-columns:150px 1fr auto;gap:16px;align-items:center}
+  .thist{height:56px;border-radius:7px;background:linear-gradient(180deg,#0c1013,#0e1315);border:1px solid var(--border);box-shadow:var(--track-in);position:relative;overflow:hidden}
+  .thist svg{position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen}
+  .tsliders{display:grid;grid-template-columns:1fr 1fr;gap:9px 20px}
+  .sld .sr{display:flex;justify-content:space-between;margin-bottom:5px}
+  .sld .sr .nm{font-size:11px;color:#c3cdd3}.sld .sr .v{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10px;color:var(--muted-fg)}
+  .sld .sr .v.on{color:var(--primary)}
+  .tk{position:relative;height:3px;border-radius:999px;background:var(--muted);box-shadow:var(--track-in)}
+  .cen{position:absolute;top:-2px;bottom:-2px;left:50%;width:1px;background:var(--muted-fg);opacity:.5}
+  .fl{position:absolute;top:0;height:100%;border-radius:999px;background:var(--primary)}
+  .th{position:absolute;top:50%;width:10px;height:10px;border-radius:50%;background:var(--fg);border:1px solid rgba(0,0,0,.35);transform:translate(-50%,-50%);box-shadow:0 1px 2px rgba(0,0,0,.5)}
+  .th.on{background:var(--primary);border-color:transparent;box-shadow:0 0 0 3px color-mix(in oklab,var(--ring) 26%,transparent)}
+  .tactions{display:flex;flex-direction:column;gap:8px}
+  .pr{display:flex;gap:7px}
+  .pbtn{height:30px;padding:0 12px;border-radius:8px;font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:6px;cursor:pointer;border:1px solid var(--border);background:var(--card);box-shadow:var(--lift)}
+  .pbtn svg{width:13px;height:13px}
+  .pbtn.pick{color:var(--success);border-color:color-mix(in oklab,var(--success) 42%,var(--border));background:color-mix(in oklab,var(--success) 13%,transparent)}
+  .pbtn.rej{color:var(--destructive);border-color:color-mix(in oklab,var(--destructive) 42%,var(--border));background:transparent}
+  .exp{height:32px;padding:0 14px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:7px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22);cursor:pointer}
+  .exp svg{width:14px;height:14px}
+
+  /* status */
+  .sbar{display:flex;align-items:center;gap:13px;height:30px;padding:0 13px;background:var(--titlebar);border-top:1px solid var(--border);font-size:11px;color:var(--muted-fg)}
+  .sbar .path{font-family:var(--font-mono);font-size:10.5px}.sbar .path b{color:var(--fg);font-weight:500}
+  .sbar .st{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10.5px}.sbar .st b{color:var(--fg);font-weight:500}
+  .sbar .st.pick b{color:var(--success)}
+  .sbar .task{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:10px;color:var(--primary)}
+  .sbar .mini{width:80px;height:3px;border-radius:999px;background:var(--muted);overflow:hidden}.sbar .mini i{display:block;height:100%;width:42%;background:var(--primary)}
+  .sbar .conn{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:10px;color:var(--success)}
+  .sbar .conn .d{width:6px;height:6px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px color-mix(in oklab,var(--success) 22%,transparent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Refined · Whole-app hybrid · 1 of 2</p>
+    <h1>Cull mode</h1>
+    <p class="lede">The blend, screen one. <b>A's</b> mode rail + ⌘K command bar frame every screen; here they wrap <b>B's</b> culling workspace — a dense contact sheet beside one big confirm-loupe carrying <b>C's</b> darkroom vignette. Rate and pick with number keys while the large preview confirms each call; a tight triage strip handles quick tone fixes without leaving the sweep.</p>
+  </header>
+
+  <div class="app">
+    <!-- titlebar -->
+    <div class="tb">
+      <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+      <span class="title"><b>marraw</b> · Iceland</span>
+      <span class="grow"></span>
+      <div class="cmd"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>Search or run a command<span class="k">⌘K</span></div>
+      <span class="ticon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.3-2.6H10l-.3 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.3 2.6h4l.3-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"/></svg></span>
+    </div>
+
+    <div class="shell">
+      <!-- mode rail -->
+      <nav class="rail">
+        <div class="mode"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Library</span></div>
+        <div class="mode on"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg><span>Cull</span></div>
+        <div class="mode"><svg viewBox="0 0 24 24"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.2" fill="var(--rail)"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.2" fill="var(--rail)"/></svg><span>Develop</span></div>
+        <div class="mode"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg><span>Export</span></div>
+        <div class="sp"></div>
+        <div class="mode"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.3-2.6H10l-.3 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.3 2.6h4l.3-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"/></svg><span>Settings</span></div>
+      </nav>
+
+      <div class="main">
+        <!-- toolbar -->
+        <div class="toolbar">
+          <div class="crumb"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="dim">Library / 2026 /</span> Iceland <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div>
+          <div class="chips"><button class="on">All</button><button><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg>Picks</button><button>★3+</button></div>
+          <div class="rfilter"><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></div>
+          <span class="grow"></span>
+          <span class="count"><b>96</b> / 1,284</span>
+        </div>
+
+        <!-- cull body -->
+        <div class="cull">
+          <!-- contact sheet -->
+          <div class="sheet">
+            <div class="sheet-h"><span>Contact sheet · South coast</span><span>420</span></div>
+            <div class="grid" id="grid"></div>
+          </div>
+
+          <!-- loupe -->
+          <div class="loupe">
+            <div class="stage">
+              <div class="photo"></div>
+              <div class="chip tl">DSC07421.ARW · ƒ/2.8 · 1/250 · ISO 400 · 35mm</div>
+              <div class="chip tr"><span class="stars"><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></span><span class="pick"><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg>Pick</span></div>
+              <button class="nav prev"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+              <button class="nav next"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+            </div>
+            <div class="triage">
+              <div class="thist"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><path d="M0,40 L2,33 8,26 16,16 26,10 36,18 46,14 56,20 66,10 78,16 88,7 96,22 100,32 100,40Z" fill="#38BDF8" stroke="none" opacity=".7"/><path d="M0,40 L3,32 9,24 17,13 27,8 37,16 47,12 57,19 67,8 79,14 89,6 97,21 100,31 100,40Z" fill="#34D399" stroke="none" opacity=".7"/><path d="M0,40 L4,35 11,29 19,20 29,12 41,18 53,10 65,16 75,10 85,18 93,12 100,27 100,40Z" fill="#F0616D" stroke="none" opacity=".7"/></svg></div>
+              <div class="tsliders">
+                <div class="sld"><div class="sr"><span class="nm">Exposure</span><span class="v on">+0.40</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:4%"></span><span class="th on" style="left:54%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="nm">Contrast</span><span class="v on">+12</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:6%"></span><span class="th" style="left:56%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="nm">Highlights</span><span class="v on">−38</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:31%;width:19%"></span><span class="th" style="left:31%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="nm">Shadows</span><span class="v on">+24</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:12%"></span><span class="th" style="left:62%"></span></div></div>
+              </div>
+              <div class="tactions">
+                <div class="pr"><button class="pbtn pick"><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg>Pick <span style="opacity:.6;font-family:var(--font-mono);font-size:10px">P</span></button><button class="pbtn rej"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>X</button></div>
+                <div class="exp"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg>Export 96</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- status -->
+        <div class="sbar">
+          <span class="path"><span style="color:var(--muted-fg)">2026 / Iceland /</span> <b>South coast</b></span>
+          <span class="st"><b>420</b> in folder</span>
+          <span class="st pick">★ <b>96</b> picked</span>
+          <span class="st">⚑ 12 rejected</span>
+          <span class="grow"></span>
+          <span class="task">Previews <span class="mini"><i></i></span> 176 / 420</span>
+          <span class="conn"><span class="d"></span>Connected · :8483</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot"><b>Blend:</b> rail + ⌘K from A · contact-sheet/confirm-loupe from B · darkroom vignette from C<br><b>Trade-offs:</b> + fastest number-key culling with instant big-preview confirmation · + one rail unifies cull/develop/export · − loupe is for triage; serious grading happens in Develop mode</p>
+</div>
+
+<script>
+  // deterministic contact sheet — hardcoded arrays only, no external input
+  const grads = [
+    'linear-gradient(135deg,#2b3f4a,#0f1a1f 60%,#3a5a5f)','linear-gradient(135deg,#6a5233,#241a12 55%,#8a6a3a)',
+    'linear-gradient(135deg,#334a5c,#12181f 60%,#4a6f86)','linear-gradient(135deg,#4a4a52,#1a1a1f 55%,#5c5c66)',
+    'linear-gradient(135deg,#2f4a3a,#101a15 55%,#3f6a4f)','linear-gradient(135deg,#5c3f52,#1f1219 55%,#7a5470)',
+    'linear-gradient(135deg,#54492f,#1a1710 55%,#6f6140)','linear-gradient(135deg,#2b4a4a,#0e1a1a 55%,#3a6a6a)'
+  ];
+  const rows = 6, cols = 4, total = rows*cols;
+  let html = '';
+  for (let i=0;i<total;i++){
+    const g = grads[i % grads.length];
+    const num = 7421 + i;
+    const sel = i===0 ? ' sel' : '';
+    const rej = (i===3 || i===13) ? ' rej' : '';
+    const flag = i===0||i===2||i===9||i===17 ? '<span class="flag p"></span>' : (i===3||i===13 ? '<span class="flag r"></span>' : '');
+    const rating = (i*7)%6; // 0..5
+    let dots=''; for(let d=0;d<rating;d++) dots+='<i></i>';
+    html += '<div class="cell'+sel+rej+'"><div class="ph" style="background:'+g+'"></div>'+flag+'<div class="dots">'+dots+'</div><span class="n">'+num+'</span></div>';
+  }
+  document.getElementById('grid').innerHTML = html;
+</script>
+</body>
+</html>

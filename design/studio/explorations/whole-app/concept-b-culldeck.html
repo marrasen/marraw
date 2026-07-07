@@ -1,0 +1,333 @@
+<!-- @dsCard group="Explorations · Whole-app" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · B · Cull Deck</title>
+<style>
+  :root{
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    --bg:#0F1214;--titlebar:#0d1113;--side:#121619;--work:#0d1012;--panel:#14181B;--card:#171B1E;--popover:#1A1F23;
+    --muted:#242c31;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#232b31;--input:#1c2226;
+    --primary:#2DD4BF;--primary-fg:#04211d;--accent:#1B2A2B;--ring:#2DD4BF;
+    --success:#34D399;--warning:#F5B14C;--destructive:#F0616D;--info:#38BDF8;
+    --radius:8px;
+    --shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-2:0 18px 44px -14px rgba(0,0,0,.7);
+    --lift:inset 0 1px 0 rgba(255,255,255,.05);--track-in:inset 0 1px 2px rgba(0,0,0,.55);
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1200px 560px at 100% -12%,#14201f 0%,transparent 58%),#090c0e;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(14px,3vw,36px) 46px}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  .wrap{max-width:1300px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--primary);display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,var(--primary),transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:74ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:24px}
+  .foot{margin-top:22px;font-family:var(--font-mono);font-size:11px;color:#5f6d75;line-height:1.7}
+  .foot b{color:#8fa0a8;font-weight:500}
+
+  /* window */
+  .app{width:1280px;max-width:100%;height:820px;margin:0 auto;border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-2);background:var(--bg);color:var(--fg);display:flex;flex-direction:column;min-width:0}
+
+  /* titlebar */
+  .tb{display:flex;align-items:center;gap:12px;height:38px;padding:0 13px;background:var(--titlebar);border-bottom:1px solid var(--border);flex:none}
+  .lights{display:flex;gap:7px}
+  .lights i{width:11px;height:11px;border-radius:50%}
+  .lights .r{background:#f0616d}.lights .y{background:#f5b14c}.lights .g{background:#34d399}
+  .tb .title{font-size:12px;color:var(--muted-fg);font-family:var(--font-mono);position:absolute;left:0;right:0;text-align:center;pointer-events:none}
+  .tb .title b{color:var(--fg);font-weight:500}
+  .tb .rel{position:relative;flex:1;height:38px;display:flex;align-items:center}
+
+  /* toolbar */
+  .toolbar{display:flex;align-items:center;gap:11px;height:48px;padding:0 12px;border-bottom:1px solid var(--border);background:var(--panel);flex:none}
+  /* breadcrumb dropdown */
+  .crumb{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 10px;background:var(--input);border:1px solid var(--border);border-radius:8px;box-shadow:var(--track-in);cursor:pointer;color:var(--fg)}
+  .crumb .fic{width:15px;height:15px;color:var(--muted-fg);flex:none}
+  .crumb .bc{font-family:var(--font-mono);font-size:12px;display:inline-flex;align-items:center;gap:5px}
+  .crumb .bc span{color:var(--muted-fg)}
+  .crumb .bc b{color:var(--fg);font-weight:600}
+  .crumb .bc .sep{color:#4b565d}
+  .crumb .cv{width:14px;height:14px;color:var(--muted-fg);margin-left:1px}
+
+  .divv{width:1px;height:22px;background:var(--border)}
+
+  .seg{display:inline-flex;background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:3px;gap:2px}
+  .seg button{height:24px;padding:0 11px;border:0;background:transparent;border-radius:5px;color:var(--muted-fg);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-family:inherit}
+  .seg button svg{width:12px;height:12px}
+  .seg button.on{background:var(--card);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.4),var(--lift)}
+  .seg button.on.teal{color:var(--primary)}
+
+  /* rating filter */
+  .ratefilt{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--card)}
+  .ratefilt .lab{font-size:10px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--muted-fg)}
+  .ratefilt .rs{display:inline-flex;gap:2px}
+  .ratefilt .rs svg{width:12px;height:12px;stroke:var(--muted-fg);fill:none;stroke-width:1.7}
+  .ratefilt .rs svg.f{stroke:none;fill:var(--primary)}
+
+  .grow{flex:1}
+  .count{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted-fg)}
+  .count b{color:var(--primary)}
+  .tbtn{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--muted-fg);border:1px solid var(--border);background:var(--card)}
+  .tbtn svg{width:15px;height:15px}
+
+  /* body */
+  .body{flex:1;display:grid;grid-template-columns:52fr 48fr;min-height:0}
+
+  /* contact sheet */
+  .sheet{background:var(--work);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+  .sheet .shead{display:flex;align-items:center;justify-content:space-between;padding:9px 13px 8px;flex:none}
+  .sheet .shead .t{font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted-fg)}
+  .sheet .shead .z{display:inline-flex;align-items:center;gap:7px;color:var(--muted-fg)}
+  .sheet .shead .z svg{width:13px;height:13px}
+  .sheet .shead .z .bar{width:64px;height:3px;border-radius:999px;background:var(--muted);box-shadow:var(--track-in);position:relative}
+  .sheet .shead .z .bar i{position:absolute;left:0;top:0;height:100%;width:42%;border-radius:999px;background:var(--muted-fg)}
+  .scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:2px 13px 14px}
+  .scroll::-webkit-scrollbar{width:10px}
+  .scroll::-webkit-scrollbar-thumb{background:#2a333a;border-radius:6px;border:3px solid var(--work)}
+  .grid{display:grid;grid-template-columns:repeat(6,1fr);gap:7px}
+  .cell{position:relative;border-radius:6px;overflow:hidden;border:1px solid var(--border);aspect-ratio:3/2;box-shadow:0 1px 2px rgba(0,0,0,.5);cursor:pointer}
+  .cell .ph{position:absolute;inset:0;background:var(--g)}
+  .cell.sel{outline:2px solid var(--ring);outline-offset:1px;border-color:transparent;z-index:2}
+  .cell.rej .ph{filter:grayscale(.55) brightness(.55)}
+  .cell .flag{position:absolute;top:4px;left:4px;width:6px;height:6px;border-radius:50%;box-shadow:0 0 0 1.5px rgba(4,7,9,.5)}
+  .cell .flag.p{background:var(--success)} .cell .flag.r{background:var(--destructive)}
+  .cell .rt{position:absolute;bottom:3px;left:4px;display:inline-flex;gap:2px}
+  .cell .rt i{width:3px;height:3px;border-radius:50%;background:rgba(255,255,255,.85);box-shadow:0 0 2px rgba(0,0,0,.6)}
+  .cell .cur{position:absolute;top:3px;right:4px;font-family:var(--font-mono);font-size:8px;color:rgba(255,255,255,.55)}
+  .cell.sel .cur{color:var(--primary)}
+
+  /* loupe column */
+  .right{display:flex;flex-direction:column;min-height:0;background:var(--panel)}
+  .loupe{flex:1;position:relative;min-height:0;background:#0a0d0f;overflow:hidden}
+  .loupe .img{position:absolute;inset:0;background:linear-gradient(135deg,#2b3f4a,#0f1a1f 58%,#3a5a5f)}
+  .loupe .vig{position:absolute;inset:0;background:radial-gradient(120% 92% at 50% 42%,transparent 44%,rgba(4,7,9,.42) 78%,rgba(3,5,7,.72) 100%)}
+  .loupe .exif{position:absolute;left:14px;bottom:14px;display:inline-flex;align-items:center;gap:10px;padding:7px 11px;background:rgba(13,17,19,.72);border:1px solid rgba(255,255,255,.08);border-radius:9px;backdrop-filter:blur(9px)}
+  .loupe .exif .fn{font-family:var(--font-mono);font-size:11.5px;color:var(--fg);font-weight:500}
+  .loupe .exif .mt{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--muted-fg)}
+  .loupe .exif .dvv{width:1px;height:22px;background:rgba(255,255,255,.12)}
+  .loupe .rchip{position:absolute;right:14px;top:14px;display:inline-flex;align-items:center;gap:6px;padding:6px 9px;background:rgba(13,17,19,.72);border:1px solid rgba(255,255,255,.08);border-radius:9px;backdrop-filter:blur(9px)}
+  .loupe .rchip .stars{display:inline-flex;gap:2px}
+  .loupe .rchip .stars svg{width:13px;height:13px;stroke:rgba(255,255,255,.4);fill:none;stroke-width:1.6}
+  .loupe .rchip .stars svg.f{stroke:none;fill:var(--primary)}
+  .loupe .rchip .pk{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10.5px;color:var(--success)}
+  .loupe .rchip .pk svg{width:12px;height:12px}
+  .loupe .nav{position:absolute;left:14px;top:14px;display:inline-flex;gap:5px}
+  .loupe .nav b{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;background:rgba(13,17,19,.66);border:1px solid rgba(255,255,255,.08);color:var(--muted-fg);backdrop-filter:blur(9px)}
+  .loupe .nav b svg{width:13px;height:13px}
+
+  /* develop strip */
+  .strip{flex:none;border-top:1px solid var(--border);background:var(--panel);padding:12px 14px 13px}
+  .strip .stop{display:flex;align-items:stretch;gap:14px}
+  .hist{width:150px;flex:none;height:74px;border-radius:8px;background:linear-gradient(180deg,#0c1013,#0e1315);border:1px solid var(--border);overflow:hidden;box-shadow:var(--track-in);position:relative}
+  .hist svg{position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen}
+  .hist .hl{position:absolute;left:6px;bottom:5px;font-family:var(--font-mono);font-size:8.5px;letter-spacing:.1em;color:var(--muted-fg)}
+  .sliders{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:9px 20px;align-content:center}
+  .sld{}
+  .sr{display:flex;justify-content:space-between;margin-bottom:5px}
+  .sr .n{font-size:11.5px;color:#c3cdd3}
+  .sr .v{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--muted-fg)}
+  .sr .v.on{color:var(--primary)}
+  .tk{position:relative;height:3px;border-radius:999px;background:var(--muted);box-shadow:var(--track-in)}
+  .cen{position:absolute;top:-2px;bottom:-2px;left:50%;width:1px;background:var(--muted-fg);opacity:.5}
+  .fl{position:absolute;top:0;height:100%;border-radius:999px;background:var(--primary)}
+  .th{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;background:var(--fg);border:1px solid rgba(0,0,0,.35);transform:translate(-50%,-50%);box-shadow:0 1px 2px rgba(0,0,0,.5)}
+  .th.on{background:var(--primary);border-color:transparent;box-shadow:0 0 0 3px color-mix(in oklab,var(--ring) 26%,transparent)}
+
+  .actions{display:flex;align-items:center;gap:9px;margin-top:13px}
+  .cbtn{height:34px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--fg);font-size:12.5px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:0 14px;cursor:pointer;font-family:inherit}
+  .cbtn svg{width:15px;height:15px}
+  .cbtn.pick{color:var(--success)}
+  .cbtn.pick svg{stroke:var(--success)}
+  .cbtn.rej{color:var(--destructive)}
+  .cbtn.rej svg{stroke:var(--destructive)}
+  .cbtn .kk{font-family:var(--font-mono);font-size:9.5px;color:var(--muted-fg);border:1px solid var(--border);border-radius:4px;padding:1px 4px;margin-left:2px}
+  .expbtn{margin-left:auto;height:34px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:0 16px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22);cursor:pointer;border:0;font-family:inherit}
+  .expbtn svg{width:15px;height:15px}
+
+  /* status bar */
+  .sbar{display:flex;align-items:center;gap:14px;height:30px;padding:0 13px;background:var(--titlebar);border-top:1px solid var(--border);font-size:11px;color:var(--muted-fg);flex:none}
+  .sbar .path{font-family:var(--font-mono);font-size:10.5px}
+  .sbar .path b{color:var(--fg);font-weight:500}
+  .sbar .stat{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10.5px}
+  .sbar .stat b{color:var(--fg);font-weight:500}
+  .sbar .stat.pick b{color:var(--success)}
+  .sbar .task{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:10px;color:var(--primary)}
+  .sbar .task .pb{width:88px;height:3px;border-radius:999px;background:var(--muted);box-shadow:var(--track-in);position:relative;overflow:hidden}
+  .sbar .task .pb i{position:absolute;left:0;top:0;height:100%;width:42%;background:var(--primary);border-radius:999px}
+  .sbar .conn{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:10px;color:var(--success)}
+  .sbar .conn .d{width:6px;height:6px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px color-mix(in oklab,var(--success) 22%,transparent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Exploration · Whole-app</p>
+    <h1>B · Cull Deck</h1>
+    <p class="lede">A culling-first rethink in the spirit of Photo Mechanic: no permanent folder pane — just a breadcrumb, a wall of thumbnails, and one big loupe beside it. You rate and pick with number keys while the large preview confirms every choice, so a thousand frames get triaged in one unbroken sweep.</p>
+  </header>
+
+  <div class="app">
+    <!-- titlebar -->
+    <div class="tb">
+      <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+      <div class="rel"><span class="title"><b>marraw</b> · Iceland</span></div>
+    </div>
+
+    <!-- toolbar -->
+    <div class="toolbar">
+      <div class="crumb">
+        <svg class="fic" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span class="bc"><span>Library</span><span class="sep">/</span><span>2026</span><span class="sep">/</span><b>Iceland</b></span>
+        <svg class="cv" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <span class="divv"></span>
+      <div class="seg">
+        <button class="on teal">All</button>
+        <button><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg>Picks</button>
+        <button>★3+</button>
+      </div>
+      <div class="ratefilt">
+        <span class="lab">Rating</span>
+        <span class="rs">
+          <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+          <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+          <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+          <svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+          <svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+        </span>
+      </div>
+      <span class="grow"></span>
+      <span class="tbtn"><svg viewBox="0 0 24 24"><path d="M11 4h10M11 12h10M11 20h10M4 7l1.5-3L7 7M4 7v13"/></svg></span>
+      <span class="count"><b>96</b> / 1,284</span>
+    </div>
+
+    <!-- body -->
+    <div class="body">
+      <!-- contact sheet -->
+      <div class="sheet">
+        <div class="shead">
+          <span class="t">Contact sheet · South coast</span>
+          <span class="z">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            <span class="bar"><i></i></span>
+          </span>
+        </div>
+        <div class="scroll">
+          <div class="grid" id="grid"></div>
+        </div>
+      </div>
+
+      <!-- loupe + develop -->
+      <div class="right">
+        <div class="loupe">
+          <div class="img"></div>
+          <div class="vig"></div>
+          <div class="nav">
+            <b><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></b>
+            <b><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></b>
+          </div>
+          <div class="rchip">
+            <span class="stars">
+              <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+              <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+              <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+              <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+              <svg class="f" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg>
+            </span>
+            <span class="dvv" style="width:1px;height:16px;background:rgba(255,255,255,.14)"></span>
+            <span class="pk"><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg>Pick</span>
+          </div>
+          <div class="exif">
+            <span class="fn">DSC07421.ARW</span>
+            <span class="dvv"></span>
+            <span class="mt">ƒ/2.8 · 1/250 · ISO 400 · 35mm</span>
+          </div>
+        </div>
+
+        <!-- develop strip -->
+        <div class="strip">
+          <div class="stop">
+            <div class="hist">
+              <svg viewBox="0 0 100 40" preserveAspectRatio="none"><path d="M0,40 L2,33 8,26 16,16 26,10 36,18 46,14 56,20 66,10 78,16 88,7 96,22 100,32 100,40Z" fill="#38BDF8" stroke="none" opacity=".7"/><path d="M0,40 L3,32 9,24 17,13 27,8 37,16 47,12 57,19 67,8 79,14 89,6 97,21 100,31 100,40Z" fill="#34D399" stroke="none" opacity=".7"/><path d="M0,40 L4,35 11,29 19,20 29,12 41,18 53,10 65,16 75,10 85,18 93,12 100,27 100,40Z" fill="#F0616D" stroke="none" opacity=".7"/></svg>
+              <span class="hl">RGB</span>
+            </div>
+            <div class="sliders">
+              <div class="sld"><div class="sr"><span class="n">Exposure</span><span class="v on">+0.40</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:4%"></span><span class="th on" style="left:54%"></span></div></div>
+              <div class="sld"><div class="sr"><span class="n">Contrast</span><span class="v on">+12</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:6%"></span><span class="th on" style="left:56%"></span></div></div>
+              <div class="sld"><div class="sr"><span class="n">Highlights</span><span class="v on">−38</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:31%;width:19%"></span><span class="th on" style="left:31%"></span></div></div>
+              <div class="sld"><div class="sr"><span class="n">Shadows</span><span class="v on">+24</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:12%"></span><span class="th on" style="left:62%"></span></div></div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="cbtn pick"><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg>Pick<span class="kk">P</span></button>
+            <button class="cbtn rej"><svg viewBox="0 0 24 24"><path d="M6 4v18M6 18h12l-2-4 2-4H6"/></svg>Reject<span class="kk">X</span></button>
+            <button class="expbtn"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg>Export 96</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- status bar -->
+    <div class="sbar">
+      <span class="path"><span style="color:var(--muted-fg)">2026 / Iceland /</span> <b>South coast</b></span>
+      <span class="stat"><b>420</b> in folder</span>
+      <span class="stat pick">★ <b>96</b> picked</span>
+      <span class="stat">↩ <b>1</b> rejected</span>
+      <span class="grow"></span>
+      <span class="task"><span class="pb"><i></i></span>Building previews · 176 / 420</span>
+      <span class="conn"><span class="d"></span>Connected · :8483</span>
+    </div>
+  </div>
+
+  <p class="foot"><b>Trade-offs:</b> + whole contact sheet and a big confirm-loupe on screen at once = fastest number-key culling · + reclaims width by dropping the folder rail into a breadcrumb — much larger previews · − no persistent tree means cross-folder jumps cost an extra click · − the tight inline develop strip is for triage tweaks, not a full grade.</p>
+</div>
+
+<script>
+  // dense contact sheet — deterministic, no randomness at render
+  var grads = [
+    "linear-gradient(135deg,#2b3f4a,#0f1a1f 60%,#3a5a5f)",
+    "linear-gradient(135deg,#6a5233,#241a12 55%,#8a6a3a)",
+    "linear-gradient(135deg,#334a5c,#12181f 60%,#4a6f86)",
+    "linear-gradient(135deg,#2f4a3a,#101a15 55%,#3f6a4f)",
+    "linear-gradient(135deg,#5c3f52,#1f1219 55%,#7a5470)",
+    "linear-gradient(135deg,#26454a,#0d1719 60%,#356066)",
+    "linear-gradient(135deg,#7a5a2e,#2a1e10 55%,#a07a3a)",
+    "linear-gradient(135deg,#3a4657,#14181f 58%,#586b86)",
+    "linear-gradient(135deg,#4a4a52,#1a1a1f 55%,#5c5c66)",
+    "linear-gradient(135deg,#2e4756,#0e161c 60%,#436a7e)"
+  ];
+  // per-cell: [gradientIndex, rating(0-5), flag('p'|'r'|null)]
+  var cells = [
+    [0,5,'p'],[6,3,null],[2,4,'p'],[8,0,'r'],[3,2,null],[4,3,'p'],
+    [5,4,'p'],[1,3,null],[7,2,null],[0,5,'p'],[2,4,'p'],[9,1,null],
+    [3,3,null],[6,4,'p'],[8,0,'r'],[4,2,null],[5,5,'p'],[1,3,null],
+    [7,4,'p'],[2,2,null],[0,3,null],[9,4,'p'],[3,1,null],[6,5,'p'],
+    [8,0,null],[4,3,'p'],[5,2,null],[1,4,'p'],[7,3,null],[2,5,'p'],
+    [0,2,null],[9,3,null],[3,4,'p'],[6,0,'r'],[4,4,'p'],[5,3,null],
+    [1,2,null],[7,5,'p'],[2,3,null],[8,1,null],[0,4,'p'],[3,3,null],
+    [6,2,null],[9,4,'p'],[4,3,null],[5,5,'p'],[1,0,null],[7,3,null]
+  ];
+  var selIndex = 0; // first cell is current selection (★★★★★, picked)
+  var g = document.getElementById('grid');
+  var html = '';
+  var num = 7421;
+  for(var i=0;i<cells.length;i++){
+    var c = cells[i];
+    var sel = i===selIndex ? ' sel' : '';
+    var rej = c[2]==='r' ? ' rej' : '';
+    var flag = c[2] ? '<span class="flag '+c[2]+'"></span>' : '';
+    var dots = '';
+    for(var d=0; d<c[1]; d++) dots += '<i></i>';
+    var rt = c[1] ? '<span class="rt">'+dots+'</span>' : '';
+    var fn = String(num++);
+    html += '<div class="cell'+sel+rej+'" style="--g:'+grads[c[0]]+'">'+flag+rt+'<span class="cur">'+fn+'</span></div>';
+  }
+  g.innerHTML = html;
+</script>
+</body>
+</html>

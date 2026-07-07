@@ -1,0 +1,123 @@
+<!-- @dsCard group="Components" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Dialog, Popover &amp; Tooltip</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--popover:#1A1F23;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--input:#222A30;--primary:#2DD4BF;--primary-fg:#05211D;--secondary:#222A30;--accent:#1B2A2B;--accent-fg:#8FE9DD;--ring:#2DD4BF;--destructive:#F0616D;
+    --hair:rgba(255,255,255,.06);--shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-2:0 18px 44px -14px rgba(0,0,0,.7);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .theme-light{--bg:#F5F7F9;--card:#FFFFFF;--popover:#FFFFFF;--muted:#EAEEF1;--muted-fg:#5A6672;--fg:#0F1214;--border:#DCE2E7;--input:#FFFFFF;--primary:#0E9C8C;--primary-fg:#FFFFFF;--secondary:#EAEEF1;--accent:#E3F3F0;--accent-fg:#0B6A5F;--ring:#14B8A6;--destructive:#DC2A3A;
+    --hair:rgba(16,20,24,.06);--shadow-1:0 1px 2px rgba(16,20,24,.08);--shadow-2:0 18px 44px -16px rgba(16,20,24,.28);--lift:inset 0 1px 0 rgba(255,255,255,.75);color-scheme:light}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:64ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .stages{display:grid;grid-template-columns:1fr;gap:18px}
+  @media(min-width:880px){.stages{grid-template-columns:1.25fr 1fr}}
+  .stage{border-radius:16px;padding:0;overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow-2);position:relative;min-height:340px}
+  .stage-lbl{position:absolute;top:14px;left:16px;z-index:5;font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.7)}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  /* dialog scene */
+  .scene{position:absolute;inset:0;display:grid;place-items:center;padding:26px}
+  .backdrop{position:absolute;inset:0;background:
+     linear-gradient(120deg,#1c2a2f,#0e1417 55%,#20303a),
+     radial-gradient(500px 300px at 30% 30%,rgba(45,212,191,.16),transparent 60%);}
+  .backdrop::after{content:"";position:absolute;inset:0;background:rgba(6,9,11,.62)}
+  .dlg{position:relative;z-index:2;width:100%;max-width:360px;background:var(--popover);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-2),var(--lift);overflow:hidden}
+  .dlg-h{padding:15px 17px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+  .dlg-h h3{margin:0;font-size:15px;font-weight:600;color:var(--fg)}
+  .dlg-x{width:28px;height:28px;border-radius:7px;border:0;background:transparent;color:var(--muted-fg);cursor:pointer;display:grid;place-items:center}
+  .dlg-x:hover{background:var(--accent);color:var(--fg)} .dlg-x svg{width:15px;height:15px}
+  .dlg-b{padding:16px 17px;display:flex;flex-direction:column;gap:13px}
+  .field{display:flex;flex-direction:column;gap:6px}
+  .field .l{font-size:10.5px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-fg)}
+  .in{height:32px;background:var(--input);border:1px solid var(--border);border-radius:8px;color:var(--fg);font-size:13px;padding:0 11px;box-shadow:var(--lift);display:flex;align-items:center;justify-content:space-between}
+  .in .chev{color:var(--muted-fg)}.in .chev svg{width:14px;height:14px}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+  .dlg-f{padding:13px 17px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px;background:var(--card)}
+  .btn{height:33px;padding:0 14px;border-radius:8px;font-size:13px;font-weight:500;border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+  .btn svg{width:15px;height:15px}
+  .btn.p{background:var(--primary);color:var(--primary-fg);box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+  .btn.s{background:var(--secondary);color:var(--fg);border-color:var(--border)}
+
+  /* popover + tooltip */
+  .rt{position:absolute;inset:0;background:var(--bg);padding:0}
+  .rt .stage-lbl{color:var(--muted-fg)}
+  .cluster{position:absolute;inset:0;display:flex;flex-direction:column;gap:22px;align-items:center;justify-content:center;padding:26px}
+  .pop{width:210px;background:var(--popover);border:1px solid var(--border);border-radius:11px;box-shadow:var(--shadow-2),var(--lift);padding:5px}
+  .mi{display:flex;align-items:center;gap:10px;padding:7px 9px;border-radius:7px;font-size:13px;color:var(--fg);cursor:pointer}
+  .mi svg{width:15px;height:15px;color:var(--muted-fg)}
+  .mi:hover{background:var(--accent);color:var(--accent-fg)} .mi:hover svg{color:var(--accent-fg)}
+  .mi .k{margin-left:auto;font-family:var(--font-mono);font-size:10px;color:var(--muted-fg)}
+  .mi.on{background:color-mix(in oklab,var(--primary) 15%,transparent);color:var(--primary)} .mi.on svg{color:var(--primary)}
+  .mi.danger{color:var(--destructive)} .mi.danger svg{color:var(--destructive)}
+  .sep{height:1px;background:var(--border);margin:5px 4px}
+  .tipwrap{display:flex;align-items:center;gap:0;flex-direction:column;gap:0}
+  .tip{position:relative;background:var(--popover);border:1px solid var(--border);color:var(--fg);font-size:11.5px;padding:6px 9px;border-radius:7px;box-shadow:var(--shadow-2);display:inline-flex;align-items:center;gap:7px}
+  .tip .k{font-family:var(--font-mono);font-size:10px;color:var(--muted-fg);border:1px solid var(--border);border-radius:4px;padding:0 4px}
+  .tip::after{content:"";position:absolute;bottom:-5px;left:50%;transform:translateX(-50%) rotate(45deg);width:8px;height:8px;background:var(--popover);border-right:1px solid var(--border);border-bottom:1px solid var(--border)}
+  .anchor{height:32px;padding:0 13px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--muted-fg);font-size:12.5px;display:inline-flex;align-items:center;gap:7px;box-shadow:var(--lift)}
+  .anchor svg{width:15px;height:15px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Components · Overlays</p>
+    <h1>Dialog · popover · tooltip</h1>
+    <p class="lede">Layered surfaces read by elevation, not color. The backdrop dims to a cool wash, the dialog rises on a raised popover surface with a light top-edge, and menus/tooltips share the same recipe one step down. The primary teal button is the single commit point.</p>
+  </header>
+
+  <div class="stages">
+    <section class="stage theme-dark">
+      <div class="stage-lbl">Dialog · Export</div>
+      <div class="backdrop"></div>
+      <div class="scene">
+        <div class="dlg">
+          <div class="dlg-h"><h3>Export 12 photos</h3><button class="dlg-x" aria-label="close"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button></div>
+          <div class="dlg-b">
+            <div class="field"><span class="l">Destination</span><div class="in">…/Exports/Iceland <span class="chev"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span></div></div>
+            <div class="two">
+              <div class="field"><span class="l">Format</span><div class="in">JPEG <span class="chev"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span></div></div>
+              <div class="field"><span class="l">Quality</span><div class="in" style="font-family:var(--font-mono);font-variant-numeric:tabular-nums">92</div></div>
+            </div>
+          </div>
+          <div class="dlg-f"><button class="btn s">Cancel</button><button class="btn p"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg>Export</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="stage theme-light">
+      <div class="rt">
+        <div class="stage-lbl">Menu · tooltip</div>
+        <div class="cluster">
+          <div class="pop">
+            <div class="mi on"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>Pick <span class="k">P</span></div>
+            <div class="mi"><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg>Set rating <span class="k">1–5</span></div>
+            <div class="mi"><svg viewBox="0 0 24 24"><path d="M4 4h6l2 3h8v11H4z"/></svg>Copy settings <span class="k">⌘C</span></div>
+            <div class="sep"></div>
+            <div class="mi danger"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Reject <span class="k">X</span></div>
+          </div>
+          <div class="tipwrap">
+            <div class="tip">Reset all edits <span class="k">⌥R</span></div>
+            <div class="anchor" style="margin-top:12px"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/></svg>Reset</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <p class="foot">On <b>ui/dialog.tsx</b> · popover/tooltip via @base-ui/react · backdrop dim <b>rgba(6,9,11,.62)</b> · overlay elevation = shadow-2 + lift</p>
+</div>
+</body>
+</html>

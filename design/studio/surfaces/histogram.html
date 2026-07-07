@@ -1,0 +1,104 @@
+<!-- @dsCard group="App Surfaces" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Histogram</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--primary:#2DD4BF;--accent:#1B2A2B;--ring:#2DD4BF;--r:#F0616D;--g:#34D399;--b:#38BDF8;
+    --track-in:inset 0 1px 2px rgba(0,0,0,.55);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);--histbg:linear-gradient(180deg,#0c1013,#0e1315);color-scheme:dark}
+  .theme-light{--bg:#F5F7F9;--card:#FFFFFF;--muted:#EAEEF1;--muted-fg:#5A6672;--fg:#0F1214;--border:#DCE2E7;--primary:#0E9C8C;--accent:#E3F3F0;--ring:#14B8A6;--r:#DC2A3A;--g:#0E9C6E;--b:#0C82C7;
+    --track-in:inset 0 1px 2px rgba(16,20,24,.1);--shadow-2:0 14px 34px -14px rgba(16,20,24,.2);--lift:inset 0 1px 0 rgba(255,255,255,.75);--histbg:linear-gradient(180deg,#20272c,#171d21);color-scheme:light}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:64ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .stages{display:grid;grid-template-columns:1fr;gap:18px}
+  @media(min-width:880px){.stages{grid-template-columns:1fr 1fr}}
+  .stage{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:16px;padding:22px;box-shadow:var(--shadow-2)}
+  .stage-lbl{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:16px}
+  .stage-lbl .dot::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--primary);margin-right:7px;vertical-align:middle;box-shadow:0 0 0 3px color-mix(in oklab,var(--primary) 22%,transparent)}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+
+  .hbox{position:relative;height:150px;border-radius:11px;background:var(--histbg);border:1px solid var(--border);overflow:hidden;box-shadow:var(--track-in)}
+  .hbox .zones{position:absolute;inset:0;display:flex;pointer-events:none}
+  .hbox .zones span{flex:1;border-right:1px solid rgba(255,255,255,.045)}
+  .hbox .zones span:last-child{border-right:0}
+  .hbox svg{position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen}
+  .clip{position:absolute;top:8px;width:12px;height:12px;border-radius:3px;display:grid;place-items:center}
+  .clip.sh{left:8px;background:rgba(56,189,248,.16);border:1px solid rgba(56,189,248,.5)}
+  .clip.hi{right:8px;background:rgba(240,97,109,.2);border:1px solid rgba(240,97,109,.6);animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:.35}}
+  .clip i{width:5px;height:5px;border-radius:50%}
+  .clip.sh i{background:#38BDF8}.clip.hi i{background:#F0616D}
+
+  .axis{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--muted-fg);margin-top:7px;padding:0 2px}
+  .legend{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+  .ch{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 10px;border-radius:7px;border:1px solid var(--border);background:var(--card);font-size:11.5px;color:var(--fg);box-shadow:var(--lift);cursor:pointer}
+  .ch .sw{width:9px;height:9px;border-radius:2px}
+  .ch.off{opacity:.4}
+  .ch.luma .sw{background:var(--fg)}
+  .readout{display:flex;gap:14px;margin-top:14px;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12px}
+  .readout div{color:var(--muted-fg)} .readout b{font-weight:500}
+  .readout .vr{color:var(--r)}.readout .vg{color:var(--g)}.readout .vb{color:var(--b)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">App Surfaces · Histogram</p>
+    <h1>Histogram</h1>
+    <p class="lede">RGB channels screen-blended over a cool graphite field with five faint zone divisions. Clipping corners light up — cyan for crushed shadows, red for blown highlights (and blink when live) — and a mono readout tracks the sampled pixel.</p>
+  </header>
+
+  <div class="stages">
+    <section class="stage theme-dark">
+      <div class="stage-lbl"><span class="dot">Dark</span><span>RGB · clipping</span></div>
+      <div class="hbox">
+        <div class="zones"><span></span><span></span><span></span><span></span><span></span></div>
+        <svg viewBox="0 0 100 40" preserveAspectRatio="none"><path d="M0,40 L2,33 6,28 12,17 20,9 30,14 40,25 50,20 62,11 72,18 82,7 90,20 96,29 100,35 100,40Z" fill="#38BDF8" stroke="none" opacity=".72"/><path d="M0,40 L3,32 8,24 16,13 26,7 36,16 46,12 56,19 66,7 78,14 88,5 96,21 100,31 100,40Z" fill="#34D399" stroke="none" opacity=".72"/><path d="M0,40 L4,35 10,29 18,20 28,11 40,18 52,9 64,16 74,9 84,18 92,11 100,27 100,40Z" fill="#F0616D" stroke="none" opacity=".72"/></svg>
+        <div class="clip sh"><i></i></div>
+        <div class="clip hi"><i></i></div>
+      </div>
+      <div class="axis"><span>Shadows</span><span>Midtones</span><span>Highlights</span></div>
+      <div class="legend">
+        <span class="ch"><span class="sw" style="background:var(--r)"></span>R</span>
+        <span class="ch"><span class="sw" style="background:var(--g)"></span>G</span>
+        <span class="ch"><span class="sw" style="background:var(--b)"></span>B</span>
+        <span class="ch luma off"><span class="sw"></span>Luma</span>
+      </div>
+    </section>
+
+    <section class="stage theme-light">
+      <div class="stage-lbl"><span class="dot">Light</span><span>sampled readout</span></div>
+      <div class="hbox">
+        <div class="zones"><span></span><span></span><span></span><span></span><span></span></div>
+        <svg viewBox="0 0 100 40" preserveAspectRatio="none"><path d="M0,40 L2,34 8,26 16,16 26,10 36,18 46,13 56,20 66,10 78,16 88,7 96,22 100,32 100,40Z" fill="#38BDF8" stroke="none" opacity=".72"/><path d="M0,40 L3,33 9,25 17,14 27,9 37,17 47,12 57,19 67,9 79,15 89,7 97,22 100,31 100,40Z" fill="#34D399" stroke="none" opacity=".72"/><path d="M0,40 L4,36 11,30 19,21 29,13 41,19 53,11 65,17 75,11 85,19 93,13 100,28 100,40Z" fill="#F0616D" stroke="none" opacity=".72"/></svg>
+        <div class="clip sh"><i></i></div>
+      </div>
+      <div class="axis"><span>0</span><span>128</span><span>255</span></div>
+      <div class="readout">
+        <div>R <b class="vr">218</b></div>
+        <div>G <b class="vg">204</b></div>
+        <div>B <b class="vb">176</b></div>
+        <div>· <b>#DACCB0</b></div>
+      </div>
+      <div class="legend">
+        <span class="ch"><span class="sw" style="background:var(--r)"></span>R</span>
+        <span class="ch"><span class="sw" style="background:var(--g)"></span>G</span>
+        <span class="ch"><span class="sw" style="background:var(--b)"></span>B</span>
+      </div>
+    </section>
+  </div>
+
+  <p class="foot">From <b>Histogram.tsx</b> · channels screen-blended · clipping = <b>--info</b> (shadow) / <b>--destructive</b> (highlight)</p>
+</div>
+</body>
+</html>

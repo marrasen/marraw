@@ -1,0 +1,192 @@
+<!-- @dsCard group="Refined · Whole-app" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Hybrid · Develop mode</title>
+<style>
+  :root{
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    --bg:#0F1214; --titlebar:#0c0f11; --rail:#0e1214; --work:#090b0d; --panel:#14181B; --card:#171B1E; --popover:#1A1F23; --muted:#242c31; --muted-fg:#8B99A3; --fg:#E8EDF2; --border:#232b31; --input:#1c2226; --primary:#2DD4BF; --primary-fg:#04211d; --accent:#1B2A2B; --accent-fg:#8FE9DD; --ring:#2DD4BF; --success:#34D399; --destructive:#F0616D;
+    --radius:8px; --shadow-1:0 1px 2px rgba(0,0,0,.5); --shadow-2:0 20px 48px -16px rgba(0,0,0,.72); --shadow-drawer:-24px 0 60px -20px rgba(0,0,0,.7); --lift:inset 0 1px 0 rgba(255,255,255,.05); --track-in:inset 0 1px 2px rgba(0,0,0,.55);
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1200px 560px at 100% -12%,#14201f 0%,transparent 58%),#090c0e;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(14px,3vw,36px) 44px}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .wrap{max-width:1180px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:72ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .lede b{color:#cdd6db;font-weight:500}
+  .head{margin-bottom:24px}
+  .foot{margin-top:22px;font-family:var(--font-mono);font-size:11px;color:#5f6d75;line-height:1.7} .foot b{color:#8fa0a8;font-weight:500}
+
+  .app{border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-2);background:var(--bg);color:var(--fg);display:flex;flex-direction:column;height:812px}
+
+  /* titlebar */
+  .tb{display:flex;align-items:center;gap:13px;height:42px;padding:0 13px;background:var(--titlebar);border-bottom:1px solid var(--border)}
+  .lights{display:flex;gap:7px}.lights i{width:11px;height:11px;border-radius:50%}
+  .lights .r{background:#f0616d}.lights .y{background:#f5b14c}.lights .g{background:#34d399}
+  .tb .title{font-family:var(--font-mono);font-size:12px;color:var(--muted-fg)}.tb .title b{color:var(--fg);font-weight:500}
+  .tb .grow{flex:1}
+  .cmd{display:flex;align-items:center;gap:9px;height:28px;width:290px;padding:0 10px;background:var(--input);border:1px solid var(--border);border-radius:8px;color:var(--muted-fg);font-size:12.5px;box-shadow:var(--track-in)}
+  .cmd svg{width:14px;height:14px}.cmd .k{margin-left:auto;font-family:var(--font-mono);font-size:10px;border:1px solid var(--border);border-radius:4px;padding:1px 5px}
+  .ticon{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--muted-fg);border:1px solid transparent}
+  .ticon:hover{background:var(--card);border-color:var(--border)}.ticon svg{width:15px;height:15px}
+
+  .shell{flex:1;display:flex;min-height:0}
+  /* mode rail */
+  .rail{width:60px;flex:none;background:var(--rail);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:4px;z-index:5}
+  .mode{width:46px;height:46px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--muted-fg);position:relative;cursor:pointer}
+  .mode svg{width:18px;height:18px}.mode span{font-size:8.5px}
+  .mode:hover{color:var(--fg);background:var(--accent)}
+  .mode.on{color:var(--primary);background:color-mix(in oklab,var(--primary) 15%,transparent)}
+  .mode.on::before{content:"";position:absolute;left:-10px;top:9px;bottom:9px;width:2px;border-radius:2px;background:var(--primary)}
+  .rail .sp{flex:1}
+
+  /* canvas + drawer */
+  .stagewrap{flex:1;display:flex;flex-direction:column;min-width:0}
+  .canvas{position:relative;flex:1;min-height:0;background:var(--work);overflow:hidden}
+  .photo{position:absolute;inset:0;background:radial-gradient(130% 120% at 44% 36%,#3c5866,#0d1518 60%,#1c2c34)}
+  .photo::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 180px rgba(0,0,0,.66)}
+  /* floating info + controls over the image */
+  .ochip{position:absolute;z-index:3;display:inline-flex;align-items:center;gap:9px;height:28px;padding:0 11px;border-radius:9px;background:rgba(8,11,13,.5);border:1px solid rgba(255,255,255,.1);backdrop-filter:blur(7px)}
+  .ochip.info{bottom:16px;left:16px;font-family:var(--font-mono);font-size:11px;color:rgba(230,237,241,.86)}
+  .ochip.info .stars{display:inline-flex;gap:2px;margin-left:4px}.ochip.info .stars svg{width:13px;height:13px;stroke:none;fill:var(--primary)}
+  .otools{position:absolute;z-index:3;top:16px;left:16px;display:flex;gap:8px}
+  .otool{height:30px;padding:0 11px;border-radius:8px;background:rgba(8,11,13,.5);border:1px solid rgba(255,255,255,.1);backdrop-filter:blur(7px);color:#dbe4e9;font-size:12px;display:inline-flex;align-items:center;gap:7px;cursor:pointer}
+  .otool svg{width:14px;height:14px}
+  .otool.on{color:var(--primary);border-color:color-mix(in oklab,var(--primary) 46%,rgba(255,255,255,.1));background:rgba(45,212,191,.14)}
+  .ozoom{position:absolute;z-index:3;bottom:16px;right:16px;display:flex;gap:2px;padding:3px;border-radius:9px;background:rgba(8,11,13,.5);border:1px solid rgba(255,255,255,.1);backdrop-filter:blur(7px)}
+  .ozoom button{height:24px;padding:0 10px;border:0;background:transparent;border-radius:6px;color:#c5cfd4;font-size:11.5px;font-family:var(--font-mono);cursor:pointer}
+  .ozoom button.on{background:rgba(255,255,255,.08);color:#fff}
+
+  /* develop drawer */
+  .drawer{position:absolute;top:0;right:0;bottom:0;width:312px;background:var(--panel);border-left:1px solid var(--border);box-shadow:var(--shadow-drawer);display:flex;flex-direction:column;z-index:4}
+  .dh{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border)}
+  .dh b{font-size:13px}.dh .sub{font-family:var(--font-mono);font-size:9.5px;color:var(--muted-fg);display:block;margin-top:2px}
+  .dh .rst{width:26px;height:26px;border-radius:7px;border:1px solid var(--border);background:var(--card);color:var(--muted-fg);display:grid;place-items:center}.dh .rst svg{width:13px;height:13px}
+  .dbody{flex:1;overflow:hidden}
+  .dhist{margin:12px 14px 6px;height:56px;border-radius:7px;background:linear-gradient(180deg,#0c1013,#0e1315);border:1px solid var(--border);overflow:hidden;box-shadow:var(--track-in);position:relative}
+  .dhist svg{position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen}
+  .dsec{padding:10px 14px;border-top:1px solid var(--border)}
+  .dsec .t{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-fg);display:flex;justify-content:space-between;margin-bottom:11px}
+  .dsec .t .st{color:var(--primary);font-family:var(--font-mono);letter-spacing:0}
+  .wb{display:flex;gap:8px;margin-bottom:11px}
+  .wb .as{flex:1;height:28px;border:1px solid var(--border);background:var(--input);border-radius:7px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;color:#c7d0d6;font-size:12px;box-shadow:var(--track-in)}
+  .wb .as svg{width:12px;height:12px;color:var(--muted-fg)}
+  .pip{width:28px;height:28px;border-radius:7px;border:1px solid color-mix(in oklab,var(--primary) 46%,var(--border));background:color-mix(in oklab,var(--primary) 15%,transparent);color:var(--primary);display:grid;place-items:center;cursor:pointer}.pip svg{width:14px;height:14px}
+  .sld{margin-bottom:11px}.sld:last-child{margin-bottom:2px}
+  .sr{display:flex;justify-content:space-between;margin-bottom:5px}
+  .sr .nm{font-size:11.5px;color:#c3cdd3}.sr .v{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--muted-fg)}
+  .sr .v.on{color:var(--primary)}
+  .tk{position:relative;height:3px;border-radius:999px;background:var(--muted);box-shadow:var(--track-in)}
+  .cen{position:absolute;top:-2px;bottom:-2px;left:50%;width:1px;background:var(--muted-fg);opacity:.5}
+  .fl{position:absolute;top:0;height:100%;border-radius:999px;background:var(--primary)}
+  .gr{position:absolute;inset:0;border-radius:999px}
+  .th{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;background:var(--fg);border:1px solid rgba(0,0,0,.35);transform:translate(-50%,-50%);box-shadow:0 1px 2px rgba(0,0,0,.5)}
+  .th.on{background:var(--primary);border-color:transparent;box-shadow:0 0 0 3px color-mix(in oklab,var(--ring) 26%,transparent)}
+  .expbtn{margin:12px 14px;height:34px;border-radius:8px;background:var(--primary);color:var(--primary-fg);font-size:12.5px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:7px;box-shadow:inset 0 1px 0 rgba(255,255,255,.22);cursor:pointer}.expbtn svg{width:14px;height:14px}
+
+  /* filmstrip */
+  .strip{height:96px;flex:none;background:var(--titlebar);border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 13px}
+  .striplbl{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-fg);writing-mode:vertical-rl;transform:rotate(180deg);opacity:.7}
+  .frames{display:flex;gap:8px;flex:1;overflow:hidden}
+  .fr{position:relative;flex:none;width:104px;aspect-ratio:3/2;border-radius:7px;overflow:hidden;border:1px solid var(--border);opacity:.66}
+  .fr .ph{position:absolute;inset:0}
+  .fr.active{opacity:1;outline:2px solid var(--ring);outline-offset:2px;border-color:transparent;box-shadow:0 6px 18px -6px rgba(0,0,0,.7)}
+  .fr.rej .ph{filter:grayscale(.5) brightness(.55)}
+  .fr .flag{position:absolute;top:4px;left:4px;width:6px;height:6px;border-radius:50%}.fr .flag.p{background:var(--success)}.fr .flag.r{background:var(--destructive)}
+  .pos{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--muted-fg);white-space:nowrap}.pos b{color:var(--fg);font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Refined · Whole-app hybrid · 2 of 2</p>
+    <h1>Develop mode</h1>
+    <p class="lede">The blend, screen two — same rail, same ⌘K. Switching to Develop drops the grid: the photo goes <b>edge-to-edge on a darkroom canvas (C)</b>, the full develop stack slides in as a <b>floating drawer (A)</b>, and a dismissible filmstrip keeps the sequence in reach. Precise editing gets the whole frame; the chrome that remains floats as glass so it never competes with the image.</p>
+  </header>
+
+  <div class="app">
+    <!-- titlebar -->
+    <div class="tb">
+      <div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+      <span class="title"><b>marraw</b> · Iceland</span>
+      <span class="grow"></span>
+      <div class="cmd"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>Search or run a command<span class="k">⌘K</span></div>
+      <span class="ticon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.3-2.6H10l-.3 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.3 2.6h4l.3-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"/></svg></span>
+    </div>
+
+    <div class="shell">
+      <!-- mode rail -->
+      <nav class="rail">
+        <div class="mode"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Library</span></div>
+        <div class="mode"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg><span>Cull</span></div>
+        <div class="mode on"><svg viewBox="0 0 24 24"><line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.2" fill="var(--rail)"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.2" fill="var(--rail)"/></svg><span>Develop</span></div>
+        <div class="mode"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg><span>Export</span></div>
+        <div class="sp"></div>
+        <div class="mode"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2l-.3-2.6H10l-.3 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2l.3 2.6h4l.3-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"/></svg><span>Settings</span></div>
+      </nav>
+
+      <div class="stagewrap">
+        <div class="canvas">
+          <div class="photo"></div>
+          <!-- floating tools -->
+          <div class="otools">
+            <div class="otool on"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Before / After</div>
+            <div class="otool"><svg viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>Crop</div>
+          </div>
+          <div class="ochip info">DSC07421.ARW · ƒ/2.8 · 1/250 · ISO 400 · 42.4MP <span class="stars"><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><svg viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg></span></div>
+          <div class="ozoom"><button>Fit</button><button class="on">100%</button><button>200%</button></div>
+
+          <!-- develop drawer -->
+          <aside class="drawer">
+            <div class="dh"><div><b>Develop</b><span class="sub">DSC07421.ARW · 42.4MP</span></div><div class="rst"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/></svg></div></div>
+            <div class="dbody">
+              <div class="dhist"><svg viewBox="0 0 100 40" preserveAspectRatio="none"><path d="M0,40 L2,33 8,26 16,16 26,10 36,18 46,14 56,20 66,10 78,16 88,7 96,22 100,32 100,40Z" fill="#38BDF8" stroke="none" opacity=".7"/><path d="M0,40 L3,32 9,24 17,13 27,8 37,16 47,12 57,19 67,8 79,14 89,6 97,21 100,31 100,40Z" fill="#34D399" stroke="none" opacity=".7"/><path d="M0,40 L4,35 11,29 19,20 29,12 41,18 53,10 65,16 75,10 85,18 93,12 100,27 100,40Z" fill="#F0616D" stroke="none" opacity=".7"/></svg></div>
+              <div class="dsec">
+                <div class="t"><span>Light</span><span class="st">edited</span></div>
+                <div class="sld"><div class="sr"><span class="nm">Exposure</span><span class="v on">+0.40</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:4%"></span><span class="th on" style="left:54%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="nm">Contrast</span><span class="v on">+12</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:6%"></span><span class="th" style="left:56%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="nm">Highlights</span><span class="v on">−38</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:31%;width:19%"></span><span class="th" style="left:31%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="nm">Shadows</span><span class="v on">+24</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:12%"></span><span class="th" style="left:62%"></span></div></div>
+              </div>
+              <div class="dsec">
+                <div class="t"><span>White balance</span><span class="st">5600K</span></div>
+                <div class="wb"><div class="as">As Shot <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div><button class="pip"><svg viewBox="0 0 24 24"><path d="M19 3l-8 8M11 11l-4 10-2-6-6-2 10-4"/></svg></button></div>
+                <div class="sld"><div class="sr"><span class="nm">Temp</span><span class="v on">5600</span></div><div class="tk"><span class="gr" style="background:linear-gradient(90deg,#38BDF8,#8B99A3,#F5B14C);opacity:.32"></span><span class="th" style="left:58%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="nm">Vibrance</span><span class="v on">+18</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:9%"></span><span class="th" style="left:59%"></span></div></div>
+                <div class="sld"><div class="sr"><span class="nm">Clarity</span><span class="v on">+22</span></div><div class="tk"><span class="cen"></span><span class="fl" style="left:50%;width:11%"></span><span class="th" style="left:61%"></span></div></div>
+              </div>
+            </div>
+            <div class="expbtn"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg>Export photo</div>
+          </aside>
+        </div>
+
+        <!-- filmstrip -->
+        <div class="strip">
+          <span class="striplbl">Filmstrip</span>
+          <div class="frames">
+            <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#6a5233,#241a12 55%,#8a6a3a)"></div><span class="flag p"></span></div>
+            <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#334a5c,#12181f 60%,#4a6f86)"></div></div>
+            <div class="fr active"><div class="ph" style="background:radial-gradient(130% 120% at 44% 36%,#3c5866,#0d1518 60%,#1c2c34)"></div></div>
+            <div class="fr rej"><div class="ph" style="background:linear-gradient(135deg,#4a4a52,#1a1a1f 55%,#5c5c66)"></div><span class="flag r"></span></div>
+            <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#2f4a3a,#101a15 55%,#3f6a4f)"></div></div>
+            <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#5c3f52,#1f1219 55%,#7a5470)"></div><span class="flag p"></span></div>
+            <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#2b4a4a,#0e1a1a 55%,#3a6a6a)"></div></div>
+            <div class="fr"><div class="ph" style="background:linear-gradient(135deg,#54492f,#1a1710 55%,#6f6140)"></div></div>
+          </div>
+          <span class="pos"><b>96</b> / 1,284</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot"><b>Blend:</b> rail + ⌘K + slide-over drawer from A · darkroom edge-to-edge canvas from C · continuity from B's filmstrip<br><b>Trade-offs:</b> + the image owns the frame for precise grading · + drawer can hide for a clean full-screen review · − single-image focus, so bulk triage stays in Cull mode</p>
+</div>
+</body>
+</html>

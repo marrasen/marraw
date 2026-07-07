@@ -1,0 +1,218 @@
+<!-- @dsCard group="Foundations" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Color</title>
+<style>
+  :root{
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    --radius: 0.5rem;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font-family:var(--font-sans);
+    background:
+      radial-gradient(1100px 520px at 100% -12%, #14201f 0%, transparent 58%),
+      radial-gradient(900px 500px at -5% 0%, #10181c 0%, transparent 55%),
+      #0a0d0f;
+    color:#aeb9c0;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    padding:30px clamp(16px,4vw,40px) 44px;
+  }
+
+  /* ---- Studio token scopes ---- */
+  .theme-dark{
+    --bg:#0F1214; --card:#171B1E; --popover:#1A1F23; --muted:#1F252A; --muted-fg:#8B99A3;
+    --fg:#E8EDF2; --border:#262E34; --input:#222A30; --primary:#2DD4BF; --primary-fg:#05211D;
+    --secondary:#222A30; --secondary-fg:#E8EDF2; --accent:#1B2A2B; --accent-fg:#8FE9DD; --ring:#2DD4BF;
+    --destructive:#F0616D; --success:#34D399; --warning:#F5B14C; --info:#38BDF8;
+    --hist-r:#F0616D; --hist-g:#34D399; --hist-b:#38BDF8;
+    --hair:rgba(255,255,255,.06);
+    --shadow-1:0 1px 2px rgba(0,0,0,.5);
+    --shadow-2:0 12px 34px -12px rgba(0,0,0,.66);
+    --lift:inset 0 1px 0 rgba(255,255,255,.05);
+    color-scheme:dark;
+  }
+  .theme-light{
+    --bg:#F5F7F9; --card:#FFFFFF; --popover:#FFFFFF; --muted:#EAEEF1; --muted-fg:#5A6672;
+    --fg:#0F1214; --border:#DCE2E7; --input:#FFFFFF; --primary:#0E9C8C; --primary-fg:#FFFFFF;
+    --secondary:#EAEEF1; --secondary-fg:#0F1214; --accent:#E3F3F0; --accent-fg:#0B6A5F; --ring:#14B8A6;
+    --destructive:#DC2A3A; --success:#0E9C6E; --warning:#C77A17; --info:#0C82C7;
+    --hist-r:#DC2A3A; --hist-g:#0E9C6E; --hist-b:#0C82C7;
+    --hair:rgba(16,20,24,.06);
+    --shadow-1:0 1px 2px rgba(16,20,24,.08);
+    --shadow-2:0 14px 34px -14px rgba(16,20,24,.20);
+    --lift:inset 0 1px 0 rgba(255,255,255,.75);
+    color-scheme:light;
+  }
+
+  /* ---- card chrome (page-level) ---- */
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;
+    color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px;
+  }
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:64ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+
+  .stages{display:grid;grid-template-columns:1fr;gap:18px}
+  @media(min-width:880px){.stages{grid-template-columns:1fr 1fr}}
+  .stage{
+    background:var(--bg);color:var(--fg);border:1px solid var(--border);
+    border-radius:16px;padding:20px;box-shadow:var(--shadow-2);
+  }
+  .stage-lbl{
+    display:flex;align-items:center;justify-content:space-between;
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--muted-fg);margin-bottom:16px;
+  }
+  .stage-lbl .dot{display:inline-flex;align-items:center;gap:7px}
+  .stage-lbl .dot::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--primary);box-shadow:0 0 0 3px color-mix(in oklab,var(--primary) 22%,transparent)}
+
+  .grp{margin-bottom:16px}
+  .grp:last-child{margin-bottom:0}
+  .grp-t{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-fg);margin:0 0 8px;font-weight:600}
+  .swatches{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .sw{
+    display:flex;align-items:center;gap:11px;padding:8px 9px;
+    background:var(--card);border:1px solid var(--border);border-radius:9px;box-shadow:var(--lift);
+  }
+  .sw .chip{width:32px;height:32px;border-radius:7px;border:1px solid var(--hair);flex:none;box-shadow:var(--shadow-1)}
+  .sw .m{min-width:0}
+  .sw .n{font-family:var(--font-mono);font-size:11.5px;color:var(--fg);white-space:nowrap}
+  .sw .h{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-fg);text-transform:uppercase}
+
+  .rule{
+    margin-top:16px;display:flex;gap:12px;align-items:flex-start;
+    background:var(--accent);border:1px solid color-mix(in oklab,var(--primary) 34%,var(--border));
+    border-radius:11px;padding:12px 14px;
+  }
+  .rule .ic{flex:none;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;background:color-mix(in oklab,var(--primary) 22%,transparent);color:var(--primary);font-weight:700}
+  .rule p{margin:0;font-size:12.5px;line-height:1.5;color:var(--fg)}
+  .rule b{color:var(--primary)}
+
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75;letter-spacing:.02em}
+  .foot b{color:#8fa0a8;font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Foundations · Color</p>
+    <h1>Studio palette</h1>
+    <p class="lede">Cool charcoal chrome so photographs read true — teal is the single interactive accent, spent only on active, selected, and focused states. Neutrals carry the interface; color carries the image.</p>
+  </header>
+
+  <div class="stages">
+
+    <!-- DARK -->
+    <section class="stage theme-dark">
+      <div class="stage-lbl"><span class="dot">Dark · default</span><span>oklch base</span></div>
+
+      <div class="grp">
+        <p class="grp-t">Surfaces</p>
+        <div class="swatches">
+          <div class="sw"><span class="chip" style="background:#0F1214"></span><div class="m"><div class="n">--background</div><div class="h">#0F1214</div></div></div>
+          <div class="sw"><span class="chip" style="background:#171B1E"></span><div class="m"><div class="n">--card</div><div class="h">#171B1E</div></div></div>
+          <div class="sw"><span class="chip" style="background:#1A1F23"></span><div class="m"><div class="n">--popover</div><div class="h">#1A1F23</div></div></div>
+          <div class="sw"><span class="chip" style="background:#1F252A"></span><div class="m"><div class="n">--muted</div><div class="h">#1F252A</div></div></div>
+        </div>
+      </div>
+
+      <div class="grp">
+        <p class="grp-t">Content &amp; lines</p>
+        <div class="swatches">
+          <div class="sw"><span class="chip" style="background:#E8EDF2"></span><div class="m"><div class="n">--foreground</div><div class="h">#E8EDF2</div></div></div>
+          <div class="sw"><span class="chip" style="background:#8B99A3"></span><div class="m"><div class="n">--muted-fg</div><div class="h">#8B99A3</div></div></div>
+          <div class="sw"><span class="chip" style="background:#262E34"></span><div class="m"><div class="n">--border</div><div class="h">#262E34</div></div></div>
+          <div class="sw"><span class="chip" style="background:#222A30"></span><div class="m"><div class="n">--input</div><div class="h">#222A30</div></div></div>
+        </div>
+      </div>
+
+      <div class="grp">
+        <p class="grp-t">Brand · teal</p>
+        <div class="swatches">
+          <div class="sw"><span class="chip" style="background:#2DD4BF"></span><div class="m"><div class="n">--primary</div><div class="h">#2DD4BF</div></div></div>
+          <div class="sw"><span class="chip" style="background:#05211D"></span><div class="m"><div class="n">--primary-fg</div><div class="h">#05211D</div></div></div>
+          <div class="sw"><span class="chip" style="background:#1B2A2B"></span><div class="m"><div class="n">--accent</div><div class="h">#1B2A2B</div></div></div>
+          <div class="sw"><span class="chip" style="background:#2DD4BF"></span><div class="m"><div class="n">--ring</div><div class="h">#2DD4BF</div></div></div>
+        </div>
+      </div>
+
+      <div class="grp">
+        <p class="grp-t">Semantic &amp; histogram</p>
+        <div class="swatches">
+          <div class="sw"><span class="chip" style="background:#F0616D"></span><div class="m"><div class="n">--destructive</div><div class="h">#F0616D</div></div></div>
+          <div class="sw"><span class="chip" style="background:#34D399"></span><div class="m"><div class="n">--success</div><div class="h">#34D399</div></div></div>
+          <div class="sw"><span class="chip" style="background:#F5B14C"></span><div class="m"><div class="n">--warning</div><div class="h">#F5B14C</div></div></div>
+          <div class="sw"><span class="chip" style="background:#38BDF8"></span><div class="m"><div class="n">--info</div><div class="h">#38BDF8</div></div></div>
+          <div class="sw"><span class="chip" style="background:linear-gradient(90deg,#F0616D 33%,#34D399 33% 66%,#38BDF8 66%)"></span><div class="m"><div class="n">hist R/G/B</div><div class="h">616D·D399·BDF8</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LIGHT -->
+    <section class="stage theme-light">
+      <div class="stage-lbl"><span class="dot">Light</span><span>cool paper</span></div>
+
+      <div class="grp">
+        <p class="grp-t">Surfaces</p>
+        <div class="swatches">
+          <div class="sw"><span class="chip" style="background:#F5F7F9"></span><div class="m"><div class="n">--background</div><div class="h">#F5F7F9</div></div></div>
+          <div class="sw"><span class="chip" style="background:#FFFFFF"></span><div class="m"><div class="n">--card</div><div class="h">#FFFFFF</div></div></div>
+          <div class="sw"><span class="chip" style="background:#FFFFFF"></span><div class="m"><div class="n">--popover</div><div class="h">#FFFFFF</div></div></div>
+          <div class="sw"><span class="chip" style="background:#EAEEF1"></span><div class="m"><div class="n">--muted</div><div class="h">#EAEEF1</div></div></div>
+        </div>
+      </div>
+
+      <div class="grp">
+        <p class="grp-t">Content &amp; lines</p>
+        <div class="swatches">
+          <div class="sw"><span class="chip" style="background:#0F1214"></span><div class="m"><div class="n">--foreground</div><div class="h">#0F1214</div></div></div>
+          <div class="sw"><span class="chip" style="background:#5A6672"></span><div class="m"><div class="n">--muted-fg</div><div class="h">#5A6672</div></div></div>
+          <div class="sw"><span class="chip" style="background:#DCE2E7"></span><div class="m"><div class="n">--border</div><div class="h">#DCE2E7</div></div></div>
+          <div class="sw"><span class="chip" style="background:#FFFFFF"></span><div class="m"><div class="n">--input</div><div class="h">#FFFFFF</div></div></div>
+        </div>
+      </div>
+
+      <div class="grp">
+        <p class="grp-t">Brand · teal</p>
+        <div class="swatches">
+          <div class="sw"><span class="chip" style="background:#0E9C8C"></span><div class="m"><div class="n">--primary</div><div class="h">#0E9C8C</div></div></div>
+          <div class="sw"><span class="chip" style="background:#FFFFFF"></span><div class="m"><div class="n">--primary-fg</div><div class="h">#FFFFFF</div></div></div>
+          <div class="sw"><span class="chip" style="background:#E3F3F0"></span><div class="m"><div class="n">--accent</div><div class="h">#E3F3F0</div></div></div>
+          <div class="sw"><span class="chip" style="background:#14B8A6"></span><div class="m"><div class="n">--ring</div><div class="h">#14B8A6</div></div></div>
+        </div>
+      </div>
+
+      <div class="grp">
+        <p class="grp-t">Semantic &amp; histogram</p>
+        <div class="swatches">
+          <div class="sw"><span class="chip" style="background:#DC2A3A"></span><div class="m"><div class="n">--destructive</div><div class="h">#DC2A3A</div></div></div>
+          <div class="sw"><span class="chip" style="background:#0E9C6E"></span><div class="m"><div class="n">--success</div><div class="h">#0E9C6E</div></div></div>
+          <div class="sw"><span class="chip" style="background:#C77A17"></span><div class="m"><div class="n">--warning</div><div class="h">#C77A17</div></div></div>
+          <div class="sw"><span class="chip" style="background:#0C82C7"></span><div class="m"><div class="n">--info</div><div class="h">#0C82C7</div></div></div>
+          <div class="sw"><span class="chip" style="background:linear-gradient(90deg,#DC2A3A 33%,#0E9C6E 33% 66%,#0C82C7 66%)"></span><div class="m"><div class="n">hist R/G/B</div><div class="h">2A3A·9C6E·82C7</div></div></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="theme-dark">
+    <div class="rule">
+      <span class="ic">◆</span>
+      <p><b>Accent rule.</b> Teal is never decorative. It marks exactly one thing at a time in a region: the focused control, the selected frame, the active tab, a slider's filled track, or the primary action. Everything else stays in the neutral charcoal scale so the photograph is the only saturated object on screen.</p>
+    </div>
+  </div>
+
+  <p class="foot">Maps 1:1 to shadcn CSS variables in <b>client/src/index.css</b> · ships as OKLCH · fonts <b>Geist</b> / <b>Geist Mono</b></p>
+</div>
+</body>
+</html>

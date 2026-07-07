@@ -1,0 +1,84 @@
+<!-- @dsCard group="App Surfaces" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Status bar</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--statusbar:#121619;--card:#171B1E;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--primary:#2DD4BF;--accent:#1B2A2B;--ring:#2DD4BF;--success:#34D399;--warning:#F5B14C;
+    --track-in:inset 0 1px 2px rgba(0,0,0,.55);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .theme-light{--bg:#F5F7F9;--statusbar:#FBFCFD;--card:#FFFFFF;--muted:#EAEEF1;--muted-fg:#5A6672;--fg:#0F1214;--border:#DCE2E7;--primary:#0E9C8C;--accent:#E3F3F0;--ring:#14B8A6;--success:#0E9C6E;--warning:#C77A17;
+    --track-in:inset 0 1px 2px rgba(16,20,24,.1);--shadow-2:0 14px 34px -14px rgba(16,20,24,.2);--lift:inset 0 1px 0 rgba(255,255,255,.75);color-scheme:light}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:66ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .lbl{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:#6b7880;margin:0 0 10px}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  .sb{display:flex;align-items:center;gap:14px;height:34px;padding:0 14px;background:var(--statusbar);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-2),var(--lift);color:var(--muted-fg);font-size:12px;margin-bottom:22px}
+  .sb:last-of-type{margin-bottom:0}
+  .sb .path{font-family:var(--font-mono);font-size:11px;color:var(--fg)}
+  .sb .path .dim{color:var(--muted-fg)}
+  .grow{flex:1}
+  .sep{width:1px;height:16px;background:var(--border)}
+  .stat{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--muted-fg)}
+  .stat svg{width:13px;height:13px}
+  .stat b{color:var(--fg);font-weight:500}
+  .stat.teal{color:var(--primary)} .stat.teal b{color:var(--primary)} .stat.teal svg{color:var(--primary)}
+  .stat.pick{color:var(--success)} .stat.pick svg{color:var(--success)} .stat.pick b{color:var(--success)}
+  .task{display:inline-flex;align-items:center;gap:8px}
+  .mini{position:relative;width:66px;height:4px;border-radius:999px;background:var(--muted);overflow:hidden;box-shadow:var(--track-in)}
+  .mini .v{position:absolute;left:0;height:100%;background:var(--primary);border-radius:999px}
+  .conn{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:10.5px;color:var(--success)}
+  .conn .d{width:7px;height:7px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px color-mix(in oklab,var(--success) 22%,transparent)}
+  .spin{width:13px;height:13px;border-radius:50%;border:2px solid color-mix(in oklab,var(--primary) 30%,transparent);border-top-color:var(--primary);animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">App Surfaces · Status</p>
+    <h1>Status bar</h1>
+    <p class="lede">The 34px baseline strip. It holds the current path, live counts, background task progress, and the daemon connection dot — everything mono and tabular so it reads like an instrument readout. Only an in-flight task or a healthy connection earns color.</p>
+  </header>
+
+  <p class="lbl">Dark · working</p>
+  <div class="sb theme-dark">
+    <span class="path"><span class="dim">Library / 2026 /</span> Iceland</span>
+    <span class="sep"></span>
+    <span class="stat"><b>1,284</b> photos</span>
+    <span class="stat pick"><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg><b>96</b> picked</span>
+    <span class="stat teal"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg><b>3</b> selected</span>
+    <span class="grow"></span>
+    <span class="task"><span class="spin"></span><span class="stat">Previews <div class="mini" style="display:inline-block;vertical-align:middle"><span class="v" style="width:42%"></span></div> <b class="" style="color:var(--primary)">42%</b></span></span>
+    <span class="sep"></span>
+    <span class="conn"><span class="d"></span>Connected · :8483</span>
+  </div>
+
+  <p class="lbl">Light · idle</p>
+  <div class="sb theme-light">
+    <span class="path"><span class="dim">Library / 2026 /</span> Iceland</span>
+    <span class="sep"></span>
+    <span class="stat"><b>1,284</b> photos</span>
+    <span class="stat pick"><svg viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg><b>96</b> picked</span>
+    <span class="stat"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg><b>12</b> rejected</span>
+    <span class="grow"></span>
+    <span class="stat">100%</span>
+    <span class="sep"></span>
+    <span class="conn"><span class="d"></span>Connected</span>
+  </div>
+
+  <p class="foot">Rendered by <b>StatusBar.tsx</b> · task progress mirrors <b>TaskTray.tsx</b> · connection reflects the aprot WebSocket handshake</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!-- @dsCard group="Foundations" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Iconography</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--primary:#2DD4BF;--accent:#1B2A2B;
+    --hair:rgba(255,255,255,.06);--shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:64ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .stage{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:16px;padding:24px;box-shadow:var(--shadow-2)}
+  .stage-lbl{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:20px}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;display:block}
+
+  .icons{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:12px}
+  .ic{display:flex;flex-direction:column;align-items:center;gap:9px;padding:16px 8px;background:var(--card);border:1px solid var(--border);border-radius:11px;box-shadow:var(--lift);color:var(--fg)}
+  .ic .nm{font-family:var(--font-mono);font-size:10px;color:var(--muted-fg)}
+  .ic:hover{border-color:color-mix(in oklab,var(--primary) 40%,var(--border));color:var(--primary)}
+
+  .sizes{display:flex;align-items:flex-end;gap:26px;margin-top:22px;padding-top:22px;border-top:1px solid var(--border)}
+  .sz{display:flex;flex-direction:column;align-items:center;gap:9px;color:var(--fg)}
+  .sz .cap{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-fg)}
+  .sz.active{color:var(--primary)}
+  .note{margin-top:18px;font-size:12.5px;color:var(--muted-fg);line-height:1.5}
+  .note b{color:var(--fg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Foundations · Icons</p>
+    <h1>Iconography · Lucide</h1>
+    <p class="lede">One family, one weight. Lucide at a 2px stroke with round caps and joins on a 24px grid — rendered at 16px in toolbars and 14px in dense rows. Icons inherit <code style="font-family:var(--font-mono);color:#cdd6db">currentColor</code>, so they go teal exactly when their control is active.</p>
+  </header>
+
+  <section class="stage theme-dark">
+    <div class="stage-lbl"><span>Editor set · 16px</span><span>stroke 2 · round</span></div>
+    <div class="icons">
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><span class="nm">star</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M4 22V4h13l-2 4 2 4H4"/></svg><span class="nm">flag</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg><span class="nm">crop</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><line x1="3" y1="8" x2="21" y2="8"/><circle cx="9" cy="8" r="2.4" fill="var(--bg)"/><line x1="3" y1="16" x2="21" y2="16"/><circle cx="16" cy="16" r="2.4" fill="var(--bg)"/></svg><span class="nm">sliders</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="nm">folder</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><span class="nm">sun</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg><span class="nm">contrast</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3l4 7M21 12l-8 0M17 20l-4-7M7 20l4-7M3 12l8 0M7 4l4 7"/></svg><span class="nm">aperture</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg><span class="nm">export</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg><span class="nm">search</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M4 18l5-5 4 4 3-3 4 4"/></svg><span class="nm">image</span></div>
+      <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg><span class="nm">eye</span></div>
+    </div>
+
+    <div class="sizes">
+      <div class="sz"><svg width="14" height="14" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><span class="cap">14 · rows</span></div>
+      <div class="sz active"><svg width="16" height="16" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9" fill="currentColor" stroke="none"/></svg><span class="cap">16 · toolbar</span></div>
+      <div class="sz"><svg width="20" height="20" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><span class="cap">20 · emphasis</span></div>
+      <div class="sz"><svg width="28" height="28" viewBox="0 0 24 24" style="stroke-width:1.6"><polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/></svg><span class="cap">28 · empty state</span></div>
+    </div>
+    <p class="note"><b>Rule:</b> stroke stays 2px at 14–20px; at 24px+ drop to 1.6px so large icons don't look heavy. Filled variants (solid star) signal an <b>on</b> state; outline is the default.</p>
+  </section>
+
+  <p class="foot">Library: <b>lucide-react</b> (already a dependency) · never mix in a second icon set</p>
+</div>
+</body>
+</html>

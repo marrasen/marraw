@@ -1,0 +1,112 @@
+<!-- @dsCard group="Components" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Sliders</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--muted:#242c31;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--primary:#2DD4BF;--accent:#1B2A2B;--ring:#2DD4BF;
+    --hair:rgba(255,255,255,.06);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);--track-in:inset 0 1px 2px rgba(0,0,0,.55);color-scheme:dark}
+  .theme-light{--bg:#F5F7F9;--card:#FFFFFF;--muted:#DDE3E8;--muted-fg:#5A6672;--fg:#0F1214;--border:#DCE2E7;--primary:#0E9C8C;--accent:#E3F3F0;--ring:#14B8A6;
+    --hair:rgba(16,20,24,.06);--shadow-2:0 14px 34px -14px rgba(16,20,24,.2);--lift:inset 0 1px 0 rgba(255,255,255,.75);--track-in:inset 0 1px 2px rgba(16,20,24,.12);color-scheme:light}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:66ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .stages{display:grid;grid-template-columns:1fr;gap:18px}
+  @media(min-width:880px){.stages{grid-template-columns:1.3fr 1fr}}
+  .stage{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:16px;padding:22px 24px;box-shadow:var(--shadow-2)}
+  .stage-lbl{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:22px}
+  .stage-lbl .dot::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--primary);margin-right:7px;vertical-align:middle;box-shadow:0 0 0 3px color-mix(in oklab,var(--primary) 22%,transparent)}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+
+  .sld{margin-bottom:22px}
+  .sld:last-child{margin-bottom:0}
+  .sld-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px}
+  .sld-name{font-size:12.5px;color:var(--fg);letter-spacing:.005em}
+  .sld-val{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted-fg)}
+  .sld-val.on{color:var(--primary)}
+  .track{position:relative;height:4px;border-radius:999px;background:var(--muted);box-shadow:var(--track-in)}
+  .cen{position:absolute;top:-3px;bottom:-3px;left:50%;width:1px;background:var(--muted-fg);opacity:.5}
+  .fill{position:absolute;top:0;height:100%;border-radius:999px;background:var(--primary)}
+  .thumb{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:var(--fg);border:1px solid rgba(0,0,0,.35);transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.4)}
+  .thumb.on{background:var(--primary);border-color:transparent;box-shadow:0 0 0 4px color-mix(in oklab,var(--ring) 26%,transparent),0 1px 3px rgba(0,0,0,.5)}
+  .thumb.foc{box-shadow:0 0 0 4px color-mix(in oklab,var(--ring) 40%,transparent),0 1px 3px rgba(0,0,0,.5)}
+  .sld.dis{opacity:.4}
+  .hint{display:flex;align-items:center;gap:7px;margin-top:18px;font-size:11.5px;color:var(--muted-fg)}
+  .kbd{font-family:var(--font-mono);font-size:10.5px;background:var(--card);border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;padding:2px 6px;color:var(--fg)}
+  .callout{margin-top:18px;background:var(--accent);border:1px solid color-mix(in oklab,var(--primary) 32%,var(--border));border-radius:11px;padding:14px 16px}
+  .callout h3{margin:0 0 6px;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--primary)}
+  .callout p{margin:0;font-size:12.5px;line-height:1.55;color:var(--fg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Components · Sliders</p>
+    <h1>Sliders</h1>
+    <p class="lede">The instrument the whole app is built around. Tonal controls are <b style="color:#cdd6db">bipolar</b>: the track fills <i>from the center</i> toward the thumb, so a glance tells you both direction and amount. Double-click any slider to snap back to zero. Values live in mono, tabular type at the right edge.</p>
+  </header>
+
+  <div class="stages">
+    <section class="stage theme-dark">
+      <div class="stage-lbl"><span class="dot">Dark · bipolar tone</span><span>center origin</span></div>
+
+      <div class="sld">
+        <div class="sld-head"><span class="sld-name">Exposure</span><span class="sld-val on">+0.40</span></div>
+        <div class="track"><span class="cen"></span><span class="fill" style="left:50%;width:4%"></span><span class="thumb on" style="left:54%"></span></div>
+      </div>
+      <div class="sld">
+        <div class="sld-head"><span class="sld-name">Contrast</span><span class="sld-val on">+12</span></div>
+        <div class="track"><span class="cen"></span><span class="fill" style="left:50%;width:6%"></span><span class="thumb" style="left:56%"></span></div>
+      </div>
+      <div class="sld">
+        <div class="sld-head"><span class="sld-name">Highlights</span><span class="sld-val on">−38</span></div>
+        <div class="track"><span class="cen"></span><span class="fill" style="left:31%;width:19%"></span><span class="thumb" style="left:31%"></span></div>
+      </div>
+      <div class="sld">
+        <div class="sld-head"><span class="sld-name">Vignette</span><span class="sld-val">0</span></div>
+        <div class="track"><span class="cen"></span><span class="thumb" style="left:50%"></span></div>
+      </div>
+
+      <div class="callout">
+        <h3>Bipolar anatomy</h3>
+        <p>Track · center tick · directional fill · thumb. At exactly 0 there is no fill and the thumb rests on the tick — the neutral state is unmistakable, so you always know what you've changed.</p>
+      </div>
+    </section>
+
+    <section class="stage theme-light">
+      <div class="stage-lbl"><span class="dot">Light + states</span><span>unipolar</span></div>
+
+      <div class="sld">
+        <div class="sld-head"><span class="sld-name">Saturation</span><span class="sld-val on">62</span></div>
+        <div class="track"><span class="fill" style="left:0;width:62%"></span><span class="thumb on" style="left:62%"></span></div>
+      </div>
+      <div class="sld">
+        <div class="sld-head"><span class="sld-name">Sharpen · focused</span><span class="sld-val on">40</span></div>
+        <div class="track"><span class="fill" style="left:0;width:40%"></span><span class="thumb foc" style="left:40%"></span></div>
+      </div>
+      <div class="sld">
+        <div class="sld-head"><span class="sld-name">Clarity</span><span class="sld-val">18</span></div>
+        <div class="track"><span class="fill" style="left:0;width:18%"></span><span class="thumb" style="left:18%"></span></div>
+      </div>
+      <div class="sld dis">
+        <div class="sld-head"><span class="sld-name">Texture · disabled</span><span class="sld-val">—</span></div>
+        <div class="track"><span class="thumb" style="left:50%"></span></div>
+      </div>
+
+      <div class="hint"><span class="kbd">dbl-click</span> reset to 0 · <span class="kbd">←</span><span class="kbd">→</span> nudge · <span class="kbd">⇧</span> ×10</div>
+    </section>
+  </div>
+
+  <p class="foot">Extends <b>ui/slider.tsx</b> (@base-ui/react) with a <b>bipolar</b> prop · thumb 14px · track 4px · fill = <b>--primary</b></p>
+</div>
+</body>
+</html>

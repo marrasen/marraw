@@ -1,0 +1,125 @@
+<!-- @dsCard group="Components" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Buttons</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;--radius:.5rem}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--input:#222A30;--primary:#2DD4BF;--primary-fg:#05211D;--secondary:#222A30;--secondary-fg:#E8EDF2;--accent:#1B2A2B;--accent-fg:#8FE9DD;--ring:#2DD4BF;--destructive:#F0616D;
+    --hair:rgba(255,255,255,.06);--shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .theme-light{--bg:#F5F7F9;--card:#FFFFFF;--muted:#EAEEF1;--muted-fg:#5A6672;--fg:#0F1214;--border:#DCE2E7;--input:#FFFFFF;--primary:#0E9C8C;--primary-fg:#FFFFFF;--secondary:#EAEEF1;--secondary-fg:#0F1214;--accent:#E3F3F0;--accent-fg:#0B6A5F;--ring:#14B8A6;--destructive:#DC2A3A;
+    --hair:rgba(16,20,24,.06);--shadow-1:0 1px 2px rgba(16,20,24,.08);--shadow-2:0 14px 34px -14px rgba(16,20,24,.2);--lift:inset 0 1px 0 rgba(255,255,255,.75);color-scheme:light}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:64ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .stages{display:grid;grid-template-columns:1fr;gap:18px}
+  @media(min-width:880px){.stages{grid-template-columns:1fr 1fr}}
+  .stage{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:16px;padding:22px;box-shadow:var(--shadow-2)}
+  .stage-lbl{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:18px}
+  .stage-lbl .dot::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--primary);margin-right:7px;vertical-align:middle;box-shadow:0 0 0 3px color-mix(in oklab,var(--primary) 22%,transparent)}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+  .rowlbl{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-fg);margin:0 0 10px;font-weight:600}
+  .cluster{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:20px}
+  .cluster:last-child{margin-bottom:0}
+
+  /* button system */
+  .btn{font-family:var(--font-sans);font-size:13px;font-weight:500;line-height:1;display:inline-flex;align-items:center;gap:7px;padding:0 14px;height:34px;border-radius:8px;border:1px solid transparent;cursor:pointer;transition:filter .15s,background .15s,border-color .15s;letter-spacing:.004em}
+  .btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .btn-primary{background:var(--primary);color:var(--primary-fg);box-shadow:0 1px 0 rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.22)}
+  .btn-primary:hover{filter:brightness(1.07)}
+  .btn-secondary{background:var(--secondary);color:var(--secondary-fg);border-color:var(--border);box-shadow:var(--lift)}
+  .btn-secondary:hover{border-color:color-mix(in oklab,var(--primary) 34%,var(--border))}
+  .btn-ghost{background:transparent;color:var(--fg)}
+  .btn-ghost:hover{background:var(--accent);color:var(--accent-fg)}
+  .btn-destructive{background:transparent;color:var(--destructive);border-color:color-mix(in oklab,var(--destructive) 42%,var(--border))}
+  .btn-destructive:hover{background:color-mix(in oklab,var(--destructive) 15%,transparent)}
+  .btn-sm{height:28px;font-size:12px;padding:0 10px;border-radius:7px}
+  .btn-sm svg{width:13px;height:13px}
+  .btn-lg{height:40px;font-size:14px;padding:0 18px}
+  .btn-icon{width:34px;padding:0;justify-content:center}
+  .btn-icon.btn-sm{width:28px}
+  .btn.is-focus{outline:2px solid var(--ring);outline-offset:2px}
+  .btn[disabled],.btn.is-disabled{opacity:.42;cursor:not-allowed;filter:none}
+  .spin{width:14px;height:14px;border-radius:50%;border:2px solid color-mix(in oklab,var(--primary-fg) 40%,transparent);border-top-color:var(--primary-fg);animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .tag{font-family:var(--font-mono);font-size:10px;color:var(--muted-fg);margin-left:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Components · Actions</p>
+    <h1>Buttons</h1>
+    <p class="lede">One teal primary per view — the commit action. Secondary is a bordered neutral, ghost is chrome-quiet for toolbars, and destructive stays outlined until hover. Focus is always a 2px teal ring at 2px offset.</p>
+  </header>
+
+  <div class="stages">
+    <section class="stage theme-dark">
+      <div class="stage-lbl"><span class="dot">Dark</span><span>34px default</span></div>
+
+      <p class="rowlbl">Variants</p>
+      <div class="cluster">
+        <button class="btn btn-primary"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg>Export</button>
+        <button class="btn btn-secondary">Copy settings</button>
+        <button class="btn btn-ghost">Reset</button>
+        <button class="btn btn-destructive"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Reject</button>
+      </div>
+
+      <p class="rowlbl">Sizes</p>
+      <div class="cluster">
+        <button class="btn btn-primary btn-sm">Small</button>
+        <button class="btn btn-primary">Default</button>
+        <button class="btn btn-primary btn-lg">Large</button>
+        <button class="btn btn-secondary btn-icon" aria-label="crop"><svg viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg></button>
+        <button class="btn btn-ghost btn-icon" aria-label="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg></button>
+      </div>
+
+      <p class="rowlbl">States</p>
+      <div class="cluster">
+        <button class="btn btn-primary is-focus">Focused</button>
+        <button class="btn btn-primary is-disabled" disabled>Disabled</button>
+        <button class="btn btn-primary"><span class="spin"></span>Exporting…</button>
+      </div>
+    </section>
+
+    <section class="stage theme-light">
+      <div class="stage-lbl"><span class="dot">Light</span><span>34px default</span></div>
+
+      <p class="rowlbl">Variants</p>
+      <div class="cluster">
+        <button class="btn btn-primary"><svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 20h16"/></svg>Export</button>
+        <button class="btn btn-secondary">Copy settings</button>
+        <button class="btn btn-ghost">Reset</button>
+        <button class="btn btn-destructive"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Reject</button>
+      </div>
+
+      <p class="rowlbl">Sizes</p>
+      <div class="cluster">
+        <button class="btn btn-primary btn-sm">Small</button>
+        <button class="btn btn-primary">Default</button>
+        <button class="btn btn-primary btn-lg">Large</button>
+        <button class="btn btn-secondary btn-icon" aria-label="crop"><svg viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg></button>
+        <button class="btn btn-ghost btn-icon" aria-label="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg></button>
+      </div>
+
+      <p class="rowlbl">States</p>
+      <div class="cluster">
+        <button class="btn btn-primary is-focus">Focused</button>
+        <button class="btn btn-primary is-disabled" disabled>Disabled</button>
+        <button class="btn btn-primary"><span class="spin"></span>Exporting…</button>
+      </div>
+    </section>
+  </div>
+
+  <p class="foot">Implemented via <b>class-variance-authority</b> in <b>client/src/components/ui/button.tsx</b> · variants: primary · secondary · ghost · destructive</p>
+</div>
+</body>
+</html>

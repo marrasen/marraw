@@ -1,0 +1,111 @@
+<!-- @dsCard group="Foundations" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Typography</title>
+<style>
+  :root{
+    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    --radius:0.5rem;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font-family:var(--font-sans);
+    background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;
+    color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px;
+  }
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--muted:#1F252A;--muted-fg:#8B99A3;--fg:#E8EDF2;
+    --border:#262E34;--primary:#2DD4BF;--accent:#1B2A2B;--ring:#2DD4BF;
+    --hair:rgba(255,255,255,.06);--shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-2:0 12px 34px -12px rgba(0,0,0,.66);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .theme-light{--bg:#F5F7F9;--card:#FFFFFF;--muted:#EAEEF1;--muted-fg:#5A6672;--fg:#0F1214;
+    --border:#DCE2E7;--primary:#0E9C8C;--accent:#E3F3F0;--ring:#14B8A6;
+    --hair:rgba(16,20,24,.06);--shadow-1:0 1px 2px rgba(16,20,24,.08);--shadow-2:0 14px 34px -14px rgba(16,20,24,.20);--lift:inset 0 1px 0 rgba(255,255,255,.75);color-scheme:light}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:64ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .stage{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:16px;padding:24px 26px;box-shadow:var(--shadow-2)}
+  .stage-lbl{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:18px}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75}
+  .foot b{color:#8fa0a8;font-weight:500}
+
+  /* type scale rows */
+  .row{display:grid;grid-template-columns:1fr auto;align-items:baseline;gap:20px;padding:14px 0;border-top:1px solid var(--border)}
+  .row:first-of-type{border-top:0}
+  .spec{font-family:var(--font-mono);font-size:11px;color:var(--muted-fg);text-align:right;white-space:nowrap;letter-spacing:.02em}
+  .spec .tok{color:var(--primary)}
+  .t-display{font-size:34px;font-weight:600;letter-spacing:-.02em;color:var(--fg);line-height:1.05}
+  .t-title{font-size:22px;font-weight:600;letter-spacing:-.012em;color:var(--fg)}
+  .t-section{font-size:16px;font-weight:600;color:var(--fg)}
+  .t-body{font-size:14px;font-weight:400;line-height:1.55;color:var(--fg)}
+  .t-ui{font-size:13px;font-weight:500;color:var(--fg)}
+  .t-small{font-size:12px;font-weight:400;color:var(--muted-fg)}
+  .t-label{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted-fg)}
+
+  .split{display:grid;grid-template-columns:1fr;gap:18px;margin-top:18px}
+  @media(min-width:820px){.split{grid-template-columns:1fr 1fr}}
+  .mini-lbl{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted-fg);margin-bottom:12px}
+  .readout{display:flex;flex-wrap:wrap;gap:10px}
+  .rd{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:13px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:7px 11px;color:var(--fg);box-shadow:var(--lift)}
+  .rd .u{color:var(--muted-fg)}
+  .rd .pos{color:var(--primary)}
+  .weights{display:flex;gap:22px;flex-wrap:wrap;margin-top:2px}
+  .weights span{font-size:22px;color:var(--fg)}
+  .w4{font-weight:400}.w5{font-weight:500}.w6{font-weight:600}.w7{font-weight:700}
+  .wcap{display:block;font-family:var(--font-mono);font-size:10px;color:var(--muted-fg);margin-top:2px;text-align:center;font-weight:400;letter-spacing:.04em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">Foundations · Type</p>
+    <h1>Typography</h1>
+    <p class="lede">A dense, quiet UI voice. <b style="color:#cdd6db">Geist</b> carries the interface; <b style="color:#cdd6db">Geist Mono</b> carries every number — exposure stops, coordinates, EXIF, counts — set tabular so digits never shift as values change.</p>
+  </header>
+
+  <section class="stage theme-dark">
+    <div class="stage-lbl"><span>Type scale · Geist</span><span>13px UI base</span></div>
+
+    <div class="row"><div class="t-display">Develop</div><div class="spec"><span class="tok">display</span> · 34/1.05 · 600 · -0.02em</div></div>
+    <div class="row"><div class="t-title">Highlights &amp; Shadows</div><div class="spec"><span class="tok">title</span> · 22 · 600 · -0.012em</div></div>
+    <div class="row"><div class="t-section">Tone curve</div><div class="spec"><span class="tok">section</span> · 16 · 600</div></div>
+    <div class="row"><div class="t-body">Non-destructive edits are stored as sidecars, so the original raw is never touched.</div><div class="spec"><span class="tok">body</span> · 14/1.55 · 400</div></div>
+    <div class="row"><div class="t-ui">Reset · Copy settings · Paste</div><div class="spec"><span class="tok">ui</span> · 13 · 500</div></div>
+    <div class="row"><div class="t-small">1,284 photos · 96 picked · 12 rejected</div><div class="spec"><span class="tok">small</span> · 12 · 400</div></div>
+    <div class="row"><div class="t-label">White balance</div><div class="spec"><span class="tok">label</span> · 11 · 600 · 0.14em · UPPER</div></div>
+
+    <div class="split">
+      <div>
+        <div class="mini-lbl">Numeric readouts · Geist Mono</div>
+        <div class="readout">
+          <span class="rd"><span class="pos">+0.40</span> <span class="u">EV</span></span>
+          <span class="rd">5600<span class="u">K</span></span>
+          <span class="rd"><span class="pos">+12</span></span>
+          <span class="rd">ƒ/2.8</span>
+          <span class="rd">1/250<span class="u">s</span></span>
+          <span class="rd">ISO 400</span>
+          <span class="rd">100<span class="u">%</span></span>
+        </div>
+      </div>
+      <div>
+        <div class="mini-lbl">Weights</div>
+        <div class="weights">
+          <span class="w4">Aa<span class="wcap">400 · body</span></span>
+          <span class="w5">Aa<span class="wcap">500 · ui</span></span>
+          <span class="w6">Aa<span class="wcap">600 · heads</span></span>
+          <span class="w7">Aa<span class="wcap">700 · rare</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">Real app fonts: <b>Geist Variable</b> + <b>Geist Mono</b> · numerics use <b>font-variant-numeric: tabular-nums</b></p>
+</div>
+</body>
+</html>

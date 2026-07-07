@@ -1,0 +1,149 @@
+<!-- @dsCard group="App Surfaces" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio · Develop panel</title>
+<style>
+  :root{--font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Code", "Cascadia Mono", "SFMono-Regular", Consolas, monospace}
+  *{box-sizing:border-box} html,body{margin:0}
+  body{font-family:var(--font-sans);background:radial-gradient(1100px 520px at 100% -12%,#14201f 0%,transparent 58%),#0a0d0f;color:#aeb9c0;-webkit-font-smoothing:antialiased;padding:30px clamp(16px,4vw,40px) 44px}
+  .theme-dark{--bg:#0F1214;--card:#171B1E;--panel:#14181B;--muted:#242c31;--muted-fg:#8B99A3;--fg:#E8EDF2;--border:#262E34;--input:#222A30;--primary:#2DD4BF;--primary-fg:#05211D;--accent:#1B2A2B;--accent-fg:#8FE9DD;--ring:#2DD4BF;
+    --track-in:inset 0 1px 2px rgba(0,0,0,.55);--shadow-1:0 1px 2px rgba(0,0,0,.5);--shadow-2:0 18px 44px -14px rgba(0,0,0,.7);--lift:inset 0 1px 0 rgba(255,255,255,.05);color-scheme:dark}
+  .wrap{max-width:1120px;margin:0 auto}
+  .kicker{font-family:var(--font-mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:#2DD4BF;display:flex;align-items:center;gap:9px;margin:0 0 14px}
+  .kicker::before{content:"";width:22px;height:1px;background:linear-gradient(90deg,#2DD4BF,transparent)}
+  h1{margin:0;color:#eef3f6;font-size:26px;font-weight:600;letter-spacing:-.015em}
+  .lede{margin:8px 0 0;max-width:62ch;font-size:14px;line-height:1.55;color:#93a0a8}
+  .head{margin-bottom:26px}
+  .layout{display:grid;grid-template-columns:1fr;gap:22px;align-items:start}
+  @media(min-width:820px){.layout{grid-template-columns:1fr 340px}}
+  .notes{display:flex;flex-direction:column;gap:14px}
+  .note{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:15px 16px;box-shadow:var(--lift)}
+  .note h3{margin:0 0 5px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--primary)}
+  .note p{margin:0;font-size:13px;line-height:1.55;color:#c3cdd3}
+  svg{stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  /* ---- the panel ---- */
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-2),var(--lift);overflow:hidden;font-size:13px;color:var(--fg)}
+  .ph{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid var(--border)}
+  .ph .fn{display:flex;flex-direction:column;gap:2px}
+  .ph .fn b{font-size:13px;font-weight:600}
+  .ph .fn span{font-family:var(--font-mono);font-size:10.5px;color:var(--muted-fg)}
+  .ph .rst{width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--card);color:var(--muted-fg);cursor:pointer;display:grid;place-items:center;box-shadow:var(--lift)}
+  .ph .rst svg{width:14px;height:14px}
+
+  .hist{padding:12px 15px;border-bottom:1px solid var(--border)}
+  .histbox{position:relative;height:64px;border-radius:8px;background:linear-gradient(180deg,#0c1013,#0e1315);border:1px solid var(--border);overflow:hidden;box-shadow:var(--track-in)}
+  .histbox svg{position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen}
+
+  .sect{border-bottom:1px solid var(--border)}
+  .sect:last-child{border-bottom:0}
+  .sh{display:flex;align-items:center;justify-content:space-between;padding:11px 15px;cursor:pointer;user-select:none}
+  .sh .t{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted-fg)}
+  .sh .r{display:flex;align-items:center;gap:9px}
+  .sh .r .st{font-family:var(--font-mono);font-size:10.5px;color:var(--primary)}
+  .sh .chev{width:14px;height:14px;color:var(--muted-fg)}
+  .sh .chev.closed{transform:rotate(-90deg)}
+  .sb{padding:4px 15px 15px}
+  .sb.hidden{display:none}
+
+  .sld{margin-bottom:14px}
+  .sld:last-child{margin-bottom:0}
+  .sld-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
+  .sld-name{font-size:12px;color:#c7d0d6}
+  .sld-val{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:11px;color:var(--muted-fg)}
+  .sld-val.on{color:var(--primary)}
+  .track{position:relative;height:4px;border-radius:999px;background:var(--muted);box-shadow:var(--track-in)}
+  .cen{position:absolute;top:-3px;bottom:-3px;left:50%;width:1px;background:var(--muted-fg);opacity:.5}
+  .fill{position:absolute;top:0;height:100%;border-radius:999px;background:var(--primary)}
+  .thumb{position:absolute;top:50%;width:13px;height:13px;border-radius:50%;background:var(--fg);border:1px solid rgba(0,0,0,.35);transform:translate(-50%,-50%);box-shadow:0 1px 3px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.4)}
+  .thumb.on{background:var(--primary);border-color:transparent;box-shadow:0 0 0 3px color-mix(in oklab,var(--ring) 26%,transparent)}
+
+  .wb{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+  .wb .as{flex:1;height:30px;border:1px solid var(--border);background:var(--input);border-radius:7px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;color:#c7d0d6;box-shadow:var(--lift)}
+  .wb .as .c{color:var(--muted-fg)} .wb .as svg{width:13px;height:13px}
+  .pip{width:30px;height:30px;border-radius:7px;border:1px solid color-mix(in oklab,var(--primary) 46%,var(--border));background:color-mix(in oklab,var(--primary) 15%,transparent);color:var(--primary);display:grid;place-items:center;cursor:pointer}
+  .pip svg{width:15px;height:15px}
+  .crop{display:flex;gap:8px;padding:4px 15px 15px}
+  .crop button{flex:1;height:30px;border-radius:7px;border:1px solid var(--border);background:var(--card);color:#c7d0d6;font-size:12px;display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;box-shadow:var(--lift)}
+  .crop button svg{width:14px;height:14px}
+  .crop button.on{color:var(--primary);border-color:color-mix(in oklab,var(--primary) 46%,var(--border));background:color-mix(in oklab,var(--primary) 14%,transparent)}
+  .foot{margin-top:24px;font-family:var(--font-mono);font-size:11px;color:#5f6d75} .foot b{color:#8fa0a8;font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <p class="kicker">App Surfaces · Develop</p>
+    <h1>Develop panel</h1>
+    <p class="lede">The right sidebar, in the Studio language. Collapsible sections keep a long adjustment list scannable; each changed slider lights its value teal so you can read your edit at a glance; the neutral panel never competes with the image beside it.</p>
+  </header>
+
+  <div class="layout theme-dark">
+    <div class="notes">
+      <div class="note"><h3>Read your edit</h3><p>A section header shows a teal summary chip when anything inside is non-zero. Untouched groups stay silent — the panel tells you <i>what you changed</i> without opening every fold.</p></div>
+      <div class="note"><h3>Center-origin tone</h3><p>Every tonal slider fills from the middle. Positive pushes right in teal, negative pushes left — direction and magnitude in a single glance across the whole stack.</p></div>
+      <div class="note"><h3>Pipette white balance</h3><p>The active pipette glows teal; click a neutral in the photo to set Temp &amp; Tint, or drag the sliders directly. "As Shot" is always one tap away.</p></div>
+      <div class="note"><h3>Dense, quiet type</h3><p>Labels in 12px Geist, values in mono tabular so digits never jump. 15px gutters, 4px slider tracks — instrument-tight, never cramped.</p></div>
+    </div>
+
+    <aside class="panel">
+      <div class="ph">
+        <div class="fn"><b>DSC07421.ARW</b><span>ƒ/2.8 · 1/250 · ISO 400 · 42.4MP</span></div>
+        <button class="rst" title="Reset all"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 4v5h5"/></svg></button>
+      </div>
+
+      <div class="hist">
+        <div class="histbox">
+          <svg viewBox="0 0 100 40" preserveAspectRatio="none"><path d="M0,40 L2,34 6,30 12,20 20,12 30,16 40,26 50,22 62,14 72,20 82,10 90,22 96,30 100,36 100,40 Z" fill="#38BDF8" stroke="none" opacity=".7"/><path d="M0,40 L3,33 8,26 16,16 26,10 36,18 46,14 56,20 66,10 78,16 88,8 96,22 100,32 100,40 Z" fill="#34D399" stroke="none" opacity=".7"/><path d="M0,40 L4,36 10,30 18,22 28,14 40,20 52,12 64,18 74,12 84,20 92,14 100,28 100,40 Z" fill="#F0616D" stroke="none" opacity=".7"/></svg>
+        </div>
+      </div>
+
+      <div class="sect">
+        <div class="sh"><span class="t">Light</span><div class="r"><span class="st">edited</span><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div></div>
+        <div class="sb">
+          <div class="sld"><div class="sld-head"><span class="sld-name">Exposure</span><span class="sld-val on">+0.40</span></div><div class="track"><span class="cen"></span><span class="fill" style="left:50%;width:4%"></span><span class="thumb on" style="left:54%"></span></div></div>
+          <div class="sld"><div class="sld-head"><span class="sld-name">Contrast</span><span class="sld-val on">+12</span></div><div class="track"><span class="cen"></span><span class="fill" style="left:50%;width:6%"></span><span class="thumb" style="left:56%"></span></div></div>
+          <div class="sld"><div class="sld-head"><span class="sld-name">Highlights</span><span class="sld-val on">−38</span></div><div class="track"><span class="cen"></span><span class="fill" style="left:31%;width:19%"></span><span class="thumb" style="left:31%"></span></div></div>
+          <div class="sld"><div class="sld-head"><span class="sld-name">Shadows</span><span class="sld-val on">+24</span></div><div class="track"><span class="cen"></span><span class="fill" style="left:50%;width:12%"></span><span class="thumb" style="left:62%"></span></div></div>
+          <div class="sld"><div class="sld-head"><span class="sld-name">Whites</span><span class="sld-val">0</span></div><div class="track"><span class="cen"></span><span class="thumb" style="left:50%"></span></div></div>
+          <div class="sld"><div class="sld-head"><span class="sld-name">Blacks</span><span class="sld-val on">−8</span></div><div class="track"><span class="cen"></span><span class="fill" style="left:46%;width:4%"></span><span class="thumb" style="left:46%"></span></div></div>
+        </div>
+      </div>
+
+      <div class="sect">
+        <div class="sh"><span class="t">White balance</span><div class="r"><span class="st">5600K</span><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div></div>
+        <div class="sb">
+          <div class="wb"><div class="as">As Shot <span class="c"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span></div><button class="pip" title="Pick neutral"><svg viewBox="0 0 24 24"><path d="M19 3l-8 8M11 11l-4 10-2-6-6-2 10-4"/></svg></button></div>
+          <div class="sld"><div class="sld-head"><span class="sld-name">Temp</span><span class="sld-val on">5600</span></div><div class="track"><span style="position:absolute;inset:0;border-radius:999px;background:linear-gradient(90deg,#38BDF8,#8B99A3,#F5B14C);opacity:.32"></span><span class="thumb" style="left:58%"></span></div></div>
+          <div class="sld"><div class="sld-head"><span class="sld-name">Tint</span><span class="sld-val on">+6</span></div><div class="track"><span style="position:absolute;inset:0;border-radius:999px;background:linear-gradient(90deg,#34D399,#8B99A3,#F0616D);opacity:.32"></span><span class="thumb" style="left:56%"></span></div></div>
+        </div>
+      </div>
+
+      <div class="sect">
+        <div class="sh"><span class="t">Presence &amp; detail</span><div class="r"><span class="st">edited</span><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div></div>
+        <div class="sb">
+          <div class="sld"><div class="sld-head"><span class="sld-name">Vibrance</span><span class="sld-val on">+18</span></div><div class="track"><span class="cen"></span><span class="fill" style="left:50%;width:9%"></span><span class="thumb" style="left:59%"></span></div></div>
+          <div class="sld"><div class="sld-head"><span class="sld-name">Saturation</span><span class="sld-val">0</span></div><div class="track"><span class="cen"></span><span class="thumb" style="left:50%"></span></div></div>
+          <div class="sld"><div class="sld-head"><span class="sld-name">Sharpen</span><span class="sld-val on">40</span></div><div class="track"><span class="fill" style="left:0;width:40%"></span><span class="thumb" style="left:40%"></span></div></div>
+          <div class="sld"><div class="sld-head"><span class="sld-name">Clarity</span><span class="sld-val on">+22</span></div><div class="track"><span class="cen"></span><span class="fill" style="left:50%;width:11%"></span><span class="thumb" style="left:61%"></span></div></div>
+        </div>
+      </div>
+
+      <div class="sect">
+        <div class="sh"><span class="t">Effects · Crop</span><div class="r"><svg class="chev closed" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div></div>
+      </div>
+      <div class="crop">
+        <button class="on"><svg viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>Crop</button>
+        <button><svg viewBox="0 0 24 24"><path d="M21 3l-6 6M3 21l6-6M3 8V3h5M21 16v5h-5"/></svg>Straighten</button>
+      </div>
+    </aside>
+  </div>
+
+  <p class="foot">Composes <b>EditPanel.tsx</b> + <b>Histogram.tsx</b> · sliders = bipolar <b>ui/slider.tsx</b> · sections collapsible, teal summary when dirty</p>
+</div>
+</body>
+</html>

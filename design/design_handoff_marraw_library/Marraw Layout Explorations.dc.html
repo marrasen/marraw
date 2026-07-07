@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  a { color: #7c83ff; }
+  a:hover { color: #9aa0ff; }
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:#0d0e0f;padding:56px;font-family:Geist,system-ui,sans-serif;color:#e6e7ea">
+
+<!-- ================= SPEC SHEET (folded) ================= -->
+<section style="display:flex;flex-direction:column;gap:44px;width:1480px;margin-bottom:84px">
+  <div id="spec" style="scroll-margin:48px;display:flex;flex-direction:column;gap:16px">
+    <div style="font-family:'Geist Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#7c83ff">Recommended direction · consolidated spec · v1</div>
+    <h1 style="margin:0;font-size:40px;font-weight:600;letter-spacing:-.025em;line-height:1.05">Cull → Focus on a Cinema canvas</h1>
+    <p style="margin:0;max-width:900px;font-size:15.5px;line-height:1.6;color:#c4c7cc">One zero-chrome, edge-to-edge canvas serves both jobs. <strong style="color:#e6e7ea">CULL</strong> triages a shoot fast against a full-size confirm loupe; <strong style="color:#e6e7ea">DEVELOP</strong> perfects one frame with the complete tool stack a keystroke away. Chrome is glass and auto-hides, so the photograph always dominates. Ships dark-first with a full light theme.</p>
+
+    <!-- model cards -->
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">
+      <div style="flex:1;min-width:280px;background:#141619;border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:20px">
+        <div style="font-family:'Geist Mono',monospace;font-size:11px;color:#7c83ff;margin-bottom:9px">01 · CANVAS</div>
+        <div style="font-weight:600;font-size:15px;margin-bottom:6px">Zero-chrome, image-maximal</div>
+        <p style="margin:0;font-size:13px;line-height:1.55;color:#9a9ea6">The photo fills the window. Every deck is floating glass that auto-hides when idle; the image is draggable behind pinned panels — nothing pushes it.</p>
+      </div>
+      <div style="flex:1;min-width:280px;background:#141619;border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:20px">
+        <div style="font-family:'Geist Mono',monospace;font-size:11px;color:#7c83ff;margin-bottom:9px">02 · MODES</div>
+        <div style="font-weight:600;font-size:15px;margin-bottom:6px">Two modes, one shared HUD</div>
+        <p style="margin:0;font-size:13px;line-height:1.55;color:#9a9ea6">A top segmented control (Library · Cull · Develop · Export) + ⌘K stay constant everywhere, so navigation and muscle memory never move between tasks.</p>
+      </div>
+      <div style="flex:1;min-width:280px;background:#141619;border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:20px">
+        <div style="font-family:'Geist Mono',monospace;font-size:11px;color:#7c83ff;margin-bottom:9px">03 · CONTROLS</div>
+        <div style="font-weight:600;font-size:15px;margin-bottom:6px">Three-tier control model</div>
+        <p style="margin:0;font-size:13px;line-height:1.55;color:#9a9ea6"><strong style="color:#e6e7ea">Quick-dock</strong> for the ~6 dials you ride constantly · pinnable <strong style="color:#e6e7ea">Develop drawer</strong> for the full stack · <strong style="color:#e6e7ea">⌘K + hotkeys</strong> to reach anything without opening a panel.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- PLATES -->
+  <div style="display:flex;flex-direction:column;gap:40px">
+
+    <!-- LIBRARY / GRID -->
+    <div id="library" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">LIBRARY</span><h3 style="margin:0;font-size:18px;font-weight:600">The home base — browse, filter, and triage the whole shoot</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">The one structured surface: a folder rail, a virtualized thumbnail grid sized by a live slider, and the persistent Develop panel tracking the focused frame. Filters and counts sit inline; <span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.08)">Enter</span> drops the focused photo into the Cull loupe. This is where every session starts.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#0c0d0f;color:#e6e7ea;display:flex;flex-direction:column;box-shadow:0 40px 90px -30px rgba(0,0,0,.8);font-size:13px">
+
+        <!-- top bar -->
+        <div style="height:48px;flex:0 0 48px;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.07);background:#0e0f12">
+          <div style="display:flex;align-items:center;gap:9px"><div style="width:24px;height:24px;border-radius:7px;background:#7c83ff;color:#0d0e0f;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px">m</div><span style="font-weight:600">Iceland</span></div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:2px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:4px;font-size:12.5px"><span style="padding:5px 15px;border-radius:6px;background:rgba(124,131,255,.24);color:#c3c7ff">Library</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Cull</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Export</span></div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#8b8f96;font-size:12px"><span>Jump to anything</span><span style="font-family:'Geist Mono',monospace;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.09)">⌘K</span></div>
+        </div>
+
+        <!-- body -->
+        <div style="flex:1;display:flex;overflow:hidden">
+
+          <!-- folder rail -->
+          <div style="width:214px;flex:0 0 214px;border-right:1px solid rgba(255,255,255,.07);background:#0e0f12;display:flex;flex-direction:column">
+            <div style="padding:14px 12px 10px"><div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;font-size:12px;color:#8b8f96"><svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="#8b8f96" stroke-width="1.4"><circle cx="5.6" cy="5.6" r="3.9"></circle><path d="M8.6 8.6l2.2 2.2"></path></svg><span>Filter folders</span></div></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:0 18px 8px"><span style="font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#6f747c">In your library</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#5f636b">5 folders</span></div>
+            <div style="flex:1;overflow:hidden;padding:0 8px;display:flex;flex-direction:column;gap:1px">
+              <sc-for list="{{ folders }}" as="f" hint-placeholder-count="7">
+                <sc-if value="{{ f.group }}">
+                  <div style="display:flex;flex-direction:column;gap:1px;padding:9px 9px 5px 10px">
+                    <div style="display:flex;align-items:center;gap:7px"><span style="color:#8b8f96;font-size:9px;transform:{{ f.caretRot }}">▶</span><span style="flex:1;font-size:12.5px;font-weight:600;color:#e6e7ea;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.name }}</span></div>
+                    <span style="padding-left:16px;font-family:'Geist Mono',monospace;font-size:10px;color:#5f636b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.dispPath }}</span>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ f.leaf }}">
+                  <div style="display:flex;align-items:center;gap:7px;height:30px;padding-left:24px;padding-right:9px;border-radius:7px;background:{{ f.rowBg }};font-size:12.5px">
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="{{ f.iconColor }}" stroke-width="1.3" style="flex:0 0 13px"><path d="M1.5 3.6c0-.6.5-1.1 1.1-1.1h2.4l1.2 1.3h4.7c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H2.6c-.6 0-1.1-.5-1.1-1.1z"></path></svg>
+                    <span style="flex:1;color:{{ f.nameColor }};font-weight:{{ f.weight }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.name }}</span>
+                    <sc-if value="{{ f.count }}"><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#6f747c">{{ f.count }}</span></sc-if>
+                  </div>
+                </sc-if>
+              </sc-for>
+            </div>
+            <div style="padding:8px 10px"><div style="display:flex;align-items:center;justify-content:center;gap:7px;height:32px;border-radius:8px;border:1px dashed rgba(124,131,255,.5);background:rgba(124,131,255,.08);color:#c3c7ff;font-size:12.5px"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#c3c7ff" stroke-width="1.5"><path d="M7 2.5v9M2.5 7h9"></path></svg>Add folder</div></div>
+            <div style="padding:10px 12px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:8px;font-size:12px;color:#8b8f96"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.3"><circle cx="7" cy="7" r="2.2"></circle><path d="M7 1.3v1.6M7 11.1v1.6M12.7 7h-1.6M2.9 7H1.3M11 3l-1.1 1.1M4.1 9.9 3 11M11 11 9.9 9.9M4.1 4.1 3 3"></path></svg>Settings</div>
+          </div>
+
+          <!-- center: filter bar + grid + status -->
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+
+            <!-- filter bar -->
+            <div style="height:47px;flex:0 0 47px;display:flex;align-items:center;gap:16px;padding:0 18px;border-bottom:1px solid rgba(255,255,255,.07)">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font-size:11.5px;color:#8b8f96">Rating</span><div style="display:flex;gap:2px;font-size:13px"><span style="color:#f5b544">★★★</span><span style="color:rgba(255,255,255,.22)">★★</span></div><span style="font-size:11px;color:#8b8f96">& up</span></div>
+              <div style="width:1px;height:20px;background:rgba(255,255,255,.1)"></div>
+              <div style="display:flex;gap:3px;background:rgba(255,255,255,.05);border-radius:8px;padding:3px;font-size:12px"><span style="padding:4px 11px;border-radius:5px;color:#8b8f96">All</span><span style="padding:4px 11px;border-radius:5px;background:rgba(124,131,255,.24);color:#c3c7ff">Picks</span><span style="padding:4px 11px;border-radius:5px;color:#8b8f96">Not excluded</span><span style="padding:4px 11px;border-radius:5px;color:#8b8f96">Excluded</span></div>
+              <div style="flex:1"></div>
+              <div style="display:flex;align-items:center;gap:9px"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.3"><rect x="1.5" y="1.5" width="4" height="4" rx="1"></rect><rect x="8.5" y="1.5" width="4" height="4" rx="1"></rect><rect x="1.5" y="8.5" width="4" height="4" rx="1"></rect><rect x="8.5" y="8.5" width="4" height="4" rx="1"></rect></svg><div style="width:104px;position:relative;height:3px;border-radius:2px;background:rgba(255,255,255,.12)"><div style="position:absolute;top:0;bottom:0;left:0;width:44%;background:#7c83ff;border-radius:2px"></div><div style="position:absolute;top:50%;left:44%;width:11px;height:11px;margin-left:-5.5px;transform:translateY(-50%);border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div></div><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96;width:42px">220px</span></div>
+              <div style="width:1px;height:20px;background:rgba(255,255,255,.1)"></div>
+              <span style="font-family:'Geist Mono',monospace;font-size:12px;color:#c4c7cc"><span style="color:#e6e7ea">412</span> shown <span style="color:#5f636b">/ 1,284</span></span>
+            </div>
+
+            <!-- grid -->
+            <div style="flex:1;overflow:hidden;padding:16px 18px">
+              <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+                <sc-for list="{{ libGrid }}" as="p" hint-placeholder-count="25">
+                  <div style="position:relative;aspect-ratio:3 / 2;border-radius:4px;overflow:hidden">
+                    <div style="{{ p.gridStyle }}"></div>
+                    <sc-if value="{{ p.hasRating }}"><div style="position:absolute;left:5px;bottom:5px;font-size:9px;letter-spacing:.5px;padding:2px 5px;border-radius:4px;background:rgba(0,0,0,.5);color:#f5b544">{{ p.starsFilled }}</div></sc-if>
+                    <sc-if value="{{ p.hasFlag }}"><div style="{{ p.flagStyle }}"></div></sc-if>
+                    <sc-if value="{{ p.isFocus }}"><div style="position:absolute;inset:0;border:2px solid #7c83ff;border-radius:4px;pointer-events:none"></div></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <!-- status bar -->
+            <div style="height:26px;flex:0 0 26px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:16px;padding:0 16px;font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96;background:#0e0f12"><span>/Volumes/Shoots/2026/Iceland</span><span>412 / 1,284</span><span style="color:#5ee0b0">96 picked</span><span style="flex:1"></span><span style="display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:#34d399"></span>daemon connected</span></div>
+          </div>
+
+          <!-- right: Develop / edit panel -->
+          <div style="width:300px;flex:0 0 300px;border-left:1px solid rgba(255,255,255,.07);background:#0e0f12;display:flex;flex-direction:column;overflow:hidden">
+            <div style="padding:15px 16px 13px;border-bottom:1px solid rgba(255,255,255,.07)">
+              <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-family:'Geist Mono',monospace;font-size:12.5px">DSC07439.ARW</span><div style="display:flex;gap:6px"><div style="width:24px;height:24px;border-radius:6px;border:1px solid rgba(52,211,153,.45);background:rgba(52,211,153,.14);color:#5ee0b0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">P</div><div style="width:24px;height:24px;border-radius:6px;border:1px solid rgba(255,255,255,.12);color:#8b8f96;display:flex;align-items:center;justify-content:center;font-size:11px">X</div></div></div>
+              <div style="display:flex;gap:3px;font-size:16px;margin-top:9px"><span style="color:#f5b544">★★★★</span><span style="color:rgba(255,255,255,.24)">★</span></div>
+              <div style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#8b8f96;margin-top:8px">Sony A7R V · ƒ/2.8 · 1/250 · ISO 400 · 42mm</div>
+            </div>
+            <div style="padding:13px 16px 0"><div style="height:52px;position:relative;border-radius:6px;background:#08090b;border:1px solid rgba(255,255,255,.07);overflow:hidden"><svg viewBox="0 0 100 40" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen"><polygon points="{{ hist.r }}" fill="rgba(240,90,90,.55)"></polygon><polygon points="{{ hist.g }}" fill="rgba(90,220,120,.55)"></polygon><polygon points="{{ hist.b }}" fill="rgba(90,140,240,.55)"></polygon></svg></div></div>
+            <div style="flex:1;overflow:hidden;padding:4px 16px 0">
+              <sc-for list="{{ devGroups }}" as="g" hint-placeholder-count="5">
+                <div style="display:flex;align-items:center;gap:6px;margin:13px 0 8px"><span style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#8b8f96">{{ g.name }}</span><sc-if value="{{ g.dot }}"><span style="width:5px;height:5px;border-radius:50%;background:#7c83ff"></span></sc-if></div>
+                <sc-for list="{{ g.controls }}" as="c" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
+                    <div style="width:82px;flex:0 0 82px;color:#c4c7cc;font-size:11.5px">{{ c.label }}</div>
+                    <div style="flex:1;position:relative;height:3px;border-radius:2px;background:rgba(255,255,255,.1)"><div style="{{ c.fillStyle }}"></div><div style="{{ c.thumbStyle }}"></div></div>
+                    <div style="width:52px;text-align:right;font-family:'Geist Mono',monospace;font-size:11px;color:#e6e7ea">{{ c.val }}</div>
+                  </div>
+                </sc-for>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:6px;padding:11px 16px;border-top:1px solid rgba(255,255,255,.08)"><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#c4c7cc;font-family:Geist;font-size:12px">Copy</button><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#c4c7cc;font-family:Geist;font-size:12px">Paste</button><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#8b8f96;font-family:Geist;font-size:12px;margin-left:auto">Reset</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADD FOLDER · picker modal -->
+    <div id="add-folder" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">ADD FOLDER</span><h3 style="margin:0;font-size:18px;font-weight:600">The old file browser, repurposed as a picker</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">Instead of the library being your whole disk, <strong style="color:#e6e7ea">Add folder</strong> opens the drive browser as a modal. Navigate to any drive or network share, tick the folders you want, and they're imported as library roots — marraw scans them for RAWs in the background. Multi-select and an <strong style="color:#e6e7ea">include-subfolders</strong> toggle handle nested shoots in one pass. Light theme mirrors this surface.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);position:relative;font-size:13px;color:#e6e7ea;box-shadow:0 40px 90px -30px rgba(0,0,0,.8)">
+        <div style="position:absolute;inset:0;background:#0c0d0f"></div>
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 80% at 50% 0%, rgba(124,131,255,.06), transparent 60%)"></div>
+        <div style="position:absolute;inset:0;background:rgba(6,7,9,.5);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)"></div>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:760px;height:520px;background:#141619;border:1px solid rgba(255,255,255,.12);border-radius:14px;overflow:hidden;box-shadow:0 50px 120px -30px rgba(0,0,0,.9);display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;padding:17px 22px;border-bottom:1px solid rgba(255,255,255,.08)"><div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:16px;font-weight:600">Add folder to library</span><span style="font-size:12px;color:#8b8f96">Browse your drives and pick folders of RAW photos</span></div><div style="margin-left:auto;width:28px;height:28px;border-radius:7px;border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;color:#8b8f96">✕</div></div>
+          <div style="flex:1;display:flex;overflow:hidden">
+            <!-- quick access -->
+            <div style="width:184px;flex:0 0 184px;border-right:1px solid rgba(255,255,255,.08);background:#0f1013;padding:14px 10px;display:flex;flex-direction:column;gap:1px">
+              <span style="font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#6f747c;padding:0 8px 8px">Quick access</span>
+              <sc-for list="{{ pickLocations }}" as="l" hint-placeholder-count="6">
+                <div style="display:flex;align-items:center;gap:9px;height:32px;padding:0 10px;border-radius:7px;background:{{ l.rowBg }};font-size:12.5px;color:{{ l.color }}"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.3" style="flex:0 0 14px;opacity:.85"><rect x="1.5" y="3" width="11" height="8" rx="1.4"></rect><path d="M4 6.2h6M4 8.4h3.5"></path></svg><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ l.name }}</span></div>
+              </sc-for>
+            </div>
+            <!-- main -->
+            <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+              <div style="height:42px;flex:0 0 42px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.07);font-size:12.5px">
+                <div style="width:26px;height:26px;border-radius:7px;border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;color:#8b8f96"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8.5 3 4.5 7l4 4"></path></svg></div>
+                <span style="color:#8b8f96">Photos (C:)</span><span style="color:#5f636b">›</span><span style="color:#8b8f96">Marcus</span><span style="color:#5f636b">›</span><span style="color:#e6e7ea;font-weight:600">Weddings 2026</span>
+                <div style="flex:1"></div>
+                <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">5 items</span>
+              </div>
+              <div style="flex:1;overflow:hidden;padding:8px 10px;display:flex;flex-direction:column;gap:1px">
+                <sc-for list="{{ pickFolders }}" as="f" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;gap:11px;height:40px;padding:0 12px;border-radius:8px;background:{{ f.rowBg }}">
+                    <div style="{{ f.boxStyle }}"><sc-if value="{{ f.checked }}"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="#0d0e0f" stroke-width="2"><path d="M2.5 6.2 5 8.6l4.5-5.2"></path></svg></sc-if></div>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#8b8f96" stroke-width="1.3" style="flex:0 0 16px"><path d="M1.8 4.1c0-.7.5-1.2 1.2-1.2h2.7l1.3 1.5h5.3c.7 0 1.2.5 1.2 1.2v6.1c0 .7-.5 1.2-1.2 1.2H3c-.7 0-1.2-.5-1.2-1.2z"></path></svg>
+                    <span style="flex:1;font-size:13px;color:{{ f.nameColor }}">{{ f.name }}</span>
+                    <span style="font-family:'Geist Mono',monospace;font-size:11px;color:{{ f.rawColor }}">{{ f.raw }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+          <div style="padding:14px 22px;border-top:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:16px">
+            <div style="display:flex;align-items:center;gap:9px"><div style="width:34px;height:20px;border-radius:999px;background:#7c83ff;position:relative;flex:0 0 34px"><div style="position:absolute;top:2px;right:2px;width:16px;height:16px;border-radius:50%;background:#fff"></div></div><span style="font-size:12.5px;color:#c4c7cc">Include subfolders</span></div>
+            <div style="flex:1"></div>
+            <span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8b8f96">2 folders · 3,748 RAW files</span>
+            <button style="height:38px;padding:0 18px;border-radius:9px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#c4c7cc;font-family:Geist;font-size:13px">Cancel</button>
+            <button style="height:38px;padding:0 20px;border-radius:9px;border:1px solid #7c83ff;background:#7c83ff;color:#0d0e0f;font-family:Geist;font-size:13px;font-weight:500">Add to library</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTEXT MENU · organize -->
+    <div id="menu" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">ORGANIZE</span><h3 style="margin:0;font-size:18px;font-weight:600">Right-click to rename, reorder, locate, and remove</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">Every row in the rail carries a context menu. <strong style="color:#e6e7ea">Rename</strong> sets a display alias only — it never touches the folder on disk (a separate "Rename on disk…" is offered where it does). <strong style="color:#e6e7ea">Locate on disk</strong> opens the folder in Explorer. <strong style="color:#e6e7ea">Remove</strong> only drops it from the library; the files always stay put. Reorder is drag, or the arrow items here.</p>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">
+
+        <!-- shoot menu -->
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">On a shoot folder</span>
+          <div style="width:262px;background:rgba(20,22,26,.98);border:1px solid rgba(255,255,255,.12);border-radius:11px;box-shadow:0 30px 70px -20px rgba(0,0,0,.85);padding:7px;display:flex;flex-direction:column;gap:1px;font-size:13px;color:#c4c7cc">
+            <div style="display:flex;align-items:center;gap:8px;padding:7px 10px 9px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#c3c7ff" stroke-width="1.3" style="flex:0 0 14px"><path d="M1.5 3.6c0-.6.5-1.1 1.1-1.1h2.4l1.2 1.3h4.7c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H2.6c-.6 0-1.1-.5-1.1-1.1z"></path></svg><div style="display:flex;flex-direction:column;gap:1px;min-width:0"><span style="color:#e6e7ea;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Tobias and Elisabeth Wedding</span><span style="font-family:'Geist Mono',monospace;font-size:10px;color:#5f636b">2,140 RAW</span></div></div>
+            <div style="height:1px;background:rgba(255,255,255,.08);margin:2px 6px 4px"></div>
+            <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:7px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.4"><path d="M4 3 10 7l-6 4z"></path></svg><span style="flex:1;color:#e6e7ea">Open in Cull</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#5f636b">Enter</span></div>
+            <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:7px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.4"><path d="M9.5 2.5 11.5 4.5 5 11l-2.5.5.5-2.5z"></path></svg><span style="flex:1">Rename…</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#5f636b">F2</span></div>
+            <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:7px;background:rgba(124,131,255,.16);border:1px solid rgba(124,131,255,.32)"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#c3c7ff" stroke-width="1.4"><path d="M6 2.5H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-3M8 2.5h3.5V6M11.5 2.5 6.5 7.5"></path></svg><span style="flex:1;color:#e6e7ea">Locate on disk</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#aab0ff">Explorer</span></div>
+            <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:7px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.4"><rect x="3.5" y="2.5" width="7" height="9" rx="1.2"></rect><path d="M5.5 2.5V1.5h3v1"></path></svg><span style="flex:1">Copy path</span></div>
+            <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:7px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#7c83ff" stroke-width="1.8"><path d="M2.5 6.5 5 9l4.5-5.2"></path></svg><span style="flex:1">Include subfolders</span></div>
+            <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:7px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.4"><path d="M11.5 6a4.5 4.5 0 1 1-1.3-3.1M11.5 1.5V4H9"></path></svg><span style="flex:1">Rescan for new photos</span></div>
+            <div style="height:1px;background:rgba(255,255,255,.08);margin:4px 6px"></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:7px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#f28c8c" stroke-width="1.4" style="flex:0 0 14px"><path d="M2.5 3.5h9M5 3.5V2.3h4v1.2M3.5 3.5l.5 8h6l.5-8"></path></svg><div style="display:flex;flex-direction:column;gap:1px"><span style="color:#f28c8c">Remove from library</span><span style="font-size:11px;color:#6f747c">Files stay on disk</span></div></div>
+          </div>
+        </div>
+
+        <!-- group menu -->
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">On a parent group</span>
+          <div style="width:262px;background:rgba(20,22,26,.98);border:1px solid rgba(255,255,255,.12);border-radius:11px;box-shadow:0 30px 70px -20px rgba(0,0,0,.85);padding:7px;display:flex;flex-direction:column;gap:1px;font-size:13px;color:#c4c7cc">
+            <div style="display:flex;flex-direction:column;gap:1px;padding:7px 10px 9px"><span style="color:#e6e7ea;font-weight:600">Weddings 2026</span><span style="font-family:'Geist Mono',monospace;font-size:10px;color:#5f636b">C:\Users\Marcus\Photos · 2 shoots</span></div>
+            <div style="height:1px;background:rgba(255,255,255,.08);margin:2px 6px 4px"></div>
+            <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:7px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.4"><path d="M9.5 2.5 11.5 4.5 5 11l-2.5.5.5-2.5z"></path></svg><span style="flex:1">Rename group…</span></div>
+            <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:7px;background:rgba(124,131,255,.16);border:1px solid rgba(124,131,255,.32)"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#c3c7ff" stroke-width="1.4"><path d="M6 2.5H3a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1v-3M8 2.5h3.5V6M11.5 2.5 6.5 7.5"></path></svg><span style="flex:1;color:#e6e7ea">Locate on disk</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#aab0ff">Explorer</span></div>
+            <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;border-radius:7px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.4"><path d="M11.5 6a4.5 4.5 0 1 1-1.3-3.1M11.5 1.5V4H9"></path></svg><span style="flex:1">Rescan all shoots</span></div>
+            <div style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-radius:7px"><span style="width:14px;display:flex;justify-content:center;color:#8b8f96">↑</span><span style="flex:1">Move up</span></div>
+            <div style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-radius:7px"><span style="width:14px;display:flex;justify-content:center;color:#8b8f96">↓</span><span style="flex:1">Move down</span></div>
+            <div style="height:1px;background:rgba(255,255,255,.08);margin:4px 6px"></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:7px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#f28c8c" stroke-width="1.4" style="flex:0 0 14px"><path d="M2.5 3.5h9M5 3.5V2.3h4v1.2M3.5 3.5l.5 8h6l.5-8"></path></svg><div style="display:flex;flex-direction:column;gap:1px"><span style="color:#f28c8c">Remove group</span><span style="font-size:11px;color:#6f747c">2 shoots · files stay on disk</span></div></div>
+          </div>
+        </div>
+
+        <!-- rename inline -->
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">Rename (alias, inline)</span>
+          <div style="width:262px;background:#0e0f12;border:1px solid rgba(255,255,255,.1);border-radius:11px;padding:16px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;border-radius:8px;border:1px solid #7c83ff;background:rgba(124,131,255,.1)"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.3" style="flex:0 0 14px"><path d="M1.5 3.6c0-.6.5-1.1 1.1-1.1h2.4l1.2 1.3h4.7c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H2.6c-.6 0-1.1-.5-1.1-1.1z"></path></svg><span style="flex:1;font-size:13px;color:#e6e7ea">Tobias &amp; Elisabeth<span style="display:inline-block;width:1px;height:15px;background:#7c83ff;margin-left:1px;vertical-align:-3px"></span></span></div>
+            <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:#8b8f96;line-height:1.5"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.3" style="flex:0 0 13px;margin-top:1px"><circle cx="7" cy="7" r="5.3"></circle><path d="M7 6.2v3.4M7 4.3v.1"></path></svg><span>Display name only. Folder on disk stays <span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#c4c7cc">Tobias and Elisabeth Wedding</span>.</span></div>
+            <div style="font-size:11.5px;color:#6f747c;border-top:1px solid rgba(255,255,255,.07);padding-top:11px">Need to rename the folder itself? Use <span style="color:#c4c7cc">Rename on disk…</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOUPE -->
+    <div id="loupe" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">LOUPE</span><h3 style="margin:0;font-size:18px;font-weight:600">Full-res viewer — zoom, pan, pixel-peep</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6"><span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.08)">Z</span> / <span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.08)">Space</span> toggle 1:1 ↔ fit, <span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.08)">+/−</span> step. A navigator inset shows the visible region; stars and flags stay off the image so it reads true. Arrow keys move frame to frame.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);position:relative;font-size:13px;color:#e6e7ea;box-shadow:0 40px 90px -30px rgba(0,0,0,.8)">
+        <div style="position:absolute;inset:0;background:#08090b"></div>
+        <div style="position:absolute;top:-14%;left:-10%;width:150%;height:150%;background:radial-gradient(120% 80% at 62% 30%, rgba(255,240,210,.22), transparent 55%), linear-gradient(168deg,#c3d2c0 0%,#8ba088 34%,#4c5f44 62%,#26311e 100%)"></div>
+        <div style="position:absolute;inset:0;background:radial-gradient(80% 60% at 50% 50%, transparent 60%, rgba(0,0,0,.35))"></div>
+        <div style="position:absolute;top:16px;left:18px;display:flex;align-items:center;gap:10px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:7px 12px"><div style="width:18px;height:18px;border-radius:5px;background:#7c83ff;color:#0d0e0f;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px">m</div><span style="font-weight:600;font-size:12.5px">Iceland</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#aab0ff">DSC07421.ARW</span></div>
+        <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:4px;font-size:12.5px"><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Library</span><span style="padding:5px 15px;border-radius:6px;background:rgba(124,131,255,.24);color:#c3c7ff">Cull</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Export</span></div>
+        <div style="position:absolute;top:16px;right:18px;display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;color:#8b8f96;font-size:12px"><span>Jump to any control</span><span style="font-family:'Geist Mono',monospace;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.09)">⌘K</span></div>
+        <!-- navigator inset -->
+        <div style="position:absolute;bottom:18px;right:18px;width:200px;background:rgba(12,14,18,.62);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,.12);border-radius:11px;padding:9px;box-shadow:0 20px 50px -18px rgba(0,0,0,.7)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px"><span style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8b8f96">Navigator</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#c3c7ff">100%</span></div>
+          <div style="position:relative;height:122px;border-radius:6px;overflow:hidden"><div style="position:absolute;inset:0;background:radial-gradient(120% 80% at 62% 30%, rgba(255,240,210,.22), transparent 55%), linear-gradient(168deg,#c3d2c0 0%,#8ba088 34%,#4c5f44 62%,#26311e 100%)"></div><div style="position:absolute;left:44%;top:24%;width:34%;height:40%;border:1.5px solid #fff;border-radius:2px;box-shadow:0 0 0 999px rgba(0,0,0,.34)"></div></div>
+        </div>
+        <!-- zoom control -->
+        <div style="position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:14px;background:rgba(12,14,18,.62);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:10px 16px;box-shadow:0 24px 60px -18px rgba(0,0,0,.7)">
+          <div style="display:flex;align-items:center;gap:7px;font-family:'Geist Mono',monospace;font-size:12px;color:#c4c7cc"><span style="width:26px;height:26px;border-radius:7px;border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;color:#8b8f96">‹</span><span>7 / 1,284</span><span style="width:26px;height:26px;border-radius:7px;border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;color:#8b8f96">›</span></div>
+          <div style="width:1px;height:26px;background:rgba(255,255,255,.14)"></div>
+          <div style="display:flex;gap:3px;background:rgba(255,255,255,.06);border-radius:8px;padding:3px;font-size:12px"><span style="padding:5px 13px;border-radius:5px;color:#8b8f96">Fit</span><span style="padding:5px 13px;border-radius:5px;background:rgba(124,131,255,.24);color:#c3c7ff">1:1</span></div>
+          <div style="display:flex;align-items:center;gap:10px"><span style="color:#8b8f96;font-size:15px">−</span><div style="width:150px;position:relative;height:3px;border-radius:2px;background:rgba(255,255,255,.14)"><div style="position:absolute;top:0;bottom:0;left:0;width:52%;background:#7c83ff;border-radius:2px"></div><div style="position:absolute;top:50%;left:52%;width:11px;height:11px;margin-left:-5.5px;transform:translateY(-50%);border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div></div><span style="color:#8b8f96;font-size:15px">+</span><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#e6e7ea;width:42px;text-align:right">100%</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOUPE · RENDERING -->
+    <div id="rendering" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">RENDERING</span><h3 style="margin:0;font-size:18px;font-weight:600">"It's rendering," not "it's soft"</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">Jumping to 1:1 shows a fast, slightly soft preview for a beat while the full-res RAW tile decodes. A top progress line and a clear badge make it unmistakable that the frame is <strong style="color:#e6e7ea">still resolving</strong> — so a sharp shot never gets rejected as blurry. The badge fades the instant the tile lands.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);position:relative;font-size:13px;color:#e6e7ea;box-shadow:0 40px 90px -30px rgba(0,0,0,.8)">
+        <div style="position:absolute;inset:0;background:#08090b"></div>
+        <div style="position:absolute;top:-14%;left:-10%;width:150%;height:150%;filter:blur(9px);transform:scale(1.04);background:radial-gradient(120% 80% at 62% 30%, rgba(255,240,210,.22), transparent 55%), linear-gradient(168deg,#c3d2c0 0%,#8ba088 34%,#4c5f44 62%,#26311e 100%)"></div>
+        <div style="position:absolute;inset:0;background:radial-gradient(80% 60% at 50% 50%, transparent 60%, rgba(0,0,0,.35))"></div>
+        <!-- top indeterminate progress line -->
+        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:rgba(255,255,255,.08)"><div style="position:absolute;top:0;left:18%;width:34%;height:100%;background:linear-gradient(90deg,transparent,#7c83ff 40%,#aab0ff 60%,transparent)"></div></div>
+        <div style="position:absolute;top:16px;left:18px;display:flex;align-items:center;gap:10px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:7px 12px"><div style="width:18px;height:18px;border-radius:5px;background:#7c83ff;color:#0d0e0f;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px">m</div><span style="font-weight:600;font-size:12.5px">Iceland</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#aab0ff">DSC07421.ARW</span></div>
+        <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:4px;font-size:12.5px"><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Library</span><span style="padding:5px 15px;border-radius:6px;background:rgba(124,131,255,.24);color:#c3c7ff">Cull</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Export</span></div>
+        <!-- rendering badge -->
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:12px;background:rgba(12,14,18,.72);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:13px 18px;box-shadow:0 24px 60px -18px rgba(0,0,0,.7)">
+          <svg width="19" height="19" viewBox="0 0 15 15" fill="none" stroke="#aab0ff" stroke-width="1.5" style="flex:0 0 19px"><circle cx="7.5" cy="7.5" r="6" opacity=".3"></circle><path d="M7.5 1.5a6 6 0 0 1 6 6"></path></svg>
+          <div style="display:flex;flex-direction:column;gap:2px"><span style="font-size:13.5px;font-weight:600;color:#e6e7ea">Rendering full resolution</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">1:1 tile · decoding RAW</span></div>
+        </div>
+        <!-- zoom control with rendering state -->
+        <div style="position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:14px;background:rgba(12,14,18,.62);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:10px 16px;box-shadow:0 24px 60px -18px rgba(0,0,0,.7)">
+          <div style="display:flex;align-items:center;gap:7px;font-family:'Geist Mono',monospace;font-size:12px;color:#c4c7cc"><span style="width:26px;height:26px;border-radius:7px;border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;color:#8b8f96">‹</span><span>7 / 1,284</span><span style="width:26px;height:26px;border-radius:7px;border:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;color:#8b8f96">›</span></div>
+          <div style="width:1px;height:26px;background:rgba(255,255,255,.14)"></div>
+          <div style="display:flex;gap:3px;background:rgba(255,255,255,.06);border-radius:8px;padding:3px;font-size:12px"><span style="padding:5px 13px;border-radius:5px;color:#8b8f96">Fit</span><span style="padding:5px 13px;border-radius:5px;background:rgba(124,131,255,.24);color:#c3c7ff">1:1</span></div>
+          <div style="display:flex;align-items:center;gap:8px"><svg width="13" height="13" viewBox="0 0 15 15" fill="none" stroke="#aab0ff" stroke-width="1.6" style="flex:0 0 13px"><circle cx="7.5" cy="7.5" r="6" opacity=".3"></circle><path d="M7.5 1.5a6 6 0 0 1 6 6"></path></svg><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#aab0ff">Rendering 100%</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CROP / STRAIGHTEN -->
+    <div id="crop" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">CROP</span><h3 style="margin:0;font-size:18px;font-weight:600">Crop &amp; straighten overlay</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6"><span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.08)">R</span> drops the crop grid over the loupe. Drag the handles or pick an aspect preset; drag on the image (or the dial) to straighten against the thirds grid. Everything outside the box dims. Esc or Done commits.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);position:relative;font-size:13px;color:#e6e7ea;box-shadow:0 40px 90px -30px rgba(0,0,0,.8)">
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 80% at 40% 26%, rgba(255,245,225,.2), transparent 55%), linear-gradient(170deg,#b8c6cf 0%,#7f96a0 34%,#48606b 62%,#243139 100%)"></div>
+        <!-- dim scrim with a transparent crop window punched via layered boxes -->
+        <div style="position:absolute;left:0;right:0;top:0;height:14%;background:rgba(4,6,9,.62)"></div>
+        <div style="position:absolute;left:0;right:0;bottom:0;height:14%;background:rgba(4,6,9,.62)"></div>
+        <div style="position:absolute;left:0;top:14%;bottom:14%;width:16%;background:rgba(4,6,9,.62)"></div>
+        <div style="position:absolute;right:0;top:14%;bottom:14%;width:16%;background:rgba(4,6,9,.62)"></div>
+        <!-- crop box -->
+        <div style="position:absolute;left:16%;right:16%;top:14%;bottom:14%;border:1px solid rgba(255,255,255,.85)">
+          <div style="position:absolute;left:33.33%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.28)"></div>
+          <div style="position:absolute;left:66.66%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.28)"></div>
+          <div style="position:absolute;top:33.33%;left:0;right:0;height:1px;background:rgba(255,255,255,.28)"></div>
+          <div style="position:absolute;top:66.66%;left:0;right:0;height:1px;background:rgba(255,255,255,.28)"></div>
+          <div style="position:absolute;left:-2px;top:-2px;width:22px;height:22px;border-top:3px solid #fff;border-left:3px solid #fff"></div>
+          <div style="position:absolute;right:-2px;top:-2px;width:22px;height:22px;border-top:3px solid #fff;border-right:3px solid #fff"></div>
+          <div style="position:absolute;left:-2px;bottom:-2px;width:22px;height:22px;border-bottom:3px solid #fff;border-left:3px solid #fff"></div>
+          <div style="position:absolute;right:-2px;bottom:-2px;width:22px;height:22px;border-bottom:3px solid #fff;border-right:3px solid #fff"></div>
+          <div style="position:absolute;left:50%;top:-2px;transform:translateX(-50%);width:30px;height:4px;background:#fff;border-radius:2px"></div>
+          <div style="position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);width:30px;height:4px;background:#fff;border-radius:2px"></div>
+          <div style="position:absolute;top:50%;left:-2px;transform:translateY(-50%);width:4px;height:30px;background:#fff;border-radius:2px"></div>
+          <div style="position:absolute;top:50%;right:-2px;transform:translateY(-50%);width:4px;height:30px;background:#fff;border-radius:2px"></div>
+          <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:6px;background:rgba(12,14,18,.6);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.14);border-radius:7px;padding:4px 9px;font-family:'Geist Mono',monospace;font-size:11px;white-space:nowrap"><span style="color:#c3c7ff">3:2</span><span style="color:#8b8f96">6000 × 4000</span></div>
+        </div>
+        <div style="position:absolute;top:16px;left:18px;display:flex;align-items:center;gap:10px;background:rgba(12,14,18,.6);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.12);border-radius:9px;padding:7px 12px"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#c3c7ff" stroke-width="1.4"><path d="M4 1v9.5h9.5M1 4h9.5V13"></path></svg><span style="font-weight:600;font-size:12.5px">Crop</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">R to exit</span></div>
+        <!-- crop control bar -->
+        <div style="position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:14px;background:rgba(12,14,18,.62);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:10px 16px;box-shadow:0 24px 60px -18px rgba(0,0,0,.7)">
+          <div style="display:flex;gap:3px;background:rgba(255,255,255,.06);border-radius:8px;padding:3px;font-size:12px"><span style="padding:5px 11px;border-radius:5px;color:#8b8f96">Original</span><span style="padding:5px 11px;border-radius:5px;background:rgba(124,131,255,.24);color:#c3c7ff">3:2</span><span style="padding:5px 11px;border-radius:5px;color:#8b8f96">2:3</span><span style="padding:5px 11px;border-radius:5px;color:#8b8f96">1:1</span><span style="padding:5px 11px;border-radius:5px;color:#8b8f96">4:5</span><span style="padding:5px 11px;border-radius:5px;color:#8b8f96">16:9</span></div>
+          <div style="width:1px;height:26px;background:rgba(255,255,255,.14)"></div>
+          <div style="display:flex;align-items:center;gap:10px"><span style="font-size:11.5px;color:#8b8f96">Straighten</span><div style="width:150px;position:relative;height:3px;border-radius:2px;background:rgba(255,255,255,.14)"><div style="position:absolute;top:0;bottom:0;left:50%;width:8%;background:#7c83ff;border-radius:2px"></div><div style="position:absolute;top:50%;left:58%;width:11px;height:11px;margin-left:-5.5px;transform:translateY(-50%);border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div></div><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#e6e7ea;width:44px;text-align:right">+1.2°</span></div>
+          <div style="width:1px;height:26px;background:rgba(255,255,255,.14)"></div>
+          <button style="height:30px;padding:0 13px;border-radius:8px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#8b8f96;font-family:Geist;font-size:12.5px">Reset</button>
+          <button style="height:30px;padding:0 16px;border-radius:8px;border:1px solid #7c83ff;background:#7c83ff;color:#0d0e0f;font-family:Geist;font-size:12.5px;font-weight:500">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- WHITE BALANCE EYEDROPPER -->
+    <div id="eyedropper" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">WHITE BALANCE</span><h3 style="margin:0;font-size:18px;font-weight:600">Eyedropper — click a neutral gray</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">The pipette turns the cursor into a sampler with a magnified loupe so you can land on a true neutral. Clicking reads the pixel and solves Temperature &amp; Tint to make it gray — the WB panel flips to <strong style="color:#e6e7ea">Custom</strong> and both dials jump live. <span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.08)">Esc</span> cancels without changing anything.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);position:relative;font-size:13px;color:#e6e7ea;box-shadow:0 40px 90px -30px rgba(0,0,0,.8)">
+        <div style="position:absolute;inset:0;background:radial-gradient(90% 70% at 38% 46%, rgba(214,212,205,.5), transparent 46%), linear-gradient(168deg,#aeb6b8 0%,#7d8a8c 32%,#4c5a5e 60%,#25302f 100%)"></div>
+        <div style="position:absolute;inset:0;background:radial-gradient(80% 60% at 50% 50%, transparent 62%, rgba(0,0,0,.32))"></div>
+        <div style="position:absolute;top:16px;left:18px;display:flex;align-items:center;gap:10px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:7px 12px"><div style="width:18px;height:18px;border-radius:5px;background:#7c83ff;color:#0d0e0f;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px">m</div><span style="font-weight:600;font-size:12.5px">Iceland</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#aab0ff">DSC07421.ARW</span></div>
+        <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:4px;font-size:12.5px"><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Library</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Cull</span><span style="padding:5px 15px;border-radius:6px;background:rgba(124,131,255,.24);color:#c3c7ff">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Export</span></div>
+
+        <!-- magnifier loupe at cursor -->
+        <div style="position:absolute;left:430px;top:372px">
+          <div style="position:absolute;left:0;top:0;width:138px;height:138px;border-radius:50%;overflow:hidden;border:2px solid #fff;box-shadow:0 12px 34px -8px rgba(0,0,0,.7)">
+            <div style="position:absolute;inset:-40%;background:radial-gradient(70% 60% at 50% 46%, #d6d4cd, #b4b6b2 55%, #8f9694 100%)"></div>
+            <div style="position:absolute;inset:0;background-image:repeating-linear-gradient(0deg,rgba(0,0,0,.14) 0 1px,transparent 1px 14px),repeating-linear-gradient(90deg,rgba(0,0,0,.14) 0 1px,transparent 1px 14px)"></div>
+            <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border:1.5px solid #7c83ff;box-shadow:0 0 0 1px rgba(0,0,0,.7)"></div>
+          </div>
+          <!-- readout tag -->
+          <div style="position:absolute;left:150px;top:44px;display:flex;align-items:center;gap:9px;background:rgba(12,14,18,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.14);border-radius:9px;padding:7px 11px;white-space:nowrap;box-shadow:0 14px 34px -12px rgba(0,0,0,.6)">
+            <div style="width:20px;height:20px;border-radius:5px;background:rgb(182,180,175);border:1px solid rgba(255,255,255,.3)"></div>
+            <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#c4c7cc">R182 G180 B175</span>
+            <span style="width:1px;height:16px;background:rgba(255,255,255,.16)"></span>
+            <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#aab0ff">→ 5450 K · +3</span>
+          </div>
+          <!-- pipette cursor -->
+          <svg width="26" height="26" viewBox="0 0 26 26" fill="none" style="position:absolute;left:120px;top:118px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6))"><path d="M17.5 4.5a2.4 2.4 0 0 1 3.4 3.4l-7.6 7.6-4 1 1-4z" fill="#0d0e0f" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"></path><path d="M14.5 8.5l3 3" stroke="#fff" stroke-width="1.4"></path></svg>
+        </div>
+
+        <!-- WB panel -->
+        <div style="position:absolute;top:64px;right:16px;width:300px;background:rgba(16,18,22,.92);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:15px 16px;box-shadow:0 24px 70px -20px rgba(0,0,0,.85);display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8b8f96">White balance</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#aab0ff">Sampling…</span></div>
+          <div style="display:flex;gap:8px">
+            <div style="flex:1;display:flex;gap:3px;background:rgba(255,255,255,.05);border-radius:8px;padding:3px;font-size:12px"><span style="flex:1;text-align:center;padding:5px 0;border-radius:5px;color:#8b8f96">As shot</span><span style="flex:1;text-align:center;padding:5px 0;border-radius:5px;color:#8b8f96">Auto</span><span style="flex:1;text-align:center;padding:5px 0;border-radius:5px;background:rgba(124,131,255,.24);color:#c3c7ff">Custom</span></div>
+            <div style="width:34px;height:34px;flex:0 0 34px;border-radius:8px;border:1px solid #7c83ff;background:rgba(124,131,255,.2);display:flex;align-items:center;justify-content:center;color:#c3c7ff"><svg width="16" height="16" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M17 5a2.4 2.4 0 0 1 3.4 3.4l-7.6 7.6-4 1 1-4z"></path><path d="M14 8.5l3 3"></path></svg></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px"><span style="width:74px;flex:0 0 74px;color:#c4c7cc;font-size:12px">Temperature</span><div style="flex:1;position:relative;height:3px;border-radius:2px;background:linear-gradient(90deg,#6fa8ff,#e9e3d0,#ffb066)"><div style="position:absolute;top:50%;left:54%;width:12px;height:12px;margin-left:-6px;transform:translateY(-50%);border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div></div><span style="width:50px;text-align:right;font-family:'Geist Mono',monospace;font-size:11px;color:#e6e7ea">5450 K</span></div>
+          <div style="display:flex;align-items:center;gap:10px"><span style="width:74px;flex:0 0 74px;color:#c4c7cc;font-size:12px">Tint</span><div style="flex:1;position:relative;height:3px;border-radius:2px;background:linear-gradient(90deg,#5cd06e,#d9d9d9,#c86fd0)"><div style="position:absolute;top:50%;left:53%;width:12px;height:12px;margin-left:-6px;transform:translateY(-50%);border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div></div><span style="width:50px;text-align:right;font-family:'Geist Mono',monospace;font-size:11px;color:#e6e7ea">+3</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding-top:12px;border-top:1px solid rgba(255,255,255,.08);font-size:11.5px;color:#8b8f96;line-height:1.45"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.3" style="flex:0 0 13px"><circle cx="7" cy="7" r="5.3"></circle><path d="M7 6.2v3.4M7 4.3v.1"></path></svg><span>Sampled the loupe pixel and neutralized it.</span></div>
+        </div>
+
+        <!-- hint bar -->
+        <div style="position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;background:rgba(12,14,18,.62);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:10px 16px;box-shadow:0 24px 60px -18px rgba(0,0,0,.7);font-size:12.5px"><svg width="15" height="15" viewBox="0 0 26 26" fill="none" stroke="#c3c7ff" stroke-width="1.6"><path d="M17 5a2.4 2.4 0 0 1 3.4 3.4l-7.6 7.6-4 1 1-4z"></path><path d="M14 8.5l3 3"></path></svg><span style="color:#c4c7cc">Click a neutral gray to set white balance</span><span style="width:1px;height:16px;background:rgba(255,255,255,.16)"></span><span style="color:#8b8f96">Right-click resets · <span style="font-family:'Geist Mono',monospace;color:#c4c7cc">Esc</span> cancels</span></div>
+      </div>
+    </div>
+
+    <!-- BATCH / MULTI-SELECT -->
+    <div id="batch" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">BATCH</span><h3 style="margin:0;font-size:18px;font-weight:600">Multi-select — rate, flag, and adjust many at once</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">Shift-click extends a range, ⌘-click toggles, <span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.08)">⌘A</span> selects all. A selection bar takes over the filter row for batch rate/flag/copy; the right panel switches to <strong style="color:#e6e7ea">relative adjustment</strong> — deltas that add to each photo's own current values, then apply in the background.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#0c0d0f;color:#e6e7ea;display:flex;flex-direction:column;box-shadow:0 40px 90px -30px rgba(0,0,0,.8);font-size:13px">
+        <div style="height:48px;flex:0 0 48px;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.07);background:#0e0f12">
+          <div style="display:flex;align-items:center;gap:9px"><div style="width:24px;height:24px;border-radius:7px;background:#7c83ff;color:#0d0e0f;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px">m</div><span style="font-weight:600">Iceland</span></div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:2px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:4px;font-size:12.5px"><span style="padding:5px 15px;border-radius:6px;background:rgba(124,131,255,.24);color:#c3c7ff">Library</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Cull</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Export</span></div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#8b8f96;font-size:12px"><span>Jump to anything</span><span style="font-family:'Geist Mono',monospace;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.09)">⌘K</span></div>
+        </div>
+        <div style="flex:1;display:flex;overflow:hidden">
+          <!-- folder rail (condensed) -->
+          <div style="width:214px;flex:0 0 214px;border-right:1px solid rgba(255,255,255,.07);background:#0e0f12;display:flex;flex-direction:column;padding:14px 8px">
+            <span style="font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#6f747c;padding:0 10px 8px">In your library</span>
+            <div style="padding:9px 9px 5px 10px"><div style="display:flex;align-items:center;gap:7px"><span style="color:#8b8f96;font-size:9px;transform:rotate(90deg)">▶</span><span style="font-size:12.5px;font-weight:600;color:#e6e7ea">Trips 2026</span></div><span style="padding-left:16px;font-family:'Geist Mono',monospace;font-size:10px;color:#5f636b">D:\Shoots</span></div>
+            <div style="display:flex;align-items:center;gap:7px;height:30px;padding-left:24px;padding-right:9px;border-radius:7px;background:rgba(124,131,255,.16);font-size:12.5px"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#c3c7ff" stroke-width="1.3" style="flex:0 0 13px"><path d="M1.5 3.6c0-.6.5-1.1 1.1-1.1h2.4l1.2 1.3h4.7c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H2.6c-.6 0-1.1-.5-1.1-1.1z"></path></svg><span style="flex:1;color:#e6e7ea;font-weight:600">Iceland</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#6f747c">1,284</span></div>
+            <div style="display:flex;align-items:center;gap:7px;height:30px;padding-left:24px;padding-right:9px;border-radius:7px;font-size:12.5px"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.3" style="flex:0 0 13px"><path d="M1.5 3.6c0-.6.5-1.1 1.1-1.1h2.4l1.2 1.3h4.7c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H2.6c-.6 0-1.1-.5-1.1-1.1z"></path></svg><span style="flex:1;color:#c4c7cc">Faroe Islands</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#6f747c">642</span></div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+            <!-- selection bar -->
+            <div style="height:47px;flex:0 0 47px;display:flex;align-items:center;gap:14px;padding:0 18px;border-bottom:1px solid rgba(124,131,255,.28);background:rgba(124,131,255,.1)">
+              <span style="display:flex;align-items:center;gap:8px;font-size:13px;color:#e6e7ea"><span style="font-family:'Geist Mono',monospace;background:#7c83ff;color:#0d0e0f;font-weight:600;border-radius:5px;padding:2px 7px">12</span>selected</span>
+              <div style="width:1px;height:20px;background:rgba(255,255,255,.14)"></div>
+              <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#c4c7cc"><span style="color:#8b8f96">Rate</span><span style="display:flex;gap:1px;font-size:13px;color:#f5b544">★★★★★</span></div>
+              <div style="display:flex;gap:7px"><button style="height:30px;padding:0 13px;border-radius:8px;border:1px solid rgba(52,211,153,.45);background:rgba(52,211,153,.14);color:#5ee0b0;font-family:Geist;font-size:12.5px;display:flex;align-items:center;gap:6px">Pick<span style="font-family:'Geist Mono',monospace;font-size:10px;opacity:.8">P</span></button><button style="height:30px;padding:0 13px;border-radius:8px;border:1px solid rgba(242,109,109,.4);background:rgba(242,109,109,.12);color:#f28c8c;font-family:Geist;font-size:12.5px;display:flex;align-items:center;gap:6px">Reject<span style="font-family:'Geist Mono',monospace;font-size:10px;opacity:.8">X</span></button></div>
+              <div style="display:flex;gap:7px"><button style="height:30px;padding:0 13px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#c4c7cc;font-family:Geist;font-size:12.5px">Paste settings</button><button style="height:30px;padding:0 13px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#c4c7cc;font-family:Geist;font-size:12.5px">Restore original</button></div>
+              <div style="flex:1"></div>
+              <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">Esc to clear</span>
+            </div>
+            <!-- grid -->
+            <div style="flex:1;overflow:hidden;padding:16px 18px">
+              <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+                <sc-for list="{{ libGrid }}" as="p" hint-placeholder-count="25">
+                  <div style="position:relative;aspect-ratio:3 / 2;border-radius:4px;overflow:hidden">
+                    <div style="{{ p.gridStyle }}"></div>
+                    <sc-if value="{{ p.sel }}"><div style="{{ p.selDim }}"></div><div style="position:absolute;left:6px;top:6px;width:16px;height:16px;border-radius:5px;background:#7c83ff;display:flex;align-items:center;justify-content:center"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="#0d0e0f" stroke-width="2"><path d="M2.5 6.2 5 8.6l4.5-5.2"></path></svg></div></sc-if>
+                    <sc-if value="{{ p.isAnchor }}"><div style="position:absolute;inset:0;border:2px solid #fff;border-radius:4px;pointer-events:none"></div></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="height:26px;flex:0 0 26px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:16px;padding:0 16px;font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96;background:#0e0f12"><span>/Volumes/Shoots/2026/Iceland</span><span style="color:#c3c7ff">12 selected</span><span>1,284 total</span><span style="flex:1"></span><span>⇧-click range · ⌘-click toggle · ⌘A all</span></div>
+          </div>
+          <!-- right: relative adjustment -->
+          <div style="width:300px;flex:0 0 300px;border-left:1px solid rgba(255,255,255,.07);background:#0e0f12;display:flex;flex-direction:column;overflow:hidden">
+            <div style="padding:15px 16px 13px;border-bottom:1px solid rgba(255,255,255,.07)"><span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8b8f96">Relative adjustment</span><div style="margin-top:6px;font-size:13px;color:#e6e7ea">12 photos selected</div><div style="margin-top:4px;font-size:11.5px;color:#8b8f96;line-height:1.45">Deltas add to each photo's own current value — mixed edits stay intact.</div></div>
+            <div style="flex:1;overflow:hidden;padding:16px">
+              <sc-for list="{{ batchDeltas }}" as="c" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:9px;margin-bottom:16px">
+                  <div style="width:78px;flex:0 0 78px;color:#c4c7cc;font-size:12px">{{ c.label }}</div>
+                  <div style="flex:1;position:relative;height:3px;border-radius:2px;background:rgba(255,255,255,.1)"><div style="{{ c.fillStyle }}"></div><div style="{{ c.thumbStyle }}"></div></div>
+                  <div style="width:60px;text-align:right;font-family:'Geist Mono',monospace;font-size:11px;color:#e6e7ea">{{ c.val }}</div>
+                </div>
+              </sc-for>
+              <div style="margin-top:6px;padding:11px 12px;border-radius:9px;background:rgba(124,131,255,.08);border:1px solid rgba(124,131,255,.22);display:flex;align-items:center;gap:9px"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#aab0ff" stroke-width="1.3" style="flex:0 0 14px"><path d="M7 4.5v3M7 9.4v.1"></path><circle cx="7" cy="7" r="5.4"></circle></svg><span style="font-size:11.5px;color:#c4c7cc;line-height:1.45">Absolute edits? Open one in Develop and Paste settings across.</span></div>
+            </div>
+            <div style="padding:13px 16px;border-top:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:8px;font-size:11.5px;color:#8b8f96"><span style="width:6px;height:6px;border-radius:50%;background:#7c83ff;flex:0 0 6px"></span>Thumbnails update live as you drag</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EMPTY LIBRARY -->
+    <div id="empty" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">EMPTY</span><h3 style="margin:0;font-size:18px;font-weight:600">First run — nothing added yet</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">Before any folders exist, the rail collapses to a single prompt and the canvas carries one clear call to action. The reassurance that files stay on disk lives right here, where the commitment is made. Dropping a folder anywhere in the window works too.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#0c0d0f;color:#e6e7ea;display:flex;flex-direction:column;box-shadow:0 40px 90px -30px rgba(0,0,0,.8);font-size:13px">
+        <div style="height:48px;flex:0 0 48px;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.07);background:#0e0f12">
+          <div style="display:flex;align-items:center;gap:9px"><div style="width:24px;height:24px;border-radius:7px;background:#7c83ff;color:#0d0e0f;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px">m</div><span style="font-weight:600">marraw</span></div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:2px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:4px;font-size:12.5px;opacity:.5"><span style="padding:5px 15px;border-radius:6px;background:rgba(124,131,255,.24);color:#c3c7ff">Library</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Cull</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Export</span></div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#8b8f96;font-size:12px;opacity:.5"><span>Jump to anything</span><span style="font-family:'Geist Mono',monospace;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.09)">⌘K</span></div>
+        </div>
+        <div style="flex:1;display:flex;overflow:hidden">
+          <div style="width:214px;flex:0 0 214px;border-right:1px solid rgba(255,255,255,.07);background:#0e0f12;display:flex;flex-direction:column">
+            <div style="padding:14px 12px 10px"><div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;font-size:12px;color:#5f636b"><svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="#5f636b" stroke-width="1.4"><circle cx="5.6" cy="5.6" r="3.9"></circle><path d="M8.6 8.6l2.2 2.2"></path></svg><span>Filter folders</span></div></div>
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:0 20px;text-align:center"><span style="font-size:12.5px;color:#6f747c">No folders yet</span></div>
+            <div style="padding:8px 10px"><div style="display:flex;align-items:center;justify-content:center;gap:7px;height:32px;border-radius:8px;border:1px dashed rgba(124,131,255,.5);background:rgba(124,131,255,.08);color:#c3c7ff;font-size:12.5px"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#c3c7ff" stroke-width="1.5"><path d="M7 2.5v9M2.5 7h9"></path></svg>Add folder</div></div>
+            <div style="padding:10px 12px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:8px;font-size:12px;color:#8b8f96"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.3"><circle cx="7" cy="7" r="2.2"></circle><path d="M7 1.3v1.6M7 11.1v1.6M12.7 7h-1.6M2.9 7H1.3M11 3l-1.1 1.1M4.1 9.9 3 11M11 11 9.9 9.9M4.1 4.1 3 3"></path></svg>Settings</div>
+          </div>
+          <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:40px">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:20px;max-width:420px;text-align:center">
+              <div style="width:72px;height:72px;border-radius:18px;border:1px solid rgba(124,131,255,.35);background:rgba(124,131,255,.1);display:flex;align-items:center;justify-content:center"><svg width="34" height="34" viewBox="0 0 34 34" fill="none" stroke="#aab0ff" stroke-width="1.6"><path d="M4 9.5c0-1.4 1.1-2.5 2.5-2.5h6l3 3.2h10c1.4 0 2.5 1.1 2.5 2.5V24c0 1.4-1.1 2.5-2.5 2.5h-19C5.1 26.5 4 25.4 4 24z"></path><path d="M17 15v6M14 18h6" stroke-width="1.8"></path></svg></div>
+              <div style="display:flex;flex-direction:column;gap:9px"><h2 style="margin:0;font-size:23px;font-weight:600;letter-spacing:-.02em">Your library is empty</h2><p style="margin:0;font-size:14px;line-height:1.55;color:#9a9ea6">Add a folder of RAW photos to start culling. marraw reads them where they live — <strong style="color:#c4c7cc">your files never move or change</strong>.</p></div>
+              <div style="display:flex;flex-direction:column;align-items:center;gap:12px"><button style="height:42px;padding:0 22px;border-radius:10px;border:1px solid #7c83ff;background:#7c83ff;color:#0d0e0f;font-family:Geist;font-size:14px;font-weight:500;display:flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="#0d0e0f" stroke-width="1.8"><path d="M7 2.5v9M2.5 7h9"></path></svg>Add folder</button><span style="font-size:12px;color:#6f747c">or drop a folder anywhere in this window</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCANNING / PREVIEWS -->
+    <div id="scanning" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">SCANNING</span><h3 style="margin:0;font-size:18px;font-weight:600">Just added — generating previews</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">A freshly added folder fills in progressively: resolved thumbnails paint as they decode, the rest hold skeletons, and a task chip tracks the background job. You can start rating the ready frames immediately — nothing blocks on the full scan.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#0c0d0f;color:#e6e7ea;display:flex;flex-direction:column;box-shadow:0 40px 90px -30px rgba(0,0,0,.8);font-size:13px;position:relative">
+        <div style="height:48px;flex:0 0 48px;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.07);background:#0e0f12">
+          <div style="display:flex;align-items:center;gap:9px"><div style="width:24px;height:24px;border-radius:7px;background:#7c83ff;color:#0d0e0f;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px">m</div><span style="font-weight:600">Iceland</span></div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:2px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:9px;padding:4px;font-size:12.5px"><span style="padding:5px 15px;border-radius:6px;background:rgba(124,131,255,.24);color:#c3c7ff">Library</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Cull</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Export</span></div>
+          <div style="flex:1"></div>
+          <!-- task chip -->
+          <div style="display:flex;align-items:center;gap:11px;background:rgba(12,14,18,.78);border:1px solid rgba(255,255,255,.12);border-radius:11px;padding:8px 8px 8px 13px;box-shadow:0 16px 40px -14px rgba(0,0,0,.7)"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#aab0ff" stroke-width="1.5" style="flex:0 0 15px"><circle cx="7.5" cy="7.5" r="6" opacity=".3"></circle><path d="M7.5 1.5a6 6 0 0 1 6 6"></path></svg><div style="display:flex;flex-direction:column;gap:4px;width:186px"><div style="display:flex;justify-content:space-between;font-family:'Geist Mono',monospace;font-size:10.5px"><span style="color:#c4c7cc;white-space:nowrap">Generating previews</span><span style="color:#8b8f96">342/1,284</span></div><div style="height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden"><div style="width:27%;height:100%;background:#7c83ff"></div></div></div><div title="Cancel" style="width:24px;height:24px;border-radius:7px;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;color:#8b8f96;flex:0 0 24px"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"></path></svg></div></div>
+        </div>
+        <div style="flex:1;display:flex;overflow:hidden">
+          <div style="width:214px;flex:0 0 214px;border-right:1px solid rgba(255,255,255,.07);background:#0e0f12;display:flex;flex-direction:column;padding:14px 8px">
+            <span style="font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#6f747c;padding:0 10px 8px">In your library</span>
+            <div style="padding:9px 9px 5px 10px"><div style="display:flex;align-items:center;gap:7px"><span style="color:#8b8f96;font-size:9px;transform:rotate(90deg)">▶</span><span style="font-size:12.5px;font-weight:600;color:#e6e7ea">Trips 2026</span></div><span style="padding-left:16px;font-family:'Geist Mono',monospace;font-size:10px;color:#5f636b">D:\Shoots</span></div>
+            <div style="display:flex;align-items:center;gap:7px;height:30px;padding-left:24px;padding-right:9px;border-radius:7px;background:rgba(124,131,255,.16);font-size:12.5px"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#c3c7ff" stroke-width="1.3" style="flex:0 0 13px"><path d="M1.5 3.6c0-.6.5-1.1 1.1-1.1h2.4l1.2 1.3h4.7c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H2.6c-.6 0-1.1-.5-1.1-1.1z"></path></svg><span style="flex:1;color:#e6e7ea;font-weight:600">Iceland</span><svg width="12" height="12" viewBox="0 0 15 15" fill="none" stroke="#aab0ff" stroke-width="1.6" style="flex:0 0 12px"><circle cx="7.5" cy="7.5" r="6" opacity=".3"></circle><path d="M7.5 1.5a6 6 0 0 1 6 6"></path></svg></div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+            <div style="height:47px;flex:0 0 47px;display:flex;align-items:center;gap:16px;padding:0 18px;border-bottom:1px solid rgba(255,255,255,.07)">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font-size:11.5px;color:#8b8f96">Rating</span><div style="display:flex;gap:2px;font-size:13px;color:rgba(255,255,255,.22)">★★★★★</div><span style="font-size:11px;color:#8b8f96">& up</span></div>
+              <div style="width:1px;height:20px;background:rgba(255,255,255,.1)"></div>
+              <div style="display:flex;gap:3px;background:rgba(255,255,255,.05);border-radius:8px;padding:3px;font-size:12px"><span style="padding:4px 11px;border-radius:5px;background:rgba(124,131,255,.24);color:#c3c7ff">All</span><span style="padding:4px 11px;border-radius:5px;color:#8b8f96">Picks</span><span style="padding:4px 11px;border-radius:5px;color:#8b8f96">Not excluded</span><span style="padding:4px 11px;border-radius:5px;color:#8b8f96">Excluded</span></div>
+              <div style="flex:1"></div>
+              <span style="font-family:'Geist Mono',monospace;font-size:12px;color:#c4c7cc"><span style="color:#e6e7ea">342</span> ready <span style="color:#5f636b">/ 1,284</span></span>
+            </div>
+            <div style="flex:1;overflow:hidden;padding:16px 18px">
+              <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+                <sc-for list="{{ libGrid }}" as="p" hint-placeholder-count="25">
+                  <div style="position:relative;aspect-ratio:3 / 2;border-radius:4px;overflow:hidden">
+                    <sc-if value="{{ p.scanReady }}"><div style="{{ p.gridStyle }}"></div><sc-if value="{{ p.hasFlag }}"><div style="{{ p.flagStyle }}"></div></sc-if></sc-if>
+                    <sc-if value="{{ p.scanSkeleton }}"><div style="position:absolute;inset:0;background:linear-gradient(105deg,#141619 0%,#1a1d22 44%,#23272e 50%,#1a1d22 56%,#141619 100%)"></div></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="height:26px;flex:0 0 26px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:16px;padding:0 16px;font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96;background:#0e0f12"><span>D:\Shoots\Iceland</span><span style="color:#c3c7ff">Scanning… 342 / 1,284</span><span style="flex:1"></span><span style="display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:#f5b544"></span>indexing RAW headers</span></div>
+          </div>
+          <div style="width:300px;flex:0 0 300px;border-left:1px solid rgba(255,255,255,.07);background:#0e0f12;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:30px;text-align:center">
+            <div style="width:44px;height:44px;border-radius:12px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#5f636b" stroke-width="1.4"><rect x="2.5" y="3.5" width="15" height="11" rx="1.5"></rect><circle cx="7" cy="7.5" r="1.3"></circle><path d="M2.5 12l4-3.5 3.5 3 3-2.5 4.5 4"></path></svg></div>
+            <span style="font-size:12.5px;color:#6f747c;line-height:1.5">Select a photo to develop<br>once previews are ready</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TASK TRAY -->
+    <div id="tray" style="scroll-margin:48px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">TASK TRAY</span><h3 style="margin:0;font-size:18px;font-weight:600">Every background job in one place — each cancellable</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">When more than one job runs — a scan, an export, a cache sweep — the top-bar chip becomes a summary pill. Click it to drop the tray: one row per job with its own progress, ETA, and cancel. Finished jobs settle to a dismissible confirmation with a shortcut to the result.</p>
+      <div style="display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start">
+
+        <!-- collapsed pill -->
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">Collapsed · in the top bar</span>
+          <div style="display:flex;align-items:center;gap:11px;background:rgba(12,14,18,.9);border:1px solid rgba(255,255,255,.12);border-radius:11px;padding:9px 12px 9px 13px;box-shadow:0 16px 40px -14px rgba(0,0,0,.7)">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#aab0ff" stroke-width="1.5" style="flex:0 0 15px"><circle cx="7.5" cy="7.5" r="6" opacity=".3"></circle><path d="M7.5 1.5a6 6 0 0 1 6 6"></path></svg>
+            <span style="font-size:12.5px;color:#e6e7ea;white-space:nowrap">3 tasks</span>
+            <div style="width:84px;height:4px;border-radius:2px;background:rgba(255,255,255,.14);overflow:hidden"><div style="width:41%;height:100%;background:#7c83ff"></div></div>
+            <span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#8b8f96">41%</span>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#8b8f96" stroke-width="1.5" style="flex:0 0 12px"><path d="M2.5 4.5 6 8l3.5-3.5"></path></svg>
+          </div>
+        </div>
+
+        <!-- expanded tray -->
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">Expanded</span>
+          <div style="width:384px;background:rgba(16,18,22,.98);border:1px solid rgba(255,255,255,.12);border-radius:13px;box-shadow:0 30px 70px -20px rgba(0,0,0,.85);overflow:hidden">
+            <div style="display:flex;align-items:center;padding:13px 14px;border-bottom:1px solid rgba(255,255,255,.08)"><span style="font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#8b8f96">Background tasks</span><span style="margin-left:auto;font-family:'Geist Mono',monospace;font-size:10.5px;color:#5f636b">3 running</span></div>
+
+            <!-- job: previews -->
+            <div style="display:flex;align-items:center;gap:11px;padding:12px 8px 12px 14px;border-bottom:1px solid rgba(255,255,255,.06)">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#aab0ff" stroke-width="1.5" style="flex:0 0 15px"><circle cx="7.5" cy="7.5" r="6" opacity=".3"></circle><path d="M7.5 1.5a6 6 0 0 1 6 6"></path></svg>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+                <div style="display:flex;justify-content:space-between;gap:8px"><span style="font-size:12.5px;color:#e6e7ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">Generating previews</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#8b8f96;flex:0 0 auto">342/1,284</span></div>
+                <div style="height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden"><div style="width:27%;height:100%;background:#7c83ff"></div></div>
+                <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#5f636b">Iceland · ~2 min left</span>
+              </div>
+              <div style="width:24px;height:24px;border-radius:7px;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;color:#8b8f96;flex:0 0 24px"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"></path></svg></div>
+            </div>
+
+            <!-- job: export -->
+            <div style="display:flex;align-items:center;gap:11px;padding:12px 8px 12px 14px;border-bottom:1px solid rgba(255,255,255,.06)">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#aab0ff" stroke-width="1.5" style="flex:0 0 15px"><circle cx="7.5" cy="7.5" r="6" opacity=".3"></circle><path d="M7.5 1.5a6 6 0 0 1 6 6"></path></svg>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+                <div style="display:flex;justify-content:space-between;gap:8px"><span style="font-size:12.5px;color:#e6e7ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">Exporting → export/</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#8b8f96;flex:0 0 auto">42/96</span></div>
+                <div style="height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden"><div style="width:44%;height:100%;background:#7c83ff"></div></div>
+                <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#5f636b">JPEG q90 · 2160px</span>
+              </div>
+              <div style="width:24px;height:24px;border-radius:7px;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;color:#8b8f96;flex:0 0 24px"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"></path></svg></div>
+            </div>
+
+            <!-- job: cache sweep (indeterminate) -->
+            <div style="display:flex;align-items:center;gap:11px;padding:12px 8px 12px 14px;border-bottom:1px solid rgba(255,255,255,.06)">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#aab0ff" stroke-width="1.5" style="flex:0 0 15px"><circle cx="7.5" cy="7.5" r="6" opacity=".3"></circle><path d="M7.5 1.5a6 6 0 0 1 6 6"></path></svg>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+                <div style="display:flex;justify-content:space-between;gap:8px"><span style="font-size:12.5px;color:#e6e7ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">Reclaiming cache</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#8b8f96;flex:0 0 auto">6.2 GB</span></div>
+                <div style="height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden;position:relative"><div style="position:absolute;top:0;left:22%;width:38%;height:100%;background:linear-gradient(90deg,transparent,#7c83ff,transparent)"></div></div>
+                <span style="font-family:'Geist Mono',monospace;font-size:10px;color:#5f636b">Scanning old previews…</span>
+              </div>
+              <div style="width:24px;height:24px;border-radius:7px;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;color:#8b8f96;flex:0 0 24px"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"></path></svg></div>
+            </div>
+
+            <!-- job: done -->
+            <div style="display:flex;align-items:center;gap:11px;padding:12px 8px 12px 14px">
+              <div style="width:15px;height:15px;border-radius:50%;background:rgba(52,211,153,.16);border:1px solid rgba(52,211,153,.5);display:flex;align-items:center;justify-content:center;flex:0 0 15px"><svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="#5ee0b0" stroke-width="1.6"><path d="M2 5.2 4.2 7.4 8 3"></path></svg></div>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+                <div style="display:flex;justify-content:space-between;gap:8px"><span style="font-size:12.5px;color:#c4c7cc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">Imported Weddings 2026</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#5ee0b0;flex:0 0 auto">Done</span></div>
+                <span style="font-size:11px;color:#7c83ff">Show in library</span>
+              </div>
+              <div style="width:24px;height:24px;border-radius:7px;border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;color:#6f747c;flex:0 0 24px"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"></path></svg></div>
+            </div>
+
+            <div style="display:flex;align-items:center;padding:11px 14px;border-top:1px solid rgba(255,255,255,.08)"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">Runs in the background</span><span style="margin-left:auto;font-size:12px;color:#f28c8c">Cancel all</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">CULL</span><h3 style="margin:0;font-size:18px;font-weight:600">Triage against a full-size confirm loupe</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">Arrow through the take; the big preview confirms each call as you rate (1–5) and flag (P/X). The grid lives as a glass scrubber deck, split into <strong style="color:#e6e7ea">time-gap groups</strong> so a single "happening" reads as one cluster.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);position:relative;font-size:13px;color:#e6e7ea;box-shadow:0 40px 90px -30px rgba(0,0,0,.8)">
+        <div style="position:absolute;inset:0;background:radial-gradient(140% 90% at 25% 12%, rgba(255,255,255,.16), transparent 50%), linear-gradient(175deg,#b9cdd7 0%,#7d97a3 34%,#47616b 60%,#22333b 100%)"></div>
+        <div style="position:absolute;top:16px;left:18px;display:flex;align-items:center;gap:10px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:7px 12px"><div style="width:18px;height:18px;border-radius:5px;background:#7c83ff;color:#0d0e0f;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px">m</div><span style="font-weight:600;font-size:12.5px">Iceland</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#aab0ff">09:14 · frame 7</span><span style="width:6px;height:6px;border-radius:50%;background:#34d399"></span></div>
+        <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:4px;font-size:12.5px"><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Library</span><span style="padding:5px 15px;border-radius:6px;background:rgba(124,131,255,.24);color:#c3c7ff">Cull</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Export</span></div>
+        <div style="position:absolute;top:16px;right:18px;display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;font-size:12px"><span style="color:#8b8f96">Group by gap</span><span style="display:flex;align-items:center;gap:5px;font-family:'Geist Mono',monospace;color:#c3c7ff;background:rgba(124,131,255,.2);border-radius:5px;padding:2px 8px;white-space:nowrap">6 min<span style="opacity:.6">▾</span></span></div>
+        <div style="position:absolute;bottom:126px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:16px;background:rgba(12,14,18,.62);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px 18px;box-shadow:0 24px 60px -18px rgba(0,0,0,.7)">
+          <div style="display:flex;flex-direction:column;gap:5px"><span style="font-family:'Geist Mono',monospace;font-size:11.5px">DSC07421.ARW</span><div style="display:flex;gap:2px;font-size:15px"><span style="color:#f5b544">★★★★</span><span style="color:rgba(255,255,255,.28)">★</span></div></div>
+          <div style="width:1px;height:36px;background:rgba(255,255,255,.14)"></div>
+          <div style="display:flex;gap:7px"><button style="height:34px;padding:0 16px;border-radius:8px;border:1px solid rgba(52,211,153,.45);background:rgba(52,211,153,.16);color:#5ee0b0;font-family:Geist;font-size:12.5px;display:flex;align-items:center;gap:6px">Pick<span style="font-family:'Geist Mono',monospace;font-size:10px;opacity:.8">P</span></button><button style="height:34px;padding:0 16px;border-radius:8px;border:1px solid rgba(242,109,109,.4);background:rgba(242,109,109,.12);color:#f28c8c;font-family:Geist;font-size:12.5px;display:flex;align-items:center;gap:6px">Reject<span style="font-family:'Geist Mono',monospace;font-size:10px;opacity:.8">X</span></button></div>
+          <div style="width:1px;height:36px;background:rgba(255,255,255,.14)"></div>
+          <sc-for list="{{ triage }}" as="c" hint-placeholder-count="3"><div style="display:flex;flex-direction:column;gap:5px;width:82px"><div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:#c4c7cc">{{ c.label }}</span><span style="font-family:'Geist Mono',monospace;color:#fff">{{ c.val }}</span></div><div style="position:relative;height:3px;border-radius:2px;background:rgba(255,255,255,.14)"><div style="{{ c.fillStyle }}"></div><div style="{{ c.thumbStyle }}"></div></div></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;align-items:stretch;gap:0;background:rgba(10,12,16,.6);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:11px;padding:10px 14px;max-width:1300px;overflow:hidden">
+          <div style="display:flex;flex-direction:column;justify-content:center;gap:3px;padding-right:12px;margin-right:8px;border-right:1px solid rgba(255,255,255,.12)"><span style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#8b8f96">Groups</span><span style="font-family:'Geist Mono',monospace;font-size:13px;color:#c3c7ff">6</span></div>
+          <sc-for list="{{ groups }}" as="g" hint-placeholder-count="4">
+            <sc-if value="{{ g.hasGap }}"><div style="display:flex;align-items:center;justify-content:center;padding:0 8px;margin:0 2px"><span style="font-family:'Geist Mono',monospace;font-size:9px;color:#aab0ff;background:rgba(124,131,255,.16);border:1px solid rgba(124,131,255,.32);border-radius:4px;padding:5px 3px;white-space:nowrap;writing-mode:vertical-rl;transform:rotate(180deg)">{{ g.gapLabel }}</span></div></sc-if>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <div style="display:flex;align-items:baseline;gap:6px;padding-left:1px"><span style="font-family:'Geist Mono',monospace;font-size:10px;color:#e6e7ea">{{ g.range }}</span><span style="font-size:9px;color:#8b8f96">{{ g.count }}</span></div>
+              <div style="display:flex;gap:4px">
+                <sc-for list="{{ g.photos }}" as="p" hint-placeholder-count="5"><div style="position:relative;width:60px;height:40px;flex:0 0 60px;border-radius:3px;overflow:hidden"><div style="{{ p.stripStyle }}"></div><sc-if value="{{ p.isFocus }}"><div style="position:absolute;inset:0;border:2px solid #7c83ff;border-radius:3px"></div></sc-if><sc-if value="{{ p.isPick }}"><div style="position:absolute;right:2px;top:2px;width:6px;height:6px;border-radius:2px;background:#34d399"></div></sc-if><sc-if value="{{ p.isReject }}"><div style="position:absolute;right:2px;top:2px;width:6px;height:6px;border-radius:2px;background:#f26d6d"></div></sc-if></div></sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">DEVELOP</span><h3 style="margin:0;font-size:18px;font-weight:600">Full stack, one keystroke away</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">The quick-dock holds the six dials you touch most. The pinnable right drawer carries the complete develop stack — Tone, Presence, WB, Color, Effects, and the advanced Detail rows (Highlight recovery, FBDD, Demosaic). ⌘K jumps to any control by name.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);position:relative;font-size:13px;color:#e6e7ea;box-shadow:0 40px 90px -30px rgba(0,0,0,.8)">
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 80% at 68% 14%, rgba(255,240,210,.18), transparent 55%), linear-gradient(172deg,#9fb3a0 0%,#6f8570 40%,#3c4c38 66%,#1c261a 100%)"></div>
+        <div style="position:absolute;top:16px;left:18px;display:flex;align-items:center;gap:10px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:7px 12px"><div style="width:18px;height:18px;border-radius:5px;background:#7c83ff;color:#0d0e0f;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px">m</div><span style="font-weight:600;font-size:12.5px">Iceland</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#aab0ff">DSC07421.ARW · 1:1</span><span style="width:6px;height:6px;border-radius:50%;background:#34d399"></span></div>
+        <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:4px;font-size:12.5px"><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Library</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Cull</span><span style="padding:5px 15px;border-radius:6px;background:rgba(124,131,255,.24);color:#c3c7ff">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#8b8f96">Export</span></div>
+        <div style="position:absolute;top:16px;right:18px;display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;background:rgba(12,14,18,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:9px;color:#8b8f96;font-size:12px"><span>Jump to any control</span><span style="font-family:'Geist Mono',monospace;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.09)">⌘K</span></div>
+        <div style="position:absolute;top:64px;right:16px;bottom:16px;width:352px;background:rgba(16,18,22,.9);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:15px 16px;overflow:hidden;box-shadow:0 24px 70px -20px rgba(0,0,0,.85);display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8b8f96">Develop · full stack</span><span style="font-size:11px;display:flex;align-items:center;gap:4px;color:#aab0ff"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 1.5v6"></path><circle cx="6" cy="9.2" r="1.4"></circle></svg>Pinned</span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"><span style="font-family:'Geist Mono',monospace;font-size:12.5px">DSC07421.ARW</span><div style="display:flex;gap:2px;font-size:13px"><span style="color:#f5b544">★★★★</span><span style="color:rgba(255,255,255,.28)">★</span></div></div>
+          <div style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#8b8f96;margin-top:5px">ƒ/2.8 · 1/250 · ISO 400 · 42.4MP</div>
+          <div style="height:52px;position:relative;border-radius:6px;background:#08090b;border:1px solid rgba(255,255,255,.07);overflow:hidden;margin-top:11px"><svg viewBox="0 0 100 40" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen"><polygon points="{{ hist.r }}" fill="rgba(240,90,90,.55)"></polygon><polygon points="{{ hist.g }}" fill="rgba(90,220,120,.55)"></polygon><polygon points="{{ hist.b }}" fill="rgba(90,140,240,.55)"></polygon></svg></div>
+          <div style="flex:1;overflow:hidden;margin-top:2px">
+            <sc-for list="{{ fullGroups }}" as="g" hint-placeholder-count="7">
+              <div style="display:flex;align-items:center;gap:6px;margin:12px 0 8px"><span style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#8b8f96">{{ g.name }}</span><sc-if value="{{ g.dot }}"><span style="width:5px;height:5px;border-radius:50%;background:#7c83ff"></span></sc-if></div>
+              <sc-for list="{{ g.controls }}" as="c" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
+                  <div style="width:96px;flex:0 0 96px;color:#c4c7cc;font-size:11.5px">{{ c.label }}</div>
+                  <div style="flex:1;position:relative;height:3px;border-radius:2px;background:rgba(255,255,255,.1)"><div style="{{ c.fillStyle }}"></div><div style="{{ c.thumbStyle }}"></div></div>
+                  <div style="width:56px;text-align:right;font-family:'Geist Mono',monospace;font-size:11px;color:#e6e7ea">{{ c.val }}</div>
+                </div>
+              </sc-for>
+            </sc-for>
+            <div style="margin:12px 0 8px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#8b8f96">Detail · advanced</div>
+            <div style="margin-bottom:9px"><div style="font-size:11.5px;color:#c4c7cc;margin-bottom:5px">Highlight recovery</div><div style="display:flex;gap:3px;background:rgba(255,255,255,.05);border-radius:6px;padding:2px;font-size:10.5px"><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;color:#8b8f96">Clip</span><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;color:#8b8f96">Unclip</span><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;background:rgba(124,131,255,.24);color:#c3c7ff">Blend</span><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;color:#8b8f96">Rebuild</span></div></div>
+            <div style="margin-bottom:9px"><div style="font-size:11.5px;color:#c4c7cc;margin-bottom:5px">FBDD denoise</div><div style="display:flex;gap:3px;background:rgba(255,255,255,.05);border-radius:6px;padding:2px;font-size:10.5px"><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;color:#8b8f96">Off</span><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;background:rgba(124,131,255,.24);color:#c3c7ff">Light</span><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;color:#8b8f96">Full</span></div></div>
+            <div style="margin-bottom:9px"><div style="font-size:11.5px;color:#c4c7cc;margin-bottom:5px">Demosaic</div><div style="display:flex;gap:3px;background:rgba(255,255,255,.05);border-radius:6px;padding:2px;font-size:10.5px"><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;background:rgba(124,131,255,.24);color:#c3c7ff">Auto</span><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;color:#8b8f96">VNG</span><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;color:#8b8f96">PPG</span><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;color:#8b8f96">AHD</span><span style="flex:1;text-align:center;padding:4px 0;border-radius:4px;color:#8b8f96">DHT</span></div></div>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:10px;padding-top:11px;border-top:1px solid rgba(255,255,255,.08)"><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#c4c7cc;font-family:Geist;font-size:12px">Copy</button><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#c4c7cc;font-family:Geist;font-size:12px">Paste</button><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#8b8f96;font-family:Geist;font-size:12px;margin-left:auto">Reset</button></div>
+        </div>
+        <div style="position:absolute;bottom:100px;left:calc(50% - 192px);transform:translateX(-50%);display:flex;align-items:center;gap:14px;background:rgba(12,14,18,.62);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:12px 18px;box-shadow:0 24px 60px -18px rgba(0,0,0,.7)">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8b8f96;writing-mode:vertical-rl;transform:rotate(180deg)">Quick</span>
+          <sc-for list="{{ dock }}" as="c" hint-placeholder-count="6"><div style="display:flex;flex-direction:column;gap:5px;width:82px"><div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:#c4c7cc">{{ c.label }}</span><span style="font-family:'Geist Mono',monospace;color:#fff">{{ c.val }}</span></div><div style="position:relative;height:3px;border-radius:2px;background:rgba(255,255,255,.14)"><div style="{{ c.fillStyle }}"></div><div style="{{ c.thumbStyle }}"></div></div></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:16px;left:calc(50% - 192px);transform:translateX(-50%);display:flex;align-items:center;gap:6px;background:rgba(10,12,16,.5);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.09);border-radius:11px;padding:8px 12px;max-width:720px;overflow:hidden">
+          <sc-for list="{{ strip }}" as="p" hint-placeholder-count="8"><div style="position:relative;width:70px;height:46px;flex:0 0 70px;border-radius:3px;overflow:hidden"><div style="{{ p.stripStyle }}"></div><sc-if value="{{ p.isFocus }}"><div style="position:absolute;inset:0;border:2px solid #7c83ff;border-radius:3px"></div></sc-if><sc-if value="{{ p.isPick }}"><div style="position:absolute;right:2px;top:2px;width:6px;height:6px;border-radius:2px;background:#34d399"></div></sc-if></div></sc-for>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">CONTACT SHEET</span><h3 style="margin:0;font-size:18px;font-weight:600">On-demand grid, sectioned by time gap</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">Press <span style="font-family:'Geist Mono',monospace;font-size:11px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.08)">G</span> to blow the scrubber up into a full multi-row grid with a header per group; Esc collapses back to the loupe.</p>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:#0c0d0f;color:#e6e7ea;display:flex;flex-direction:column;box-shadow:0 40px 90px -30px rgba(0,0,0,.8);font-size:13px">
+        <div style="height:48px;flex:0 0 48px;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,.07);background:#0e0f12">
+          <div style="width:24px;height:24px;border-radius:7px;background:#7c83ff;color:#0d0e0f;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px">m</div>
+          <span style="font-weight:600">Iceland</span><span style="color:#8b8f96;font-size:12.5px">Contact sheet</span>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:8px;font-size:12px"><span style="color:#8b8f96">Group by gap</span><span style="display:flex;align-items:center;gap:5px;font-family:'Geist Mono',monospace;color:#c3c7ff;background:rgba(124,131,255,.2);border-radius:5px;padding:2px 8px;white-space:nowrap">6 min<span style="opacity:.6">▾</span></span></div>
+          <span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">Esc to loupe</span>
+        </div>
+        <div style="flex:1;overflow:hidden;padding:18px 20px;display:flex;flex-direction:column;gap:22px">
+          <sc-for list="{{ groups }}" as="g" hint-placeholder-count="4">
+            <div style="display:flex;flex-direction:column;gap:11px">
+              <div style="display:flex;align-items:center;gap:12px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.09)">
+                <span style="display:flex;align-items:center;gap:8px;font-family:'Geist Mono',monospace;font-size:14px;color:#e6e7ea"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#8b8f96" stroke-width="1.3"><circle cx="7" cy="7" r="5.3"></circle><path d="M7 4v3l2 1.4"></path></svg>{{ g.range }}</span>
+                <span style="font-size:12.5px;color:#8b8f96">{{ g.count }} frames</span>
+                <div style="flex:1"></div>
+                <sc-if value="{{ g.hasGap }}"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#aab0ff;background:rgba(124,131,255,.16);border:1px solid rgba(124,131,255,.3);border-radius:6px;padding:3px 9px">{{ g.gapLabel }} before</span></sc-if>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(8,1fr);gap:8px">
+                <sc-for list="{{ g.photos }}" as="p" hint-placeholder-count="8">
+                  <div style="position:relative">
+                    <div style="{{ p.style }}"></div>
+                    <sc-if value="{{ p.isFocus }}"><div style="position:absolute;inset:-2px;border:2px solid #7c83ff;border-radius:4px;pointer-events:none"></div></sc-if>
+                    <sc-if value="{{ p.hasRating }}"><div style="position:absolute;left:3px;bottom:3px;display:flex;align-items:center;gap:2px;font-size:9px;padding:1px 4px;border-radius:3px;background:rgba(0,0,0,.55)"><span style="color:#f5b544">★</span><span style="color:#fff">{{ p.rating }}</span></div></sc-if>
+                    <sc-if value="{{ p.isPick }}"><div style="position:absolute;right:3px;top:3px;width:8px;height:8px;border-radius:2px;background:#34d399"></div></sc-if>
+                    <sc-if value="{{ p.isReject }}"><div style="position:absolute;right:3px;top:3px;width:8px;height:8px;border-radius:2px;background:#f26d6d"></div></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="height:26px;flex:0 0 26px;border-top:1px solid rgba(255,255,255,.07);display:flex;align-items:center;gap:16px;padding:0 16px;font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96;background:#0e0f12"><span>6 groups · 09:12 – 11:48</span><span>1,284 photos</span><span style="color:#5ee0b0">96 picked</span><span style="flex:1"></span><span>G contact sheet · 1–5 rate · P/X flag</span></div>
+      </div>
+    </div>
+
+    <!-- grouping thresholds + picker -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">GROUPING</span><h3 style="margin:0;font-size:18px;font-weight:600">Group-by-gap threshold</h3></div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">
+        <div style="width:300px;flex:0 0 300px;background:#0e0f12;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:22px;display:flex;flex-direction:column;align-items:flex-start">
+          <div style="display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;background:rgba(124,131,255,.12);border:1px solid rgba(124,131,255,.5);border-radius:9px 9px 3px 3px;font-size:12.5px"><span style="color:#8b8f96">Group by gap</span><span style="display:flex;align-items:center;gap:6px;font-family:'Geist Mono',monospace;color:#c3c7ff;background:rgba(124,131,255,.22);border-radius:5px;padding:2px 9px;white-space:nowrap">6 min<span style="transform:rotate(180deg);opacity:.7">▾</span></span></div>
+          <div style="width:100%;margin-top:5px;background:rgba(20,22,26,.98);border:1px solid rgba(255,255,255,.12);border-radius:11px;box-shadow:0 30px 70px -20px rgba(0,0,0,.85);padding:7px;display:flex;flex-direction:column">
+            <div style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#8b8f96;padding:6px 10px 8px">New group when gap exceeds</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 10px;border-radius:7px;color:#c4c7cc;font-size:13px"><span>1 min</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#5f636b">bursts</span></div>
+            <div style="display:flex;align-items:center;height:32px;padding:0 10px;border-radius:7px;color:#c4c7cc;font-size:13px"><span>2 min</span></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 10px;border-radius:7px;color:#e6e7ea;font-size:13px"><span>5 min</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#7c83ff">recommended</span></div>
+            <div style="display:flex;align-items:center;height:32px;padding:0 10px;border-radius:7px;color:#c4c7cc;font-size:13px"><span>10 min</span></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;height:32px;padding:0 10px;border-radius:7px;color:#c4c7cc;font-size:13px"><span>30 min</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#5f636b">scenes</span></div>
+            <div style="height:1px;background:rgba(255,255,255,.09);margin:6px 8px"></div>
+            <div style="display:flex;align-items:center;gap:8px;height:40px;padding:0 8px 0 10px;border-radius:7px;background:rgba(124,131,255,.16);border:1px solid rgba(124,131,255,.3)"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#aab0ff" stroke-width="1.6"><path d="M3 7.5l3 3 5-6.5"></path></svg><span style="font-size:13px;color:#e6e7ea">Custom</span><div style="margin-left:auto;display:flex;align-items:center;gap:3px"><input value="6" style="width:36px;height:26px;text-align:center;border-radius:6px;border:1px solid rgba(255,255,255,.16);background:rgba(0,0,0,.3);color:#fff;font-family:'Geist Mono',monospace;font-size:12px"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">min</span></div></div>
+            <div style="height:1px;background:rgba(255,255,255,.09);margin:6px 8px"></div>
+            <div style="display:flex;align-items:center;height:32px;padding:0 10px;border-radius:7px;color:#8b8f96;font-size:13px"><span>Off — one flat grid</span></div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:360px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:13.5px;line-height:1.55;color:#9a9ea6;max-width:520px">A new group starts whenever the gap between consecutive frames exceeds the threshold. Presets map to how photographers actually shoot:</div>
+          <div style="display:flex;flex-direction:column;gap:1px;border:1px solid rgba(255,255,255,.09);border-radius:10px;overflow:hidden;max-width:520px">
+            <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:#141619"><span style="font-family:'Geist Mono',monospace;font-size:13px;color:#c3c7ff;width:64px">1–2 min</span><span style="font-size:13px;color:#c4c7cc">Bursts — frames of a single moment</span></div>
+            <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:#141619"><span style="font-family:'Geist Mono',monospace;font-size:13px;color:#c3c7ff;width:64px">5–10 min</span><span style="font-size:13px;color:#c4c7cc">A happening — one subject or setup <span style="color:#7c83ff">(recommended: 5)</span></span></div>
+            <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:#141619"><span style="font-family:'Geist Mono',monospace;font-size:13px;color:#c3c7ff;width:64px">30 min</span><span style="font-size:13px;color:#c4c7cc">Whole scenes — location to location</span></div>
+            <div style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:#141619"><span style="font-family:'Geist Mono',monospace;font-size:13px;color:#8b8f96;width:64px">Custom</span><span style="font-size:13px;color:#8b8f96">Any value · or Off for one flat grid</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EXPORT dialog -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">EXPORT</span><h3 style="margin:0;font-size:18px;font-weight:600">Modal · streaming progress</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">Destination, format, and quality up top. Hitting Export kicks off a background job and hands you back to work — progress lives in a task-tray chip (top-right), not a modal you have to wait on.</p>
+
+      <!-- Export · dark -->
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);position:relative;font-size:13px;color:#e6e7ea;box-shadow:0 40px 90px -30px rgba(0,0,0,.8)">
+        <div style="position:absolute;inset:0;background:radial-gradient(140% 90% at 25% 12%, rgba(255,255,255,.14), transparent 50%), linear-gradient(175deg,#b9cdd7 0%,#7d97a3 34%,#47616b 60%,#22333b 100%)"></div>
+        <div style="position:absolute;inset:0;background:rgba(6,7,9,.66);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)"></div>
+        <div style="position:absolute;top:18px;right:18px;display:flex;align-items:center;gap:11px;background:rgba(12,14,18,.78);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.12);border-radius:11px;padding:10px 10px 10px 14px;box-shadow:0 16px 40px -14px rgba(0,0,0,.7)"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#aab0ff" stroke-width="1.5"><circle cx="7.5" cy="7.5" r="6" opacity=".3"></circle><path d="M7.5 1.5a6 6 0 0 1 6 6"></path></svg><div style="display:flex;flex-direction:column;gap:4px;width:158px"><div style="display:flex;justify-content:space-between;font-family:'Geist Mono',monospace;font-size:10.5px"><span style="color:#c4c7cc">Exporting → export/</span><span style="color:#8b8f96">42/96</span></div><div style="height:4px;border-radius:2px;background:rgba(255,255,255,.12);overflow:hidden"><div style="width:44%;height:100%;background:#7c83ff"></div></div></div><div title="Cancel" style="width:24px;height:24px;border-radius:7px;border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;color:#8b8f96;flex:0 0 24px"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"></path></svg></div></div><div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:680px;background:#141619;border:1px solid rgba(255,255,255,.12);border-radius:14px;overflow:hidden;box-shadow:0 50px 120px -30px rgba(0,0,0,.9)">
+          <div style="display:flex;align-items:center;padding:18px 22px;border-bottom:1px solid rgba(255,255,255,.08)"><div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:16px;font-weight:600">Export</span><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8b8f96">96 picks · Iceland</span></div><div style="margin-left:auto;width:28px;height:28px;border-radius:7px;border:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;color:#8b8f96">✕</div></div>
+          <div style="padding:20px 22px;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;align-items:center;gap:14px"><span style="width:110px;flex:0 0 110px;color:#8b8f96">Destination</span><div style="flex:1;display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;font-family:'Geist Mono',monospace;font-size:12px;color:#c4c7cc">/Volumes/Shoots/2026/Iceland/<span style="color:#e6e7ea">export</span></div><button style="height:34px;padding:0 14px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#c4c7cc;font-family:Geist;font-size:12.5px">Choose…</button></div>
+            <div style="display:flex;align-items:center;gap:14px"><span style="width:110px;flex:0 0 110px;color:#8b8f96">Format</span><div style="display:flex;gap:3px;background:rgba(255,255,255,.05);border-radius:8px;padding:3px;font-size:12.5px"><span style="padding:5px 14px;border-radius:5px;background:rgba(124,131,255,.24);color:#c3c7ff">JPEG</span><span style="padding:5px 14px;border-radius:5px;color:#8b8f96">16-bit TIFF</span></div></div>
+            <div style="display:flex;align-items:center;gap:14px"><span style="width:110px;flex:0 0 110px;color:#8b8f96">Quality</span><div style="flex:1;position:relative;height:3px;border-radius:2px;background:rgba(255,255,255,.1)"><div style="position:absolute;top:0;bottom:0;left:0;width:90%;background:#7c83ff;border-radius:2px"></div><div style="position:absolute;top:50%;left:90%;width:12px;height:12px;margin-left:-6px;transform:translateY(-50%);border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5)"></div></div><span style="width:36px;text-align:right;font-family:'Geist Mono',monospace;color:#e6e7ea">90</span></div>
+            <div style="display:flex;align-items:center;gap:14px"><span style="width:110px;flex:0 0 110px;color:#8b8f96">Resize</span><div style="display:flex;gap:3px;background:rgba(255,255,255,.05);border-radius:8px;padding:3px;font-size:12.5px"><span style="padding:5px 14px;border-radius:5px;color:#8b8f96">Full res</span><span style="padding:5px 14px;border-radius:5px;background:rgba(124,131,255,.24);color:#c3c7ff">Long edge</span></div><div style="display:flex;align-items:center;gap:6px;height:34px;padding:0 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px"><input value="2160" style="width:46px;background:transparent;border:none;color:#e6e7ea;font-family:'Geist Mono',monospace;font-size:12px;text-align:right"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">px</span></div></div>
+            <div style="display:flex;align-items:center;gap:14px"><span style="width:110px;flex:0 0 110px;color:#8b8f96">Color space</span><div style="display:flex;gap:3px;background:rgba(255,255,255,.05);border-radius:8px;padding:3px;font-size:12.5px"><span style="padding:5px 14px;border-radius:5px;background:rgba(124,131,255,.24);color:#c3c7ff">sRGB</span><span style="padding:5px 14px;border-radius:5px;color:#8b8f96">Adobe RGB</span><span style="padding:5px 14px;border-radius:5px;color:#8b8f96">ProPhoto</span></div></div>
+          </div>
+          <div style="padding:16px 22px;border-top:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:16px"><span style="flex:1;font-family:'Geist Mono',monospace;font-size:11.5px;color:#8b8f96">96 files · JPEG q90 · 2160px · runs in the background</span><button style="height:38px;padding:0 18px;border-radius:9px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#c4c7cc;font-family:Geist;font-size:13px">Cancel</button><button style="height:38px;padding:0 22px;border-radius:9px;border:1px solid #7c83ff;background:#7c83ff;color:#0d0e0f;font-family:Geist;font-size:13px;font-weight:500">Export</button></div>
+        </div>
+      </div>
+
+      <!-- Export · light -->
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(0,0,0,.12);position:relative;font-size:13px;color:#1a1c1f;box-shadow:0 40px 90px -30px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 80% at 40% 12%, rgba(255,255,255,.45), transparent 55%), linear-gradient(180deg,#e2ecf0 0%,#b7cbd3 40%,#82a0ab 70%,#516e79 100%)"></div>
+        <div style="position:absolute;inset:0;background:rgba(30,34,40,.4);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)"></div>
+        <div style="position:absolute;top:18px;right:18px;display:flex;align-items:center;gap:11px;background:rgba(255,255,255,.85);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(0,0,0,.08);border-radius:11px;padding:10px 10px 10px 14px;box-shadow:0 16px 40px -14px rgba(0,0,0,.25)"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#5b62e6" stroke-width="1.5"><circle cx="7.5" cy="7.5" r="6" opacity=".3"></circle><path d="M7.5 1.5a6 6 0 0 1 6 6"></path></svg><div style="display:flex;flex-direction:column;gap:4px;width:158px"><div style="display:flex;justify-content:space-between;font-family:'Geist Mono',monospace;font-size:10.5px"><span style="color:#3a3d43">Exporting → export/</span><span style="color:#6b7078">42/96</span></div><div style="height:4px;border-radius:2px;background:rgba(0,0,0,.1);overflow:hidden"><div style="width:44%;height:100%;background:#5b62e6"></div></div></div><div title="Cancel" style="width:24px;height:24px;border-radius:7px;border:1px solid rgba(0,0,0,.12);display:flex;align-items:center;justify-content:center;color:#6b7078;flex:0 0 24px"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"></path></svg></div></div><div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:680px;background:#ffffff;border:1px solid rgba(0,0,0,.1);border-radius:14px;overflow:hidden;box-shadow:0 50px 120px -30px rgba(0,0,0,.5)">
+          <div style="display:flex;align-items:center;padding:18px 22px;border-bottom:1px solid rgba(0,0,0,.09)"><div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:16px;font-weight:600">Export</span><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#6b7078">96 picks · Iceland</span></div><div style="margin-left:auto;width:28px;height:28px;border-radius:7px;border:1px solid rgba(0,0,0,.1);display:flex;align-items:center;justify-content:center;color:#6b7078">✕</div></div>
+          <div style="padding:20px 22px;display:flex;flex-direction:column;gap:16px">
+            <div style="display:flex;align-items:center;gap:14px"><span style="width:110px;flex:0 0 110px;color:#6b7078">Destination</span><div style="flex:1;display:flex;align-items:center;gap:8px;height:34px;padding:0 10px;background:#f5f6f7;border:1px solid rgba(0,0,0,.1);border-radius:8px;font-family:'Geist Mono',monospace;font-size:12px;color:#3a3d43">/Volumes/Shoots/2026/Iceland/<span style="color:#1a1c1f">export</span></div><button style="height:34px;padding:0 14px;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:#fff;color:#3a3d43;font-family:Geist;font-size:12.5px">Choose…</button></div>
+            <div style="display:flex;align-items:center;gap:14px"><span style="width:110px;flex:0 0 110px;color:#6b7078">Format</span><div style="display:flex;gap:3px;background:#f1f2f4;border-radius:8px;padding:3px;font-size:12.5px"><span style="padding:5px 14px;border-radius:5px;background:#fff;color:#4c53c9;box-shadow:0 1px 2px rgba(0,0,0,.1)">JPEG</span><span style="padding:5px 14px;border-radius:5px;color:#6b7078">16-bit TIFF</span></div></div>
+            <div style="display:flex;align-items:center;gap:14px"><span style="width:110px;flex:0 0 110px;color:#6b7078">Quality</span><div style="flex:1;position:relative;height:3px;border-radius:2px;background:rgba(0,0,0,.12)"><div style="position:absolute;top:0;bottom:0;left:0;width:90%;background:#5b62e6;border-radius:2px"></div><div style="position:absolute;top:50%;left:90%;width:12px;height:12px;margin-left:-6px;transform:translateY(-50%);border-radius:50%;background:#fff;border:1px solid rgba(0,0,0,.2);box-shadow:0 1px 3px rgba(0,0,0,.2)"></div></div><span style="width:36px;text-align:right;font-family:'Geist Mono',monospace;color:#1a1c1f">90</span></div>
+            <div style="display:flex;align-items:center;gap:14px"><span style="width:110px;flex:0 0 110px;color:#6b7078">Resize</span><div style="display:flex;gap:3px;background:#f1f2f4;border-radius:8px;padding:3px;font-size:12.5px"><span style="padding:5px 14px;border-radius:5px;color:#6b7078">Full res</span><span style="padding:5px 14px;border-radius:5px;background:#fff;color:#4c53c9;box-shadow:0 1px 2px rgba(0,0,0,.1)">Long edge</span></div><div style="display:flex;align-items:center;gap:6px;height:34px;padding:0 10px;background:#f5f6f7;border:1px solid rgba(0,0,0,.1);border-radius:8px"><input value="2160" style="width:46px;background:transparent;border:none;color:#1a1c1f;font-family:'Geist Mono',monospace;font-size:12px;text-align:right"><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#6b7078">px</span></div></div>
+            <div style="display:flex;align-items:center;gap:14px"><span style="width:110px;flex:0 0 110px;color:#6b7078">Color space</span><div style="display:flex;gap:3px;background:#f1f2f4;border-radius:8px;padding:3px;font-size:12.5px"><span style="padding:5px 14px;border-radius:5px;background:#fff;color:#4c53c9;box-shadow:0 1px 2px rgba(0,0,0,.1)">sRGB</span><span style="padding:5px 14px;border-radius:5px;color:#6b7078">Adobe RGB</span><span style="padding:5px 14px;border-radius:5px;color:#6b7078">ProPhoto</span></div></div>
+          </div>
+          <div style="padding:16px 22px;border-top:1px solid rgba(0,0,0,.09);display:flex;align-items:center;gap:16px"><span style="flex:1;font-family:'Geist Mono',monospace;font-size:11.5px;color:#6b7078">96 files · JPEG q90 · 2160px · runs in the background</span><button style="height:38px;padding:0 18px;border-radius:9px;border:1px solid rgba(0,0,0,.14);background:#fff;color:#3a3d43;font-family:Geist;font-size:13px">Cancel</button><button style="height:38px;padding:0 22px;border-radius:9px;border:1px solid #5b62e6;background:#5b62e6;color:#fff;font-family:Geist;font-size:13px;font-weight:500">Export</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS dialog -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">SETTINGS</span><h3 style="margin:0;font-size:18px;font-weight:600">Modal · cache & sidecars</h3></div>
+      <p style="margin:0;max-width:860px;font-size:13.5px;line-height:1.55;color:#9a9ea6">Left-nav modal. Cache directory + a live usage meter with Clear; portable edit sidecars toggle so edits travel with the RAWs.</p>
+
+      <!-- Settings · dark -->
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.1);position:relative;font-size:13px;color:#e6e7ea;box-shadow:0 40px 90px -30px rgba(0,0,0,.8)">
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 80% at 68% 14%, rgba(255,240,210,.16), transparent 55%), linear-gradient(172deg,#9fb3a0 0%,#6f8570 40%,#3c4c38 66%,#1c261a 100%)"></div>
+        <div style="position:absolute;inset:0;background:rgba(6,7,9,.66);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)"></div>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:760px;height:480px;background:#141619;border:1px solid rgba(255,255,255,.12);border-radius:14px;overflow:hidden;box-shadow:0 50px 120px -30px rgba(0,0,0,.9);display:flex">
+          <div style="width:172px;flex:0 0 172px;border-right:1px solid rgba(255,255,255,.08);background:#0f1013;padding:16px 12px;display:flex;flex-direction:column;gap:2px">
+            <span style="font-size:15px;font-weight:600;padding:0 8px 12px">Settings</span>
+            <span style="padding:8px 10px;border-radius:7px;color:#8b8f96">General</span>
+            <span style="padding:8px 10px;border-radius:7px;background:rgba(124,131,255,.16);color:#c3c7ff">Cache</span>
+            <span style="padding:8px 10px;border-radius:7px;color:#8b8f96">Sidecars</span>
+            <span style="padding:8px 10px;border-radius:7px;color:#8b8f96">Performance</span>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column">
+            <div style="flex:1;padding:22px;overflow:hidden;display:flex;flex-direction:column;gap:22px">
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8b8f96">Cache</span>
+                <div style="display:flex;align-items:center;gap:12px"><span style="width:120px;flex:0 0 120px;color:#c4c7cc">Directory</span><div style="flex:1;height:34px;display:flex;align-items:center;padding:0 10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:8px;font-family:'Geist Mono',monospace;font-size:12px;color:#c4c7cc">~/Library/Caches/marraw</div><button style="height:34px;padding:0 14px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:#c4c7cc;font-family:Geist;font-size:12.5px">Change…</button></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="width:120px;flex:0 0 120px;color:#c4c7cc">On disk</span><div style="flex:1;display:flex;flex-direction:column;gap:6px"><div style="height:8px;border-radius:4px;background:rgba(255,255,255,.1);overflow:hidden"><div style="width:46%;height:100%;background:#7c83ff"></div></div><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#8b8f96">18.4 GB used · 40 GB limit</span></div><button style="height:34px;padding:0 14px;border-radius:8px;border:1px solid rgba(242,109,109,.4);background:rgba(242,109,109,.1);color:#f28c8c;font-family:Geist;font-size:12.5px">Clear cache</button></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8b8f96">Sidecars</span>
+                <div style="display:flex;align-items:center;gap:12px"><div style="flex:1;display:flex;flex-direction:column;gap:3px"><span style="color:#e6e7ea">Write edit sidecars</span><span style="font-size:12px;color:#8b8f96">Portable, non-destructive edits saved beside each RAW.</span></div><div style="width:38px;height:22px;border-radius:999px;background:#7c83ff;position:relative;flex:0 0 38px"><div style="position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:#fff"></div></div></div>
+              </div>
+            </div>
+            <div style="padding:16px 22px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:10px;justify-content:flex-end"><button style="height:36px;padding:0 18px;border-radius:9px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#c4c7cc;font-family:Geist;font-size:13px">Cancel</button><button style="height:36px;padding:0 20px;border-radius:9px;border:1px solid #7c83ff;background:#7c83ff;color:#0d0e0f;font-family:Geist;font-size:13px;font-weight:500">Done</button></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings · light -->
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(0,0,0,.12);position:relative;font-size:13px;color:#1a1c1f;box-shadow:0 40px 90px -30px rgba(0,0,0,.5)">
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 80% at 40% 12%, rgba(255,255,255,.45), transparent 55%), linear-gradient(180deg,#e2ecf0 0%,#b7cbd3 40%,#82a0ab 70%,#516e79 100%)"></div>
+        <div style="position:absolute;inset:0;background:rgba(30,34,40,.4);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)"></div>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:760px;height:480px;background:#ffffff;border:1px solid rgba(0,0,0,.1);border-radius:14px;overflow:hidden;box-shadow:0 50px 120px -30px rgba(0,0,0,.5);display:flex">
+          <div style="width:172px;flex:0 0 172px;border-right:1px solid rgba(0,0,0,.08);background:#f7f8f9;padding:16px 12px;display:flex;flex-direction:column;gap:2px">
+            <span style="font-size:15px;font-weight:600;padding:0 8px 12px">Settings</span>
+            <span style="padding:8px 10px;border-radius:7px;color:#6b7078">General</span>
+            <span style="padding:8px 10px;border-radius:7px;background:rgba(91,98,230,.12);color:#4c53c9">Cache</span>
+            <span style="padding:8px 10px;border-radius:7px;color:#6b7078">Sidecars</span>
+            <span style="padding:8px 10px;border-radius:7px;color:#6b7078">Performance</span>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column">
+            <div style="flex:1;padding:22px;overflow:hidden;display:flex;flex-direction:column;gap:22px">
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#6b7078">Cache</span>
+                <div style="display:flex;align-items:center;gap:12px"><span style="width:120px;flex:0 0 120px;color:#3a3d43">Directory</span><div style="flex:1;height:34px;display:flex;align-items:center;padding:0 10px;background:#f5f6f7;border:1px solid rgba(0,0,0,.1);border-radius:8px;font-family:'Geist Mono',monospace;font-size:12px;color:#3a3d43">~/Library/Caches/marraw</div><button style="height:34px;padding:0 14px;border-radius:8px;border:1px solid rgba(0,0,0,.12);background:#fff;color:#3a3d43;font-family:Geist;font-size:12.5px">Change…</button></div>
+                <div style="display:flex;align-items:center;gap:12px"><span style="width:120px;flex:0 0 120px;color:#3a3d43">On disk</span><div style="flex:1;display:flex;flex-direction:column;gap:6px"><div style="height:8px;border-radius:4px;background:rgba(0,0,0,.1);overflow:hidden"><div style="width:46%;height:100%;background:#5b62e6"></div></div><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#6b7078">18.4 GB used · 40 GB limit</span></div><button style="height:34px;padding:0 14px;border-radius:8px;border:1px solid rgba(224,86,86,.4);background:rgba(224,86,86,.08);color:#c53d3d;font-family:Geist;font-size:12.5px">Clear cache</button></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#6b7078">Sidecars</span>
+                <div style="display:flex;align-items:center;gap:12px"><div style="flex:1;display:flex;flex-direction:column;gap:3px"><span style="color:#1a1c1f">Write edit sidecars</span><span style="font-size:12px;color:#6b7078">Portable, non-destructive edits saved beside each RAW.</span></div><div style="width:38px;height:22px;border-radius:999px;background:#5b62e6;position:relative;flex:0 0 38px"><div style="position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:#fff"></div></div></div>
+              </div>
+            </div>
+            <div style="padding:16px 22px;border-top:1px solid rgba(0,0,0,.09);display:flex;gap:10px;justify-content:flex-end"><button style="height:36px;padding:0 18px;border-radius:9px;border:1px solid rgba(0,0,0,.14);background:#fff;color:#3a3d43;font-family:Geist;font-size:13px">Cancel</button><button style="height:36px;padding:0 20px;border-radius:9px;border:1px solid #5b62e6;background:#5b62e6;color:#fff;font-family:Geist;font-size:13px;font-weight:500">Done</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= LIGHT THEME ================= -->
+    <div style="display:flex;flex-direction:column;gap:12px;border-top:1px solid rgba(255,255,255,.09);padding-top:34px;margin-top:10px">
+      <div style="font-family:'Geist Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#7c83ff">Light theme · same system, inverted</div>
+      <h2 style="margin:0;font-size:26px;font-weight:600;letter-spacing:-.02em">The full light theme</h2>
+      <p style="margin:0;max-width:900px;font-size:14px;line-height:1.6;color:#c4c7cc">Every surface has a light twin. The swaps are mechanical: page/panel fills go white (<span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#e6e7ea">#fff</span> / <span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#e6e7ea">#f7f8f9</span>), hairlines become <span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#e6e7ea">rgba(0,0,0,.08)</span>, text inverts to <span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#e6e7ea">#1a1c1f</span>/<span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#e6e7ea">#6b7078</span>, the accent shifts to <span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#8f94ff">#5b62e6</span>, and floating glass becomes light-frosted (<span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#e6e7ea">rgba(255,255,255,.72)</span>) with dark text. Below: the structured Library, a cinema Cull, and the dense Develop drawer. The remaining screens follow these same rules.</p>
+    </div>
+
+    <!-- LIBRARY · light -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">LIBRARY · LIGHT</span></div>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(0,0,0,.12);background:#f4f5f6;color:#1a1c1f;display:flex;flex-direction:column;box-shadow:0 40px 90px -30px rgba(0,0,0,.45);font-size:13px">
+        <div style="height:48px;flex:0 0 48px;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid rgba(0,0,0,.08);background:#ffffff">
+          <div style="display:flex;align-items:center;gap:9px"><div style="width:24px;height:24px;border-radius:7px;background:#5b62e6;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px">m</div><span style="font-weight:600">Iceland</span></div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:2px;background:#f1f2f4;border:1px solid rgba(0,0,0,.07);border-radius:9px;padding:4px;font-size:12.5px"><span style="padding:5px 15px;border-radius:6px;background:#fff;color:#4c53c9;box-shadow:0 1px 2px rgba(0,0,0,.1)">Library</span><span style="padding:5px 15px;border-radius:6px;color:#6b7078">Cull</span><span style="padding:5px 15px;border-radius:6px;color:#6b7078">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#6b7078">Export</span></div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;background:#f5f6f7;border:1px solid rgba(0,0,0,.08);border-radius:8px;color:#6b7078;font-size:12px"><span>Jump to anything</span><span style="font-family:'Geist Mono',monospace;padding:1px 6px;border-radius:4px;background:rgba(0,0,0,.06)">⌘K</span></div>
+        </div>
+        <div style="flex:1;display:flex;overflow:hidden">
+          <div style="width:214px;flex:0 0 214px;border-right:1px solid rgba(0,0,0,.08);background:#f7f8f9;display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px 8px"><span style="font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:#9aa0a6">In your library</span><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#a9adb3">5 folders</span></div>
+            <div style="flex:1;overflow:hidden;padding:0 8px;display:flex;flex-direction:column;gap:1px">
+              <sc-for list="{{ folders }}" as="f" hint-placeholder-count="7">
+                <sc-if value="{{ f.group }}">
+                  <div style="display:flex;flex-direction:column;gap:1px;padding:9px 9px 5px 10px">
+                    <div style="display:flex;align-items:center;gap:7px"><span style="color:#9aa0a6;font-size:9px;transform:{{ f.caretRot }}">▶</span><span style="flex:1;font-size:12.5px;font-weight:600;color:#1a1c1f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.name }}</span></div>
+                    <span style="padding-left:16px;font-family:'Geist Mono',monospace;font-size:10px;color:#a9adb3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.dispPath }}</span>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ f.leaf }}">
+                  <div style="display:flex;align-items:center;gap:7px;height:30px;padding-left:24px;padding-right:9px;border-radius:7px;background:{{ f.rowBgLt }};font-size:12.5px">
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="{{ f.iconColorLt }}" stroke-width="1.3" style="flex:0 0 13px"><path d="M1.5 3.6c0-.6.5-1.1 1.1-1.1h2.4l1.2 1.3h4.7c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H2.6c-.6 0-1.1-.5-1.1-1.1z"></path></svg>
+                    <span style="flex:1;color:{{ f.nameColorLt }};font-weight:{{ f.weight }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.name }}</span>
+                    <sc-if value="{{ f.count }}"><span style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#a9adb3">{{ f.count }}</span></sc-if>
+                  </div>
+                </sc-if>
+              </sc-for>
+            </div>
+            <div style="padding:8px 10px"><div style="display:flex;align-items:center;justify-content:center;gap:7px;height:32px;border-radius:8px;border:1px dashed rgba(91,98,230,.5);background:rgba(91,98,230,.07);color:#4c53c9;font-size:12.5px"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#4c53c9" stroke-width="1.5"><path d="M7 2.5v9M2.5 7h9"></path></svg>Add folder</div></div>
+            <div style="padding:10px 12px;border-top:1px solid rgba(0,0,0,.08);display:flex;align-items:center;gap:8px;font-size:12px;color:#6b7078"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#6b7078" stroke-width="1.3"><circle cx="7" cy="7" r="2.2"></circle><path d="M7 1.3v1.6M7 11.1v1.6M12.7 7h-1.6M2.9 7H1.3M11 3l-1.1 1.1M4.1 9.9 3 11M11 11 9.9 9.9M4.1 4.1 3 3"></path></svg>Settings</div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+            <div style="height:47px;flex:0 0 47px;display:flex;align-items:center;gap:16px;padding:0 18px;border-bottom:1px solid rgba(0,0,0,.08)">
+              <div style="display:flex;align-items:center;gap:8px"><span style="font-size:11.5px;color:#6b7078">Rating</span><div style="display:flex;gap:2px;font-size:13px"><span style="color:#f5b544">★★★</span><span style="color:rgba(0,0,0,.18)">★★</span></div><span style="font-size:11px;color:#6b7078">& up</span></div>
+              <div style="width:1px;height:20px;background:rgba(0,0,0,.1)"></div>
+              <div style="display:flex;gap:3px;background:#f1f2f4;border-radius:8px;padding:3px;font-size:12px"><span style="padding:4px 11px;border-radius:5px;color:#6b7078">All</span><span style="padding:4px 11px;border-radius:5px;background:#fff;color:#4c53c9;box-shadow:0 1px 2px rgba(0,0,0,.1)">Picks</span><span style="padding:4px 11px;border-radius:5px;color:#6b7078">Not excluded</span><span style="padding:4px 11px;border-radius:5px;color:#6b7078">Excluded</span></div>
+              <div style="flex:1"></div>
+              <div style="display:flex;align-items:center;gap:9px"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#6b7078" stroke-width="1.3"><rect x="1.5" y="1.5" width="4" height="4" rx="1"></rect><rect x="8.5" y="1.5" width="4" height="4" rx="1"></rect><rect x="1.5" y="8.5" width="4" height="4" rx="1"></rect><rect x="8.5" y="8.5" width="4" height="4" rx="1"></rect></svg><div style="width:104px;position:relative;height:3px;border-radius:2px;background:rgba(0,0,0,.12)"><div style="position:absolute;top:0;bottom:0;left:0;width:44%;background:#5b62e6;border-radius:2px"></div><div style="position:absolute;top:50%;left:44%;width:11px;height:11px;margin-left:-5.5px;transform:translateY(-50%);border-radius:50%;background:#fff;border:1px solid rgba(0,0,0,.15);box-shadow:0 1px 3px rgba(0,0,0,.2)"></div></div><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#6b7078;width:42px">220px</span></div>
+              <div style="width:1px;height:20px;background:rgba(0,0,0,.1)"></div>
+              <span style="font-family:'Geist Mono',monospace;font-size:12px;color:#3a3d43"><span style="color:#1a1c1f">412</span> shown <span style="color:#a9adb3">/ 1,284</span></span>
+            </div>
+            <div style="flex:1;overflow:hidden;padding:16px 18px">
+              <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+                <sc-for list="{{ libGrid }}" as="p" hint-placeholder-count="25">
+                  <div style="position:relative;aspect-ratio:3 / 2;border-radius:4px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.12)">
+                    <div style="{{ p.gridStyle }}"></div>
+                    <sc-if value="{{ p.hasRating }}"><div style="position:absolute;left:5px;bottom:5px;font-size:9px;letter-spacing:.5px;padding:2px 5px;border-radius:4px;background:rgba(0,0,0,.5);color:#f5b544">{{ p.starsFilled }}</div></sc-if>
+                    <sc-if value="{{ p.hasFlag }}"><div style="{{ p.flagStyle }}"></div></sc-if>
+                    <sc-if value="{{ p.isFocus }}"><div style="position:absolute;inset:0;border:2px solid #5b62e6;border-radius:4px;pointer-events:none"></div></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="height:26px;flex:0 0 26px;border-top:1px solid rgba(0,0,0,.08);display:flex;align-items:center;gap:16px;padding:0 16px;font-family:'Geist Mono',monospace;font-size:11px;color:#6b7078;background:#ffffff"><span>/Volumes/Shoots/2026/Iceland</span><span>412 / 1,284</span><span style="color:#1f9d63">96 picked</span><span style="flex:1"></span><span style="display:flex;align-items:center;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:#1f9d63"></span>daemon connected</span></div>
+          </div>
+          <div style="width:300px;flex:0 0 300px;border-left:1px solid rgba(0,0,0,.08);background:#f7f8f9;display:flex;flex-direction:column;overflow:hidden">
+            <div style="padding:15px 16px 13px;border-bottom:1px solid rgba(0,0,0,.08)">
+              <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-family:'Geist Mono',monospace;font-size:12.5px;color:#1a1c1f">DSC07439.ARW</span><div style="display:flex;gap:6px"><div style="width:24px;height:24px;border-radius:6px;border:1px solid rgba(31,157,99,.5);background:rgba(31,157,99,.12);color:#1f9d63;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">P</div><div style="width:24px;height:24px;border-radius:6px;border:1px solid rgba(0,0,0,.12);color:#6b7078;display:flex;align-items:center;justify-content:center;font-size:11px">X</div></div></div>
+              <div style="display:flex;gap:3px;font-size:16px;margin-top:9px"><span style="color:#f5b544">★★★★</span><span style="color:rgba(0,0,0,.2)">★</span></div>
+              <div style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#6b7078;margin-top:8px">Sony A7R V · ƒ/2.8 · 1/250 · ISO 400 · 42mm</div>
+            </div>
+            <div style="padding:13px 16px 0"><div style="height:52px;position:relative;border-radius:6px;background:#111318;border:1px solid rgba(0,0,0,.1);overflow:hidden"><svg viewBox="0 0 100 40" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen"><polygon points="{{ hist.r }}" fill="rgba(240,90,90,.55)"></polygon><polygon points="{{ hist.g }}" fill="rgba(90,220,120,.55)"></polygon><polygon points="{{ hist.b }}" fill="rgba(90,140,240,.55)"></polygon></svg></div></div>
+            <div style="flex:1;overflow:hidden;padding:4px 16px 0">
+              <sc-for list="{{ devGroups }}" as="g" hint-placeholder-count="5">
+                <div style="display:flex;align-items:center;gap:6px;margin:13px 0 8px"><span style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#6b7078">{{ g.name }}</span><sc-if value="{{ g.dot }}"><span style="width:5px;height:5px;border-radius:50%;background:#5b62e6"></span></sc-if></div>
+                <sc-for list="{{ g.controls }}" as="c" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
+                    <div style="width:82px;flex:0 0 82px;color:#3a3d43;font-size:11.5px">{{ c.label }}</div>
+                    <div style="flex:1;position:relative;height:3px;border-radius:2px;background:rgba(0,0,0,.1)"><div style="{{ c.fillStyleLt }}"></div><div style="{{ c.thumbStyle }}"></div></div>
+                    <div style="width:52px;text-align:right;font-family:'Geist Mono',monospace;font-size:11px;color:#1a1c1f">{{ c.val }}</div>
+                  </div>
+                </sc-for>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:6px;padding:11px 16px;border-top:1px solid rgba(0,0,0,.08)"><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid rgba(0,0,0,.12);background:#fff;color:#3a3d43;font-family:Geist;font-size:12px">Copy</button><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid rgba(0,0,0,.12);background:#fff;color:#3a3d43;font-family:Geist;font-size:12px">Paste</button><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid transparent;background:transparent;color:#6b7078;font-family:Geist;font-size:12px;margin-left:auto">Reset</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CULL · light -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">CULL · LIGHT</span></div>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(0,0,0,.12);position:relative;font-size:13px;color:#1a1c1f;box-shadow:0 40px 90px -30px rgba(0,0,0,.45)">
+        <div style="position:absolute;inset:0;background:radial-gradient(140% 90% at 30% 12%, rgba(255,255,255,.5), transparent 50%), linear-gradient(175deg,#d7e2e7 0%,#a7c0c9 34%,#7592a0 62%,#4b6572 100%)"></div>
+        <div style="position:absolute;top:16px;left:18px;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.72);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(0,0,0,.06);border-radius:9px;padding:7px 12px;box-shadow:0 4px 14px -6px rgba(0,0,0,.3)"><div style="width:18px;height:18px;border-radius:5px;background:#5b62e6;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px">m</div><span style="font-weight:600;font-size:12.5px">Iceland</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#4c53c9">09:14 · frame 7</span></div>
+        <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;background:rgba(255,255,255,.72);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(0,0,0,.06);border-radius:9px;padding:4px;font-size:12.5px;box-shadow:0 4px 14px -6px rgba(0,0,0,.3)"><span style="padding:5px 15px;border-radius:6px;color:#6b7078">Library</span><span style="padding:5px 15px;border-radius:6px;background:rgba(91,98,230,.16);color:#4c53c9">Cull</span><span style="padding:5px 15px;border-radius:6px;color:#6b7078">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#6b7078">Export</span></div>
+        <div style="position:absolute;top:16px;right:18px;display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;background:rgba(255,255,255,.72);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(0,0,0,.06);border-radius:9px;font-size:12px;box-shadow:0 4px 14px -6px rgba(0,0,0,.3)"><span style="color:#6b7078">Group by gap</span><span style="display:flex;align-items:center;gap:5px;font-family:'Geist Mono',monospace;color:#4c53c9;background:rgba(91,98,230,.16);border-radius:5px;padding:2px 8px;white-space:nowrap">6 min<span style="opacity:.6">▾</span></span></div>
+        <div style="position:absolute;bottom:126px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:16px;background:rgba(255,255,255,.8);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(0,0,0,.07);border-radius:14px;padding:12px 18px;box-shadow:0 24px 60px -18px rgba(0,0,0,.35)">
+          <div style="display:flex;flex-direction:column;gap:5px"><span style="font-family:'Geist Mono',monospace;font-size:11.5px;color:#1a1c1f">DSC07421.ARW</span><div style="display:flex;gap:2px;font-size:15px"><span style="color:#f5b544">★★★★</span><span style="color:rgba(0,0,0,.2)">★</span></div></div>
+          <div style="width:1px;height:36px;background:rgba(0,0,0,.12)"></div>
+          <div style="display:flex;gap:7px"><button style="height:34px;padding:0 16px;border-radius:8px;border:1px solid rgba(31,157,99,.45);background:rgba(31,157,99,.12);color:#1f9d63;font-family:Geist;font-size:12.5px;display:flex;align-items:center;gap:6px">Pick<span style="font-family:'Geist Mono',monospace;font-size:10px;opacity:.8">P</span></button><button style="height:34px;padding:0 16px;border-radius:8px;border:1px solid rgba(209,84,79,.4);background:rgba(209,84,79,.1);color:#d1544f;font-family:Geist;font-size:12.5px;display:flex;align-items:center;gap:6px">Reject<span style="font-family:'Geist Mono',monospace;font-size:10px;opacity:.8">X</span></button></div>
+          <div style="width:1px;height:36px;background:rgba(0,0,0,.12)"></div>
+          <sc-for list="{{ triage }}" as="c" hint-placeholder-count="3"><div style="display:flex;flex-direction:column;gap:5px;width:82px"><div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:#3a3d43">{{ c.label }}</span><span style="font-family:'Geist Mono',monospace;color:#1a1c1f">{{ c.val }}</span></div><div style="position:relative;height:3px;border-radius:2px;background:rgba(0,0,0,.12)"><div style="{{ c.fillStyleLt }}"></div><div style="{{ c.thumbStyle }}"></div></div></div></sc-for>
+        </div>
+        <div style="position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;background:rgba(255,255,255,.7);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(0,0,0,.06);border-radius:11px;padding:8px 12px;max-width:900px;overflow:hidden;box-shadow:0 10px 30px -12px rgba(0,0,0,.3)">
+          <sc-for list="{{ strip }}" as="p" hint-placeholder-count="10"><div style="position:relative;width:70px;height:46px;flex:0 0 70px;border-radius:3px;overflow:hidden"><div style="{{ p.stripStyle }}"></div><sc-if value="{{ p.isFocus }}"><div style="position:absolute;inset:0;border:2px solid #5b62e6;border-radius:3px"></div></sc-if><sc-if value="{{ p.isPick }}"><div style="position:absolute;right:2px;top:2px;width:6px;height:6px;border-radius:2px;background:#1f9d63"></div></sc-if></div></sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- DEVELOP · light -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">DEVELOP · LIGHT</span></div>
+      <div style="width:1480px;height:864px;border-radius:12px;overflow:hidden;border:1px solid rgba(0,0,0,.12);position:relative;font-size:13px;color:#1a1c1f;box-shadow:0 40px 90px -30px rgba(0,0,0,.45)">
+        <div style="position:absolute;inset:0;background:radial-gradient(120% 80% at 68% 14%, rgba(255,255,255,.5), transparent 55%), linear-gradient(172deg,#cdd8c8 0%,#a6b79c 40%,#728560 66%,#42502f 100%)"></div>
+        <div style="position:absolute;top:16px;left:18px;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.72);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(0,0,0,.06);border-radius:9px;padding:7px 12px;box-shadow:0 4px 14px -6px rgba(0,0,0,.3)"><div style="width:18px;height:18px;border-radius:5px;background:#5b62e6;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:11px">m</div><span style="font-weight:600;font-size:12.5px">Iceland</span><span style="font-family:'Geist Mono',monospace;font-size:11px;color:#4c53c9">DSC07421.ARW · 1:1</span></div>
+        <div style="position:absolute;top:16px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;background:rgba(255,255,255,.72);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(0,0,0,.06);border-radius:9px;padding:4px;font-size:12.5px;box-shadow:0 4px 14px -6px rgba(0,0,0,.3)"><span style="padding:5px 15px;border-radius:6px;color:#6b7078">Library</span><span style="padding:5px 15px;border-radius:6px;color:#6b7078">Cull</span><span style="padding:5px 15px;border-radius:6px;background:rgba(91,98,230,.16);color:#4c53c9">Develop</span><span style="padding:5px 15px;border-radius:6px;color:#6b7078">Export</span></div>
+        <div style="position:absolute;top:16px;right:16px;display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;background:rgba(255,255,255,.72);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(0,0,0,.06);border-radius:9px;color:#6b7078;font-size:12px;box-shadow:0 4px 14px -6px rgba(0,0,0,.3)"><span>Jump to any control</span><span style="font-family:'Geist Mono',monospace;padding:1px 6px;border-radius:4px;background:rgba(0,0,0,.06)">⌘K</span></div>
+        <div style="position:absolute;top:64px;right:16px;bottom:16px;width:352px;background:rgba(255,255,255,.94);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(0,0,0,.09);border-radius:13px;padding:15px 16px;overflow:hidden;box-shadow:0 24px 70px -20px rgba(0,0,0,.4);display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#6b7078">Develop · full stack</span><span style="font-size:11px;display:flex;align-items:center;gap:4px;color:#4c53c9"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 1.5v6"></path><circle cx="6" cy="9.2" r="1.4"></circle></svg>Pinned</span></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px"><span style="font-family:'Geist Mono',monospace;font-size:12.5px;color:#1a1c1f">DSC07421.ARW</span><div style="display:flex;gap:2px;font-size:13px"><span style="color:#f5b544">★★★★</span><span style="color:rgba(0,0,0,.2)">★</span></div></div>
+          <div style="font-family:'Geist Mono',monospace;font-size:10.5px;color:#6b7078;margin-top:5px">ƒ/2.8 · 1/250 · ISO 400 · 42.4MP</div>
+          <div style="height:52px;position:relative;border-radius:6px;background:#111318;border:1px solid rgba(0,0,0,.1);overflow:hidden;margin-top:11px"><svg viewBox="0 0 100 40" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen"><polygon points="{{ hist.r }}" fill="rgba(240,90,90,.55)"></polygon><polygon points="{{ hist.g }}" fill="rgba(90,220,120,.55)"></polygon><polygon points="{{ hist.b }}" fill="rgba(90,140,240,.55)"></polygon></svg></div>
+          <div style="flex:1;overflow:hidden;margin-top:2px">
+            <sc-for list="{{ fullGroups }}" as="g" hint-placeholder-count="7">
+              <div style="display:flex;align-items:center;gap:6px;margin:12px 0 8px"><span style="font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#6b7078">{{ g.name }}</span><sc-if value="{{ g.dot }}"><span style="width:5px;height:5px;border-radius:50%;background:#5b62e6"></span></sc-if></div>
+              <sc-for list="{{ g.controls }}" as="c" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:9px;margin-bottom:7px">
+                  <div style="width:96px;flex:0 0 96px;color:#3a3d43;font-size:11.5px">{{ c.label }}</div>
+                  <div style="flex:1;position:relative;height:3px;border-radius:2px;background:rgba(0,0,0,.1)"><div style="{{ c.fillStyleLt }}"></div><div style="{{ c.thumbStyle }}"></div></div>
+                  <div style="width:56px;text-align:right;font-family:'Geist Mono',monospace;font-size:11px;color:#1a1c1f">{{ c.val }}</div>
+                </div>
+              </sc-for>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:10px;padding-top:11px;border-top:1px solid rgba(0,0,0,.08)"><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid rgba(0,0,0,.12);background:#fff;color:#3a3d43;font-family:Geist;font-size:12px">Copy</button><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid rgba(0,0,0,.12);background:#fff;color:#3a3d43;font-family:Geist;font-size:12px">Paste</button><button style="height:28px;padding:0 12px;border-radius:7px;border:1px solid transparent;background:transparent;color:#6b7078;font-family:Geist;font-size:12px;margin-left:auto">Reset</button></div>
+        </div>
+        <div style="position:absolute;bottom:16px;left:calc(50% - 192px);transform:translateX(-50%);display:flex;align-items:center;gap:14px;background:rgba(255,255,255,.8);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border:1px solid rgba(0,0,0,.07);border-radius:14px;padding:12px 18px;box-shadow:0 24px 60px -18px rgba(0,0,0,.35)">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#6b7078;writing-mode:vertical-rl;transform:rotate(180deg)">Quick</span>
+          <sc-for list="{{ dock }}" as="c" hint-placeholder-count="6"><div style="display:flex;flex-direction:column;gap:5px;width:82px"><div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:#3a3d43">{{ c.label }}</span><span style="font-family:'Geist Mono',monospace;color:#1a1c1f">{{ c.val }}</span></div><div style="position:relative;height:3px;border-radius:2px;background:rgba(0,0,0,.12)"><div style="{{ c.fillStyleLt }}"></div><div style="{{ c.thumbStyle }}"></div></div></div></sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- keyboard map -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Geist Mono',monospace;font-size:12px;color:#7c83ff">KEYBOARD</span><h3 style="margin:0;font-size:18px;font-weight:600">Muscle memory, preserved</h3></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;max-width:1200px">
+        <div style="background:#141619;border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:9px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8b8f96;margin-bottom:2px">Navigate</div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Move</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">← ↑ → ↓</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Extend</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">⇧+arrow</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Select all</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">⌘A</span></div>
+        </div>
+        <div style="background:#141619;border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:9px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8b8f96;margin-bottom:2px">Rate & flag</div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Rate</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">1–5 · 0</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Pick / exclude</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">P · X</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Unflag</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">U</span></div>
+        </div>
+        <div style="background:#141619;border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:9px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8b8f96;margin-bottom:2px">View & modes</div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Loupe / back</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">Enter · Esc</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Contact sheet</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">G</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Zoom 1:1 / fit</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">Z · Space</span></div>
+        </div>
+        <div style="background:#141619;border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:9px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8b8f96;margin-bottom:2px">Develop</div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Focus a control</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">E C T H S…</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Adjust</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">+ / − · ⇧</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:12.5px;color:#c4c7cc"><span>Copy / paste / crop</span><span style="font-family:'Geist Mono',monospace;color:#e6e7ea">⌘C ⌘V R</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-family:'Geist Mono',monospace;font-size:12px;color:#5f636b;border-top:1px solid rgba(255,255,255,.09);padding-top:22px;line-height:1.6">Every surface is defined dark-first and in a full light theme. Built on the existing shadcn/ui set — dialog, slider, toggle, segmented (toggle-group), progress, scroll-area.</div>
+  </div>
+</section>
+
+
+
+
+
+
+
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const rnd = s => { const x = Math.sin(s * 127.1) * 43758.5453; return x - Math.floor(x); };
+    const palettes = [
+      ['#c3d3dd', '#7c9099', '#3b474e'],
+      ['#2b3a47', '#18242e', '#0c1116'],
+      ['#8fa08a', '#5b6b56', '#28311f'],
+      ['#9db9cb', '#5f8095', '#2c4450'],
+      ['#123a3a', '#0f3f3a', '#0a1f26'],
+      ['#c2a292', '#7c5f56', '#2e2422'],
+      ['#aebfc9', '#6f818c', '#333d45'],
+      ['#5b6470', '#2a3139', '#0d0f13']
+    ];
+    const photos = [];
+    for (let i = 0; i < 44; i++) {
+      const p = palettes[Math.floor(rnd(i + 1) * palettes.length) % palettes.length];
+      const ang = 168 + Math.floor(rnd(i + 3) * 16);
+      const h = 44 + Math.floor(rnd(i + 5) * 22);
+      const lx = 18 + Math.floor(rnd(i + 9) * 52);
+      const grad = 'radial-gradient(120% 80% at ' + lx + '% 14%, rgba(255,255,255,.13), transparent 55%), linear-gradient(' + ang + 'deg, ' + p[0] + ' 0%, ' + p[1] + ' ' + h + '%, ' + p[2] + ' 100%)';
+      const r = rnd(i + 11);
+      let rating = 0, flag = 'none';
+      if (r > 0.86) { rating = 5; flag = 'pick'; }
+      else if (r > 0.72) { rating = 4; flag = 'pick'; }
+      else if (r > 0.62) { rating = 4; flag = 'none'; }
+      else if (r > 0.5) { rating = 3; flag = 'none'; }
+      else if (r > 0.4) { rating = 2; flag = 'none'; }
+      else if (r > 0.32) { rating = 1; flag = 'reject'; }
+      else if (r > 0.26) { rating = 0; flag = 'reject'; }
+      const iso = [100, 200, 400, 800, 1600][Math.floor(rnd(i + 13) * 5)];
+      const shut = ['1/2000', '1/1000', '1/500', '1/250', '1/125', '1/60'][Math.floor(rnd(i + 17) * 6)];
+      const ap = ['1.8', '2.8', '4.0', '5.6', '8.0'][Math.floor(rnd(i + 19) * 5)];
+      const foc = [16, 24, 35, 42, 70, 135][Math.floor(rnd(i + 23) * 6)];
+      photos.push({
+        id: i, name: 'DSC0' + (7421 + i * 3) + '.ARW',
+        rating: rating, hasRating: rating > 0, isPick: flag === 'pick', isReject: flag === 'reject',
+        style: { background: grad, aspectRatio: '3 / 2', borderRadius: '3px', overflow: 'hidden' },
+        stripStyle: { position: 'absolute', inset: 0, background: grad, borderRadius: '3px' },
+        exif: 'f/' + ap + '  ' + shut + '  ISO ' + iso + '  ' + foc + 'mm',
+        isFocus: i === 6,
+        starsFilled: '\u2605'.repeat(rating), starsEmpty: '\u2605'.repeat(5 - rating),
+        gridStyle: { position: 'absolute', inset: 0, background: grad },
+        hasFlag: flag !== 'none',
+        flagStyle: { position: 'absolute', right: '6px', top: '6px', width: '9px', height: '9px', borderRadius: '2px', background: flag === 'pick' ? '#34d399' : (flag === 'reject' ? '#f26d6d' : 'transparent') }
+      });
+    }
+    const strip = photos.slice(0, 16);
+
+    // --- capture times + time-gap grouping ---
+    const fmt = m => { const h = Math.floor(m / 60) % 24, mm = Math.floor(m % 60); return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm; };
+    const bigGapAt = { 6: 22, 13: 9, 20: 41, 27: 6, 34: 15 };
+    let mins = 9 * 60 + 12;
+    photos.forEach((ph, i) => {
+      if (i > 0) mins += bigGapAt[i] ? bigGapAt[i] : (0.15 + rnd(i * 3 + 2) * 1.5);
+      ph._min = mins; ph.time = fmt(mins);
+    });
+    const gapMinutes = 6;
+    const groups = [];
+    let cur = null;
+    photos.forEach((ph, i) => {
+      const gapBefore = i > 0 ? (ph._min - photos[i - 1]._min) : 0;
+      if (!cur || (i > 0 && gapBefore >= gapMinutes)) { cur = { photos: [], startMin: ph._min, gap: i > 0 ? Math.round(gapBefore) : 0 }; groups.push(cur); }
+      cur.photos.push(ph); cur.endMin = ph._min;
+    });
+    groups.forEach(g => { g.start = fmt(g.startMin); g.end = fmt(g.endMin); g.count = g.photos.length; g.range = g.count > 1 ? (g.start + ' – ' + g.end) : g.start; g.gap && (g.gapLabel = '+' + g.gap + ' min gap'); g.hasGap = !!g.gap; });
+
+    const mk = (label, letter, val, pct, neutral) => {
+      const left = Math.min(pct, neutral), width = Math.abs(pct - neutral);
+      return {
+        label: label, letter: letter, val: val, changed: pct !== neutral,
+        fillStyle: { position: 'absolute', top: 0, bottom: 0, left: left + '%', width: width + '%', background: '#7c83ff', borderRadius: '2px' },
+        fillStyleLt: { position: 'absolute', top: 0, bottom: 0, left: left + '%', width: width + '%', background: '#5b62e6', borderRadius: '2px' },
+        thumbStyle: { position: 'absolute', top: '50%', left: pct + '%', width: '10px', height: '10px', marginLeft: '-5px', transform: 'translateY(-50%)', borderRadius: '50%', background: '#ffffff', border: '1px solid rgba(0,0,0,.3)', boxShadow: '0 1px 4px rgba(0,0,0,.5)' }
+      };
+    };
+    const devGroups = [
+      { name: 'Tone', dot: true, controls: [mk('Exposure', 'E', '+0.35 EV', 62, 50), mk('Contrast', 'C', '+12', 60, 50), mk('Highlights', 'H', '\u201240', 30, 50), mk('Shadows', 'S', '+28', 64, 50), mk('Whites', '', '+8', 55, 50), mk('Blacks', '', '\u22126', 47, 50)] },
+      { name: 'Presence', dot: true, controls: [mk('Clarity', '', '+18', 68, 50), mk('Texture', '', '+10', 60, 50), mk('Dehaze', '', '+6', 56, 50)] },
+      { name: 'White balance', dot: true, controls: [mk('Temperature', 'T', '5200 K', 53, 50), mk('Tint', 'I', '+4', 54, 50)] },
+      { name: 'Color', dot: true, controls: [mk('Saturation', 'A', '\u22124', 46, 50), mk('Vibrance', 'V', '+22', 72, 50)] },
+      { name: 'Detail', dot: false, controls: [mk('Sharpen', '', '42', 42, 0), mk('Noise reduction', 'N', '18', 18, 0)] }
+    ];
+    const triage = [mk('Exposure', 'E', '+0.35', 62, 50), mk('Contrast', 'C', '+12', 60, 50), mk('Temp', 'T', '5200K', 53, 50)];
+    const quick = [mk('Exposure', 'E', '+0.35', 62, 50), mk('Contrast', 'C', '+12', 60, 50), mk('Highlights', 'H', '\u201240', 30, 50), mk('Vibrance', 'V', '+22', 72, 50)];
+    const dock = [mk('Exposure', 'E', '+0.35', 62, 50), mk('Contrast', 'C', '+12', 60, 50), mk('Highlights', 'H', '\u201240', 30, 50), mk('Shadows', 'S', '+28', 64, 50), mk('Temp', 'T', '5200K', 53, 50), mk('Vibrance', 'V', '+22', 72, 50)];
+    const fullGroups = [
+      { name: 'Crop & straighten', dot: false, controls: [mk('Straighten', 'R', '+1.2\u00b0', 53, 50)] },
+      { name: 'Tone', dot: true, controls: [mk('Exposure', 'E', '+0.35 EV', 62, 50), mk('Contrast', 'C', '+12', 60, 50), mk('Highlights', 'H', '\u201240', 30, 50), mk('Shadows', 'S', '+28', 64, 50), mk('Whites', '', '+8', 55, 50), mk('Blacks', '', '\u22126', 47, 50)] },
+      { name: 'Presence', dot: true, controls: [mk('Clarity', '', '+18', 68, 50), mk('Texture', '', '+10', 60, 50), mk('Dehaze', '', '+6', 56, 50)] },
+      { name: 'White balance', dot: true, controls: [mk('Temperature', 'T', '5200 K', 53, 50), mk('Tint', 'I', '+4', 54, 50)] },
+      { name: 'Color', dot: true, controls: [mk('Saturation', 'A', '\u22124', 46, 50), mk('Vibrance', 'V', '+22', 72, 50), mk('Shadow tint', '', 'H214 \u00b7 12', 44, 50), mk('Highlight tint', '', 'H42 \u00b7 8', 56, 50)] },
+      { name: 'Effects', dot: true, controls: [mk('Vignette', 'O', '\u201218', 40, 50)] },
+      { name: 'Detail', dot: true, controls: [mk('Sharpen', '', '42', 42, 0), mk('Noise reduction', 'N', '18', 18, 0), mk('CA red / cyan', '', '0', 50, 50), mk('CA blue / yellow', '', '+2', 53, 50)] }
+    ];
+
+    const N = 60;
+    const pt = (shift, scale) => {
+      let s = '0,40';
+      for (let i = 0; i <= N; i++) {
+        const x = i / N;
+        const c = Math.exp(-Math.pow((x - (0.5 + shift)) * 3.0, 2));
+        const nz = 0.12 * rnd(i * 7 + shift * 50 + 1);
+        let y = 40 - (c + nz) * 34 * scale;
+        if (y < 2) y = 2; if (y > 40) y = 40;
+        s += ' ' + (x * 100).toFixed(1) + ',' + y.toFixed(1);
+      }
+      return s + ' 100,40';
+    };
+    const hist = { r: pt(0.08, 0.9), g: pt(0.0, 1.0), b: pt(-0.06, 0.8) };
+
+    const libGrid = photos.slice(0, 25);
+    const batchSel = new Set([6, 7, 8, 9, 11, 12, 13, 16, 17, 18, 21, 22]);
+    libGrid.forEach(p => {
+      p.sel = batchSel.has(p.id);
+      p.selDim = { position: 'absolute', inset: 0, background: p.sel ? 'rgba(124,131,255,.14)' : 'transparent', border: p.sel ? '2px solid #7c83ff' : '2px solid transparent', borderRadius: '4px' };
+      p.isAnchor = p.id === 6;
+      p.scanReady = p.id < 9;
+      p.scanSkeleton = p.id >= 9;
+    });
+    const elide = (p, max) => p.length <= max ? p : p.slice(0, 2) + '…' + p.slice(-(max - 3));
+    const folders = [
+      { group: true, name: 'Trips 2026', path: 'D:\\Shoots', open: true },
+      { leaf: true, name: 'Iceland', count: '1,284', sel: true },
+      { leaf: true, name: 'Faroe Islands', count: '642' },
+      { leaf: true, name: 'Dolomites', count: '918' },
+      { group: true, name: 'Weddings 2026', path: 'C:\\Users\\Marcus\\Photos', open: true },
+      { leaf: true, name: 'Tobias and Elisabeth Wedding', count: '2,140' },
+      { leaf: true, name: 'Priya and Sam Wedding', count: '1,608' },
+      { group: true, name: 'Studio', path: 'D:\\Work\\2026', open: false }
+    ].map(f => ({
+      ...f,
+      caretRot: f.open ? 'rotate(90deg)' : 'none',
+      dispPath: f.path ? elide(f.path, 24) : '',
+      rowBg: f.sel ? 'rgba(124,131,255,.16)' : 'transparent',
+      iconColor: f.sel ? '#c3c7ff' : '#8b8f96',
+      nameColor: f.sel ? '#e6e7ea' : '#c4c7cc',
+      rowBgLt: f.sel ? 'rgba(91,98,230,.12)' : 'transparent',
+      iconColorLt: f.sel ? '#4c53c9' : '#6b7078',
+      nameColorLt: f.sel ? '#1a1c1f' : '#3a3d43',
+      weight: f.sel ? 600 : 400
+    }));
+
+    const pickLocations = [
+      { name: 'This PC', sel: false },
+      { name: 'Local Disk (C:)', sel: false },
+      { name: 'Photos (C:)', sel: true },
+      { name: 'Shoots (D:)', sel: false },
+      { name: 'Desktop', sel: false },
+      { name: 'archive (\\\\nas)', sel: false }
+    ].map(l => ({ ...l, rowBg: l.sel ? 'rgba(124,131,255,.16)' : 'transparent', color: l.sel ? '#e6e7ea' : '#c4c7cc' }));
+    const pickFolders = [
+      { name: 'Tobias and Elisabeth Wedding', raw: '2,140 RAW', checked: true, dim: false },
+      { name: 'Priya and Sam Wedding', raw: '1,608 RAW', checked: true, dim: false },
+      { name: 'Aster and Jonah Wedding', raw: '1,974 RAW', checked: false, dim: false },
+      { name: 'Client previews', raw: 'no RAW files', checked: false, dim: true },
+      { name: 'exported', raw: 'no RAW files', checked: false, dim: true }
+    ].map(f => ({
+      ...f,
+      boxStyle: { width: '16px', height: '16px', flex: '0 0 16px', borderRadius: '5px', border: f.checked ? '1px solid #7c83ff' : '1px solid rgba(255,255,255,.2)', background: f.checked ? '#7c83ff' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+      rowBg: f.checked ? 'rgba(124,131,255,.1)' : 'transparent',
+      nameColor: f.dim ? '#5f636b' : '#e6e7ea',
+      rawColor: f.dim ? '#4a4e55' : '#8b8f96'
+    }));
+
+    const batchDeltas = [mk('Exposure', 'E', '+0.20 EV', 58, 50), mk('Contrast', 'C', '+8', 56, 50), mk('Saturation', 'A', '\u22123', 47, 50)];
+
+    return { photos, strip, groups, gapMinutes, devGroups, triage, quick, dock, fullGroups, hist, libGrid, folders, pickLocations, pickFolders, batchDeltas };
+  }
+}
+</script>
+</body>
+</html>
