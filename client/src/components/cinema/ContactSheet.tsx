@@ -5,7 +5,9 @@ import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { gapLabel, rangeLabel, timeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { GapControl } from '@/components/cinema/GapControl';
+import { WindowControls } from '@/components/WindowControls';
 import { useUIStore } from '@/stores/uiStore';
+import '@/lib/electron';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
 
 /**
@@ -36,7 +38,7 @@ export function ContactSheet({ photos, groups }: { photos: Photo[]; groups: Time
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className="flex h-12 shrink-0 items-center gap-3.5 border-b bg-sidebar px-4">
+      <div className="flex h-12 shrink-0 items-center gap-3.5 border-b bg-sidebar py-0 pr-2 pl-4 [-webkit-app-region:drag]">
         <div className="flex size-6 items-center justify-center rounded-[7px] bg-primary text-sm font-bold text-primary-foreground">
           m
         </div>
@@ -45,8 +47,12 @@ export function ContactSheet({ photos, groups }: { photos: Photo[]; groups: Time
         </span>
         <span className="text-[12.5px] text-muted-foreground">Contact sheet</span>
         <div className="flex-1" />
-        <GapControl />
+        <div className="[-webkit-app-region:no-drag]">
+          <GapControl />
+        </div>
         <span className="font-mono text-[11px] text-muted-foreground">Esc to loupe</span>
+        {window.win && <div className="h-[22px] w-px bg-black/10 dark:bg-white/9" />}
+        <WindowControls />
       </div>
       <div ref={scrollRef} className="flex flex-1 flex-col gap-[22px] overflow-y-auto p-5">
         {groups.map((g, i) => (

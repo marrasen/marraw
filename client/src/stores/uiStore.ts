@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Photo, PhotoPatch } from '@/api/library';
+import type { FlagType, Photo, PhotoPatch } from '@/api/library';
 import type { Params } from '@/api/edits';
 
 export type View = 'grid' | 'loupe';
@@ -17,6 +17,8 @@ interface UIState {
   addFolderOpen: boolean;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
+  // OS fullscreen (F11) — mirrored from the Electron window so Esc can exit.
+  fullscreen: boolean;
   // Cull: the contact sheet (G) and the time-gap grouping threshold in
   // minutes (null = off, one flat grid). Persisted across sessions.
   contactSheet: boolean;
@@ -37,6 +39,9 @@ interface UIState {
   // Grid geometry + currently visible list, for keyboard navigation.
   gridCols: number;
   visibleIds: number[];
+  // Current flag per photo (kept fresh by usePhotos) so the P/X keys can
+  // toggle instead of blindly setting.
+  photoFlags: Map<number, FlagType>;
 
   clipboard: Params | null;
   exportOpen: boolean;
@@ -64,6 +69,7 @@ interface UIState {
   applyLocal: (ids: number[], patch: Partial<Photo>) => void;
   setGrid: (cols: number) => void;
   setVisibleIds: (ids: number[]) => void;
+  setPhotoFlags: (flags: Map<number, FlagType>) => void;
   setClipboard: (p: Params | null) => void;
   setExportOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
@@ -79,6 +85,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   addFolderOpen: false,
   paletteOpen: false,
   shortcutsOpen: false,
+  fullscreen: false,
   contactSheet: false,
   gapMinutes: (() => {
     const raw = localStorage.getItem('marraw:gapMinutes');
@@ -94,6 +101,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   overrides: new Map(),
   gridCols: 4,
   visibleIds: [],
+  photoFlags: new Map<number, FlagType>(),
   clipboard: null,
   exportOpen: false,
   settingsOpen: false,
@@ -198,6 +206,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       return { visibleIds: ids };
     }),
 
+  setPhotoFlags: (flags) => set({ photoFlags: flags }),
   setClipboard: (p) => set({ clipboard: p }),
   setExportOpen: (open) => set({ exportOpen: open }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),

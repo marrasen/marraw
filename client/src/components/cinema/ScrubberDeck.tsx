@@ -14,10 +14,13 @@ export function ScrubberDeck({
   groups,
   focusId,
   hidden,
+  shifted,
 }: {
   groups: TimeGroup[];
   focusId: number | null;
   hidden?: boolean;
+  /** Center on the free canvas left of Develop's pinned drawer. */
+  shifted?: boolean;
 }) {
   const focus = useUIStore((s) => s.focus);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -32,9 +35,17 @@ export function ScrubberDeck({
   return (
     <div
       className={cn(
-        'absolute bottom-4 left-1/2 z-30 flex max-w-[90%] -translate-x-1/2 items-stretch rounded-[11px] border border-glass-border px-3.5 py-2.5 transition-opacity duration-300',
+        'pointer-events-none absolute bottom-4 left-4 z-30 flex justify-center transition-opacity duration-300',
+        shifted ? 'right-[384px]' : 'right-4',
+        hidden && 'opacity-0',
+      )}
+    >
+    <div
+      data-testid="filmstrip"
+      className={cn(
+        'flex max-w-full items-stretch rounded-[11px] border border-glass-border px-3.5 py-2.5',
         'bg-white/75 backdrop-blur-2xl dark:bg-[rgba(10,12,16,.6)]',
-        hidden && 'pointer-events-none opacity-0',
+        !hidden && 'pointer-events-auto',
       )}
     >
       <div className="mr-2 flex shrink-0 flex-col justify-center gap-[3px] border-r border-white/12 pr-3">
@@ -70,6 +81,7 @@ export function ScrubberDeck({
         ))}
       </div>
     </div>
+    </div>
   );
 }
 
@@ -103,6 +115,15 @@ function StripThumb({
             photo.flag === 'pick' ? 'bg-success' : 'bg-destructive',
           )}
         />
+      )}
+      {photo.rating > 0 && (
+        <span
+          data-testid="strip-rating"
+          className="absolute bottom-0.5 left-0.5 flex items-center gap-px rounded-[3px] bg-black/55 px-1 text-[8px]"
+        >
+          <span className="text-rating">★</span>
+          <span className="text-white">{photo.rating}</span>
+        </span>
       )}
       {focused && <span className="absolute inset-0 rounded-[3px] border-2 border-primary" />}
     </button>

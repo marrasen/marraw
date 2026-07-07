@@ -10,9 +10,18 @@ const ev = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
 
 /**
  * The Cull confirm bar (bottom-center glass): filename + star row, Pick /
- * Reject, and the three quick-triage dials (Exposure / Contrast / Temp).
+ * Reject, the three quick-triage dials (Exposure / Contrast / Temp), and
+ * the always-present zoom cluster.
  */
-export function ConfirmBar({ photo, hidden }: { photo: Photo; hidden?: boolean }) {
+export function ConfirmBar({
+  photo,
+  hidden,
+  zoom,
+}: {
+  photo: Photo;
+  hidden?: boolean;
+  zoom?: React.ReactNode;
+}) {
   const client = useApiClient();
   const draft = useEditSession((s) => s.draft);
   const onDraft = useEditSession((s) => s.photoId) === photo.id && draft != null;
@@ -104,6 +113,12 @@ export function ConfirmBar({ photo, hidden }: { photo: Photo; hidden?: boolean }
         </>
       ) : (
         <span className="w-[270px] text-[10.5px] text-muted-foreground">Loading edits…</span>
+      )}
+      {zoom && (
+        <>
+          <div className="h-9 w-px bg-white/15" />
+          {zoom}
+        </>
       )}
     </div>
   );

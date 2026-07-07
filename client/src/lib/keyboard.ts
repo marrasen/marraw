@@ -72,7 +72,12 @@ export function useKeyboard() {
         s.mode === 'cull' && s.contactSheet ? 8 : s.mode === 'library' && s.view === 'grid' ? s.gridCols : 1;
 
       const applyRating = (n: number) => doRating(client, selectionOrFocus(), n);
-      const applyFlag = (flag: FlagType) => doFlag(client, selectionOrFocus(), flag);
+      // P/X toggle: pressing the key of the flag the focused photo already
+      // carries clears it (for the whole selection).
+      const applyFlag = (flag: FlagType) => {
+        const cur = s.focusId != null ? s.photoFlags.get(s.focusId) : undefined;
+        doFlag(client, selectionOrFocus(), flag !== 'none' && cur === flag ? 'none' : flag);
+      };
 
       const zoomStep = (factor: number) => {
         if (s.view !== 'loupe') return;
@@ -133,6 +138,13 @@ export function useKeyboard() {
       }
 
       const key = e.key.toLowerCase();
+
+      // F11 = true fullscreen: even marraw's own chrome goes away.
+      if (e.key === 'F11') {
+        e.preventDefault();
+        window.win?.toggleFullScreen();
+        return;
+      }
 
       // ? toggles the keyboard-shortcuts reference.
       if (e.key === '?') {
@@ -196,10 +208,14 @@ export function useKeyboard() {
           // In crop mode, Enter applies the crop rather than switching mode.
           if (es.cropping) esSetCropping(client, false);
           else if (s.contactSheet) s.setContactSheet(false);
-          else if (s.focusId != null && s.mode === 'library' && s.view === 'grid') s.setMode('cull');
+          else if (s.mode === 'cull') s.setMode('develop');
+          else if (s.mode === 'develop') s.setMode('cull');
+          else if (s.focusId != null) s.setMode('cull');
           break;
         case 'Escape':
-          if (s.shortcutsOpen) {
+          if (s.fullscreen) {
+            window.win?.toggleFullScreen();
+          } else if (s.shortcutsOpen) {
             s.setShortcutsOpen(false);
           } else if (es.cropping) {
             esSetCropping(client, false);

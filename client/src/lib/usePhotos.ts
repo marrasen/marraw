@@ -68,5 +68,10 @@ export function usePhotos(folderId: number): PhotoLists {
     useUIStore.getState().setVisibleIds(visible.map((p) => p.id));
   }, [visible]);
 
+  // Flags per photo so P/X can toggle against the current state.
+  useEffect(() => {
+    useUIStore.getState().setPhotoFlags(new Map(all.map((p) => [p.id, p.flag])));
+  }, [all]);
+
   return { all, visible, isLoading };
 }

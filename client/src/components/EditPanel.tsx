@@ -245,9 +245,9 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
 
   const kelvinMode = draft.wbMode === 'kelvin';
   return (
-    <div className="flex flex-col gap-2.5 p-3 text-sm">
-      <div className="flex items-center gap-2 px-1">
-        <h2 className="font-medium">Develop</h2>
+    <div className="flex flex-col px-4 pt-1 pb-3 text-sm">
+      <div className="flex items-center gap-2">
+        <h2 className="text-[13px] font-medium">Develop</h2>
         {targetCount > 1 && (
           <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">
             applies to {targetCount} photos
@@ -632,9 +632,10 @@ function groupChanged(draft: Params, keys: (keyof Params)[]): boolean {
   return keys.some((k) => !isDefault(draft, k));
 }
 
-// Group is one collapsible develop-panel section. The open state persists
-// per group in localStorage; a dot in the header marks a group holding
-// non-default values, so a collapsed group still shows it carries edits.
+// Group is one collapsible develop-panel section, drawn flat per the
+// develop-drawer plate: an uppercase eyebrow header with the "has
+// adjustments" dot, rows beneath, no card chrome. Open state persists per
+// group in localStorage.
 function Group({
   id,
   title,
@@ -652,22 +653,27 @@ function Group({
     localStorage.setItem(`marraw:editGroup:${id}`, open ? '0' : '1');
   };
   return (
-    <section className="overflow-hidden rounded-lg border bg-card">
+    <section>
       <button
         type="button"
-        className="flex w-full items-center gap-1.5 bg-muted/40 px-2.5 py-2 text-left transition-colors hover:bg-muted/70"
+        className="group/hdr mt-3 mb-2 flex w-full items-center gap-1.5 text-left"
         onClick={toggle}
         aria-expanded={open}
       >
-        <ChevronRight
-          className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')}
-        />
-        <span className="text-xs font-medium">{title}</span>
+        <span className="text-[10px] tracking-[.06em] text-muted-foreground uppercase group-hover/hdr:text-foreground">
+          {title}
+        </span>
         {changed && (
-          <span className="ml-auto size-1.5 shrink-0 rounded-full bg-primary" title="Has adjustments" />
+          <span className="size-[5px] shrink-0 rounded-full bg-primary" title="Has adjustments" />
         )}
+        <ChevronRight
+          className={cn(
+            'size-3 shrink-0 text-faint opacity-0 transition-transform group-hover/hdr:opacity-100',
+            open && 'rotate-90',
+          )}
+        />
       </button>
-      {open && <div className="flex flex-col gap-3.5 p-3">{children}</div>}
+      {open && <div className="flex flex-col gap-[7px]">{children}</div>}
     </section>
   );
 }
@@ -889,56 +895,64 @@ export function EditSlider({
   const [dragging, setDragging] = useState<number | null>(null);
   const shown = dragging ?? value;
   const changed = neutral != null && Math.abs(value - neutral) > 1e-9;
+  // One row per the develop-drawer plate: label · track · mono value, the
+  // reset affordance surfacing only when the value left its default.
   return (
     <div
       className={cn(
-        'flex flex-col gap-1.5 rounded-md',
+        'flex items-center gap-2.5 rounded-md',
         active && 'ring-2 ring-ring ring-offset-2 ring-offset-background',
         disabled && 'opacity-50',
       )}
       onPointerDown={onFocusControl}
+      title={hotkey ? `${label} (${hotkey})` : undefined}
     >
-      <div className="flex items-center justify-between gap-1">
-        <span className="text-xs text-muted-foreground">
-          {label} {hotkey && <kbd className="text-[10px] opacity-60">{hotkey}</kbd>}
-        </span>
-        <span className="ml-auto text-xs tabular-nums">{display}</span>
-        {onClear && neutral != null && (
-          <button
-            type="button"
-            className={cn(
-              'text-muted-foreground transition-colors hover:text-foreground',
-              !changed && 'invisible',
-            )}
-            title={`Reset ${label.toLowerCase()}`}
-            aria-label={`Reset ${label.toLowerCase()}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setDragging(null);
-              onClear();
-            }}
-          >
-            <RotateCcw className="size-3" />
-          </button>
-        )}
+      <span className="w-[96px] shrink-0 truncate text-[11.5px] text-secondary-foreground">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1">
+        <Slider
+          value={shown}
+          min={min}
+          max={max}
+          step={step}
+          fillFrom={neutral}
+          gradient={gradient}
+          disabled={disabled}
+          aria-label={label}
+          onValueChange={(v) => {
+            setDragging(v as number);
+            onChange(v as number);
+          }}
+          onValueCommitted={(v) => {
+            setDragging(null);
+            onCommit(v as number);
+          }}
+        />
       </div>
-      <Slider
-        value={shown}
-        min={min}
-        max={max}
-        step={step}
-        fillFrom={neutral}
-        gradient={gradient}
-        disabled={disabled}
-        onValueChange={(v) => {
-          setDragging(v as number);
-          onChange(v as number);
-        }}
-        onValueCommitted={(v) => {
-          setDragging(null);
-          onCommit(v as number);
-        }}
-      />
+      <span className="w-[56px] shrink-0 text-right font-mono text-[11px] text-foreground tabular-nums">
+        {display}
+      </span>
+      {onClear && neutral != null ? (
+        <button
+          type="button"
+          className={cn(
+            'shrink-0 text-muted-foreground transition-colors hover:text-foreground',
+            !changed && 'invisible',
+          )}
+          title={`Reset ${label.toLowerCase()}`}
+          aria-label={`Reset ${label.toLowerCase()}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setDragging(null);
+            onClear();
+          }}
+        >
+          <RotateCcw className="size-3" />
+        </button>
+      ) : (
+        <span className="w-3 shrink-0" />
+      )}
     </div>
   );
 }

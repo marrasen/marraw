@@ -71,6 +71,10 @@ export default function App() {
   useKeyboard();
   useAutoOpenFolder();
   useDropFolder();
+  // Mirror the OS fullscreen state (F11) so Esc can exit it first.
+  useEffect(() => {
+    window.win?.onFullScreenChange((fs) => useUIStore.setState({ fullscreen: fs }));
+  }, []);
   const folderId = useUIStore((s) => s.folderId);
   const mode = useUIStore((s) => s.mode);
   const view = useUIStore((s) => s.view);

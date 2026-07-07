@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Pin, PinOff } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
-import { CinemaImage, Filmstrip } from '@/views/LoupeView';
+import { CinemaImage } from '@/views/LoupeView';
 import { CinemaHUD, PaletteChip } from '@/components/cinema/CinemaHUD';
+import { GapControl } from '@/components/cinema/GapControl';
 import { MiniSlider } from '@/components/cinema/MiniSlider';
+import { ScrubberDeck } from '@/components/cinema/ScrubberDeck';
+import { ZoomCluster } from '@/components/cinema/ZoomCluster';
 import { EditPanel } from '@/components/EditPanel';
 import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
+import { groupByGap } from '@/lib/timeGaps';
 import { useIdle } from '@/lib/useIdle';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
@@ -17,16 +21,23 @@ const ev = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
 /**
  * Develop mode: the maximal darkroom canvas. The photo fills the window;
  * the full develop stack lives in a pinnable right drawer, the six
- * most-touched dials float as a quick dock, and a glass filmstrip keeps the
- * take in reach.
+ * most-touched dials float as a quick dock (with the always-present zoom
+ * cluster), and the same time-gap camera roll as Cull keeps the take in
+ * reach.
  */
 export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) {
   const focusId = useUIStore((s) => s.focusId);
+  const gapMinutes = useUIStore((s) => s.gapMinutes);
   const cropping = useEditSession((s) => s.cropping);
   const wbPicking = useEditSession((s) => s.wbPicking);
   const [pinned, setPinned] = useState(() => localStorage.getItem('marraw:developPinned') !== '0');
   const idle = useIdle();
+  const [zoomInfo, setZoomInfo] = useState<{ scale: number; rendering: boolean }>({
+    scale: 1,
+    rendering: false,
+  });
 
+  const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
   const photo = photos.find((p) => p.id === focusId) ?? photos[0];
   if (!photo) {
     return (
@@ -46,7 +57,13 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-      <CinemaImage photo={photo} photos={photos} hideChrome={overlayActive} />
+      <CinemaImage
+        photo={photo}
+        photos={photos}
+        onZoomInfo={(scale, rendering) => setZoomInfo({ scale, rendering })}
+        renderingBadgeBottom={216}
+        navigatorBottom={pinned ? 18 : 124}
+      />
       {!overlayActive && (
         <CinemaHUD
           hidden={idle && !pinned}
@@ -55,7 +72,12 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
               {photo.fileName.split(/[\\/]/).pop()}
             </span>
           }
-          right={<PaletteChip />}
+          right={
+            <div className="flex items-center gap-3">
+              <GapControl glass />
+              <PaletteChip />
+            </div>
+          }
         />
       )}
       {/* Pinnable full-stack drawer. Stays MOUNTED through crop/eyedropper
@@ -66,19 +88,19 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
           (!pinned || overlayActive) && 'translate-x-[calc(100%+32px)]',
         )}
       >
-            <div className="flex items-center justify-between px-4 pt-[13px] pb-1">
-              <span className="text-[10px] tracking-[.07em] text-muted-foreground uppercase">
-                Develop · full stack
-              </span>
-              <button
-                className="flex items-center gap-1 text-[11px] text-[#aab0ff] hover:text-foreground"
-                onClick={togglePin}
-                title={pinned ? 'Unpin drawer' : 'Pin drawer'}
-              >
-                <Pin className="size-3" strokeWidth={1.5} />
-                Pinned
-              </button>
-            </div>
+        <div className="flex items-center justify-between px-4 pt-[13px] pb-1">
+          <span className="text-[10px] tracking-[.07em] text-muted-foreground uppercase">
+            Develop · full stack
+          </span>
+          <button
+            className="flex items-center gap-1 text-[11px] text-[#aab0ff] hover:text-foreground"
+            onClick={togglePin}
+            title={pinned ? 'Unpin drawer' : 'Pin drawer'}
+          >
+            <Pin className="size-3" strokeWidth={1.5} />
+            Pinned
+          </button>
+        </div>
         <div className="min-h-0 flex-1">
           <EditPanel photos={all} />
         </div>
@@ -95,26 +117,29 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
               Develop
             </button>
           )}
-          <QuickDock hidden={idle} shifted={pinned} />
-          <div
-            className={cn(
-              'absolute bottom-4 z-30 flex justify-center transition-opacity duration-300',
-              pinned ? 'left-[calc(50%-192px)] -translate-x-1/2' : 'inset-x-0',
-              idle && 'pointer-events-none opacity-0',
-            )}
-          >
-            <div className="glass max-w-[720px] overflow-hidden rounded-[11px] p-1">
-              <Filmstrip photos={photos} currentId={photo.id} />
-            </div>
-          </div>
+          <QuickDock
+            hidden={idle}
+            shifted={pinned}
+            zoom={<ZoomCluster scale={zoomInfo.scale} rendering={zoomInfo.rendering} />}
+          />
+          <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} shifted={pinned} />
         </>
       )}
     </div>
   );
 }
 
-// QuickDock: the six most-touched dials floating over the canvas.
-function QuickDock({ hidden, shifted }: { hidden?: boolean; shifted?: boolean }) {
+// QuickDock: the six most-touched dials floating over the canvas, plus the
+// embedded zoom cluster.
+function QuickDock({
+  hidden,
+  shifted,
+  zoom,
+}: {
+  hidden?: boolean;
+  shifted?: boolean;
+  zoom?: React.ReactNode;
+}) {
   const client = useApiClient();
   const draft = useEditSession((s) => s.draft);
   if (!draft) return null;
@@ -141,9 +166,15 @@ function QuickDock({ hidden, shifted }: { hidden?: boolean; shifted?: boolean })
   return (
     <div
       className={cn(
-        'glass absolute bottom-[100px] z-30 flex items-center gap-3.5 rounded-[14px] px-[18px] py-3 transition-opacity duration-300',
-        shifted ? 'left-[calc(50%-192px)] -translate-x-1/2' : 'left-1/2 -translate-x-1/2',
-        hidden && 'pointer-events-none opacity-0',
+        'pointer-events-none absolute bottom-[100px] left-4 z-30 flex justify-center transition-opacity duration-300',
+        shifted ? 'right-[384px]' : 'right-4',
+        hidden && 'opacity-0',
+      )}
+    >
+    <div
+      className={cn(
+        'glass flex max-w-full items-center gap-3.5 overflow-x-auto rounded-[14px] px-[18px] py-3',
+        !hidden && 'pointer-events-auto',
       )}
     >
       <span
@@ -158,6 +189,13 @@ function QuickDock({ hidden, shifted }: { hidden?: boolean; shifted?: boolean })
       {dial('Shadows', 'toneShadows', { min: -1, max: 1, step: 0.02, display: pct })}
       {dial('Temp', 'wbTemp', { min: -1, max: 1, step: 0.02, display: pct })}
       {dial('Vibrance', 'vibrance', { min: -1, max: 1, step: 0.02, display: pct })}
+      {zoom && (
+        <>
+          <div className="h-9 w-px bg-white/15" />
+          {zoom}
+        </>
+      )}
+    </div>
     </div>
   );
 }

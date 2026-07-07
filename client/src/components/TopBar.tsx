@@ -6,9 +6,11 @@ import { useApiClient } from '@/api/client';
 import { useMyTasks, cancelSharedTask } from '@/api/tasks';
 import type { SharedTaskState } from '@/api/tasks-handler';
 import { cn } from '@/lib/utils';
+import { WindowControls } from '@/components/WindowControls';
 import { useUIStore, type Mode } from '@/stores/uiStore';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
 import { useTaskToasts } from '@/lib/taskToasts';
+import '@/lib/electron';
 
 const MODE_ITEMS: { value: Mode | 'export'; label: string }[] = [
   { value: 'library', label: 'Library' },
@@ -34,8 +36,10 @@ export function TopBar() {
   const shootName = current ? rootName(current) : folderPath ? folderPath : 'marraw';
   const hasFolder = folderPath != null;
 
+  // The whole bar is the frameless window's move handle; every interactive
+  // island is carved back out with no-drag.
   return (
-    <div className="flex h-12 shrink-0 items-center gap-3.5 border-b bg-sidebar px-4">
+    <div className="flex h-12 shrink-0 items-center gap-3.5 border-b bg-sidebar py-0 pr-2 pl-4 [-webkit-app-region:drag]">
       <div className="flex min-w-0 items-center gap-2">
         <div className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-primary text-sm font-bold text-primary-foreground">
           m
@@ -56,12 +60,11 @@ export function TopBar() {
           if (v === 'export') setExportOpen(true);
           else setMode(v);
         }}
-        className={!hasFolder ? 'opacity-50' : undefined}
+        className={cn('[-webkit-app-region:no-drag]', !hasFolder && 'opacity-50')}
       />
       <div className="flex flex-1 items-center justify-end gap-3" data-testid="task-tray">
-        <TopBarTasks />
         <button
-          className="flex h-[30px] items-center gap-2 rounded-lg border border-border bg-secondary px-3 text-xs text-muted-foreground hover:text-foreground dark:bg-white/5"
+          className="flex h-[30px] items-center gap-2 rounded-lg border border-border bg-secondary px-3 text-xs text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag] dark:bg-white/5"
           onClick={() => setPaletteOpen(true)}
           disabled={!hasFolder}
           style={!hasFolder ? { opacity: 0.5 } : undefined}
@@ -69,6 +72,9 @@ export function TopBar() {
           <span>Jump to anything</span>
           <span className="rounded bg-black/10 px-1.5 py-px font-mono dark:bg-white/10">⌘K</span>
         </button>
+        <TopBarTasks />
+        {window.win && <div className="h-[22px] w-px bg-black/10 dark:bg-white/9" />}
+        <WindowControls />
       </div>
     </div>
   );
@@ -89,7 +95,7 @@ function TopBarTasks() {
     t.total ? Math.round(((t.current ?? 0) / t.total) * 100) : undefined;
 
   return (
-    <div className="relative">
+    <div className="relative [-webkit-app-region:no-drag]">
       {running.length <= 1 && running[0] ? (
         <TaskChip
           label={running[0].title}

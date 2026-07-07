@@ -101,7 +101,6 @@ function GridCell({ photo, w, h }: { photo: Photo; w: number; h: number }) {
   const selected = useUIStore((s) => s.selection.has(photo.id));
   const multiSelect = useUIStore((s) => s.selection.size > 1);
   const focus = useUIStore((s) => s.focus);
-  const setView = useUIStore((s) => s.setView);
   const [loaded, setLoaded] = useState(false);
   const level = w * window.devicePixelRatio > 256 ? '512' : '256';
   const isFocus = focusId === photo.id;

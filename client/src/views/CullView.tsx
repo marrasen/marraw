@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
 import { CinemaImage } from '@/views/LoupeView';
@@ -7,25 +7,29 @@ import { ConfirmBar } from '@/components/cinema/ConfirmBar';
 import { ScrubberDeck } from '@/components/cinema/ScrubberDeck';
 import { ContactSheet } from '@/components/cinema/ContactSheet';
 import { GapControl } from '@/components/cinema/GapControl';
+import { ZoomCluster } from '@/components/cinema/ZoomCluster';
 import { esLoad, useEditSession } from '@/lib/editSession';
 import { groupByGap, timeLabel } from '@/lib/timeGaps';
 import { useIdle } from '@/lib/useIdle';
 import { useUIStore } from '@/stores/uiStore';
 
 /**
- * Cull mode: the cinema confirm loupe with the time-gap scrubber deck.
- * Arrow through the take; rate and flag against the full-size preview.
- * Zooming in swaps the triage furniture for the loupe's zoom furniture.
+ * Cull mode: the cinema confirm loupe with the time-gap scrubber deck. The
+ * confirm bar (with its embedded zoom cluster) and the deck stay up whether
+ * the photo sits at fit or 1:1.
  */
 export function CullView({ photos }: { photos: Photo[] }) {
   const client = useApiClient();
   const focusId = useUIStore((s) => s.focusId);
   const contactSheet = useUIStore((s) => s.contactSheet);
   const gapMinutes = useUIStore((s) => s.gapMinutes);
-  const zoom = useUIStore((s) => s.loupeZoom);
   const cropping = useEditSession((s) => s.cropping);
   const wbPicking = useEditSession((s) => s.wbPicking);
   const idle = useIdle();
+  const [zoomInfo, setZoomInfo] = useState<{ scale: number; rendering: boolean }>({
+    scale: 1,
+    rendering: false,
+  });
 
   const photo = photos.find((p) => p.id === focusId) ?? photos[0];
   const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
@@ -54,26 +58,33 @@ export function CullView({ photos }: { photos: Photo[] }) {
   }
 
   const idx = photos.findIndex((p) => p.id === photo.id);
-  const triage = zoom === 'fit'; // zoomed in → loupe furniture instead
   const overlayActive = cropping || wbPicking;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-      <CinemaImage photo={photo} photos={photos} hideChrome={triage} />
+      <CinemaImage
+        photo={photo}
+        photos={photos}
+        onZoomInfo={(scale, rendering) => setZoomInfo({ scale, rendering })}
+        renderingBadgeBottom={216}
+        navigatorBottom={124}
+      />
       {!overlayActive && (
-        <CinemaHUD
-          hidden={idle}
-          status={
-            <span className="font-mono text-[11px] text-[#aab0ff]">
-              {photo.takenAt > 0 && `${timeLabel(photo.takenAt)} · `}frame {idx + 1}
-            </span>
-          }
-          right={<GapControl glass />}
-        />
-      )}
-      {triage && !overlayActive && (
         <>
-          <ConfirmBar photo={photo} hidden={idle} />
+          <CinemaHUD
+            hidden={idle}
+            status={
+              <span className="font-mono text-[11px] text-[#aab0ff]">
+                {photo.takenAt > 0 && `${timeLabel(photo.takenAt)} · `}frame {idx + 1}
+              </span>
+            }
+            right={<GapControl glass />}
+          />
+          <ConfirmBar
+            photo={photo}
+            hidden={idle}
+            zoom={<ZoomCluster scale={zoomInfo.scale} rendering={zoomInfo.rendering} />}
+          />
           <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} />
         </>
       )}

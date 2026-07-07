@@ -8,6 +8,15 @@ declare global {
       getPathForFile: (file: File) => string;
       isDirectory: (path: string) => Promise<boolean>;
     };
+    win?: {
+      minimize: () => void;
+      toggleMax: () => void;
+      close: () => void;
+      toggleFullScreen: () => void;
+      isMax: () => Promise<boolean>;
+      onMaxChange: (cb: (max: boolean) => void) => void;
+      onFullScreenChange: (cb: (fs: boolean) => void) => void;
+    };
   }
 }
 

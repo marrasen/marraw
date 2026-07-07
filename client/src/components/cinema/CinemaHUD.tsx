@@ -1,4 +1,5 @@
 import { Segmented } from '@/components/ui/segmented';
+import { WindowControls } from '@/components/WindowControls';
 import { useConnection } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
@@ -42,7 +43,10 @@ export function CinemaHUD({
         hidden && 'opacity-0',
       )}
     >
-      <div className={cn('absolute top-4 left-[18px]', !hidden && 'pointer-events-auto')}>
+      {/* The top band doubles as the frameless window's move handle; the
+          glass clusters below carve themselves out with no-drag. */}
+      <div className="pointer-events-auto absolute inset-x-0 top-0 h-12 [-webkit-app-region:drag]" />
+      <div className={cn('absolute top-4 left-[18px] [-webkit-app-region:no-drag]', !hidden && 'pointer-events-auto')}>
         <div className="glass flex items-center gap-2.5 rounded-[9px] px-3 py-[7px]">
           <div className="flex size-[18px] items-center justify-center rounded-[5px] bg-primary text-[11px] font-bold text-primary-foreground">
             m
@@ -60,7 +64,7 @@ export function CinemaHUD({
           />
         </div>
       </div>
-      <div className={cn('absolute top-4 left-1/2 -translate-x-1/2', !hidden && 'pointer-events-auto')}>
+      <div className={cn('absolute top-4 left-1/2 -translate-x-1/2 [-webkit-app-region:no-drag]', !hidden && 'pointer-events-auto')}>
         <Segmented
           aria-label="Mode"
           variant="glass"
@@ -72,9 +76,15 @@ export function CinemaHUD({
           }}
         />
       </div>
-      {right && (
-        <div className={cn('absolute top-4 right-[18px]', !hidden && 'pointer-events-auto')}>{right}</div>
-      )}
+      <div
+        className={cn(
+          'absolute top-4 right-[18px] flex items-center gap-3 [-webkit-app-region:no-drag]',
+          !hidden && 'pointer-events-auto',
+        )}
+      >
+        {right}
+        <WindowControls variant="glass" />
+      </div>
     </div>
   );
 }

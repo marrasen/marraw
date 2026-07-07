@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useVirtualizer } from '@tanstack/react-virtual';
-import { Crop as CropIcon, Pipette, Star, Check, X } from 'lucide-react';
+import { Crop as CropIcon, Pipette } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -14,27 +13,6 @@ import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
 import type { Params } from '@/api/edits';
-
-// LoupeView is kept as the plain full-viewer wrapper (legacy view state);
-// the cinema modes compose CinemaImage + their own floating chrome instead.
-export function LoupeView({ photos }: { photos: Photo[] }) {
-  const focusId = useUIStore((s) => s.focusId);
-  const photo = photos.find((p) => p.id === focusId) ?? photos[0];
-
-  if (!photo) {
-    return (
-      <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-        Nothing to show.
-      </div>
-    );
-  }
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <CinemaImage photo={photo} photos={photos} />
-      <Filmstrip photos={photos} currentId={photo.id} />
-    </div>
-  );
-}
 
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
 // fraction space (crop-width-fraction / crop-height-fraction), accounting for
@@ -76,8 +54,8 @@ function CropBar({
       <div className="h-[26px] w-px bg-white/15" />
       <div className="flex items-center gap-2.5">
         <span className="text-[11.5px] text-muted-foreground">Straighten</span>
-        <Slider
-          className="w-[150px]"
+        <div className="w-[150px]">
+          <Slider
           value={shown}
           min={-15}
           max={15}
@@ -92,7 +70,8 @@ function CropBar({
             setDragging(null);
             esCommit(client, { cropAngle: v as number });
           }}
-        />
+          />
+        </div>
         <span className="w-[44px] text-right font-mono text-[11.5px] tabular-nums">
           {shown >= 0 ? '+' : ''}
           {shown.toFixed(1)}°
@@ -176,18 +155,24 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
 }
 
 // CinemaImage is the shared photo engine of every cinema surface: the
-// pannable/zoomable image with tile sharpening, plus its own floating
-// furniture (zoom bar, navigator, rendering indicator, crop overlay, WB
-// eyedropper). `hideChrome` lets Cull swap the zoom furniture for its
-// confirm bar while the photo sits at fit.
+// pannable/zoomable image (over an accent-tinted radial backdrop) with tile
+// sharpening, navigator inset, rendering indicator, and the crop / WB
+// overlays. Zoom controls live in each mode's own control bar, fed through
+// onZoomInfo.
 export function CinemaImage({
   photo,
   photos,
-  hideChrome,
+  onZoomInfo,
+  renderingBadgeBottom = 180,
+  navigatorBottom = 18,
 }: {
   photo: Photo;
   photos: Photo[];
-  hideChrome?: boolean;
+  /** Reports the effective scale + rendering state for embedded zoom UIs. */
+  onZoomInfo?: (scale: number, rendering: boolean) => void;
+  /** Bottom offset of the "Rendering full resolution" badge (above the mode's control bar). */
+  renderingBadgeBottom?: number;
+  navigatorBottom?: number;
 }) {
   const client = useApiClient();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -404,6 +389,21 @@ export function CinemaImage({
   const rendering = wantTiles && pendingTiles[0] > 0;
   const firstDecode = rendering && pendingTiles[1] === 0;
 
+  // Parents embed the zoom cluster in their own control bars.
+  const onZoomInfoRef = useRef(onZoomInfo);
+  onZoomInfoRef.current = onZoomInfo;
+  useEffect(() => {
+    onZoomInfoRef.current?.(scale, rendering);
+  }, [scale, rendering]);
+
+  // Navigator drag / click pans the viewport to the pointed-at fraction.
+  const panTo = (fx: number, fy: number) => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.scrollLeft = fx * boxW - el.clientWidth / 2;
+    el.scrollTop = fy * boxH - el.clientHeight / 2;
+  };
+
   const onMagnifierMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!wbPicking) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -421,7 +421,13 @@ export function CinemaImage({
   })();
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden bg-inset">
+    <div
+      className="relative min-h-0 flex-1 overflow-hidden"
+      style={{
+        background:
+          'radial-gradient(120% 90% at 50% 38%, color-mix(in oklch, var(--primary) 14%, var(--background)), var(--background) 68%)',
+      }}
+    >
       <div
         ref={containerRef}
         className={cn(
@@ -500,7 +506,10 @@ export function CinemaImage({
         </div>
       )}
       {firstDecode && (
-        <div className="glass pointer-events-none absolute top-1/2 left-1/2 z-40 flex -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-xl px-[18px] py-[13px]">
+        <div
+          className="glass pointer-events-none absolute left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl px-[18px] py-[13px]"
+          style={{ bottom: renderingBadgeBottom }}
+        >
           <ChipSpinner className="size-[19px]" />
           <div className="flex flex-col gap-0.5">
             <span className="text-[13.5px] font-semibold text-foreground">Rendering full resolution</span>
@@ -538,19 +547,15 @@ export function CinemaImage({
           onPickAspect={applyAspect}
         />
       ) : (
-        !hideChrome &&
         !wbPicking && (
-          <>
-            <ZoomBar
-              photos={photos}
-              photo={photo}
-              scale={scale}
-              isFit={zoom === 'fit'}
-              setZoom={setZoom}
-              rendering={rendering}
-            />
-            <NavigatorInset photo={photo} scale={scale} viewport={viewport} isFit={zoom === 'fit'} />
-          </>
+          <NavigatorInset
+            photo={photo}
+            scale={scale}
+            viewport={viewport}
+            isFit={zoom === 'fit'}
+            bottom={navigatorBottom}
+            onPan={panTo}
+          />
         )
       )}
     </div>
@@ -673,28 +678,57 @@ function NavigatorInset({
   scale,
   viewport,
   isFit,
+  bottom = 18,
+  onPan,
 }: {
   photo: Photo;
   scale: number;
   viewport: [number, number, number, number];
   isFit: boolean;
+  bottom?: number;
+  /** Center the main viewport on this image fraction (drag or click). */
+  onPan?: (fx: number, fy: number) => void;
 }) {
   const [vx, vy, vw, vh] = viewport;
+  const [dragging, setDragging] = useState(false);
   const zoomed = vw < 0.999 || vh < 0.999;
   if (isFit && !zoomed) return null;
+
+  const panFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    onPan?.(
+      Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+      Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+    );
+  };
+
   return (
-    <div className="glass absolute right-[18px] bottom-[18px] z-30 w-[200px] rounded-[11px] p-[9px]">
+    <div className="glass absolute right-[18px] z-30 w-[200px] rounded-[11px] p-[9px]" style={{ bottom }}>
       <div className="mb-[7px] flex items-center justify-between">
         <span className="text-[10px] tracking-[.06em] text-muted-foreground uppercase">Navigator</span>
         <span className="font-mono text-[10.5px] text-accent-text tabular-nums">
           {Math.round(scale * 100)}%
         </span>
       </div>
-      <div className="relative overflow-hidden rounded-md">
+      <div
+        className={cn('relative touch-none overflow-hidden rounded-md', zoomed && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
+        onPointerDown={(e) => {
+          if (!zoomed) return;
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+          setDragging(true);
+          panFromEvent(e);
+        }}
+        onPointerMove={(e) => dragging && panFromEvent(e)}
+        onPointerUp={(e) => {
+          setDragging(false);
+          e.currentTarget.releasePointerCapture?.(e.pointerId);
+        }}
+        onPointerCancel={() => setDragging(false)}
+      >
         <img src={imgUrl(photo, '256')} alt="" draggable={false} className="block w-full" />
         {zoomed && (
           <div
-            className="absolute rounded-[2px] border-[1.5px] border-white"
+            className="pointer-events-none absolute rounded-[2px] border-[1.5px] border-white"
             style={{
               left: `${vx * 100}%`,
               top: `${vy * 100}%`,
@@ -703,95 +737,6 @@ function NavigatorInset({
               boxShadow: '0 0 0 999px rgba(0,0,0,.34)',
             }}
           />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ZoomBar: the glass zoom control (handoff plate "LOUPE") — frame stepper,
-// Fit/1:1 segmented, zoom slider + readout, and the rendering state while
-// 1:1 tiles decode.
-function ZoomBar({
-  photos,
-  photo,
-  scale,
-  isFit,
-  setZoom,
-  rendering,
-}: {
-  photos: Photo[];
-  photo: Photo;
-  scale: number;
-  isFit: boolean;
-  setZoom: (z: 'fit' | number) => void;
-  rendering: boolean;
-}) {
-  const idx = photos.findIndex((p) => p.id === photo.id);
-  const move = (delta: number) => {
-    const next = photos[idx + delta];
-    if (next) useUIStore.getState().focus(next.id);
-  };
-  return (
-    <div className="glass absolute bottom-[18px] left-1/2 z-30 flex -translate-x-1/2 items-center gap-3.5 rounded-[13px] px-4 py-2.5">
-      <div className="flex items-center gap-[7px] font-mono text-xs text-secondary-foreground">
-        <button
-          className="flex size-[26px] items-center justify-center rounded-[7px] border border-white/15 text-muted-foreground hover:text-foreground disabled:opacity-40"
-          disabled={idx <= 0}
-          onClick={() => move(-1)}
-          aria-label="Previous photo"
-        >
-          ‹
-        </button>
-        <span className="tabular-nums">
-          {(idx + 1).toLocaleString()} / {photos.length.toLocaleString()}
-        </span>
-        <button
-          className="flex size-[26px] items-center justify-center rounded-[7px] border border-white/15 text-muted-foreground hover:text-foreground disabled:opacity-40"
-          disabled={idx >= photos.length - 1}
-          onClick={() => move(1)}
-          aria-label="Next photo"
-        >
-          ›
-        </button>
-      </div>
-      <div className="h-[26px] w-px bg-white/15" />
-      <Segmented
-        aria-label="Zoom mode"
-        size="sm"
-        items={[
-          { value: 'fit', label: 'Fit' },
-          { value: '1:1', label: '1:1' },
-        ]}
-        value={isFit ? 'fit' : '1:1'}
-        onValueChange={(v) => setZoom(v === 'fit' ? 'fit' : 1)}
-        className="border-0 bg-white/5"
-      />
-      <div className="flex items-center gap-2.5">
-        <button className="text-[15px] text-muted-foreground" onClick={() => setZoom(Math.max(0.05, scale * 0.8))} aria-label="Zoom out">
-          −
-        </button>
-        <Slider
-          className="w-[150px]"
-          value={Math.round(scale * 100)}
-          min={5}
-          max={400}
-          step={5}
-          onValueChange={(v) => setZoom((v as number) / 100)}
-          aria-label="Zoom"
-        />
-        <button className="text-[15px] text-muted-foreground" onClick={() => setZoom(Math.min(4, scale * 1.25))} aria-label="Zoom in">
-          +
-        </button>
-        {rendering ? (
-          <span className="flex w-[110px] items-center gap-2 font-mono text-[11.5px] text-[#aab0ff]">
-            <ChipSpinner className="size-[13px]" />
-            Rendering {Math.round(scale * 100)}%
-          </span>
-        ) : (
-          <span className="w-[42px] text-right font-mono text-[11.5px] tabular-nums">
-            {Math.round(scale * 100)}%
-          </span>
         )}
       </div>
     </div>
@@ -980,88 +925,4 @@ export function DecodedImage({
     };
   }, [src]);
   return <img src={shown} draggable={false} alt="" className={className} style={style} />;
-}
-
-export function Filmstrip({ photos, currentId }: { photos: Photo[]; currentId: number }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const focus = useUIStore((s) => s.focus);
-  const selection = useUIStore((s) => s.selection);
-  const virtualizer = useVirtualizer({
-    horizontal: true,
-    count: photos.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 96,
-    overscan: 10,
-  });
-
-  const currentIndex = photos.findIndex((p) => p.id === currentId);
-  useEffect(() => {
-    if (currentIndex >= 0) virtualizer.scrollToIndex(currentIndex);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex]);
-
-  return (
-    <div
-      ref={scrollRef}
-      data-testid="filmstrip"
-      className="no-scrollbar h-16 w-[720px] max-w-[80vw] shrink-0 overflow-x-auto"
-    >
-      <div className="relative h-full" style={{ width: virtualizer.getTotalSize() }}>
-        {virtualizer.getVirtualItems().map((item) => {
-          const p = photos[item.index];
-          const selected = selection.has(p.id);
-          return (
-            <button
-              key={p.id}
-              className={cn(
-                'absolute top-0 h-full p-1',
-                p.id === currentId && 'bg-accent',
-                selected && p.id !== currentId && 'bg-primary/20',
-                p.flag === 'exclude' && 'opacity-40',
-              )}
-              style={{ left: item.start, width: 96 }}
-              onClick={(e) => focus(p.id, { extend: e.shiftKey, toggle: e.ctrlKey || e.metaKey })}
-            >
-              <span className={cn('relative block size-full rounded-sm', selected && 'ring-2 ring-primary')}>
-                <img
-                  src={imgUrl(p, '256')}
-                  alt={p.fileName}
-                  draggable={false}
-                  loading="lazy"
-                  className="size-full rounded-sm object-contain"
-                />
-                <FilmstripBadges photo={p} />
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// FilmstripBadges overlays the cull state on a thumbnail: rating stars at
-// the bottom left, pick/exclude at the top right.
-function FilmstripBadges({ photo }: { photo: Photo }) {
-  if (photo.rating === 0 && photo.flag === 'none') return null;
-  return (
-    <>
-      {photo.rating > 0 && (
-        <span data-testid="strip-rating" className="absolute bottom-0.5 left-0.5 flex items-center gap-px rounded bg-black/60 px-1 py-px text-[10px] text-amber-400">
-          {photo.rating}
-          <Star className="size-2.5 fill-amber-400 text-amber-400" />
-        </span>
-      )}
-      {photo.flag === 'pick' && (
-        <span className="absolute top-0.5 right-0.5 rounded-full bg-black/60 p-0.5">
-          <Check className="size-3 text-emerald-400" aria-label="Pick" />
-        </span>
-      )}
-      {photo.flag === 'exclude' && (
-        <span className="absolute top-0.5 right-0.5 rounded-full bg-black/60 p-0.5">
-          <X className="size-3 text-red-400" aria-label="Excluded" />
-        </span>
-      )}
-    </>
-  );
 }

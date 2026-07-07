@@ -7,3 +7,14 @@ contextBridge.exposeInMainWorld('marraw', {
   getPathForFile: (file) => webUtils.getPathForFile(file),
   isDirectory: (path) => ipcRenderer.invoke('marraw:is-directory', path),
 });
+
+// Frameless-window controls (diff handoff "frameless window + baked-in controls").
+contextBridge.exposeInMainWorld('win', {
+  minimize: () => ipcRenderer.send('win:minimize'),
+  toggleMax: () => ipcRenderer.send('win:toggleMax'),
+  close: () => ipcRenderer.send('win:close'),
+  toggleFullScreen: () => ipcRenderer.send('win:toggleFullScreen'),
+  isMax: () => ipcRenderer.invoke('win:isMax'),
+  onMaxChange: (cb) => ipcRenderer.on('win:maxChanged', (_e, v) => cb(v)),
+  onFullScreenChange: (cb) => ipcRenderer.on('win:fullscreenChanged', (_e, v) => cb(v)),
+});

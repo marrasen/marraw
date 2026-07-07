@@ -68,7 +68,9 @@ async function createWindow() {
   const win = new BrowserWindow({
     width: 1500,
     height: 950,
-    backgroundColor: '#0a0a0a',
+    minWidth: 1280, // the handoff's "minimum comfortable window"
+    frame: false, // no native title bar — marraw draws its own controls
+    backgroundColor: '#0c0d0f',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -80,6 +82,18 @@ async function createWindow() {
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+  // Baked-in window controls (frameless): renderer buttons drive these, and
+  // the maximize/fullscreen state flows back so glyphs and Esc behave.
+  ipcMain.on('win:minimize', () => win.minimize());
+  ipcMain.on('win:toggleMax', () => (win.isMaximized() ? win.unmaximize() : win.maximize()));
+  ipcMain.on('win:close', () => win.close());
+  ipcMain.on('win:toggleFullScreen', () => win.setFullScreen(!win.isFullScreen()));
+  ipcMain.handle('win:isMax', () => win.isMaximized());
+  win.on('maximize', () => win.webContents.send('win:maxChanged', true));
+  win.on('unmaximize', () => win.webContents.send('win:maxChanged', false));
+  win.on('enter-full-screen', () => win.webContents.send('win:fullscreenChanged', true));
+  win.on('leave-full-screen', () => win.webContents.send('win:fullscreenChanged', false));
 
   const query = { apiPort: String(backend.port), token: backend.token };
   if (process.env.MARRAW_OPEN_FOLDER) query.openFolder = process.env.MARRAW_OPEN_FOLDER;
