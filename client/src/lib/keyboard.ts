@@ -129,10 +129,12 @@ export function useKeyboard() {
         return;
       }
 
-      // R toggles crop mode (needs a loupe surface, where the overlay lives).
+      // R toggles crop mode (needs a cinema surface, where the overlay
+      // lives) — entering from Library switches to Develop for real, so the
+      // mode tabs stay truthful.
       if (e.key.toLowerCase() === 'r' && es.draft) {
         e.preventDefault();
-        if (!es.cropping && s.mode === 'library') s.setView('loupe');
+        if (!es.cropping && s.mode === 'library') s.setMode('develop');
         esSetCropping(client, !es.cropping);
         return;
       }

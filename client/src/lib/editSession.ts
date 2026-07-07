@@ -191,6 +191,10 @@ interface Preview {
   photoId: number;
   url: string; // object URL of the preview JPEG
   blob: Blob;
+  // Rendered with crop + straighten stripped (the flat full frame crop mode
+  // draws its overlay + CSS rotation over). Set from the same `cropping` that
+  // built the render params, so the tag can never disagree with the pixels.
+  flat: boolean;
 }
 
 interface HistoryEntry {
@@ -268,12 +272,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
   previewAbort?.abort();
   esClearPreview();
   setState({ photoId, applyIds, draft: null, loading: true, wbPicking: false, cropping: false });
-  let params: Params | null = null;
-  try {
-    params = await getEditParams(client, photoId);
-  } catch {
-    params = null;
-  }
+  const params = await getEditParams(client, photoId).catch(() => null);
   if (useEditSession.getState().photoId !== photoId) return; // superseded
   const draft = params ?? { ...NEUTRAL };
   setState((s) => {
@@ -377,7 +376,7 @@ async function renderPreview(client: ApiClient, full: boolean) {
     const url = URL.createObjectURL(blob);
     const old = useEditSession.getState().preview;
     if (old) URL.revokeObjectURL(old.url);
-    setState({ preview: { photoId, url, blob } });
+    setState({ preview: { photoId, url, blob, flat: cropping } });
   } catch {
     // aborted or superseded
   } finally {

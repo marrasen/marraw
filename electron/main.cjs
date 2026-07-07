@@ -7,6 +7,16 @@ const path = require('node:path');
 const readline = require('node:readline');
 
 const DEV = process.env.MARRAW_DEV === '1';
+// Scripted harness runs (ui-verify, shot): animation frames must keep
+// flowing even when the window is occluded. webPreferences.backgroundThrottling
+// alone does not cover Chromium's compositor-side occlusion backgrounding —
+// an occluded window stops getting BeginFrames and every rAF-coalesced code
+// path (edit-draft flushes, the zoom tween) silently stalls mid-test.
+const UITEST = !!(process.env.MARRAW_UITEST || process.env.MARRAW_SCREENSHOT);
+if (UITEST) {
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+}
 let child = null;
 let quitting = false;
 
@@ -77,6 +87,10 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Harness runs must keep animation frames flowing even when the window
+      // is occluded: draft updates and the zoom tween are rAF-driven. Works
+      // together with the occlusion switches set at startup (see UITEST).
+      backgroundThrottling: !UITEST,
     },
   });
   win.setMenuBarVisibility(false);
@@ -106,7 +120,9 @@ async function createWindow() {
     // MARRAW_VITE_PORT points dev Electron at the right instance.
     const vitePort = process.env.MARRAW_VITE_PORT || '5173';
     await win.loadURL(`http://localhost:${vitePort}/?${qs}`);
-    win.webContents.openDevTools({ mode: 'detach' });
+    // The detached DevTools window opens right on top of the app window —
+    // in harness runs that occlusion is what used to stall rAF (see UITEST).
+    if (!UITEST) win.webContents.openDevTools({ mode: 'detach' });
   } else {
     await win.loadFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'), { query });
   }

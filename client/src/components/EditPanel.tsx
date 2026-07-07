@@ -69,9 +69,13 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
   const ids = selection.size > 1 ? [...selection] : focusId != null ? [focusId] : [];
 
   // Open an edit session whenever the focus moves; keep commit targets in
-  // sync when only the selection changes.
+  // sync when only the selection changes. A remount with the session already
+  // on the focused photo (Library aside ⇄ Develop drawer swap on mode
+  // switches) must NOT reload: esLoad resets overlay state, which would kill
+  // the crop overlay in the very click that opened it from Library.
   useEffect(() => {
-    if (focusId != null) void esLoad(client, focusId, ids);
+    if (focusId != null && useEditSession.getState().photoId !== focusId)
+      void esLoad(client, focusId, ids);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, focusId]);
   const idsKey = ids.join(',');
@@ -206,7 +210,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
   const canRedo = useEditSession(esCanRedo);
   const setClipboard = useUIStore((s) => s.setClipboard);
   const clipboard = useUIStore((s) => s.clipboard);
-  const setView = useUIStore((s) => s.setView);
+  const setMode = useUIStore((s) => s.setMode);
 
   if (!draft) return <div className="p-4 text-sm text-muted-foreground">Loading edits…</div>;
 
@@ -269,8 +273,9 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           variant={cropping ? 'default' : 'outline'}
           className="justify-start"
           onClick={() => {
-            // The overlay lives in the loupe, so entering crop opens it.
-            if (!cropping) setView('loupe');
+            // The overlay lives on the Develop canvas, so entering crop from
+            // Library switches mode for real (keeps the mode tabs truthful).
+            if (!cropping) setMode('develop');
             esSetCropping(client, !cropping);
           }}
           title="Crop &amp; straighten (R)"
@@ -296,7 +301,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           onFocusControl={() => {
             esSetActive('cropAngle');
             if (!cropping) {
-              setView('loupe');
+              setMode('develop');
               esSetCropping(client, true);
             }
           }}

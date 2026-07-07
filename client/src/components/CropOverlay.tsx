@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Params } from '@/api/edits';
 import { cn } from '@/lib/utils';
-import { fitCropToRotation, rectCornersCovered } from '@/lib/crop';
+import { fitCropToRotation, maxCoveredT, rectCornersCovered, slideMoveRect } from '@/lib/crop';
 
 // Which edges a drag moves. Corner/edge handles set one or both; an interior
 // drag moves the whole rectangle.
@@ -104,10 +104,15 @@ export function CropOverlay({
     return { x, y, w, h };
   };
 
-  const onPointerDown = (grip: Grip) => (e: React.PointerEvent) => {
+  const beginDrag = (e: React.PointerEvent, grip: Grip) => {
     e.stopPropagation();
     e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    } catch {
+      // Capture only widens the drag beyond the handle; a pointer that can't
+      // be captured (synthetic test events) still drags.
+    }
     const [px, py] = pointFrac(e);
     drag.current = { grip, startRect: rect, startX: px, startY: py };
     setActive(true);
@@ -119,33 +124,51 @@ export function CropOverlay({
     const { grip, startRect: s, startX, startY } = drag.current;
     const dx = px - startX;
     const dy = py - startY;
-    let rc: Rect = { ...s };
 
-    if (grip === 'move') {
-      rc.x = clamp01(Math.min(s.x + dx, 1 - s.w));
-      rc.y = clamp01(Math.min(s.y + dy, 1 - s.h));
-      if (s.x + dx < 0) rc.x = 0;
-      if (s.y + dy < 0) rc.y = 0;
-    } else {
-      let left = s.x;
-      let top = s.y;
-      let right = s.x + s.w;
-      let bottom = s.y + s.h;
-      if (grip.includes('w')) left = clamp01(Math.min(s.x + dx, right - MIN));
-      if (grip.includes('e')) right = clamp01(Math.max(s.x + s.w + dx, left + MIN));
-      if (grip.includes('n')) top = clamp01(Math.min(s.y + dy, bottom - MIN));
-      if (grip.includes('s')) bottom = clamp01(Math.max(s.y + s.h + dy, top + MIN));
-      rc = { x: left, y: top, w: right - left, h: bottom - top };
-      rc = applyRatio(rc, grip);
+    // The whole candidate pipeline as a function of the applied delta, so
+    // the coverage clamp below can probe scaled-back deltas with every
+    // invariant (edge clamps, MIN floor, aspect lock, frame clamps) intact.
+    const compute = (fx: number, fy: number): Rect => {
+      let rc: Rect = { ...s };
+      if (grip === 'move') {
+        rc.x = clamp01(Math.min(s.x + fx, 1 - s.w));
+        rc.y = clamp01(Math.min(s.y + fy, 1 - s.h));
+        if (s.x + fx < 0) rc.x = 0;
+        if (s.y + fy < 0) rc.y = 0;
+      } else {
+        let left = s.x;
+        let top = s.y;
+        let right = s.x + s.w;
+        let bottom = s.y + s.h;
+        if (grip.includes('w')) left = clamp01(Math.min(s.x + fx, right - MIN));
+        if (grip.includes('e')) right = clamp01(Math.max(s.x + s.w + fx, left + MIN));
+        if (grip.includes('n')) top = clamp01(Math.min(s.y + fy, bottom - MIN));
+        if (grip.includes('s')) bottom = clamp01(Math.max(s.y + s.h + fy, top + MIN));
+        rc = { x: left, y: top, w: right - left, h: bottom - top };
+        rc = applyRatio(rc, grip);
+      }
+      // Final clamp into the frame.
+      rc.w = Math.min(rc.w, 1 - Math.max(0, rc.x));
+      rc.h = Math.min(rc.h, 1 - Math.max(0, rc.y));
+      rc.x = clamp01(rc.x);
+      rc.y = clamp01(rc.y);
+      return rc;
+    };
+
+    let rc = compute(dx, dy);
+    // With a straighten angle, a drag that would cross into the black wedge
+    // slides along the rotated frame's edge instead of freezing: moves keep
+    // the largest usable per-axis components; resizes retreat along the
+    // pointer ray. Recomputed from the start rect + fresh total delta every
+    // event, so there is no drift and never a dropped move.
+    if (draft.cropAngle !== 0 && !rectCornersCovered(rc, draft.cropAngle, frameAspect)) {
+      if (grip === 'move') {
+        rc = slideMoveRect(compute(0, 0), rc, draft.cropAngle, frameAspect);
+      } else {
+        const t = maxCoveredT((k) => compute(k * dx, k * dy), draft.cropAngle, frameAspect);
+        rc = compute(t * dx, t * dy);
+      }
     }
-    // Final clamp into the frame.
-    rc.w = Math.min(rc.w, 1 - Math.max(0, rc.x));
-    rc.h = Math.min(rc.h, 1 - Math.max(0, rc.y));
-    rc.x = clamp01(rc.x);
-    rc.y = clamp01(rc.y);
-    // With a straighten angle, a move that would expose the black wedge is
-    // rejected — the handle stops at the rotated image's edge.
-    if (draft.cropAngle !== 0 && !rectCornersCovered(rc, draft.cropAngle, frameAspect)) return;
     setRect(rc); // local only — no store write while dragging
   };
 
@@ -166,7 +189,7 @@ export function CropOverlay({
 
   const handle = (grip: Grip, cls: string) => (
     <div
-      onPointerDown={onPointerDown(grip)}
+      onPointerDown={(e) => beginDrag(e, grip)}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       className={cn('absolute z-10 touch-none', cls)}
@@ -208,7 +231,7 @@ export function CropOverlay({
       <div
         className={cn('absolute border border-white/85', active && 'border-white')}
         style={box}
-        onPointerDown={onPointerDown('move')}
+        onPointerDown={(e) => beginDrag(e, 'move')}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       >

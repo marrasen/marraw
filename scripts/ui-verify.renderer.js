@@ -30,6 +30,12 @@ try {
   await until(() => ui().visibleIds.length > 0, 30000, 'photos loaded');
   R.photosLoaded = ui().visibleIds.length;
 
+  // The control-presence checks need every collapsible edit group open; an
+  // interactive session may have persisted some collapsed. Set the state
+  // before the panel first mounts (it reads localStorage on mount).
+  for (const g of ['crop', 'tone', 'presence', 'wb', 'color', 'effects', 'detail'])
+    localStorage.setItem(`marraw:editGroup:${g}`, '1');
+
   // --- keyboard focus + loupe -------------------------------------------
   key('ArrowRight');
   await until(() => ui().focusId != null, 5000, 'focus via arrow');
@@ -146,6 +152,9 @@ try {
     buttons().some((b) => b.textContent.trim().startsWith('Crop'));
   key('r'); // toggle crop mode
   await until(() => es().cropping && ui().view === 'loupe', 5000, 'crop mode on');
+  // The overlay (and the CSS-rotation preview) mounts once the flat
+  // crop-stripped render arrives — the CropBar appears instantly.
+  await until(() => document.querySelector('[data-testid="crop-overlay"]'), 15000, 'crop overlay up');
   R.cropOverlay = !!document.querySelector('[data-testid="crop-overlay"]') &&
     ['Free', '1:1', '16:9', 'Done'].every((t) => buttons().some((b) => b.textContent.trim() === t));
   // Straighten previews as a live client-side rotation (no backend render):
@@ -157,8 +166,14 @@ try {
   // wedge the rotation exposes.
   mw.esUpdate({ cropX: 0.05, cropY: 0.05, cropW: 0.9, cropH: 0.9 });
   mw.esUpdate({ cropAngle: 14 });
-  await until(() => es().draft.cropW < 0.9, 3000, 'crop fit to angle').catch(() => {});
-  R.cropFitsAngle = es().draft.cropW < 0.9 && es().draft.cropW > 0.3;
+  // Convergence takes two animation frames (draft flush → CropOverlay fit
+  // effect → second flush); the window is generous because rAF can be
+  // briefly starved under harness load.
+  await until(() => es().draft.cropW < 0.9, 8000, 'crop fit to angle').catch(() => {});
+  R.cropFitsAngle =
+    es().draft.cropW < 0.9 && es().draft.cropW > 0.3
+      ? true
+      : `cropW=${es().draft.cropW} angle=${es().draft.cropAngle} overlay=${!!document.querySelector('[data-testid="crop-overlay"]')} flat=${es().preview?.flat}`;
   // Apply a half-frame crop through the dev bridge, then exit crop mode.
   mw.esUpdate({ cropX: 0.2, cropY: 0.2, cropW: 0.5, cropH: 0.5, cropAngle: 0 });
   await sleep(50);
@@ -169,6 +184,80 @@ try {
   // 3:2-ish frame ≈ the same ratio) and the overlay is gone.
   R.cropOverlayGone = !document.querySelector('[data-testid="crop-overlay"]');
   await sleep(300);
+
+  // --- crop mode survives a straighten commit at tile depth -----------------
+  // Regression (fixed 2026-07-07): a mid-crop commit bumps editHash; at tile
+  // depth the loupe used to evict the flat preview and show the committed
+  // crop-baked rendition stretched into the full-frame box and rotated AGAIN
+  // ("base image looks cropped before rotating").
+  ui().setLoupeZoom(1); // 42MP at 100% is past pyramid depth on any display
+  key('r');
+  await until(() => es().cropping, 5000, 'crop mode re-entered');
+  await until(
+    () => es().preview && es().preview.flat === true && es().preview.photoId === ui().focusId,
+    20000,
+    'flat crop-mode preview',
+  );
+  await until(() => document.querySelector('[data-testid="crop-overlay"]'), 5000, 'overlay over flat frame');
+  mw.esUpdate({ cropAngle: 5 });
+  await sleep(300); // angle lands + CropOverlay's auto-fit pushes back
+  mw.esCommit();
+  await sleep(2500); // PhotoPatchEvent lands (editHash bump — the old eviction trigger)
+  const cropBase = document.querySelector('.overflow-auto img');
+  R.cropCommitKeepsFlat =
+    es().cropping && es().preview && es().preview.flat === true && (cropBase?.src ?? '').startsWith('blob:')
+      ? true
+      : `cropping=${es().cropping} flat=${es().preview?.flat} src=${(cropBase?.src ?? '').slice(0, 30)}`;
+  R.cropCommitKeepsRotation = (cropBase?.style.transform ?? '').includes('rotate(5')
+    ? true
+    : (cropBase?.style.transform || '(none)');
+
+  // --- crop drags slide along the tilted edge instead of freezing -----------
+  // A small interior rect, then one big pointer jump far past the rotated
+  // frame's boundary. The old code rejected any move whose corners left
+  // coverage — a big jump left the rect exactly at its start; now it slides
+  // to the largest covered position (both axes advance).
+  mw.esUpdate({ cropX: 0.4, cropY: 0.4, cropW: 0.2, cropH: 0.2 });
+  await until(() => es().draft.cropX === 0.4, 3000, 'test rect in draft');
+  await sleep(250); // rect resyncs into the overlay
+  const ovl = document.querySelector('[data-testid="crop-overlay"]');
+  const rectEl = ovl.querySelector(':scope > div.border');
+  const ovlRect = ovl.getBoundingClientRect();
+  const cpt = (el, type, fx, fy) =>
+    el.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, cancelable: true, button: 0, buttons: 1, pointerId: 11, isPrimary: true,
+      clientX: ovlRect.left + fx * ovlRect.width, clientY: ovlRect.top + fy * ovlRect.height,
+    }));
+  const posOf = () => [parseFloat(rectEl.style.left), parseFloat(rectEl.style.top)]; // % of frame
+  const p0 = posOf();
+  cpt(rectEl, 'pointerdown', 0.5, 0.5);
+  cpt(rectEl, 'pointermove', 0.02, 0.05); // toward the top-left wedge in one jump
+  cpt(rectEl, 'pointerup', 0.02, 0.05);
+  await sleep(150);
+  const p1 = posOf();
+  // The slide clamp is per-axis sequential (x gets the budget first), so a
+  // drag into a wedge may exhaust x and leave y pinned — assert substantial
+  // total displacement (the old code left the rect exactly at its start).
+  R.cropDragSlides = p0[0] - p1[0] + (p0[1] - p1[1]) > 10 ? true : `(${p0}) -> (${p1})`;
+
+  // A resize handle dragged far outside grows the rect to the largest covered
+  // size instead of sticking at its start size.
+  mw.esUpdate({ cropX: 0.4, cropY: 0.4, cropW: 0.2, cropH: 0.2 });
+  await sleep(250);
+  const seHandle = rectEl.querySelector('.-bottom-2.-right-2');
+  const w0 = parseFloat(rectEl.style.width);
+  cpt(seHandle, 'pointerdown', 0.6, 0.6);
+  cpt(seHandle, 'pointermove', 0.98, 0.98);
+  cpt(seHandle, 'pointerup', 0.98, 0.98);
+  await sleep(150);
+  const w1 = parseFloat(rectEl.style.width);
+  R.cropResizeSlides = w1 > w0 + 5 ? true : `w ${w0}% -> ${w1}%`;
+
+  key('Escape'); // exit crop (commits; Reset below cleans everything)
+  await until(() => !es().cropping, 5000, 'crop exited');
+  ui().setLoupeZoom('fit');
+  await sleep(400);
+
   // Reset back to neutral (persisted) so later checks and the DB start clean.
   buttons().find((b) => b.textContent.trim() === 'Reset')?.click();
   await until(() => es().draft.cropW === 0, 5000, 'crop reset');
@@ -320,11 +409,14 @@ try {
         : `scroll ${sx},${sy} -> ${pane.scrollLeft},${pane.scrollTop}`;
 
     // Ctrl+wheel zooms toward the cursor: the image point under it stays put.
-    const boxEl = pane.firstElementChild;
+    // The image box sits centered in a pan-slack wrapper (see LoupeView), so
+    // its offset in scroll coordinates is half the wrapper/box size delta.
+    const wrapEl = pane.firstElementChild;
+    const boxEl = wrapEl.firstElementChild;
     const imgPxAt = (x, y) => {
       const z = ui().loupeZoom;
-      const offX = Math.max(0, (pane.clientWidth - parseFloat(boxEl.style.width)) / 2);
-      const offY = Math.max(0, (pane.clientHeight - parseFloat(boxEl.style.height)) / 2);
+      const offX = (parseFloat(wrapEl.style.width) - parseFloat(boxEl.style.width)) / 2;
+      const offY = (parseFloat(wrapEl.style.height) - parseFloat(boxEl.style.height)) / 2;
       return [(pane.scrollLeft + x - offX) / z, (pane.scrollTop + y - offY) / z];
     };
     const anchorBefore = imgPxAt(400, 300);
@@ -332,7 +424,7 @@ try {
       bubbles: true, cancelable: true, ctrlKey: true, deltaY: -300,
       clientX: rect.left + 400, clientY: rect.top + 300,
     }));
-    await sleep(200);
+    await sleep(400); // let the zoom tween (~160ms) fully settle
     const anchorAfter = imgPxAt(400, 300);
     const drift = Math.hypot(anchorAfter[0] - anchorBefore[0], anchorAfter[1] - anchorBefore[1]);
     R.loupeWheelAnchor =

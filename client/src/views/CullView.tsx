@@ -8,7 +8,7 @@ import { ScrubberDeck } from '@/components/cinema/ScrubberDeck';
 import { ContactSheet } from '@/components/cinema/ContactSheet';
 import { GapControl } from '@/components/cinema/GapControl';
 import { ZoomCluster } from '@/components/cinema/ZoomCluster';
-import { esLoad, useEditSession } from '@/lib/editSession';
+import { esLoad, esSetApplyIds, useEditSession } from '@/lib/editSession';
 import { groupByGap, timeLabel } from '@/lib/timeGaps';
 import { useIdle } from '@/lib/useIdle';
 import { useUIStore } from '@/stores/uiStore';
@@ -26,18 +26,18 @@ export function CullView({ photos }: { photos: Photo[] }) {
   const cropping = useEditSession((s) => s.cropping);
   const wbPicking = useEditSession((s) => s.wbPicking);
   const idle = useIdle();
-  const [zoomInfo, setZoomInfo] = useState<{ scale: number; rendering: boolean }>({
-    scale: 1,
-    rendering: false,
-  });
+  const [scale, setScale] = useState(1);
 
   const photo = photos.find((p) => p.id === focusId) ?? photos[0];
   const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
 
   // The confirm bar's quick dials need an edit session even though the
-  // Develop panel is not mounted in this mode.
+  // Develop panel is not mounted in this mode. A session already open on
+  // this photo (mode switch) is kept — reloading would reset overlay state.
   useEffect(() => {
-    if (photo) void esLoad(client, photo.id, [photo.id]);
+    if (!photo) return;
+    if (useEditSession.getState().photoId !== photo.id) void esLoad(client, photo.id, [photo.id]);
+    else esSetApplyIds([photo.id]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, photo?.id]);
   useEffect(() => {
@@ -65,7 +65,7 @@ export function CullView({ photos }: { photos: Photo[] }) {
       <CinemaImage
         photo={photo}
         photos={photos}
-        onZoomInfo={(scale, rendering) => setZoomInfo({ scale, rendering })}
+        onZoomInfo={setScale}
         renderingBadgeBottom={216}
         navigatorBottom={124}
       />
@@ -80,11 +80,7 @@ export function CullView({ photos }: { photos: Photo[] }) {
             }
             right={<GapControl glass />}
           />
-          <ConfirmBar
-            photo={photo}
-            hidden={idle}
-            zoom={<ZoomCluster scale={zoomInfo.scale} rendering={zoomInfo.rendering} />}
-          />
+          <ConfirmBar photo={photo} hidden={idle} zoom={<ZoomCluster scale={scale} />} />
           <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} />
         </>
       )}

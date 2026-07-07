@@ -1,17 +1,18 @@
+import { useRef } from 'react';
 import type { Photo } from '@/api/library';
+import type { Params } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { applyFlag, applyRating } from '@/lib/actions';
+import { DIALS, dialValue } from '@/lib/dials';
 import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
 import { MiniSlider } from '@/components/cinema/MiniSlider';
-
-const pct = (v: number) => (v === 0 ? '0' : `${v > 0 ? '+' : ''}${Math.round(v * 100)}`);
-const ev = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
+import { useUIStore } from '@/stores/uiStore';
 
 /**
  * The Cull confirm bar (bottom-center glass): filename + star row, Pick /
- * Reject, the three quick-triage dials (Exposure / Contrast / Temp), and
- * the always-present zoom cluster.
+ * Reject, the user-picked quick dials (Settings → Toolbars; none by default,
+ * which keeps the bar compact), and the always-present zoom cluster.
  */
 export function ConfirmBar({
   photo,
@@ -23,9 +24,18 @@ export function ConfirmBar({
   zoom?: React.ReactNode;
 }) {
   const client = useApiClient();
+  const dials = useUIStore((s) => s.cullDials);
   const draft = useEditSession((s) => s.draft);
   const onDraft = useEditSession((s) => s.photoId) === photo.id && draft != null;
   const displayName = photo.fileName.split(/[\\/]/).pop() ?? photo.fileName;
+
+  // While the next photo's edit session loads, keep showing the last draft
+  // (input disabled) instead of swapping the dials for a placeholder — the
+  // load takes a frame or two and the swap read as flicker while arrowing
+  // through a take.
+  const held = useRef<Params | null>(null);
+  if (onDraft && draft) held.current = draft;
+  const shown = onDraft && draft ? draft : held.current;
 
   return (
     <div
@@ -35,7 +45,11 @@ export function ConfirmBar({
       )}
     >
       <div className="flex flex-col gap-[5px]">
-        <span className="font-mono text-[11.5px]">{displayName}</span>
+        {/* Fixed width: filename length varies shot to shot, and a centered
+            bar re-centers on every change of its natural width. */}
+        <span className="w-[112px] truncate font-mono text-[11.5px]" title={displayName}>
+          {displayName}
+        </span>
         <div className="flex text-[15px] leading-none" role="group" aria-label="Rating">
           {[1, 2, 3, 4, 5].map((n) => (
             <button
@@ -74,45 +88,26 @@ export function ConfirmBar({
           Reject <span className="font-mono text-[10px] opacity-80">X</span>
         </button>
       </div>
-      <div className="h-9 w-px bg-white/15" />
-      {onDraft && draft ? (
+      {dials.length > 0 && (
         <>
-          <MiniSlider
-            label="Exposure"
-            value={draft.expEV}
-            display={ev(draft.expEV)}
-            min={-2}
-            max={3}
-            step={0.05}
-            neutral={0}
-            onChange={(v) => esUpdate(client, { expEV: v })}
-            onCommit={() => esCommit(client)}
-          />
-          <MiniSlider
-            label="Contrast"
-            value={draft.contrast}
-            display={pct(draft.contrast)}
-            min={-1}
-            max={1}
-            step={0.02}
-            neutral={0}
-            onChange={(v) => esUpdate(client, { contrast: v })}
-            onCommit={() => esCommit(client)}
-          />
-          <MiniSlider
-            label="Temp"
-            value={draft.wbTemp}
-            display={pct(draft.wbTemp)}
-            min={-1}
-            max={1}
-            step={0.02}
-            neutral={0}
-            onChange={(v) => esUpdate(client, { wbTemp: v })}
-            onCommit={() => esCommit(client)}
-          />
+          <div className="h-9 w-px bg-white/15" />
+          <div className={cn('flex items-center gap-4', !onDraft && 'pointer-events-none')}>
+            {DIALS.filter((d) => dials.includes(d.key)).map((d) => (
+              <MiniSlider
+                key={d.key}
+                label={d.label}
+                value={dialValue(shown, d.key)}
+                display={d.display(dialValue(shown, d.key))}
+                min={d.min}
+                max={d.max}
+                step={d.step}
+                neutral={0}
+                onChange={(v) => esUpdate(client, { [d.key]: v })}
+                onCommit={() => esCommit(client)}
+              />
+            ))}
+          </div>
         </>
-      ) : (
-        <span className="w-[270px] text-[10.5px] text-muted-foreground">Loading edits…</span>
       )}
       {zoom && (
         <>

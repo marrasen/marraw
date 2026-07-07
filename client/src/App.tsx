@@ -83,7 +83,7 @@ export default function App() {
   const structured = folderId == null || (mode === 'library' && view === 'grid');
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    <div className="app-backdrop flex h-screen flex-col text-foreground">
       {/* Cinema modes are edge-to-edge; their floating HUD replaces the bar. */}
       {structured && <TopBar />}
       <div className="flex min-h-0 flex-1">

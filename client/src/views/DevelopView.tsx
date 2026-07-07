@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Pin, PinOff } from 'lucide-react';
 import type { Photo } from '@/api/library';
+import type { Params } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { CinemaImage } from '@/views/LoupeView';
 import { CinemaHUD, PaletteChip } from '@/components/cinema/CinemaHUD';
@@ -9,21 +10,19 @@ import { MiniSlider } from '@/components/cinema/MiniSlider';
 import { ScrubberDeck } from '@/components/cinema/ScrubberDeck';
 import { ZoomCluster } from '@/components/cinema/ZoomCluster';
 import { EditPanel } from '@/components/EditPanel';
+import { DIALS, dialValue } from '@/lib/dials';
 import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
 import { groupByGap } from '@/lib/timeGaps';
 import { useIdle } from '@/lib/useIdle';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 
-const pct = (v: number) => (v === 0 ? '0' : `${v > 0 ? '+' : ''}${Math.round(v * 100)}`);
-const ev = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
-
 /**
  * Develop mode: the maximal darkroom canvas. The photo fills the window;
- * the full develop stack lives in a pinnable right drawer, the six
- * most-touched dials float as a quick dock (with the always-present zoom
- * cluster), and the same time-gap camera roll as Cull keeps the take in
- * reach.
+ * the full develop stack lives in a pinnable right drawer, the user-picked
+ * quick dials float as a dock with the always-present zoom cluster (none by
+ * default — Settings → Toolbars), and the same time-gap camera roll as Cull
+ * keeps the take in reach.
  */
 export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) {
   const focusId = useUIStore((s) => s.focusId);
@@ -32,10 +31,7 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
   const wbPicking = useEditSession((s) => s.wbPicking);
   const [pinned, setPinned] = useState(() => localStorage.getItem('marraw:developPinned') !== '0');
   const idle = useIdle();
-  const [zoomInfo, setZoomInfo] = useState<{ scale: number; rendering: boolean }>({
-    scale: 1,
-    rendering: false,
-  });
+  const [scale, setScale] = useState(1);
 
   const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
   const photo = photos.find((p) => p.id === focusId) ?? photos[0];
@@ -60,7 +56,7 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
       <CinemaImage
         photo={photo}
         photos={photos}
-        onZoomInfo={(scale, rendering) => setZoomInfo({ scale, rendering })}
+        onZoomInfo={setScale}
         renderingBadgeBottom={216}
         navigatorBottom={pinned ? 18 : 124}
       />
@@ -117,11 +113,7 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
               Develop
             </button>
           )}
-          <QuickDock
-            hidden={idle}
-            shifted={pinned}
-            zoom={<ZoomCluster scale={zoomInfo.scale} rendering={zoomInfo.rendering} />}
-          />
+          <QuickDock hidden={idle} shifted={pinned} zoom={<ZoomCluster scale={scale} />} />
           <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} shifted={pinned} />
         </>
       )}
@@ -129,8 +121,11 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
   );
 }
 
-// QuickDock: the six most-touched dials floating over the canvas, plus the
-// embedded zoom cluster.
+// QuickDock: the user-picked dials floating over the canvas, plus the
+// embedded zoom cluster. With no dials picked (the default) it collapses to
+// just the zoom cluster. Stays rendered while the next photo's edit session
+// loads — the last draft keeps the dials in place (input disabled) so
+// arrowing through a take doesn't blink the dock.
 function QuickDock({
   hidden,
   shifted,
@@ -141,27 +136,11 @@ function QuickDock({
   zoom?: React.ReactNode;
 }) {
   const client = useApiClient();
+  const dials = useUIStore((s) => s.quickDials);
   const draft = useEditSession((s) => s.draft);
-  if (!draft) return null;
-
-  const dial = (
-    label: string,
-    field: 'expEV' | 'contrast' | 'toneHighlights' | 'toneShadows' | 'wbTemp' | 'vibrance',
-    opts: { min: number; max: number; step: number; display: (v: number) => string },
-  ) => (
-    <MiniSlider
-      key={field}
-      label={label}
-      value={draft[field]}
-      display={opts.display(draft[field])}
-      min={opts.min}
-      max={opts.max}
-      step={opts.step}
-      neutral={0}
-      onChange={(v) => esUpdate(client, { [field]: v })}
-      onCommit={() => esCommit(client)}
-    />
-  );
+  const held = useRef<Params | null>(null);
+  if (draft) held.current = draft;
+  const shown = draft ?? held.current;
 
   return (
     <div
@@ -177,24 +156,34 @@ function QuickDock({
         !hidden && 'pointer-events-auto',
       )}
     >
-      <span
-        className="text-[10px] tracking-[.06em] text-muted-foreground uppercase"
-        style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
-      >
-        Quick
-      </span>
-      {dial('Exposure', 'expEV', { min: -2, max: 3, step: 0.05, display: ev })}
-      {dial('Contrast', 'contrast', { min: -1, max: 1, step: 0.02, display: pct })}
-      {dial('Highlights', 'toneHighlights', { min: -1, max: 1, step: 0.02, display: pct })}
-      {dial('Shadows', 'toneShadows', { min: -1, max: 1, step: 0.02, display: pct })}
-      {dial('Temp', 'wbTemp', { min: -1, max: 1, step: 0.02, display: pct })}
-      {dial('Vibrance', 'vibrance', { min: -1, max: 1, step: 0.02, display: pct })}
-      {zoom && (
+      {dials.length > 0 && (
         <>
-          <div className="h-9 w-px bg-white/15" />
-          {zoom}
+          <span
+            className="text-[10px] tracking-[.06em] text-muted-foreground uppercase"
+            style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+          >
+            Quick
+          </span>
+          <div className={cn('flex items-center gap-3.5', !draft && 'pointer-events-none')}>
+            {DIALS.filter((d) => dials.includes(d.key)).map((d) => (
+              <MiniSlider
+                key={d.key}
+                label={d.label}
+                value={dialValue(shown, d.key)}
+                display={d.display(dialValue(shown, d.key))}
+                min={d.min}
+                max={d.max}
+                step={d.step}
+                neutral={0}
+                onChange={(v) => esUpdate(client, { [d.key]: v })}
+                onCommit={() => esCommit(client)}
+              />
+            ))}
+          </div>
+          {zoom && <div className="h-9 w-px bg-white/15" />}
         </>
       )}
+      {zoom}
     </div>
     </div>
   );

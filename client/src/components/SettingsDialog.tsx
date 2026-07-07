@@ -9,6 +9,7 @@ import { Segmented } from '@/components/ui/segmented';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
+import { DIALS, type DialKey } from '@/lib/dials';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
@@ -26,7 +27,7 @@ function formatBytes(n: number): string {
   return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
 }
 
-const SECTIONS = ['General', 'Cache', 'Sidecars', 'Performance'] as const;
+const SECTIONS = ['General', 'Toolbars', 'Cache', 'Sidecars', 'Performance'] as const;
 type Section = (typeof SECTIONS)[number];
 
 /**
@@ -73,6 +74,7 @@ export function SettingsDialog() {
           </div>
           <div className="flex-1 overflow-y-auto p-5">
             {open && section === 'General' && <GeneralSection />}
+            {open && section === 'Toolbars' && <ToolbarsSection />}
             {open && section === 'Cache' && <CacheSection />}
             {open && section === 'Sidecars' && <SidecarSection />}
             {open && section === 'Performance' && <PerformanceSection />}
@@ -123,6 +125,73 @@ function GeneralSection() {
         />
       }
     />
+  );
+}
+
+// ToolbarsSection: which develop dials float in the Cull confirm bar and
+// the Develop quick dock. None (the default) keeps those bars compact.
+function ToolbarsSection() {
+  const cullDials = useUIStore((s) => s.cullDials);
+  const quickDials = useUIStore((s) => s.quickDials);
+  const setCullDials = useUIStore((s) => s.setCullDials);
+  const setQuickDials = useUIStore((s) => s.setQuickDials);
+  return (
+    <div className="flex flex-col">
+      <DialPickerRow
+        title="Cull toolbar dials"
+        description="Develop dials shown in the Cull confirm bar, next to Pick / Reject. None keeps the bar compact."
+        value={cullDials}
+        onChange={setCullDials}
+      />
+      <DialPickerRow
+        title="Develop quick dials"
+        description="Dials floating in the Develop quick dock over the photo. None leaves just the zoom controls."
+        value={quickDials}
+        onChange={setQuickDials}
+      />
+    </div>
+  );
+}
+
+function DialPickerRow({
+  title,
+  description,
+  value,
+  onChange,
+}: {
+  title: string;
+  description: string;
+  value: DialKey[];
+  onChange: (v: DialKey[]) => void;
+}) {
+  // Adding a dial keeps catalog order, so the toolbar layout is stable no
+  // matter the order the user clicks in.
+  const toggle = (k: DialKey) =>
+    onChange(DIALS.map((d) => d.key).filter((x) => (x === k ? !value.includes(k) : value.includes(x))));
+  const chip = (selected: boolean, label: string, onClick: () => void) => (
+    <button
+      key={label}
+      className={cn(
+        'h-7 rounded-lg border px-2.5 text-xs',
+        selected
+          ? 'border-primary/60 bg-primary/15 font-medium text-accent-text'
+          : 'border-input text-muted-foreground hover:text-foreground',
+      )}
+      aria-pressed={selected}
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="border-b py-4 first:pt-0 last:border-0">
+      <div className="text-sm font-medium">{title}</div>
+      <div className="mt-0.5 text-xs leading-normal text-muted-foreground">{description}</div>
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {chip(value.length === 0, 'None', () => onChange([]))}
+        {DIALS.map((d) => chip(value.includes(d.key), d.label, () => toggle(d.key)))}
+      </div>
+    </div>
   );
 }
 

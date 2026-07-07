@@ -7,6 +7,7 @@ import { useMyTasks, cancelSharedTask } from '@/api/tasks';
 import type { SharedTaskState } from '@/api/tasks-handler';
 import { cn } from '@/lib/utils';
 import { WindowControls } from '@/components/WindowControls';
+import { modK } from '@/lib/platform';
 import { useUIStore, type Mode } from '@/stores/uiStore';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
 import { useTaskToasts } from '@/lib/taskToasts';
@@ -40,7 +41,9 @@ export function TopBar() {
   // island is carved back out with no-drag.
   return (
     <div className="flex h-12 shrink-0 items-center gap-3.5 border-b bg-sidebar py-0 pr-2 pl-4 [-webkit-app-region:drag]">
-      <div className="flex min-w-0 items-center gap-2">
+      {/* Both side clusters get equal flexible shares (flex-1 basis-0) so
+          the mode control sits at the true window center at any width. */}
+      <div className="flex min-w-0 flex-1 basis-0 items-center gap-2">
         <div className="flex size-6 shrink-0 items-center justify-center rounded-[7px] bg-primary text-sm font-bold text-primary-foreground">
           m
         </div>
@@ -48,7 +51,6 @@ export function TopBar() {
           {shootName}
         </span>
       </div>
-      <div className="flex-1" />
       <Segmented
         aria-label="Mode"
         items={MODE_ITEMS.map((m) => ({
@@ -60,17 +62,19 @@ export function TopBar() {
           if (v === 'export') setExportOpen(true);
           else setMode(v);
         }}
-        className={cn('[-webkit-app-region:no-drag]', !hasFolder && 'opacity-50')}
+        className={cn('shrink-0 [-webkit-app-region:no-drag]', !hasFolder && 'opacity-50')}
       />
-      <div className="flex flex-1 items-center justify-end gap-3" data-testid="task-tray">
+      <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-3" data-testid="task-tray">
         <button
-          className="flex h-[30px] items-center gap-2 rounded-lg border border-border bg-secondary px-3 text-xs text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag] dark:bg-white/5"
+          className="flex h-[30px] shrink-0 items-center gap-2 rounded-lg border border-border bg-secondary px-3 text-xs whitespace-nowrap text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag] dark:bg-white/5"
           onClick={() => setPaletteOpen(true)}
           disabled={!hasFolder}
           style={!hasFolder ? { opacity: 0.5 } : undefined}
+          title="Jump to anything"
         >
-          <span>Jump to anything</span>
-          <span className="rounded bg-black/10 px-1.5 py-px font-mono dark:bg-white/10">⌘K</span>
+          {/* The label yields first when the window narrows; the chip stays. */}
+          <span className="max-[860px]:hidden">Jump to anything</span>
+          <span className="rounded bg-black/10 px-1.5 py-px font-mono dark:bg-white/10">{modK}</span>
         </button>
         <TopBarTasks />
         {window.win && <div className="h-[22px] w-px bg-black/10 dark:bg-white/9" />}

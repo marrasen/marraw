@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { FlagType, Photo, PhotoPatch } from '@/api/library';
 import type { Params } from '@/api/edits';
+import { loadDialKeys, type DialKey } from '@/lib/dials';
 
 export type View = 'grid' | 'loupe';
 export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
@@ -23,6 +24,10 @@ interface UIState {
   // minutes (null = off, one flat grid). Persisted across sessions.
   contactSheet: boolean;
   gapMinutes: number | null;
+  // Develop dials pinned to the Cull confirm bar / Develop quick dock
+  // (Settings → Toolbars). Empty = none, the compact default. Persisted.
+  cullDials: DialKey[];
+  quickDials: DialKey[];
 
   focusId: number | null;
   anchorId: number | null;
@@ -59,6 +64,8 @@ interface UIState {
   setShortcutsOpen: (open: boolean) => void;
   setContactSheet: (open: boolean) => void;
   setGapMinutes: (min: number | null) => void;
+  setCullDials: (dials: DialKey[]) => void;
+  setQuickDials: (dials: DialKey[]) => void;
   setFolder: (id: number, path: string) => void;
   setView: (v: View) => void;
   focus: (id: number | null, opts?: { extend?: boolean; toggle?: boolean }) => void;
@@ -93,6 +100,8 @@ export const useUIStore = create<UIState>((set, get) => ({
     const n = Number(raw);
     return Number.isFinite(n) && n > 0 ? n : 6;
   })(),
+  cullDials: loadDialKeys('marraw:cullDials'),
+  quickDials: loadDialKeys('marraw:quickDials'),
   focusId: null,
   anchorId: null,
   selection: new Set<number>(),
@@ -121,6 +130,14 @@ export const useUIStore = create<UIState>((set, get) => ({
   setGapMinutes: (min) => {
     localStorage.setItem('marraw:gapMinutes', min == null ? 'off' : String(min));
     set({ gapMinutes: min });
+  },
+  setCullDials: (dials) => {
+    localStorage.setItem('marraw:cullDials', JSON.stringify(dials));
+    set({ cullDials: dials });
+  },
+  setQuickDials: (dials) => {
+    localStorage.setItem('marraw:quickDials', JSON.stringify(dials));
+    set({ quickDials: dials });
   },
 
   setFolder: (id, path) =>

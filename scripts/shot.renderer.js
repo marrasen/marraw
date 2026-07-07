@@ -60,6 +60,16 @@ if (shot === 'cull') {
   ui().setExportOpen(true);
 } else if (shot === 'settings') {
   ui().setSettingsOpen(true);
+} else if (shot === 'toolbars') {
+  ui().setSettingsOpen(true);
+  await sleep(300);
+  [...document.querySelectorAll('button')].find((b) => b.textContent === 'Toolbars')?.click();
+} else if (shot === 'cull-dials') {
+  ui().setCullDials(['expEV', 'contrast', 'wbTemp']);
+  ui().setMode('cull');
+} else if (shot === 'develop-dials') {
+  ui().setQuickDials(['expEV', 'contrast', 'toneHighlights', 'toneShadows', 'wbTemp', 'vibrance']);
+  ui().setMode('develop');
 } else if (shot === 'batch') {
   const ids = ui().visibleIds;
   ui().focus(ids[2]);

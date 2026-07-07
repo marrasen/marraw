@@ -1,6 +1,7 @@
 import { Segmented } from '@/components/ui/segmented';
 import { WindowControls } from '@/components/WindowControls';
 import { useConnection } from '@/api/client';
+import { modK } from '@/lib/platform';
 import { cn } from '@/lib/utils';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
 import { useUIStore, type Mode } from '@/stores/uiStore';
@@ -98,7 +99,7 @@ export function PaletteChip({ label = 'Jump to any control' }: { label?: string 
       onClick={() => setPaletteOpen(true)}
     >
       <span>{label}</span>
-      <span className="rounded bg-white/10 px-1.5 py-px font-mono">⌘K</span>
+      <span className="rounded bg-white/10 px-1.5 py-px font-mono">{modK}</span>
     </button>
   );
 }

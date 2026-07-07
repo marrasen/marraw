@@ -173,6 +173,17 @@
   }
 }
 
+/* App backdrop: the base gray washed with a faint accent-tinted radial
+   gradient from the top center (the cinema canvas uses a stronger cousin). */
+@utility app-backdrop {
+  background:
+    radial-gradient(
+      120% 100% at 50% 0%,
+      color-mix(in oklch, var(--primary) 9%, var(--background)),
+      var(--background) 72%
+    );
+}
+
 /* Cinema-mode floating chrome: translucent card over the photo. */
 @utility glass {
   background: var(--glass);

@@ -1,14 +1,14 @@
 import { Segmented } from '@/components/ui/segmented';
 import { Slider } from '@/components/ui/slider';
-import { ChipSpinner } from '@/components/ui/task-chip';
 import { useUIStore } from '@/stores/uiStore';
 
 /**
  * The zoom controls, embedded in a mode's control bar and always present:
- * Fit/1:1 segmented, zoom slider, and the % readout that flips to the
- * rendering state while 1:1 tiles decode.
+ * Fit/1:1 segmented, zoom slider, and the fixed-width % readout. Rendering
+ * progress lives in the canvas badge (CinemaImage), not here — swapping the
+ * readout for a spinner used to resize the whole bar on every photo step.
  */
-export function ZoomCluster({ scale, rendering }: { scale: number; rendering: boolean }) {
+export function ZoomCluster({ scale }: { scale: number }) {
   const zoom = useUIStore((s) => s.loupeZoom);
   const setZoom = useUIStore((s) => s.setLoupeZoom);
   const isFit = zoom === 'fit';
@@ -35,16 +35,9 @@ export function ZoomCluster({ scale, rendering }: { scale: number; rendering: bo
           aria-label="Zoom"
         />
       </div>
-      {rendering ? (
-        <span className="flex w-[104px] items-center gap-1.5 font-mono text-[10.5px] text-[#aab0ff]">
-          <ChipSpinner className="size-3" />
-          Rendering {Math.round(scale * 100)}%
-        </span>
-      ) : (
-        <span className="w-[38px] text-right font-mono text-[11px] tabular-nums">
-          {Math.round(scale * 100)}%
-        </span>
-      )}
+      <span className="w-[38px] text-right font-mono text-[11px] tabular-nums">
+        {Math.round(scale * 100)}%
+      </span>
     </div>
   );
 }

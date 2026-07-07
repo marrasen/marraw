@@ -20,6 +20,7 @@ if (import.meta.env.DEV) {
         // Action fns the scripted UI test drives directly (client-bound calls
         // like a crop drag are awkward to synthesize as raw pointer events).
         esUpdate: (patch: unknown) => es.esUpdate(client, patch as never),
+        esCommit: () => es.esCommit(client),
         esSetCropping: (on: boolean) => es.esSetCropping(client, on),
       };
     },

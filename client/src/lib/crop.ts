@@ -36,6 +36,14 @@ export interface CropRect {
   h: number;
 }
 
+// Coverage tolerance in frame-fraction space. fitCropToRotation's binary
+// search parks rect corners within ~2⁻²⁴ of exactly ON the rotated-frame
+// boundary, and the rect round-trips through the store between events —
+// without slack, a corner that is mathematically on the edge flunks strict
+// coverage and every subsequent interaction gets rejected. The cost is at
+// most a fraction of a pixel of black on real frames — invisible.
+const COVER_EPS = 1e-4;
+
 // coveredByRotation reports whether a frame-fraction point (x, y in [0,1]) is
 // still covered by the source image after the frame is rotated by angleDeg —
 // i.e. NOT in the black wedge a straighten exposes. aspect = frameW / frameH;
@@ -52,7 +60,7 @@ export function coveredByRotation(x: number, y: number, angleDeg: number, aspect
   const dy = y - cy;
   const sx = cx + dx * cosN - dy * sinN;
   const sy = cy + dx * sinN + dy * cosN;
-  return sx >= 0 && sx <= aspect && sy >= 0 && sy <= 1;
+  return sx >= -COVER_EPS && sx <= aspect + COVER_EPS && sy >= -COVER_EPS && sy <= 1 + COVER_EPS;
 }
 
 // rectCornersCovered reports whether all four corners of a crop rect lie within
@@ -93,6 +101,38 @@ export function fitCropToRotation(r: CropRect, angleDeg: number, aspect: number)
   const w = r.w * lo;
   const h = r.h * lo;
   return { x: cx - w / 2, y: cy - h / 2, w, h };
+}
+
+// maxCoveredT finds the largest t ∈ [0,1] for which make(t) stays black-free
+// under the given straighten angle, assuming make(0) is covered. The caller's
+// make() runs the full candidate pipeline (edge clamps, minimum size, aspect
+// lock, frame clamps), so every probed rect honors every invariant at once.
+export function maxCoveredT(make: (t: number) => CropRect, angleDeg: number, aspect: number): number {
+  if (rectCornersCovered(make(1), angleDeg, aspect)) return 1;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 20; i++) {
+    const t = (lo + hi) / 2;
+    if (rectCornersCovered(make(t), angleDeg, aspect)) lo = t;
+    else hi = t;
+  }
+  return lo;
+}
+
+// slideMoveRect clamps a whole-rect move (same w/h) so it slides along the
+// tilted frame edge instead of freezing: keep the largest usable x-component
+// first, then the largest y from there. Per-axis sequential is deliberate —
+// a single-t line clamp just parks at the boundary and the drag dies; taking
+// the axes in turn preserves the along-edge component of the motion. Falls
+// back to refitting `from` if it is itself uncovered (mid-resync race).
+export function slideMoveRect(from: CropRect, to: CropRect, angleDeg: number, aspect: number): CropRect {
+  if (!rectCornersCovered(from, angleDeg, aspect)) return fitCropToRotation(from, angleDeg, aspect);
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const tx = maxCoveredT((t) => ({ ...from, x: from.x + dx * t }), angleDeg, aspect);
+  const afterX = { ...from, x: from.x + dx * tx };
+  const ty = maxCoveredT((t) => ({ ...afterX, y: afterX.y + dy * t }), angleDeg, aspect);
+  return { ...afterX, y: afterX.y + dy * ty };
 }
 
 // Common aspect presets for the crop overlay. `null` ratio means freeform.

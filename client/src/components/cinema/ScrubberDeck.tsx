@@ -24,12 +24,71 @@ export function ScrubberDeck({
 }) {
   const focus = useUIStore((s) => s.focus);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const centeredOnce = useRef(false);
+  const anim = useRef(0);
+
+  // Manual scrolling takes over from an in-flight centering animation.
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (!box) return;
+    const cancel = () => {
+      cancelAnimationFrame(anim.current);
+      anim.current = 0;
+    };
+    box.addEventListener('wheel', cancel, { passive: true });
+    box.addEventListener('pointerdown', cancel);
+    return () => {
+      cancel();
+      box.removeEventListener('wheel', cancel);
+      box.removeEventListener('pointerdown', cancel);
+    };
+  }, []);
 
   // Keep the focused frame centered as the user arrows through the take.
+  // The first centering after mount (a mode switch remounts the deck) jumps
+  // instantly — smooth would visibly scroll in from the start of the roll.
+  // Native smooth scrollIntoView restarts its easing from zero every time a
+  // new call interrupts it, so rapid arrowing stalls near the old frame; the
+  // rAF loop instead retargets mid-flight and keeps the motion continuous.
   useEffect(() => {
-    if (focusId == null) return;
-    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-strip-id="${focusId}"]`);
-    el?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+    const box = scrollRef.current;
+    if (focusId == null || !box) return;
+    const el = box.querySelector<HTMLElement>(`[data-strip-id="${focusId}"]`);
+    if (!el) return;
+    const elRect = el.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+    const target = Math.max(
+      0,
+      Math.min(
+        box.scrollWidth - box.clientWidth,
+        box.scrollLeft + (elRect.left - boxRect.left) - (box.clientWidth - elRect.width) / 2,
+      ),
+    );
+    cancelAnimationFrame(anim.current);
+    anim.current = 0;
+    const instant = !centeredOnce.current || matchMedia('(prefers-reduced-motion: reduce)').matches;
+    centeredOnce.current = true;
+    if (instant) {
+      box.scrollLeft = target;
+      return;
+    }
+    // Track position as a float — scrollLeft assignments round to device
+    // pixels, and the exponential approach would stall inside that rounding.
+    let pos = box.scrollLeft;
+    let last = performance.now();
+    const step = (now: number) => {
+      const dt = Math.min(64, now - last);
+      last = now;
+      pos += (target - pos) * (1 - Math.exp(-dt / 90));
+      if (Math.abs(target - pos) < 0.75) {
+        box.scrollLeft = target;
+        anim.current = 0;
+        return;
+      }
+      box.scrollLeft = pos;
+      anim.current = requestAnimationFrame(step);
+    };
+    anim.current = requestAnimationFrame(step);
   }, [focusId]);
 
   return (

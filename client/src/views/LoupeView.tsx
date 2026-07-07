@@ -99,6 +99,20 @@ function CropBar({
 // instead of briefly stretching the cropped rendition into a full-frame box.
 const cropMemo = new Map<number, Params>();
 
+// Pan position as a ratio of the scrollable range — module scope so it
+// survives photo switches (a burst series can be compared at the exact same
+// crop) AND mode switches (Cull ⇄ Develop each remount CinemaImage; the zoom
+// itself already survives in the uiStore).
+const panRatio: { current: [number, number] } = { current: [0.5, 0.5] };
+
+// slackFor pads the scroll range around the image box on one axis: full
+// flush-to-flush travel when the box is smaller than the viewport, plus a
+// 40%-of-viewport overscroll margin per side so the photo can always be
+// pushed partly past an edge, away from overlaid chrome.
+function slackFor(box: number, viewport: number): number {
+  return Math.round(viewport * 0.4) + Math.max(0, viewport - box);
+}
+
 // levelForPx picks the smallest rendition covering px device pixels; past
 // pyramid depth the loupe switches to full-resolution tiles.
 function levelForPx(px: number): Level | 'tiles' {
@@ -168,8 +182,8 @@ export function CinemaImage({
 }: {
   photo: Photo;
   photos: Photo[];
-  /** Reports the effective scale + rendering state for embedded zoom UIs. */
-  onZoomInfo?: (scale: number, rendering: boolean) => void;
+  /** Reports the effective scale for embedded zoom UIs. */
+  onZoomInfo?: (scale: number) => void;
   /** Bottom offset of the "Rendering full resolution" badge (above the mode's control bar). */
   renderingBadgeBottom?: number;
   navigatorBottom?: number;
@@ -198,9 +212,14 @@ export function CinemaImage({
   if (liveCrop) cropMemo.set(photo.id, liveCrop);
   const activeCrop = liveCrop ?? cropMemo.get(photo.id) ?? null;
   const [aspectKey, setAspectKey] = useState('free');
-  // Pan position as a ratio of the scrollable range — survives photo
-  // switches so a burst series can be compared at the exact same crop.
-  const panRatio = useRef<[number, number]>([0.5, 0.5]);
+  // Crop-mode GEOMETRY (full-frame box, CSS rotation, overlay) is only valid
+  // over the flat crop-stripped render — anything else (the committed
+  // rendition, a stale non-flat preview) has the crop baked into its pixels,
+  // and stretching it into the full-frame box + rotating it again is exactly
+  // the "cropped before rotating" artifact. Until the flat frame arrives the
+  // loupe keeps showing the ordinary cropped view; controls (chip, CropBar)
+  // key off plain `cropping` so they appear instantly.
+  const cropUI = cropping && !!preview && preview.photoId === photo.id && preview.flat;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -213,18 +232,67 @@ export function CinemaImage({
   }, []);
 
   const [fdw, fdh] = fullDisplayDims(photo);
-  // When cropping we display the full frame; otherwise the cropped render.
-  const [dw, dh] = cropping ? [fdw, fdh] : renderedDims(fdw, fdh, activeCrop);
+  // Once the flat frame is up we display the full frame; otherwise the
+  // cropped render.
+  const [dw, dh] = cropUI ? [fdw, fdh] : renderedDims(fdw, fdh, activeCrop);
   const haveDims = dw > 0 && dh > 0 && container[0] > 0;
   const fitScale = haveDims ? Math.min(container[0] / dw, container[1] / dh) : 1;
   const scale = zoom === 'fit' ? fitScale : zoom;
-  const boxW = Math.max(1, Math.round(dw * scale));
-  const boxH = Math.max(1, Math.round(dh * scale));
+
+  // Zoom changes tween quickly instead of snapping: shownScale chases the
+  // target over ~160ms (ease-out) and drives the displayed box, while the
+  // rendition level, zoom readouts, and wheel math key off the target so no
+  // intermediate pyramid levels get fetched. Photo switches and crop-mode
+  // toggles snap — animating a size change between different frames reads
+  // as the photo warping.
+  const [shownScale, setShownScale] = useState(scale);
+  const shownRef = useRef(scale);
+  shownRef.current = shownScale;
+  // cropUI (not cropping) so the box-size flip when the flat frame arrives
+  // snaps instead of tweening between unrelated geometries.
+  const snapKey = `${photo.id}|${cropUI}|${haveDims}`;
+  const prevSnapKey = useRef('');
+  useEffect(() => {
+    const snap = prevSnapKey.current !== snapKey;
+    prevSnapKey.current = snapKey;
+    if (snap || !haveDims || Math.abs(scale - shownRef.current) < 1e-4) {
+      setShownScale(scale);
+      return;
+    }
+    const from = shownRef.current;
+    const start = performance.now();
+    const DURATION = 160;
+    let raf = requestAnimationFrame(function tick(t) {
+      const p = Math.min(1, (t - start) / DURATION);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setShownScale(from + (scale - from) * eased);
+      if (p < 1) raf = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [scale, snapKey, haveDims]);
+
+  const boxW = Math.max(1, Math.round(dw * shownScale));
+  const boxH = Math.max(1, Math.round(dh * shownScale));
+  // Slack pads the scrollable content so the photo can be dragged clear of
+  // overlaid chrome (develop drawer, control bars) at ANY zoom: per axis it
+  // allows flush-to-flush travel when the box fits the viewport, plus an
+  // overscroll margin past the flush edges — that margin is what lets a
+  // fit-height photo move up away from the decks. The default panRatio of
+  // 0.5 keeps the photo centered. Crop mode pins the frame centered.
+  const slackX = cropping ? 0 : slackFor(boxW, container[0]);
+  const slackY = cropping ? 0 : slackFor(boxH, container[1]);
 
   // While an edit preview is active, show the JPEG the backend just pushed
-  // over the WebSocket (rendered at 2048) instead of a cache URL.
-  const previewUrl = preview && preview.photoId === photo.id ? preview.url : null;
-  const level = levelForPx(Math.max(boxW, boxH) * window.devicePixelRatio);
+  // over the WebSocket instead of a cache URL — but only when its geometry
+  // matches the mode: flat frames belong to crop mode, cropped renders to
+  // normal viewing. A flat blob kept after Done (or one landing late from an
+  // in-flight render) is gated out and src falls back to the committed
+  // rendition, whose crop is already baked in.
+  const previewUrl =
+    preview && preview.photoId === photo.id && preview.flat === cropping ? preview.url : null;
+  // Rendition level from the TARGET scale, not the animating one, so a zoom
+  // tween never requests the pyramid levels it passes through.
+  const level = levelForPx(Math.max(dw, dh) * scale * window.devicePixelRatio);
   // Past pyramid depth the 2048 rendition stays on as an instantly-available
   // underlay stretched into the box, and TileLayer sharpens the visible
   // region with full-resolution tiles on top; neighbors are warmed so
@@ -240,25 +308,34 @@ export function CinemaImage({
   // blurry preview blob that otherwise lingers until the next photo switch.
   // Below tile depth the 2048 preview and the committed rendition are the same
   // resolution, so keep it — clearing there would just cause a needless swap.
+  // Crop mode keeps the preview no matter what: mid-crop commits (straighten
+  // release) bump the hash too, and evicting the flat frame would swap in the
+  // committed crop-baked rendition under the overlay. The exit commit changes
+  // the hash again with cropping already false, so the normal clear still runs.
   const lastHash = useRef(photo.editHash);
   const levelRef = useRef(level);
   levelRef.current = level;
   useEffect(() => {
     if (photo.editHash !== lastHash.current) {
-      lastHash.current = photo.editHash;
+      lastHash.current = photo.editHash; // always consume the hash advance
       if (levelRef.current !== 'tiles') return;
+      if (useEditSession.getState().cropping) return;
       const p = useEditSession.getState().preview;
       if (p && p.photoId === photo.id) esClearPreview();
     }
   }, [photo.editHash, photo.id]);
 
-  // Restore the pan ratio whenever the geometry or photo changes.
+  // Restore the pan ratio whenever the geometry or photo changes. `container`
+  // must be a dep: at a numeric zoom boxW is container-independent, so on a
+  // fresh mount (mode switch) it is already final while the container still
+  // measures 0×0 — without it the restore never re-runs after measurement and
+  // the view sticks at the top-left corner.
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     el.scrollLeft = panRatio.current[0] * Math.max(0, el.scrollWidth - el.clientWidth);
     el.scrollTop = panRatio.current[1] * Math.max(0, el.scrollHeight - el.clientHeight);
-  }, [photo.id, boxW, boxH]);
+  }, [photo.id, boxW, boxH, container]);
 
   const onScroll = () => {
     const el = containerRef.current;
@@ -269,17 +346,22 @@ export function CinemaImage({
   };
 
   // Navigator viewport: the visible region as fractions of the image box.
+  // With slack the box edge sits slackX from the scroll origin and the photo
+  // can be partly off-screen in any direction, so the visible span is the
+  // viewport ∩ box intersection.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     let raf = 0;
     const update = () => {
       raf = 0;
-      const vw = Math.min(1, el.clientWidth / boxW);
-      const vh = Math.min(1, el.clientHeight / boxH);
-      const vx = boxW > el.clientWidth ? el.scrollLeft / boxW : 0;
-      const vy = boxH > el.clientHeight ? el.scrollTop / boxH : 0;
-      setViewport([vx, vy, vw, vh]);
+      const posX = slackX - el.scrollLeft; // box left edge in viewport coords
+      const posY = slackY - el.scrollTop;
+      const x0 = Math.max(0, -posX);
+      const y0 = Math.max(0, -posY);
+      const x1 = Math.min(boxW, el.clientWidth - posX);
+      const y1 = Math.min(boxH, el.clientHeight - posY);
+      setViewport([x0 / boxW, y0 / boxH, Math.max(0, x1 - x0) / boxW, Math.max(0, y1 - y0) / boxH]);
     };
     const schedule = () => {
       if (!raf) raf = requestAnimationFrame(update);
@@ -290,29 +372,32 @@ export function CinemaImage({
       el.removeEventListener('scroll', schedule);
       cancelAnimationFrame(raf);
     };
-  }, [boxW, boxH]);
+  }, [boxW, boxH, slackX, slackY]);
 
   const onWheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
-    const cur = zoom === 'fit' ? fitScale : zoom;
-    const next = Math.min(4, Math.max(0.05, cur * Math.exp(-e.deltaY * 0.0015)));
+    const next = Math.min(4, Math.max(0.05, scale * Math.exp(-e.deltaY * 0.0015)));
     const el = containerRef.current;
     if (el && haveDims) {
       // Anchor the image point under the cursor (map-style zoom): compute
       // the scroll that keeps it stationary at the new scale and hand it to
-      // the pan-ratio restore that runs when the box resizes.
+      // the pan-ratio restore that runs when the box resizes. The cursor is
+      // mapped through the currently RENDERED layout (shownScale + slack, a
+      // tween may be mid-flight); the destination through the target.
       const rect = el.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-      const offX = Math.max(0, (el.clientWidth - dw * cur) / 2);
-      const offY = Math.max(0, (el.clientHeight - dh * cur) / 2);
-      const ix = (el.scrollLeft + mx - offX) / cur; // image px under the cursor
-      const iy = (el.scrollTop + my - offY) / cur;
-      const sx = ix * next - mx + Math.max(0, (el.clientWidth - dw * next) / 2);
-      const sy = iy * next - my + Math.max(0, (el.clientHeight - dh * next) / 2);
-      const maxX = Math.max(0, Math.round(dw * next) - el.clientWidth);
-      const maxY = Math.max(0, Math.round(dh * next) - el.clientHeight);
+      const ix = (el.scrollLeft + mx - slackX) / shownScale; // image px under the cursor
+      const iy = (el.scrollTop + my - slackY) / shownScale;
+      const bw = Math.round(dw * next);
+      const bh = Math.round(dh * next);
+      const nSlackX = slackFor(bw, el.clientWidth);
+      const nSlackY = slackFor(bh, el.clientHeight);
+      const sx = ix * next - mx + nSlackX;
+      const sy = iy * next - my + nSlackY;
+      const maxX = bw + 2 * nSlackX - el.clientWidth;
+      const maxY = bh + 2 * nSlackY - el.clientHeight;
       panRatio.current = [
         maxX > 0 ? Math.min(1, Math.max(0, sx / maxX)) : 0.5,
         maxY > 0 ? Math.min(1, Math.max(0, sy / maxY)) : 0.5,
@@ -325,7 +410,9 @@ export function CinemaImage({
   // survives leaving the container. WB picking keeps plain clicks.
   const dragFrom = useRef<[number, number] | null>(null);
   const [dragging, setDragging] = useState(false);
-  const pannable = haveDims && !cropping && (boxW > container[0] || boxH > container[1]);
+  // Slack means there is nearly always somewhere to drag the photo, zoomed
+  // in or not — only crop mode pins it.
+  const pannable = haveDims && !cropping;
   const onPointerDown = (e: React.PointerEvent) => {
     if (wbPicking || cropping || e.button !== 0 || !pannable) return;
     try {
@@ -383,25 +470,22 @@ export function CinemaImage({
     void esPickWB(client, Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y)));
   };
 
-  // Rendering indicator: tiles mounted but not decoded yet. The first jump
-  // to 1:1 (no tile landed) also blurs the soft 2048 underlay so "still
-  // resolving" can never read as "this shot is blurry".
+  // Rendering indicator: tiles mounted but not decoded yet.
   const rendering = wantTiles && pendingTiles[0] > 0;
-  const firstDecode = rendering && pendingTiles[1] === 0;
 
   // Parents embed the zoom cluster in their own control bars.
   const onZoomInfoRef = useRef(onZoomInfo);
   onZoomInfoRef.current = onZoomInfo;
   useEffect(() => {
-    onZoomInfoRef.current?.(scale, rendering);
-  }, [scale, rendering]);
+    onZoomInfoRef.current?.(scale);
+  }, [scale]);
 
   // Navigator drag / click pans the viewport to the pointed-at fraction.
   const panTo = (fx: number, fy: number) => {
     const el = containerRef.current;
     if (!el) return;
-    el.scrollLeft = fx * boxW - el.clientWidth / 2;
-    el.scrollTop = fy * boxH - el.clientHeight / 2;
+    el.scrollLeft = slackX + fx * boxW - el.clientWidth / 2;
+    el.scrollTop = slackY + fy * boxH - el.clientHeight / 2;
   };
 
   const onMagnifierMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -443,8 +527,14 @@ export function CinemaImage({
         onDoubleClick={() => !wbPicking && setZoom(zoom === 'fit' ? 1 : 'fit')}
       >
         {haveDims ? (
+          // The slack wrapper is the actual scroll content: the box centered
+          // in it, with room to drag the photo to any viewport edge.
           <div
-            className={cn('relative m-auto shrink-0', cropping && 'overflow-hidden bg-black')}
+            className="m-auto flex shrink-0 items-center justify-center"
+            style={{ width: boxW + 2 * slackX, height: boxH + 2 * slackY }}
+          >
+          <div
+            className={cn('relative shrink-0', cropUI && 'overflow-hidden bg-black')}
             style={{ width: boxW, height: boxH }}
             onClick={onImageClick}
             onPointerMove={onMagnifierMove}
@@ -462,8 +552,10 @@ export function CinemaImage({
               className="absolute inset-0 size-full"
               // While cropping, the straighten angle is a live client-side
               // rotation of the flat frame — instant, full-resolution feedback
-              // — matched exactly by the backend crop on commit.
-              style={cropping && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
+              // — matched exactly by the backend crop on commit. Gated on the
+              // flat frame actually being up: rotating a crop-baked render
+              // would rotate the crop twice.
+              style={cropUI && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
             />
             {wantTiles && shownSrc.includes(`/img/${photo.id}/`) && (
               <TileLayer
@@ -472,12 +564,13 @@ export function CinemaImage({
                 dw={dw}
                 dh={dh}
                 boxW={boxW}
-                boxH={boxH}
+                slackX={slackX}
+                slackY={slackY}
                 container={containerRef}
                 onProgress={(pending, loaded) => setPendingTiles([pending, loaded])}
               />
             )}
-            {cropping && draft && (
+            {cropUI && draft && (
               <CropOverlay
                 draft={draft}
                 ratioFrac={aspectRatioFrac(aspectKey, fdw, fdh)}
@@ -491,6 +584,7 @@ export function CinemaImage({
               <Magnifier src={shownSrc} boxW={boxW} boxH={boxH} cursor={cursor} rgb={sampledRGB} />
             )}
           </div>
+          </div>
         ) : (
           // Metadata not scanned yet: plain fit rendering.
           <div className="m-auto" onClick={onImageClick}>
@@ -499,24 +593,31 @@ export function CinemaImage({
         )}
       </div>
 
-      {/* Rendering full resolution: top progress line + centered badge. */}
-      {rendering && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-40 h-0.5 bg-white/10">
-          <div className="animate-chip-indeterminate absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-primary to-[#aab0ff]/0" />
+      {/* Rendering full resolution: top progress line + centered badge. Both
+          stay mounted and fade instead of popping in and out; the fade-in
+          delay swallows tile loads that finish near-instantly, so stepping
+          through a warm burst never blinks the chrome. */}
+      <div
+        className={cn(
+          'pointer-events-none absolute inset-x-0 top-0 z-40 h-0.5 bg-white/10 transition-opacity duration-200',
+          rendering ? 'opacity-100 delay-150' : 'opacity-0 delay-0',
+        )}
+      >
+        <div className="animate-chip-indeterminate absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-primary to-[#aab0ff]/0" />
+      </div>
+      <div
+        className={cn(
+          'glass pointer-events-none absolute left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl px-[18px] py-[13px] transition-opacity duration-200',
+          rendering ? 'opacity-100 delay-150' : 'opacity-0 delay-0',
+        )}
+        style={{ bottom: renderingBadgeBottom }}
+      >
+        <ChipSpinner className="size-[19px]" />
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[13.5px] font-semibold text-foreground">Rendering full resolution</span>
+          <span className="font-mono text-[11px] text-muted-foreground">1:1 tile · decoding RAW</span>
         </div>
-      )}
-      {firstDecode && (
-        <div
-          className="glass pointer-events-none absolute left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl px-[18px] py-[13px]"
-          style={{ bottom: renderingBadgeBottom }}
-        >
-          <ChipSpinner className="size-[19px]" />
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[13.5px] font-semibold text-foreground">Rendering full resolution</span>
-            <span className="font-mono text-[11px] text-muted-foreground">1:1 tile · decoding RAW</span>
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* Crop mode chip (top left, replaces the HUD status cluster). */}
       {cropping && (
@@ -755,7 +856,8 @@ function TileLayer({
   dw,
   dh,
   boxW,
-  boxH,
+  slackX,
+  slackY,
   container,
   onProgress,
 }: {
@@ -763,7 +865,9 @@ function TileLayer({
   dw: number; // rendered (crop-aware) display width
   dh: number;
   boxW: number;
-  boxH: number;
+  /** Per-side pan slack around the box (see slackFor) — the box's offset in scroll coordinates. */
+  slackX: number;
+  slackY: number;
   container: React.RefObject<HTMLDivElement | null>;
   /** Reports (pending, loaded) tile counts for the rendering indicator. */
   onProgress?: (pending: number, loaded: number) => void;
@@ -774,8 +878,12 @@ function TileLayer({
   // Tile keys mounted so far.
   const [tiles, setTiles] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(0);
+  // Keep the latest callback without retriggering the count effect below;
+  // updated in an effect (not during render) per react-hooks/refs.
   const onProgressRef = useRef(onProgress);
-  onProgressRef.current = onProgress;
+  useEffect(() => {
+    onProgressRef.current = onProgress;
+  });
   useEffect(() => {
     onProgressRef.current?.(Math.max(0, tiles.length - loaded), loaded);
   }, [tiles.length, loaded]);
@@ -788,11 +896,11 @@ function TileLayer({
     let raf = 0;
     const update = () => {
       raf = 0;
-      // Viewport rect in image pixels. When the box is smaller than the
-      // viewport it sits centered with no scroll range; the offset folds
-      // that case into the same formula.
-      const offX = Math.max(0, (el.clientWidth - boxW) / 2);
-      const offY = Math.max(0, (el.clientHeight - boxH) / 2);
+      // Viewport rect in image pixels. The box sits centered in its slack
+      // wrapper (pan freedom), so its edge in scroll coordinates is offset
+      // by the per-side slack.
+      const offX = slackX;
+      const offY = slackY;
       const margin = TILE_SIZE / 2;
       const x0 = Math.max(0, Math.floor(((el.scrollLeft - offX) / scale - margin) / TILE_SIZE));
       const y0 = Math.max(0, Math.floor(((el.scrollTop - offY) / scale - margin) / TILE_SIZE));
@@ -819,7 +927,7 @@ function TileLayer({
       el.removeEventListener('scroll', schedule);
       cancelAnimationFrame(raf);
     };
-  }, [container, scale, cols, rows, boxW, boxH]);
+  }, [container, scale, cols, rows, slackX, slackY]);
 
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
