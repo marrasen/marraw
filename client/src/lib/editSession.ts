@@ -140,6 +140,12 @@ let commitTimer = 0;
 // renders cheap 1024 frames — the 2048 lands once the user stops.
 let settleTimer = 0;
 const SETTLE_MS = 400;
+// True while a deferred full-res settle is armed (or its render is queued): the
+// low-res blob currently on screen is NOT the final state, so esPreviewSettled
+// must report unsettled and the loupe must not evict the preview yet — else at
+// 1:1 the editHash advance from the apply's persist would drop the instant
+// low-res frame and fall back to a not-yet-rendered committed rendition.
+let settlePending = false;
 // Monotonic token guarding the async autoAdjust in esAuto/esApplyAutoPreset:
 // a newer apply (or a photo switch) supersedes an in-flight one so a stale
 // result can't clobber the draft.
@@ -173,7 +179,7 @@ export function esClearPreview() {
 // carries uncommitted pixels the committed renditions don't have yet).
 export function esPreviewSettled(): boolean {
   const s = useEditSession.getState();
-  if (s.rendering > 0 || previewPending || pendingPatch) return false;
+  if (settlePending || s.rendering > 0 || previewPending || pendingPatch) return false;
   if (s.photoId == null || !s.draft) return false;
   const h = s.history[s.photoId];
   return !h || sameParams(s.draft, h.stack[h.index].params);
@@ -219,6 +225,7 @@ function labelForDiff(prev: Params, next: Params): string {
 export async function esLoad(client: ApiClient, photoId: number, applyIds: number[]) {
   window.clearTimeout(commitTimer);
   window.clearTimeout(settleTimer);
+  settlePending = false;
   applyGen++; // supersede any autoAdjust still in flight for the old photo
   previewPending = null;
   previewAbort?.abort();
@@ -314,6 +321,7 @@ export function esUpdate(client: ApiClient, patch: Partial<Params>) {
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
   window.clearTimeout(settleTimer); // a manual edit supersedes a deferred settle
+  settlePending = false;
   pendingPatch = { ...(pendingPatch ?? {}), ...patch };
   if (!draftRaf) draftRaf = requestAnimationFrame(flushDraft);
   // While cropping, the crop rectangle and straighten angle are previewed
@@ -382,6 +390,7 @@ function persist(client: ApiClient, params: Params, ids: number[]) {
 // photo in the selection and records it in the undo history.
 export function esCommit(client: ApiClient, patch?: Partial<Params>) {
   window.clearTimeout(settleTimer); // this commit is the settle
+  settlePending = false;
   esFlushDraft(); // apply any frame-pending slider move before snapshotting
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
@@ -406,6 +415,8 @@ export function esApplyParams(
 ) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
+  window.clearTimeout(settleTimer); // this discrete apply supersedes any deferred settle
+  settlePending = false;
   setState({ draft: params });
   if (!opts?.skipHistory) pushHistory(s.photoId, params, opts?.label ?? 'Edit');
   schedulePreview(client, true);
@@ -428,7 +439,11 @@ function esApplyParamsPreview(client: ApiClient, params: Params, label: string) 
   persist(client, params, ids);
   schedulePreview(client, false); // instant low-res
   window.clearTimeout(settleTimer);
-  settleTimer = window.setTimeout(() => schedulePreview(client, true), SETTLE_MS);
+  settlePending = true; // keep the loupe on the low-res blob until the 2048 lands
+  settleTimer = window.setTimeout(() => {
+    settlePending = false;
+    schedulePreview(client, true);
+  }, SETTLE_MS);
 }
 
 export function esCanUndo(s: EditSessionState): boolean {
@@ -470,6 +485,8 @@ export function esJumpTo(client: ApiClient, index: number) {
   const h = s.history[s.photoId];
   if (!h) return;
   if (index < 0 || index >= h.stack.length || index === h.index) return;
+  window.clearTimeout(settleTimer); // this jump supersedes any deferred settle
+  settlePending = false;
   const params = h.stack[index].params;
   setState({
     draft: params,
@@ -518,6 +535,8 @@ export function esStep(client: ApiClient, control: ControlId, dir: 1 | -1, big =
 export function esReset(client: ApiClient) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
+  window.clearTimeout(settleTimer); // reset supersedes any deferred settle
+  settlePending = false;
   const photoId = s.photoId;
   setState({ draft: { ...NEUTRAL } });
   esClearPreview();

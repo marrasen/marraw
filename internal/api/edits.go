@@ -35,9 +35,11 @@ type Edits struct {
 }
 
 type decodeCache struct {
-	photoID int64
-	key     string
-	rgba    *image.RGBA // never mutated in place once cached
+	photoID  int64
+	key      string
+	noExpKey string      // LibrawInputsHashNoExp: matches across exposure-only changes
+	expEV    float64     // the ExpEV baked into rgba (via LibRaw exp_shift)
+	rgba     *image.RGBA // never mutated in place once cached
 }
 
 // GetEditParams returns the stored edit state. An untouched photo returns
@@ -103,15 +105,30 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 	if !params.IsNeutral() {
 		ep = &params
 	}
-	rgba, err := e.previewDecode(ctx, photoID, photo, ep)
-	if err != nil {
-		return nil, err
+	// Reuse a warm decode that differs only in exposure — the common case right
+	// after an auto/preset, which moves exposure but leaves the rest of the
+	// LibRaw inputs alone — and fold the difference in post-decode. This paints
+	// the transient low-res frame with no demosaic; the deferred 2048 settle
+	// re-decodes at the exact exposure for the accurate render. A full miss
+	// falls through to the demosaic path with no fold.
+	var rgba *image.RGBA
+	var expDelta float64
+	if reused, baked, ok := e.approxDecode(photoID, ep); ok {
+		rgba = reused
+		if ep != nil {
+			expDelta = ep.ExpEV - baked
+		}
+	} else {
+		rgba, err = e.previewDecode(ctx, photoID, photo, ep)
+		if err != nil {
+			return nil, err
+		}
 	}
 	gamma := photo.LookGamma
 	if gamma == 0 {
 		gamma = pyramid.FallbackLookGamma
 	}
-	img := pyramid.RenderPreview(rgba, longEdge, gamma, ep)
+	img := pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta)
 	var buf bytes.Buffer
 	// Slightly lower quality than the cached rendition: the frame is
 	// transient and a smaller blob keeps the WebSocket stream snappy.
@@ -162,10 +179,7 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 // otherwise it runs the (expensive) demosaic once and caches it for the next
 // drag frame.
 func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params) (*image.RGBA, error) {
-	libKey := "base"
-	if ep != nil {
-		libKey = ep.LibrawInputsHash()
-	}
+	libKey, noExpKey, expEV := decodeKeys(ep)
 	if rgba := e.cachedDecode(photoID, libKey); rgba != nil {
 		return rgba, nil
 	}
@@ -186,8 +200,18 @@ func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Ph
 	if err != nil {
 		return nil, err
 	}
-	e.storeDecode(photoID, libKey, rgba)
+	e.storeDecode(photoID, libKey, noExpKey, expEV, rgba)
 	return rgba, nil
+}
+
+// decodeKeys derives the decode cache keys for a LibRaw-input state: the exact
+// key, the exposure-independent key (for approxDecode reuse), and the baked
+// exposure. A nil/base decode keys as "base" with zero exposure.
+func decodeKeys(ep *edit.Params) (key, noExpKey string, expEV float64) {
+	if ep == nil {
+		return "base", "base", 0
+	}
+	return ep.LibrawInputsHash(), ep.LibrawInputsHashNoExp(), ep.ExpEV
 }
 
 // cachedDecode returns the cached half-size decode for (photoID, key), or nil.
@@ -200,11 +224,26 @@ func (e *Edits) cachedDecode(photoID int64, key string) *image.RGBA {
 	return nil
 }
 
-// storeDecode replaces the single-entry decode cache.
-func (e *Edits) storeDecode(photoID int64, key string, rgba *image.RGBA) {
+// approxDecode returns a decode reusable for a transient preview of ep: the
+// cached one when it matches every LibRaw input except exposure, along with the
+// exposure baked into it so the caller can fold the difference in post-decode
+// (an exact match reports delta 0). Miss → ok=false. Only the fast preview path
+// uses this; the accurate render keys on the full LibrawInputsHash.
+func (e *Edits) approxDecode(photoID int64, ep *edit.Params) (rgba *image.RGBA, bakedExpEV float64, ok bool) {
+	_, noExpKey, _ := decodeKeys(ep)
 	e.decodeMu.Lock()
 	defer e.decodeMu.Unlock()
-	e.decodeEntry = &decodeCache{photoID: photoID, key: key, rgba: rgba}
+	if e.decodeEntry != nil && e.decodeEntry.photoID == photoID && e.decodeEntry.noExpKey == noExpKey {
+		return e.decodeEntry.rgba, e.decodeEntry.expEV, true
+	}
+	return nil, 0, false
+}
+
+// storeDecode replaces the single-entry decode cache.
+func (e *Edits) storeDecode(photoID int64, key, noExpKey string, expEV float64, rgba *image.RGBA) {
+	e.decodeMu.Lock()
+	defer e.decodeMu.Unlock()
+	e.decodeEntry = &decodeCache{photoID: photoID, key: key, noExpKey: noExpKey, expEV: expEV, rgba: rgba}
 }
 
 // PickWhiteBalance samples the current rendition at the given relative
