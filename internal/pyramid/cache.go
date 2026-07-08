@@ -444,27 +444,33 @@ func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit
 	}
 	// Runs on the scaled copy, never on src (which may be a shared cached
 	// decode), so a concurrent reuse of the same decode is unaffected.
-	applyExposureLUT(dst, expDeltaEV, lookGamma)
+	applyExposureLUT(dst, expDeltaEV)
 	ApplyLook(dst, lookGamma, edits)
 	ApplyDetail(dst, edits)
 	return dst
 }
 
-// applyExposureLUT brightens/darkens by expDeltaEV stops via a per-channel LUT.
-// It linearizes with the same lookGamma the look stage uses, scales by 2^Δ, and
-// re-encodes, so the result composes cleanly with ApplyLook. A no-op at Δ==0.
-// Highlights already clipped in the 8-bit decode can't be recovered — this is
-// only ever the fleeting reused-decode preview; the accurate render bakes
-// exposure pre-demosaic.
-func applyExposureLUT(img *image.RGBA, expDeltaEV, lookGamma float64) {
+// previewExposureGamma is the decode's own display encoding: the LibRaw 8-bit
+// output sits at roughly linear^(1/2.222) (see ApplyLook / samplePatchLinear),
+// so the exposure fold undoes THIS to reach linear light. It is NOT lookGamma —
+// that is the calibrated tone lift ApplyLook adds afterward; folding exposure in
+// lookGamma space (≈0.72) over-brightened the frame by ~2× on a positive move.
+const previewExposureGamma = 2.222
+
+// applyExposureLUT brightens/darkens by expDeltaEV stops via a per-channel LUT:
+// linearize the decode (undo previewExposureGamma), scale by 2^Δ in linear
+// light, re-encode. A no-op at Δ==0. Highlights already clipped in the 8-bit
+// decode can't be recovered — this is only ever the fleeting reused-decode
+// preview; the accurate render bakes exposure pre-demosaic.
+func applyExposureLUT(img *image.RGBA, expDeltaEV float64) {
 	if expDeltaEV == 0 {
 		return
 	}
 	scale := math.Exp2(expDeltaEV)
-	inv := 1 / lookGamma
+	inv := 1 / previewExposureGamma
 	var lut [256]uint8
 	for i := range lut {
-		x := math.Pow(float64(i)/255, lookGamma) * scale
+		x := math.Pow(float64(i)/255, previewExposureGamma) * scale
 		if x > 1 {
 			x = 1
 		}

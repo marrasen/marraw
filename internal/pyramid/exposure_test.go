@@ -47,12 +47,14 @@ func TestRenderPreviewExposureDelta(t *testing.T) {
 	}
 }
 
-// TestApplyExposureLUTPhotometric: the fold linearizes with lookGamma, scales by
-// 2^Δ, and re-encodes — so a mid-tone at +1 EV lands on encode(2·linear(v)).
+// TestApplyExposureLUTPhotometric: the fold linearizes with the decode's own
+// display gamma (previewExposureGamma), scales by 2^Δ, and re-encodes — so a
+// mid-tone at +1 EV lands on encode(2·linear(v)), a ~×1.37 rise, NOT the ~×2.6
+// that folding in lookGamma space produced.
 func TestApplyExposureLUTPhotometric(t *testing.T) {
-	const g = 0.72
+	const g = previewExposureGamma
 	img := flatGray(4, 4, 100)
-	applyExposureLUT(img, 1, g)
+	applyExposureLUT(img, 1)
 
 	lin := math.Pow(100.0/255, g) * 2
 	if lin > 1 {
@@ -62,12 +64,17 @@ func TestApplyExposureLUTPhotometric(t *testing.T) {
 	if got := img.Pix[0]; got != want {
 		t.Errorf("fold(+1EV) of 100 = %d, want %d", got, want)
 	}
+	// Guard the magnitude: +1 EV on a mid-tone must be a moderate lift, not the
+	// near-doubling the old lookGamma-space fold produced.
+	if got := img.Pix[0]; got > 160 {
+		t.Errorf("fold(+1EV) of 100 = %d, too bright (lookGamma-space regression?)", got)
+	}
 }
 
 // TestApplyExposureLUTNoOp: delta 0 must not touch pixels.
 func TestApplyExposureLUTNoOp(t *testing.T) {
 	img := flatGray(4, 4, 137)
-	applyExposureLUT(img, 0, 0.72)
+	applyExposureLUT(img, 0)
 	for i := 0; i+3 < len(img.Pix); i += 4 {
 		if img.Pix[i] != 137 {
 			t.Fatalf("delta 0 changed pixel to %d", img.Pix[i])
