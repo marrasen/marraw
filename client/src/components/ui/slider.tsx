@@ -10,6 +10,8 @@ function Slider({
   max = 100,
   fillFrom,
   gradient,
+  onPointerUp,
+  onKeyDown,
   ...props
 }: SliderPrimitive.Root.Props & {
   /**
@@ -47,6 +49,17 @@ function Slider({
   const valPct = pctOf(_values[0])
   const originPct = pctOf(fillFrom ?? min)
 
+  // A mouse drag leaves the thumb's hidden <input type="range"> focused, which
+  // would swallow the global keymap (photo nav, Esc) — sliders are driven by
+  // drag and the +/- hotkeys, never by holding focus. So release focus when a
+  // pointer interaction ends (deferred a frame in case base-ui re-focuses the
+  // input on pointer-up), and let Esc bail out of a slider that still has it.
+  // Keyboard/Tab focus is untouched — no pointer, no blur.
+  const blurThumb = () => {
+    const el = document.activeElement as HTMLElement | null
+    if (el?.tagName === "INPUT" && el.getAttribute("type") === "range") el.blur()
+  }
+
   return (
     <SliderPrimitive.Root
       className={cn("data-horizontal:w-full data-vertical:h-full", className)}
@@ -56,6 +69,14 @@ function Slider({
       min={min}
       max={max}
       thumbAlignment="edge"
+      onPointerUp={(e) => {
+        onPointerUp?.(e)
+        requestAnimationFrame(blurThumb)
+      }}
+      onKeyDown={(e) => {
+        onKeyDown?.(e)
+        if (e.key === "Escape") blurThumb()
+      }}
       {...props}
     >
       <SliderPrimitive.Control className="relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:min-h-40 data-vertical:w-auto data-vertical:flex-col">

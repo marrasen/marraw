@@ -33,8 +33,10 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
   {
     title: 'Develop',
     rows: [
+      ['Switch panel tab', 'Tab'],
       ['Prev / next control', '↑ / ↓'],
       ['Adjust', '+ / − · ⇧'],
+      ['Release slider', 'Esc'],
       ['Copy / paste / crop', 'Ctrl+C Ctrl+V R'],
       ['Auto tone / colours / all', 'Ctrl+U · +⇧ · +Alt'],
       ['Auto presets', 'Ctrl+1–9'],
