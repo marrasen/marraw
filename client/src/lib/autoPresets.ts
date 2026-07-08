@@ -114,3 +114,138 @@ export function sanitizeAutoPresets(raw: unknown): AutoPreset[] {
 export function newAutoPreset(): AutoPreset {
   return { id: crypto.randomUUID(), name: 'New preset', sections: ['tone'], offsets: {} };
 }
+
+// Default presets ship with marraw to inspire creative-auto use, and are what
+// "Restore defaults" writes back. The six are boldly different from one another
+// — cinematic teal/orange, matte faded film, dramatic monochrome, punchy
+// daylight, dark moody, and warm golden hour — so cycling Ctrl+1…6 is an obvious
+// before/after. Fixed IDs (not random) keep those shortcuts and the restore/seed
+// paths stable across runs.
+//
+// Offset values are in the same native units the sliders and computePresetParams
+// use: pct params (contrast, vibrance, …) as fractions in −1…1, split amounts in
+// 0…1, split hues in degrees (0…359), exposure in EV stops. A key whose auto
+// section is active lands as a delta on the computed value; the rest are absolute
+// (see OFFSET_KEYS / offsetIsAdditive). Keep values well inside each range so they
+// read as an offset, not a clamp.
+export const DEFAULT_PRESETS: AutoPreset[] = [
+  // Blockbuster teal shadows / orange highlights, crushed blacks, filmic lift.
+  {
+    id: 'default-cinematic',
+    name: 'Cinematic',
+    sections: ['tone', 'wb', 'color'],
+    offsets: {
+      contrast: 0.15,
+      blacks: -0.1,
+      toneShadows: 0.1,
+      toneHighlights: -0.08,
+      vibrance: 0.1,
+      saturation: -0.05,
+      splitShadowHue: 195,
+      splitShadowAmt: 0.25,
+      splitHighlightHue: 40,
+      splitHighlightAmt: 0.22,
+      clarity: 0.08,
+      vignette: 0.12,
+    },
+  },
+  // Matte film: low contrast, lifted (raised) blacks, muted colour, soft detail.
+  {
+    id: 'default-faded',
+    name: 'Faded film',
+    sections: ['tone', 'color'],
+    offsets: {
+      contrast: -0.2,
+      whites: -0.08,
+      blacks: 0.15,
+      toneHighlights: -0.1,
+      vibrance: -0.2,
+      saturation: -0.25,
+      splitShadowHue: 210,
+      splitShadowAmt: 0.1,
+      splitHighlightHue: 50,
+      splitHighlightAmt: 0.12,
+      texture: -0.12,
+      clarity: -0.1,
+      dehaze: -0.08,
+    },
+  },
+  // Dramatic monochrome: colour driven fully to zero (absolute, colour auto off),
+  // deep blacks, strong local contrast and vignette.
+  {
+    id: 'default-noir',
+    name: 'Noir B&W',
+    sections: ['tone'],
+    offsets: {
+      contrast: 0.3,
+      whites: 0.12,
+      blacks: -0.2,
+      toneShadows: -0.08,
+      saturation: -1,
+      vibrance: -1,
+      clarity: 0.25,
+      texture: 0.15,
+      dehaze: 0.1,
+      vignette: 0.28,
+    },
+  },
+  // Bright, saturated daylight — the crowd-pleaser. High contrast, vivid, crisp.
+  {
+    id: 'default-punchy',
+    name: 'Punchy',
+    sections: ['tone', 'color'],
+    offsets: {
+      contrast: 0.28,
+      whites: 0.15,
+      blacks: -0.15,
+      vibrance: 0.35,
+      saturation: 0.2,
+      clarity: 0.22,
+      texture: 0.1,
+      dehaze: 0.15,
+      vignette: 0.08,
+    },
+  },
+  // Dark and desaturated with cool shadows and a heavy vignette — dialled down.
+  {
+    id: 'default-moody',
+    name: 'Moody',
+    sections: ['tone', 'color'],
+    offsets: {
+      expEV: -0.35,
+      contrast: 0.18,
+      whites: -0.1,
+      blacks: -0.22,
+      toneShadows: 0.1,
+      vibrance: -0.15,
+      saturation: -0.2,
+      splitShadowHue: 220,
+      splitShadowAmt: 0.18,
+      dehaze: 0.15,
+      clarity: 0.1,
+      vignette: 0.3,
+    },
+  },
+  // Warm golden hour: no white-balance auto (keeps the warmth), amber shadows and
+  // golden highlights, gently lifted, softly glowing.
+  {
+    id: 'default-golden',
+    name: 'Golden hour',
+    sections: ['tone'],
+    offsets: {
+      expEV: 0.1,
+      contrast: -0.05,
+      toneShadows: 0.12,
+      toneHighlights: -0.05,
+      vibrance: 0.2,
+      saturation: 0.08,
+      splitShadowHue: 35,
+      splitShadowAmt: 0.12,
+      splitHighlightHue: 45,
+      splitHighlightAmt: 0.28,
+      clarity: -0.05,
+      texture: 0.05,
+      vignette: 0.1,
+    },
+  },
+];

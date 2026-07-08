@@ -189,7 +189,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		GapMinutes:       gap,
 		CullDials:        jsonSetting(ctx, db, settingUICullDials, []string{}),
 		QuickDials:       jsonSetting(ctx, db, settingUIQuickDials, []string{}),
-		AutoPresets:      jsonSetting(ctx, db, settingUIAutoPresets, []AutoPreset{}),
+		AutoPresets:      autoPresetsOrDefault(ctx, db),
 		ExportDir:        exportDir,
 		ExportOptions:    normalizeExportOptions(jsonSetting(ctx, db, settingUIExportOptions, ExportOptions{})),
 		DevelopPinned:    pinned,
@@ -240,6 +240,97 @@ func (u *Settings) SetAutoPresets(ctx context.Context, presets []AutoPreset) err
 		presets = []AutoPreset{}
 	}
 	return u.saveJSON(ctx, settingUIAutoPresets, presets)
+}
+
+// autoPresetsOrDefault reads the stored creative-auto presets, seeding the
+// shipped defaults on a fresh install (the row was never written). A user who
+// deletes every preset stores an explicit "[]" — not empty — so the defaults do
+// not creep back; "Restore defaults" in Settings is the deliberate way back.
+func autoPresetsOrDefault(ctx context.Context, db *store.DB) []AutoPreset {
+	raw, err := db.GetSetting(ctx, settingUIAutoPresets)
+	if err != nil || raw == "" {
+		return defaultAutoPresets()
+	}
+	var v []AutoPreset
+	if json.Unmarshal([]byte(raw), &v) != nil {
+		return []AutoPreset{}
+	}
+	return v
+}
+
+// defaultAutoPresets is the six presets marraw ships with — kept in lockstep
+// with DEFAULT_PRESETS in client/src/lib/autoPresets.ts (same IDs, sections, and
+// native-unit offset values). The client sanitizes on read, so this only needs
+// to stay a valid superset. Boldly different from one another: cinematic
+// teal/orange, matte faded film, monochrome noir, punchy daylight, dark moody,
+// and warm golden hour.
+func defaultAutoPresets() []AutoPreset {
+	return []AutoPreset{
+		{
+			ID:       "default-cinematic",
+			Name:     "Cinematic",
+			Sections: []string{"tone", "wb", "color"},
+			Offsets: map[string]float64{
+				"contrast": 0.15, "blacks": -0.1, "toneShadows": 0.1, "toneHighlights": -0.08,
+				"vibrance": 0.1, "saturation": -0.05,
+				"splitShadowHue": 195, "splitShadowAmt": 0.25, "splitHighlightHue": 40, "splitHighlightAmt": 0.22,
+				"clarity": 0.08, "vignette": 0.12,
+			},
+		},
+		{
+			ID:       "default-faded",
+			Name:     "Faded film",
+			Sections: []string{"tone", "color"},
+			Offsets: map[string]float64{
+				"contrast": -0.2, "whites": -0.08, "blacks": 0.15, "toneHighlights": -0.1,
+				"vibrance": -0.2, "saturation": -0.25,
+				"splitShadowHue": 210, "splitShadowAmt": 0.1, "splitHighlightHue": 50, "splitHighlightAmt": 0.12,
+				"texture": -0.12, "clarity": -0.1, "dehaze": -0.08,
+			},
+		},
+		{
+			ID:       "default-noir",
+			Name:     "Noir B&W",
+			Sections: []string{"tone"},
+			Offsets: map[string]float64{
+				"contrast": 0.3, "whites": 0.12, "blacks": -0.2, "toneShadows": -0.08,
+				"saturation": -1, "vibrance": -1,
+				"clarity": 0.25, "texture": 0.15, "dehaze": 0.1, "vignette": 0.28,
+			},
+		},
+		{
+			ID:       "default-punchy",
+			Name:     "Punchy",
+			Sections: []string{"tone", "color"},
+			Offsets: map[string]float64{
+				"contrast": 0.28, "whites": 0.15, "blacks": -0.15,
+				"vibrance": 0.35, "saturation": 0.2,
+				"clarity": 0.22, "texture": 0.1, "dehaze": 0.15, "vignette": 0.08,
+			},
+		},
+		{
+			ID:       "default-moody",
+			Name:     "Moody",
+			Sections: []string{"tone", "color"},
+			Offsets: map[string]float64{
+				"expEV": -0.35, "contrast": 0.18, "whites": -0.1, "blacks": -0.22, "toneShadows": 0.1,
+				"vibrance": -0.15, "saturation": -0.2,
+				"splitShadowHue": 220, "splitShadowAmt": 0.18,
+				"dehaze": 0.15, "clarity": 0.1, "vignette": 0.3,
+			},
+		},
+		{
+			ID:       "default-golden",
+			Name:     "Golden hour",
+			Sections: []string{"tone"},
+			Offsets: map[string]float64{
+				"expEV": 0.1, "contrast": -0.05, "toneShadows": 0.12, "toneHighlights": -0.05,
+				"vibrance": 0.2, "saturation": 0.08,
+				"splitShadowHue": 35, "splitShadowAmt": 0.12, "splitHighlightHue": 45, "splitHighlightAmt": 0.28,
+				"clarity": -0.05, "texture": 0.05, "vignette": 0.1,
+			},
+		},
+	}
 }
 
 // SetExportDir persists the last export destination.

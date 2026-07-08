@@ -15,6 +15,7 @@ import {
   newAutoPreset,
   offsetIsAdditive,
   OFFSET_KEYS,
+  DEFAULT_PRESETS,
   type AutoPreset,
   type OffsetKey,
   type OffsetUnit,
@@ -344,9 +345,23 @@ function AutoPresetsSection() {
           })()}
         </div>
       ))}
-      <div>
+      <div className="flex gap-1.5">
         <Button variant="outline" size="sm" onClick={() => setPresets([...presets, newAutoPreset()])}>
           Add preset
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          // Reset the six shipped presets to their pristine values and order (so
+          // Ctrl+1…6 stay put), keeping any presets the user added after them.
+          onClick={() =>
+            setPresets([
+              ...DEFAULT_PRESETS,
+              ...presets.filter((p) => !DEFAULT_PRESETS.some((dp) => dp.id === p.id)),
+            ])
+          }
+        >
+          Restore defaults
         </Button>
       </div>
     </div>
