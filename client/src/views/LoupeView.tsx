@@ -123,14 +123,17 @@ function levelForPx(px: number): Level | 'tiles' {
   return 'tiles';
 }
 
-// useTilePrefetch warms the photos adjacent to the focused one while the
-// loupe is past pyramid depth: it pre-decodes their 2048 underlay (the
-// bridge shown at the moment of a switch) and requests one tile, which makes
-// the backend render the photo's whole tile set ahead of time — the visible
-// tiles then come out of the local cache in tens of milliseconds. Underlay
-// refs are held only for the current window so the browser can evict older
-// decodes.
-function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
+// useTilePrefetch warms the photos adjacent to the focused one so stepping
+// through a burst stays instant. It pre-decodes their 2048 rendition — the
+// fit underlay AND the 1:1 bridge, and the single decode the backend runs for
+// it also yields every smaller level, so whatever level the neighbour's fit
+// needs is warm too. `active` runs this whenever the loupe is up (fit included,
+// which is where a cold 2048 otherwise stalls the arrow keys). `tiles`
+// additionally requests one full-res tile per neighbour, making the backend
+// render the whole tile set ahead of a 1:1 landing — only worth its cost past
+// pyramid depth. Underlay refs are held only for the current window so the
+// browser can evict older decodes.
+function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: boolean) {
   const held = useRef<Map<string, HTMLImageElement>>(new Map());
   const triggered = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -142,13 +145,21 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
     for (const j of [i + 1, i - 1, i + 2]) {
       const p = photos[j];
       if (!p) continue;
-      const url = imgUrl(p, '2048');
-      const img = held.current.get(url) ?? new Image();
-      if (!img.src) {
-        img.src = url;
-        img.decode().catch(() => {});
+      // Warm both the fit underlay (512) and the fit-sharp / 1:1 bridge (2048).
+      // The backend renders every smaller level from the same decode, so the
+      // 2048 request alone materializes 512 on disk — pre-decoding it here just
+      // lands it in the browser too, so the underlay paints with no round trip
+      // the instant the neighbour is focused.
+      for (const lvl of ['512', '2048'] as const) {
+        const url = imgUrl(p, lvl);
+        const img = held.current.get(url) ?? new Image();
+        if (!img.src) {
+          img.src = url;
+          img.decode().catch(() => {});
+        }
+        next.set(url, img);
       }
-      next.set(url, img);
+      if (!tiles) continue;
       const tile = tileUrl(p, 0, 0);
       if (!triggered.current.has(tile)) {
         triggered.current.add(tile);
@@ -166,7 +177,7 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
     // prefetched neighbor, the main image/tile layer re-requests it at
     // visible priority and the pool dedups against any run still going.
     return () => ac.abort();
-  }, [photos, photo, active]);
+  }, [photos, photo, active, tiles]);
 }
 
 // CinemaImage is the shared photo engine of every cinema surface: the
@@ -340,7 +351,10 @@ export function CinemaImage({
   const wantTiles = !previewUrl && level === 'tiles' && !cropping;
   const src = previewUrl ?? imgUrl(photo, level === 'tiles' ? '2048' : level);
   const [shownSrc, setShownSrc] = useState('');
-  useTilePrefetch(photos, photo, wantTiles);
+  // Warm neighbours whenever the loupe is showing committed renditions (fit
+  // included — that path has no tile layer to bridge a cold 2048); fire the
+  // full-res tile trigger only past pyramid depth.
+  useTilePrefetch(photos, photo, !previewUrl && !cropping && haveDims, wantTiles);
 
   // Once a commit lands (the photo's editHash changes to the newly rendered
   // state) AND we're past pyramid depth, drop the live 2048 preview so the
@@ -715,6 +729,27 @@ export function CinemaImage({
               }
             }}
           >
+            {/* Low-res bridge: the always-warm 512 fills the same box so a
+                photo switch shows the CORRECT frame soft immediately, then the
+                sharp DecodedImage covers it once decoded — the fit-depth
+                counterpart to the 2048-under-tiles bridge at 1:1. Keyed on the
+                photo so navigation remounts a fresh element (an <img> keeps its
+                old pixels across a src change, which would re-hold the previous
+                photo). While the sharp frame still belongs to the previous
+                photo (!showsCurrent) the bridge floats on top of it; the moment
+                the current sharp lands it drops behind and is covered. Left
+                transparent until its own decode lands, so the stale sharp frame
+                shows through in the gap — no black flash. Off during crop
+                (rotated flat frame) and live edit (the blob is the truth). */}
+            {!cropUI && !previewUrl && (
+              <img
+                key={photo.id}
+                src={imgUrl(photo, '512')}
+                draggable={false}
+                alt=""
+                className={cn('absolute inset-0 size-full', !showsCurrent && 'z-10')}
+              />
+            )}
             <DecodedImage
               src={src}
               onShown={setShownSrc}
