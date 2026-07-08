@@ -153,5 +153,6 @@ export function useTaskOutput(taskId: string): { lines: string[]; clear: () => v
 export interface TaskMeta {
     kind: string;
     folder?: string;
+    folderPath?: string;
     destDir?: string;
 }

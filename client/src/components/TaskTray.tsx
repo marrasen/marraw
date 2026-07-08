@@ -48,7 +48,7 @@ export function TaskTray() {
       {running.length <= 1 && running[0] ? (
         <TaskChip
           label={running[0].title}
-          count={running[0].total ? `${running[0].current ?? 0}/${running[0].total.toLocaleString()}` : undefined}
+          count={running[0].total ? `${running[0].current ?? 0}/${running[0].total}` : undefined}
           pct={pctOf(running[0])}
           onCancel={() => cancelSharedTask(client, running[0].id).catch(() => {})}
           onClick={() => setOpen((v) => !v)}
@@ -116,7 +116,7 @@ function TaskTrayCard({ tasks, onClose }: { tasks: SharedTaskState[]; onClose: (
                     <span className="truncate text-xs text-foreground">{t.title}</span>
                     {t.total != null && t.total > 0 && (
                       <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground tabular-nums">
-                        {(t.current ?? 0).toLocaleString()}/{t.total.toLocaleString()}
+                        {(t.current ?? 0)}/{t.total}
                       </span>
                     )}
                   </div>
