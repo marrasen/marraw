@@ -6,8 +6,15 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
+
+// Taskbar/window icon. Only needed for the dev/unpackaged run — the packaged
+// exe carries its own icon (electron-builder win.icon), and build/ isn't
+// bundled, so fall back to Electron's default there.
+const ICON_PATH = path.join(__dirname, '..', 'assets', 'icon.ico');
+const WINDOW_ICON = fs.existsSync(ICON_PATH) ? ICON_PATH : undefined;
 
 const DEV = process.env.MARRAW_DEV === '1';
 // Scripted harness runs (ui-verify, shot): animation frames must keep
@@ -98,6 +105,7 @@ async function createWindow(opts = {}) {
     minWidth: 1280, // the handoff's "minimum comfortable window"
     frame: false, // no native title bar — marraw draws its own controls
     backgroundColor: '#0c0d0f',
+    icon: WINDOW_ICON,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8f95ff"/>
+      <stop offset="1" stop-color="#545cde"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.32" cy="0.26" r="0.9">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="blade" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef0ff"/>
+    </linearGradient>
+    <linearGradient id="bladeDim" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#d3d7ff"/>
+      <stop offset="1" stop-color="#b3baff"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="url(#tile)"/>
+  <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="url(#glow)"/>
+  <g>
+    <path d="M256.00 172.00 L355.62 96.57 A188 188 0 0 1 443.89 262.56 L328.75 214.00 Z" fill="url(#blade)"/>
+    <path d="M328.75 214.00 L443.89 262.56 A188 188 0 0 1 344.26 421.99 L328.75 298.00 Z" fill="url(#bladeDim)"/>
+    <path d="M328.75 298.00 L344.26 421.99 A188 188 0 0 1 156.38 415.43 L256.00 340.00 Z" fill="url(#blade)"/>
+    <path d="M256.00 340.00 L156.38 415.43 A188 188 0 0 1 68.11 249.44 L183.25 298.00 Z" fill="url(#bladeDim)"/>
+    <path d="M183.25 298.00 L68.11 249.44 A188 188 0 0 1 167.74 90.01 L183.25 214.00 Z" fill="url(#blade)"/>
+    <path d="M183.25 214.00 L167.74 90.01 A188 188 0 0 1 355.62 96.57 L256.00 172.00 Z" fill="url(#bladeDim)"/>
+    <circle cx="256" cy="256" r="188" fill="none" stroke="#3f46c9" stroke-opacity="0.35" stroke-width="4"/>
+  </g>
+</svg>

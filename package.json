@@ -9,6 +9,7 @@
   "scripts": {
     "setup:libraw": "powershell -ExecutionPolicy Bypass -File scripts/setup-libraw.ps1",
     "gen": "go run ./tools/generate",
+    "gen:icon": "node scripts/gen-icon.mjs",
     "dev:server": "go run ./cmd/marrawd --dev --port 8483",
     "dev:client": "npm --prefix client run dev",
     "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
@@ -43,6 +44,7 @@
     ],
     "win": {
       "target": "nsis",
+      "icon": "assets/icon.ico",
       "artifactName": "marraw-Setup-${version}.exe"
     },
     "nsis": {
