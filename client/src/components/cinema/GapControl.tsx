@@ -39,7 +39,7 @@ export function GapControl({ glass }: { glass?: boolean }) {
           glass ? 'glass' : 'border border-border bg-secondary dark:bg-white/5',
         )}
       >
-        <span className="text-muted-foreground">Group by gap</span>
+        <span className="whitespace-nowrap text-muted-foreground">Group by gap</span>
         <span className="flex items-center gap-1.5 rounded-[5px] bg-primary/20 px-2 py-0.5 font-mono whitespace-nowrap text-accent-text">
           {gapMinutes == null ? 'Off' : `${gapMinutes} min`}
           <span className="opacity-60">▾</span>

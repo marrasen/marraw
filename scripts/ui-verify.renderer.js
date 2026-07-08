@@ -43,6 +43,30 @@ try {
   const thumbW = thumbSlider ? thumbSlider.getBoundingClientRect().width : 0;
   R.thumbSliderWidth = thumbW >= 90 ? true : `width=${thumbW}px`;
 
+  // --- library grid groups by time gap -------------------------------------
+  // GapControl lives in the FilterBar; grouping is driven through the server
+  // write (like setTheme above). Rapid back-to-back settings writes can apply
+  // out of order server-side and the stale echo clobbers the optimistic store
+  // value, so each step re-issues the write until its condition survives the
+  // echo window.
+  R.gridGapControl = buttons().some((b) => b.textContent.includes('Group by gap'));
+  const gapBefore = ui().gapMinutes;
+  const gridHeaders = () => document.querySelectorAll('[data-testid="grid-group-header"]').length;
+  const gapSettle = async (val, cond, what) => {
+    for (let i = 0; i < 4; i++) {
+      mw.setGapMinutes(val);
+      try {
+        await until(cond, 2500, what);
+        await sleep(700); // let any late echo land
+        if (cond()) return true;
+      } catch { /* retry */ }
+    }
+    throw new Error(`never settled: ${what}`);
+  };
+  R.gridGapHeaders = await gapSettle(1, () => gridHeaders() > 0, 'grid group headers appear');
+  R.gridGapOff = await gapSettle(null, () => gridHeaders() === 0, 'grid group headers gone when off');
+  mw.setGapMinutes(gapBefore);
+
   // --- ⌘K palette: theme commands flip the root class ----------------------
   const themeBefore = ui().theme;
   ui().setPaletteOpen(true);

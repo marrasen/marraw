@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { deletePhotos } from '@/api/library';
 import { resetEdits } from '@/api/edits';
 import { useApiClient } from '@/api/client';
+import { GapControl } from '@/components/cinema/GapControl';
 import { Segmented } from '@/components/ui/segmented';
 import { Slider } from '@/components/ui/slider';
 import {
@@ -89,6 +90,8 @@ export function FilterBar({
 
       {view === 'grid' && (
         <>
+          <GapControl />
+          <div className="h-5 w-px bg-border" />
           <div className="flex items-center gap-2" title="Thumbnail size">
             <LayoutGrid className="size-[13px] shrink-0 text-muted-foreground" strokeWidth={1.5} />
             {/* Fixed-width wrapper, not className on the root: the root's own

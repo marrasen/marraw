@@ -53,9 +53,15 @@ export function groupByGap(photos: Photo[], thresholdMin: number | null): TimeGr
 }
 
 const fmt = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 
 export function timeLabel(unixSec: number): string {
   return unixSec > 0 ? fmt.format(new Date(unixSec * 1000)) : '—';
+}
+
+/** "Tue 12 Mar" — day prefix for grids whose groups span multiple days. */
+export function dayLabel(unixSec: number): string {
+  return unixSec > 0 ? dayFmt.format(new Date(unixSec * 1000)) : '';
 }
 
 /** "09:12 – 09:18" (single time when the group spans under a minute). */

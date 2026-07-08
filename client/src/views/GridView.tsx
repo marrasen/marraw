@@ -1,13 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Check } from 'lucide-react';
+import { Check, Clock } from 'lucide-react';
 import { setVisible, type Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
+import { dayLabel, gapLabel, groupByGap, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { useUIStore } from '@/stores/uiStore';
 
 const CELL_GAP = 12;
+const HEADER_H = 40;
+
+// The grid interleaves two row kinds when group-by-gap is on: a header row
+// per time-gap group, then that group's photo rows. Photo rows carry absolute
+// indices into the flat `photos` list (groups preserve flat order, so each
+// group's slice is contiguous).
+type PhotosRow = { kind: 'photos'; start: number; count: number };
+type GridRow = { kind: 'header'; group: TimeGroup; multiDay: boolean } | PhotosRow;
 
 export function GridView({ photos, folderId }: { photos: Photo[]; folderId: number }) {
   const client = useApiClient();
@@ -32,17 +41,50 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
   const cellW = width > 0 ? Math.floor((width - CELL_GAP * (cols + 1)) / cols) : cellTarget;
   // Uniform 3:2 cells per the handoff grid spec (no filename strip).
   const cellH = Math.floor((cellW * 2) / 3);
-  const rowCount = Math.ceil(photos.length / cols);
+
+  const gapMinutes = useUIStore((s) => s.gapMinutes);
+  const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
+  const grouped = gapMinutes != null && photos.length > 0;
+
+  // photoRow maps flat photo index -> row index, for scroll-to-focus.
+  const { rows, photoRow } = useMemo(() => {
+    const rows: GridRow[] = [];
+    const photoRow = new Array<number>(photos.length);
+    // Day prefixes only when the timed groups span more than one calendar day.
+    const days = new Set<string>();
+    for (const g of groups) {
+      if (g.start > 0) days.add(new Date(g.start * 1000).toDateString());
+      if (g.end > 0) days.add(new Date(g.end * 1000).toDateString());
+    }
+    const multiDay = days.size > 1;
+    let base = 0;
+    for (const g of groups) {
+      if (grouped) rows.push({ kind: 'header', group: g, multiDay });
+      for (let i = 0; i < g.photos.length; i += cols) {
+        const count = Math.min(cols, g.photos.length - i);
+        for (let j = 0; j < count; j++) photoRow[base + i + j] = rows.length;
+        rows.push({ kind: 'photos', start: base + i, count });
+      }
+      base += g.photos.length;
+    }
+    return { rows, photoRow };
+  }, [groups, cols, grouped, photos.length]);
 
   const setGrid = useUIStore((s) => s.setGrid);
   useEffect(() => setGrid(cols), [cols, setGrid]);
 
   const virtualizer = useVirtualizer({
-    count: rowCount,
+    count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => cellH + CELL_GAP,
+    estimateSize: (i) => (rows[i].kind === 'header' ? HEADER_H : cellH + CELL_GAP),
     overscan: 3,
   });
+
+  // Mixed row heights: the virtualizer caches sizes per index, and a given
+  // index can flip between header and photos when the row model shifts —
+  // flush the cache whenever the model or cell height changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => virtualizer.measure(), [rows, cellH]);
 
   const items = virtualizer.getVirtualItems();
 
@@ -50,9 +92,13 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
   const visibleKey = items.length ? `${items[0].index}-${items[items.length - 1].index}` : '';
   useEffect(() => {
     if (!items.length || photos.length === 0) return;
+    const photoItems = items.filter((it) => rows[it.index]?.kind === 'photos');
+    if (!photoItems.length) return;
     const t = setTimeout(() => {
-      const from = Math.max(0, items[0].index - 2) * cols;
-      const to = Math.min(photos.length, (items[items.length - 1].index + 3) * cols);
+      const first = rows[photoItems[0].index] as PhotosRow;
+      const last = rows[photoItems[photoItems.length - 1].index] as PhotosRow;
+      const from = Math.max(0, first.start - 2 * cols);
+      const to = Math.min(photos.length, last.start + last.count + 3 * cols);
       setVisible(client, folderId, photos.slice(from, to).map((p) => p.id)).catch(() => {});
     }, 250);
     return () => clearTimeout(t);
@@ -63,8 +109,8 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
   const focusId = useUIStore((s) => s.focusId);
   const focusRow = useMemo(() => {
     const idx = photos.findIndex((p) => p.id === focusId);
-    return idx < 0 ? null : Math.floor(idx / cols);
-  }, [photos, focusId, cols]);
+    return idx < 0 ? null : (photoRow[idx] ?? null);
+  }, [photos, focusId, photoRow]);
   useEffect(() => {
     if (focusRow != null) virtualizer.scrollToIndex(focusRow);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -79,18 +125,57 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
           </div>
         )}
         <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-          {items.map((row) => (
-            <div
-              key={row.key}
-              className="absolute left-0 flex w-full"
-              style={{ top: row.start, height: cellH, gap: CELL_GAP, paddingLeft: CELL_GAP, paddingRight: CELL_GAP }}
-            >
-              {photos.slice(row.index * cols, row.index * cols + cols).map((p) => (
-                <GridCell key={p.id} photo={p} w={cellW} h={cellH} />
-              ))}
-            </div>
-          ))}
+          {items.map((row) => {
+            const r = rows[row.index];
+            if (!r) return null;
+            if (r.kind === 'header') {
+              return <GroupHeaderRow key={row.key} group={r.group} multiDay={r.multiDay} top={row.start} />;
+            }
+            return (
+              <div
+                key={row.key}
+                className="absolute left-0 flex w-full"
+                style={{ top: row.start, height: cellH, gap: CELL_GAP, paddingLeft: CELL_GAP, paddingRight: CELL_GAP }}
+              >
+                {photos.slice(r.start, r.start + r.count).map((p) => (
+                  <GridCell key={p.id} photo={p} w={cellW} h={cellH} />
+                ))}
+              </div>
+            );
+          })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// GroupHeaderRow: one time-gap group header — the ContactSheet section header
+// scaled down to the library toolbar type ramp.
+function GroupHeaderRow({ group, multiDay, top }: { group: TimeGroup; multiDay: boolean; top: number }) {
+  const n = group.photos.length;
+  return (
+    <div
+      data-testid="grid-group-header"
+      className="absolute left-0 flex w-full items-end"
+      style={{ top, height: HEADER_H, paddingLeft: CELL_GAP, paddingRight: CELL_GAP }}
+    >
+      <div className="mb-[6px] flex w-full items-center gap-3 border-b pb-[7px]">
+        <span className="flex items-center gap-2 font-mono text-[12.5px] text-foreground">
+          <Clock className="size-3 text-muted-foreground" strokeWidth={1.5} />
+          {multiDay && group.start > 0 && (
+            <span className="text-muted-foreground">{dayLabel(group.start)} ·</span>
+          )}
+          {rangeLabel(group)}
+        </span>
+        <span className="text-[11.5px] text-muted-foreground">
+          {n} frame{n === 1 ? '' : 's'}
+        </span>
+        <div className="flex-1" />
+        {group.gapBeforeMin != null && group.gapBeforeMin > 0 && (
+          <span className="rounded-md border border-primary/30 bg-primary/15 px-2 py-[2px] font-mono text-[10.5px] text-[#aab0ff]">
+            {gapLabel(group.gapBeforeMin)} before
+          </span>
+        )}
       </div>
     </div>
   );

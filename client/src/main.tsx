@@ -34,6 +34,7 @@ if (import.meta.env.DEV) {
       // Server-persisted UI settings (optimistic store write + server call).
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),
+      setGapMinutes: (min: number | null) => us.updateGapMinutes(client, min),
       startExport: (req: unknown) => ex.startExport(client, req as never),
     };
   });

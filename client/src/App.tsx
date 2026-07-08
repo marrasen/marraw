@@ -14,7 +14,7 @@ import { ExportDialog } from '@/components/ExportDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { StatusBar } from '@/components/StatusBar';
 import { TaskToasts, TaskTray } from '@/components/TaskTray';
-import { useUIStore } from '@/stores/uiStore';
+import { clampRailWidth, RAIL_WIDTH_DEFAULT, useUIStore } from '@/stores/uiStore';
 import { GridView } from '@/views/GridView';
 import { CullView } from '@/views/CullView';
 import { DevelopView } from '@/views/DevelopView';
@@ -25,7 +25,6 @@ import { openRoot, samePath, saveRoots, useLibraryRoots } from '@/lib/library';
 import { updateRailWidth, UISettingsSync } from '@/lib/uiSettings';
 import { openFolder } from '@/api/library';
 import { useApiClient } from '@/api/client';
-import { clampRailWidth, RAIL_WIDTH_DEFAULT, useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
 
 // Auto-open a folder passed via ?openFolder= (used by the UI smoke test and
