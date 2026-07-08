@@ -13,10 +13,13 @@ import { useTheme } from '@/components/theme-provider';
 import { DIALS, type DialDef, type DialKey } from '@/lib/dials';
 import {
   newAutoPreset,
+  offsetIsAdditive,
   OFFSET_KEYS,
   type AutoPreset,
   type OffsetKey,
+  type OffsetUnit,
 } from '@/lib/autoPresets';
+import { CONTROL_SPECS, type ControlId } from '@/lib/controlSpecs';
 import type { AutoSection } from '@/lib/editSession';
 import {
   updateAutoPresets,
@@ -249,7 +252,8 @@ function AutoPresetsSection() {
       <div className="pb-4">
         <div className="text-sm font-medium">Creative auto presets</div>
         <div className="mt-0.5 text-xs leading-normal text-muted-foreground">
-          A preset runs the selected autos on the photo, then adds your style offsets on top.
+          A preset runs the selected autos, then layers your style on top. Sliders whose auto is
+          active are added to the computed value; the rest are set to their exact value (0 included).
           Apply the first nine with Ctrl+1…9 or from the Ctrl+K palette.
         </div>
       </div>
@@ -300,22 +304,44 @@ function AutoPresetsSection() {
               );
             })}
           </div>
-          <div className="mt-2.5 grid grid-cols-2 gap-x-6 gap-y-2">
-            {OFFSET_KEYS.map((o) => (
-              <OffsetSlider
-                key={`${p.id}:${o.key}`}
-                label={o.label}
-                offsetKey={o.key}
-                value={p.offsets[o.key] ?? 0}
-                onChange={(v) => {
-                  const offsets = { ...p.offsets };
-                  if (v === 0) delete offsets[o.key];
-                  else offsets[o.key] = v;
-                  update(i, { offsets });
-                }}
-              />
-            ))}
-          </div>
+          {(() => {
+            const setOffset = (key: OffsetKey, v: number) =>
+              update(i, { offsets: { ...p.offsets, [key]: v } });
+            const additive = OFFSET_KEYS.filter((o) => offsetIsAdditive(o.key, p.sections));
+            const absolute = OFFSET_KEYS.filter((o) => !offsetIsAdditive(o.key, p.sections));
+            const block = (
+              title: string,
+              hint: string,
+              keys: typeof OFFSET_KEYS,
+            ) =>
+              keys.length === 0 ? null : (
+                <div className="mt-2.5">
+                  <div className="text-[11px] font-medium text-muted-foreground">
+                    {title}
+                    <span className="ml-1.5 font-normal text-muted-foreground/70">{hint}</span>
+                  </div>
+                  <div className="mt-1.5 grid grid-cols-2 gap-x-6 gap-y-2">
+                    {keys.map((o) => (
+                      <OffsetSlider
+                        key={`${p.id}:${o.key}`}
+                        label={o.label}
+                        offsetKey={o.key}
+                        unit={o.unit}
+                        additive={offsetIsAdditive(o.key, p.sections)}
+                        value={p.offsets[o.key] ?? 0}
+                        onChange={(v) => setOffset(o.key, v)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            return (
+              <>
+                {block('On top of auto', 'added to the auto result', additive)}
+                {block('Creative', 'set to the exact value', absolute)}
+              </>
+            );
+          })()}
         </div>
       ))}
       <div>
@@ -327,43 +353,60 @@ function AutoPresetsSection() {
   );
 }
 
-// OffsetSlider edits one style delta as a center-anchored slider: exposure
-// in EV, everything else in the panel's ±100 units. Persists on release
-// (each commit writes the preset list to the catalog).
+// OffsetSlider edits one preset value as a center-anchored slider: exposure
+// in EV, the split hues in degrees, everything else in the panel's ±100 units.
+// Domain and step come from the control catalog. When `additive` the value is
+// a delta layered on the auto result; otherwise it's an absolute setting.
+// Persists on release (each commit writes the preset list to the catalog).
 function OffsetSlider({
   label,
   offsetKey,
+  unit,
+  additive,
   value,
   onChange,
 }: {
   label: string;
   offsetKey: OffsetKey;
+  unit: OffsetUnit;
+  additive: boolean;
   value: number;
   onChange: (v: number) => void;
 }) {
-  const ev = offsetKey === 'expEV';
-  // Slider space: EV directly, ±1 params as ±100.
-  const toSlider = (v: number) => (ev ? v : Math.round(v * 100));
-  const fromSlider = (v: number) => (ev ? Math.round(v * 100) / 100 : v / 100);
   // Thumb follows a local value during the drag (same pattern as EditSlider).
   const [dragging, setDragging] = useState<number | null>(null);
+  const spec = CONTROL_SPECS[offsetKey as ControlId];
+  if (spec.kind !== 'numeric') return null;
+  // Slider space: EV/degrees directly, everything else in ±100 (×100) units.
+  const scale = unit === 'pct' ? 100 : 1;
+  const sMin = unit === 'pct' ? spec.min * scale : spec.min;
+  const sMax = unit === 'pct' ? spec.max * scale : spec.max;
+  const sStep = unit === 'ev' ? 0.05 : unit === 'deg' ? spec.step : Math.max(1, Math.round(spec.step * scale));
+  const signed = sMin < 0;
+  const toSlider = (v: number) => (unit === 'ev' ? v : Math.round(v * scale));
+  const fromSlider = (v: number) => (unit === 'ev' ? Math.round(v * 100) / 100 : v / scale);
   const shown = dragging ?? toSlider(value);
-  const display = ev
-    ? `${shown >= 0 ? '+' : ''}${shown.toFixed(2)}`
-    : shown === 0
-      ? '0'
-      : `${shown > 0 ? '+' : ''}${Math.round(shown)}`;
+  const display =
+    unit === 'ev'
+      ? `${shown >= 0 ? '+' : ''}${shown.toFixed(2)}`
+      : unit === 'deg'
+        ? `${Math.round(shown)}°`
+        : shown === 0
+          ? '0'
+          : signed
+            ? `${shown > 0 ? '+' : ''}${Math.round(shown)}`
+            : `${Math.round(shown)}`;
   return (
     <div className="flex items-center gap-2.5">
       <span className="w-20 shrink-0 text-xs text-muted-foreground">{label}</span>
       <div className="min-w-0 flex-1">
         <Slider
           value={shown}
-          min={ev ? -2 : -100}
-          max={ev ? 2 : 100}
-          step={ev ? 0.05 : 2}
+          min={sMin}
+          max={sMax}
+          step={sStep}
           fillFrom={0}
-          aria-label={`${label} offset`}
+          aria-label={`${label} ${additive ? 'offset' : 'value'}`}
           onValueChange={(v) => setDragging(v as number)}
           onValueCommitted={(v) => {
             setDragging(null);
@@ -373,7 +416,7 @@ function OffsetSlider({
       </div>
       <span className="w-14 shrink-0 text-right font-mono text-[11px] text-foreground tabular-nums">
         {display}
-        {ev && <span className="text-muted-foreground"> EV</span>}
+        {unit === 'ev' && <span className="text-muted-foreground"> EV</span>}
       </span>
     </div>
   );

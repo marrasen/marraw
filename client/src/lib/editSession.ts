@@ -18,7 +18,7 @@ import {
   setEditParams,
   type Params,
 } from '@/api/edits';
-import type { AutoPreset } from '@/lib/autoPresets';
+import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPresets';
 import { CONTROL_ORDER, CONTROL_SPECS, NEUTRAL, type ControlId } from '@/lib/controlSpecs';
 import { updateEditGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
@@ -127,6 +127,15 @@ let previewInFlight = false;
 let previewPending: { full: boolean } | null = null;
 let previewAbort: AbortController | null = null;
 let commitTimer = 0;
+// A one-shot auto/preset apply paints an instant low-res preview and defers
+// the full-res settle by SETTLE_MS so rapid toggling (Ctrl+1..9, Ctrl+U) only
+// renders cheap 1024 frames — the 2048 lands once the user stops.
+let settleTimer = 0;
+const SETTLE_MS = 400;
+// Monotonic token guarding the async autoAdjust in esAuto/esApplyAutoPreset:
+// a newer apply (or a photo switch) supersedes an in-flight one so a stale
+// result can't clobber the draft.
+let applyGen = 0;
 
 function schedulePreview(client: ApiClient, full: boolean) {
   if (previewInFlight) {
@@ -165,6 +174,8 @@ export function esPreviewSettled(): boolean {
 // esLoad opens an edit session for the newly focused photo.
 export async function esLoad(client: ApiClient, photoId: number, applyIds: number[]) {
   window.clearTimeout(commitTimer);
+  window.clearTimeout(settleTimer);
+  applyGen++; // supersede any autoAdjust still in flight for the old photo
   previewPending = null;
   previewAbort?.abort();
   esClearPreview();
@@ -256,6 +267,7 @@ export function esFlushDraft() {
 export function esUpdate(client: ApiClient, patch: Partial<Params>) {
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
+  window.clearTimeout(settleTimer); // a manual edit supersedes a deferred settle
   pendingPatch = { ...(pendingPatch ?? {}), ...patch };
   if (!draftRaf) draftRaf = requestAnimationFrame(flushDraft);
   // While cropping, the crop rectangle and straighten angle are previewed
@@ -323,6 +335,7 @@ function persist(client: ApiClient, params: Params, ids: number[]) {
 // esCommit persists the draft (merged with an optional final patch) to every
 // photo in the selection and records it in the undo history.
 export function esCommit(client: ApiClient, patch?: Partial<Params>) {
+  window.clearTimeout(settleTimer); // this commit is the settle
   esFlushDraft(); // apply any frame-pending slider move before snapshotting
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
@@ -346,6 +359,24 @@ export function esApplyParams(client: ApiClient, params: Params, opts?: { skipHi
   schedulePreview(client, true);
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
   persist(client, params, ids);
+}
+
+// esApplyParamsPreview is esApplyParams for one-shot auto/preset applies: it
+// records history and persists immediately (a discrete, undoable action) but
+// paints a low-res preview now and defers the full-res settle by SETTLE_MS.
+// Rapid toggling only ever renders 1024 frames — the coalescer never sees the
+// full flag until the idle timer fires — and the sharp 2048 lands once the
+// user stops. esUpdate/esCommit/esLoad clear settleTimer when they supersede.
+function esApplyParamsPreview(client: ApiClient, params: Params) {
+  const s = useEditSession.getState();
+  if (s.photoId == null) return;
+  setState({ draft: params });
+  pushHistory(s.photoId, params);
+  const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
+  persist(client, params, ids);
+  schedulePreview(client, false); // instant low-res
+  window.clearTimeout(settleTimer);
+  settleTimer = window.setTimeout(() => schedulePreview(client, true), SETTLE_MS);
 }
 
 export function esCanUndo(s: EditSessionState): boolean {
@@ -435,17 +466,21 @@ export function esReset(client: ApiClient) {
 // Sections the backend's AutoAdjust can compute; 'all' expands server-side.
 export type AutoSection = 'tone' | 'wb' | 'color';
 
-// esAuto asks the backend to compute auto values for the given sections of
-// the focused photo and applies the merged result (preview + persist + undo
-// via esApplyParams). On a multi-selection the focused photo's auto result
-// applies to all targets — the same semantics as paste and the WB picker.
+// esAuto asks the backend to compute auto values for the given sections of the
+// focused photo and applies the merged result with an instant low-res preview
+// and a deferred full-res settle (esApplyParamsPreview) so it stays snappy to
+// re-trigger. On a multi-selection the focused photo's auto result applies to
+// all targets — the same semantics as paste and the WB picker.
 export async function esAuto(client: ApiClient, sections: (AutoSection | 'all')[]) {
   const s = useEditSession.getState();
   if (s.photoId == null || !s.draft) return;
   esFlushDraft();
+  const gen = ++applyGen;
+  const pid = s.photoId;
   try {
-    const params = await autoAdjust(client, s.photoId, useEditSession.getState().draft!, sections);
-    esApplyParams(client, params);
+    const params = await autoAdjust(client, pid, useEditSession.getState().draft!, sections);
+    if (applyGen !== gen || useEditSession.getState().photoId !== pid) return; // superseded
+    esApplyParamsPreview(client, params);
   } catch (err) {
     toast.error(`Auto adjust failed: ${(err as Error).message}`);
   }
@@ -453,31 +488,38 @@ export async function esAuto(client: ApiClient, sections: (AutoSection | 'all')[
 
 // esApplyAutoPreset runs a creative auto: the preset's auto sections first
 // (skipped when empty — an offsets-only preset), then its style offsets on
-// top, clamped to the control ranges. One history entry, one persist.
+// top, clamped to the control ranges. One history entry, one persist, with an
+// instant low-res preview and a deferred full-res settle so toggling between
+// presets stays responsive (esApplyParamsPreview).
 export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
   const s = useEditSession.getState();
   if (s.photoId == null || !s.draft) return;
   esFlushDraft();
+  const gen = ++applyGen;
+  const pid = s.photoId;
   let base = useEditSession.getState().draft!;
   if (preset.sections.length > 0) {
     try {
-      base = await autoAdjust(client, s.photoId, base, preset.sections);
+      base = await autoAdjust(client, pid, base, preset.sections);
     } catch (err) {
       toast.error(`Auto adjust failed: ${(err as Error).message}`);
       return;
     }
+    if (applyGen !== gen || useEditSession.getState().photoId !== pid) return; // superseded
   }
   const out = { ...base };
-  // Offset keys are restricted to direct zero-neutral numeric params
-  // (autoPresets.ts), so plain field addition is safe here.
+  // Offset keys are numeric params (autoPresets.ts). A key covered by an
+  // active auto section lands as a delta on top of the computed value;
+  // anything else (creative sliders, or a section that's off) is written as
+  // an absolute value — 0 included, so it can force the field to 0.
   const fields = out as unknown as Record<string, number>;
-  for (const [key, delta] of Object.entries(preset.offsets)) {
+  for (const [key, val] of Object.entries(preset.offsets)) {
     const spec = CONTROL_SPECS[key as ControlId];
-    if (!spec || spec.kind !== 'numeric' || typeof delta !== 'number') continue;
-    const v = fields[key] + delta;
+    if (!spec || spec.kind !== 'numeric' || typeof val !== 'number') continue;
+    const v = offsetIsAdditive(key as OffsetKey, preset.sections) ? fields[key] + val : val;
     fields[key] = Math.min(spec.max, Math.max(spec.min, Math.round(v * 100) / 100));
   }
-  esApplyParams(client, out);
+  esApplyParamsPreview(client, out);
 }
 
 // esPickWB asks the backend to compute custom multipliers that neutralize
