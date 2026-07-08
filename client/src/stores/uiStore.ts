@@ -13,6 +13,8 @@ export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
 // structured window; Cull and Develop are cinema canvases. Export lives in
 // a dialog, not a mode.
 export type Mode = 'library' | 'cull' | 'develop';
+// Tabs of the develop drawer / library edit aside.
+export type DevelopTab = 'develop' | 'presets' | 'info';
 
 export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   format: 'jpeg',
@@ -89,8 +91,9 @@ interface UIState {
   exportDir: string;
   // Last-used export dialog options; the dialog re-opens with these.
   exportOptions: ExportOptions;
-  // Develop drawer pinned open.
-  developPinned: boolean;
+  // Active tab of the develop drawer / library aside (client-only, not
+  // persisted server-side — it's an ephemeral view choice).
+  developTab: DevelopTab;
   // Pre-render 1:1 full-resolution tiles for opened folders (off by default;
   // large on disk).
   prerenderFullres: boolean;
@@ -150,6 +153,7 @@ interface UIState {
   setPaletteOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setContactSheet: (open: boolean) => void;
+  setDevelopTab: (t: DevelopTab) => void;
   applyUISettings: (s: UISettings) => void;
   setFolder: (id: number, path: string) => void;
   setView: (v: View) => void;
@@ -189,7 +193,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   theme: 'dark',
   exportDir: '',
   exportOptions: DEFAULT_EXPORT_OPTIONS,
-  developPinned: true,
+  developTab: 'develop',
   prerenderFullres: false,
   editGroups: {},
   groupAliases: {},
@@ -224,6 +228,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setContactSheet: (open) => set({ contactSheet: open }),
+  setDevelopTab: (t) => set({ developTab: t }),
   // Server snapshot in (wire shapes sanitized to the client types).
   applyUISettings: (s) =>
     set({
@@ -234,7 +239,6 @@ export const useUIStore = create<UIState>((set, get) => ({
       autoPresets: sanitizeAutoPresets(s.autoPresets),
       exportDir: s.exportDir,
       exportOptions: sanitizeExportOptions(s.exportOptions),
-      developPinned: s.developPinned,
       prerenderFullres: s.prerenderFullres,
       editGroups: s.editGroups,
       groupAliases: s.groupAliases,

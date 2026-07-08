@@ -94,6 +94,7 @@ type Photo struct {
 	Rating      int     `json:"rating"`
 	Flag        Flag    `json:"flag"`
 	MetaLoaded  bool    `json:"metaLoaded"`
+	FileSize    int64   `json:"fileSize"` // bytes on disk, 0 = unknown
 	Width       int     `json:"width"`
 	Height      int     `json:"height"`
 	Orientation int     `json:"orientation"`

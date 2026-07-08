@@ -215,6 +215,7 @@ func toAPIPhoto(p store.Photo) Photo {
 		Rating:      p.Rating,
 		Flag:        FlagFromInt(p.Flag),
 		MetaLoaded:  p.MetaLoaded,
+		FileSize:    p.FileSize,
 		Width:       p.Width,
 		Height:      p.Height,
 		Orientation: p.Orientation,

@@ -191,3 +191,51 @@ export const CONTROL_ORDER: ControlId[] = [
   'sharpen', 'highlight', 'nrThreshold', 'fbddNoiseRd', 'medPasses',
   'demosaic', 'caRed', 'caBlue',
 ];
+
+// Human labels for every editable param, keyed to match the develop panel's
+// slider names. Used to name undo-history entries ("Exposure", "Vignette")
+// by diffing the params that changed between two snapshots.
+const PARAM_LABELS: Partial<Record<keyof Params, string>> = {
+  expEV: 'Exposure',
+  expPreserve: 'Preserve highlights',
+  bright: 'Brightness',
+  gamma: 'Gamma',
+  shadow: 'Shadow slope',
+  contrast: 'Contrast',
+  whites: 'Whites',
+  blacks: 'Blacks',
+  toneShadows: 'Shadows',
+  toneHighlights: 'Highlights',
+  clarity: 'Clarity',
+  texture: 'Texture',
+  dehaze: 'Dehaze',
+  wbMode: 'White balance',
+  wbMul: 'White balance',
+  wbTemp: 'Temperature',
+  wbKelvin: 'Temperature',
+  wbTint: 'Tint',
+  saturation: 'Saturation',
+  vibrance: 'Vibrance',
+  splitShadowHue: 'Split shadow',
+  splitShadowAmt: 'Split shadow',
+  splitHighlightHue: 'Split highlight',
+  splitHighlightAmt: 'Split highlight',
+  vignette: 'Vignette',
+  sharpen: 'Sharpen',
+  highlight: 'Highlight recovery',
+  nrThreshold: 'Noise reduction',
+  fbddNoiseRd: 'FBDD denoise',
+  medPasses: 'Median passes',
+  demosaic: 'Demosaic',
+  caRed: 'CA red/cyan',
+  caBlue: 'CA blue/yellow',
+  cropX: 'Crop',
+  cropY: 'Crop',
+  cropW: 'Crop',
+  cropH: 'Crop',
+  cropAngle: 'Straighten',
+};
+
+export function paramLabel(key: keyof Params): string {
+  return PARAM_LABELS[key] ?? String(key);
+}

@@ -9,6 +9,7 @@ import { ChipSpinner } from '@/components/ui/task-chip';
 import { cn } from '@/lib/utils';
 import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
 import { esClearPreview, esCommit, esPickWB, esPreviewSettled, esSetCropping, esUpdate, useEditSession } from '@/lib/editSession';
+import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
@@ -179,6 +180,7 @@ export function CinemaImage({
   onZoomInfo,
   renderingBadgeBottom = 180,
   navigatorBottom = 18,
+  showNavigator = true,
 }: {
   photo: Photo;
   photos: Photo[];
@@ -187,6 +189,12 @@ export function CinemaImage({
   /** Bottom offset of the "Rendering full resolution" badge (above the mode's control bar). */
   renderingBadgeBottom?: number;
   navigatorBottom?: number;
+  /**
+   * Show the floating navigator inset over the canvas. Develop turns it off —
+   * the always-visible drawer would cover it, so the Info tab hosts a
+   * live navigator fed from the shared loupeNav store instead.
+   */
+  showNavigator?: boolean;
 }) {
   const client = useApiClient();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -619,6 +627,20 @@ export function CinemaImage({
     el.scrollTop = slackY + fy * boxH - el.clientHeight / 2;
   };
 
+  // Publish live pan/zoom to the shared store so an off-canvas navigator (the
+  // Develop Info tab) can mirror the viewport and drive panning. panTo closes
+  // over the current geometry, so register a stable wrapper backed by a ref to
+  // the latest closure and clear it on unmount.
+  const panToRef = useRef(panTo);
+  panToRef.current = panTo;
+  useEffect(() => {
+    setLoupeNav({ panTo: (fx, fy) => panToRef.current(fx, fy) });
+    return () => setLoupeNav({ panTo: null });
+  }, []);
+  useEffect(() => {
+    setLoupeNav({ viewport, scale, isFit: zoom === 'fit' });
+  }, [viewport, scale, zoom]);
+
   const onMagnifierMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!wbPicking) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -783,7 +805,7 @@ export function CinemaImage({
           onPickAspect={applyAspect}
         />
       ) : (
-        !wbPicking && (
+        showNavigator && !wbPicking && (
           <NavigatorInset
             photo={photo}
             scale={scale}
@@ -907,6 +929,66 @@ function Magnifier({
   );
 }
 
+// NavigatorMap: the interactive minimap itself — the 256px rendition with the
+// visible-region rectangle over it, click/drag to recenter the pan. Shared by
+// the floating NavigatorInset (over the canvas) and the Develop Info tab
+// (in-panel, fed from the loupeNav store).
+export function NavigatorMap({
+  photo,
+  viewport,
+  onPan,
+  className,
+}: {
+  photo: Photo;
+  viewport: [number, number, number, number];
+  onPan?: (fx: number, fy: number) => void;
+  className?: string;
+}) {
+  const [vx, vy, vw, vh] = viewport;
+  const [dragging, setDragging] = useState(false);
+  const zoomed = vw < 0.999 || vh < 0.999;
+
+  const panFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    onPan?.(
+      Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+      Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+    );
+  };
+
+  return (
+    <div
+      className={cn('relative touch-none overflow-hidden rounded-md', zoomed && (dragging ? 'cursor-grabbing' : 'cursor-grab'), className)}
+      onPointerDown={(e) => {
+        if (!zoomed) return;
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        setDragging(true);
+        panFromEvent(e);
+      }}
+      onPointerMove={(e) => dragging && panFromEvent(e)}
+      onPointerUp={(e) => {
+        setDragging(false);
+        e.currentTarget.releasePointerCapture?.(e.pointerId);
+      }}
+      onPointerCancel={() => setDragging(false)}
+    >
+      <img src={imgUrl(photo, '256')} alt="" draggable={false} className="block w-full" />
+      {zoomed && (
+        <div
+          className="pointer-events-none absolute rounded-[2px] border-[1.5px] border-white"
+          style={{
+            left: `${vx * 100}%`,
+            top: `${vy * 100}%`,
+            width: `${vw * 100}%`,
+            height: `${vh * 100}%`,
+            boxShadow: '0 0 0 999px rgba(0,0,0,.34)',
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 // NavigatorInset: the 200px glass minimap (bottom right) with the visible
 // region outlined; click to recenter the pan there.
 function NavigatorInset({
@@ -925,18 +1007,9 @@ function NavigatorInset({
   /** Center the main viewport on this image fraction (drag or click). */
   onPan?: (fx: number, fy: number) => void;
 }) {
-  const [vx, vy, vw, vh] = viewport;
-  const [dragging, setDragging] = useState(false);
+  const [, , vw, vh] = viewport;
   const zoomed = vw < 0.999 || vh < 0.999;
   if (isFit && !zoomed) return null;
-
-  const panFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    onPan?.(
-      Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
-      Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
-    );
-  };
 
   return (
     <div className="glass absolute right-[18px] z-30 w-[200px] rounded-[11px] p-[9px]" style={{ bottom }}>
@@ -946,35 +1019,7 @@ function NavigatorInset({
           {Math.round(scale * 100)}%
         </span>
       </div>
-      <div
-        className={cn('relative touch-none overflow-hidden rounded-md', zoomed && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
-        onPointerDown={(e) => {
-          if (!zoomed) return;
-          e.currentTarget.setPointerCapture?.(e.pointerId);
-          setDragging(true);
-          panFromEvent(e);
-        }}
-        onPointerMove={(e) => dragging && panFromEvent(e)}
-        onPointerUp={(e) => {
-          setDragging(false);
-          e.currentTarget.releasePointerCapture?.(e.pointerId);
-        }}
-        onPointerCancel={() => setDragging(false)}
-      >
-        <img src={imgUrl(photo, '256')} alt="" draggable={false} className="block w-full" />
-        {zoomed && (
-          <div
-            className="pointer-events-none absolute rounded-[2px] border-[1.5px] border-white"
-            style={{
-              left: `${vx * 100}%`,
-              top: `${vy * 100}%`,
-              width: `${vw * 100}%`,
-              height: `${vh * 100}%`,
-              boxShadow: '0 0 0 999px rgba(0,0,0,.34)',
-            }}
-          />
-        )}
-      </div>
+      <NavigatorMap photo={photo} viewport={viewport} onPan={onPan} />
     </div>
   );
 }

@@ -112,7 +112,7 @@ export function useKeyboard() {
           case 'v': {
             if (!s.clipboard || s.focusId == null) return;
             e.preventDefault();
-            esApplyParams(client, s.clipboard);
+            esApplyParams(client, s.clipboard, { label: 'Paste' });
             toast.success('Edit settings pasted');
             return;
           }

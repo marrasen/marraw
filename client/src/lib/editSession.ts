@@ -19,7 +19,7 @@ import {
   type Params,
 } from '@/api/edits';
 import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPresets';
-import { CONTROL_ORDER, CONTROL_SPECS, NEUTRAL, type ControlId } from '@/lib/controlSpecs';
+import { CONTROL_ORDER, CONTROL_SPECS, NEUTRAL, paramLabel, type ControlId } from '@/lib/controlSpecs';
 import { updateEditGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 
@@ -77,8 +77,16 @@ interface Preview {
   flat: boolean;
 }
 
+// One point in a photo's edit timeline: the full params plus a human label
+// derived from what changed (so the Presets tab can list "Exposure", "Add
+// vignette", "Paste", …) and let the user click back to it.
+export interface HistorySnapshot {
+  params: Params;
+  label: string;
+}
+
 interface HistoryEntry {
-  stack: Params[];
+  stack: HistorySnapshot[];
   index: number;
 }
 
@@ -168,7 +176,43 @@ export function esPreviewSettled(): boolean {
   if (s.rendering > 0 || previewPending || pendingPatch) return false;
   if (s.photoId == null || !s.draft) return false;
   const h = s.history[s.photoId];
-  return !h || sameParams(s.draft, h.stack[h.index]);
+  return !h || sameParams(s.draft, h.stack[h.index].params);
+}
+
+// Effect-style controls read naturally as "Add vignette" / "Remove clarity"
+// when they move on/off their default; everything else just names the control.
+const ADD_REMOVE_LABELS = new Set([
+  'Vignette', 'Texture', 'Clarity', 'Dehaze',
+  'Split shadow', 'Split highlight', 'Sharpen', 'Noise reduction',
+]);
+
+function paramIsDefault(p: Params, key: keyof Params): boolean {
+  const v = p[key];
+  const d = NEUTRAL[key];
+  if (Array.isArray(v) && Array.isArray(d)) return JSON.stringify(v) === JSON.stringify(d);
+  return v === d;
+}
+
+// labelForDiff names a commit from the params that changed between the
+// previous history head and the new snapshot: a single control by its label
+// (with Add/Remove for effect toggles), a mixed change as "Adjust".
+function labelForDiff(prev: Params, next: Params): string {
+  const keys = (Object.keys(next) as (keyof Params)[]).filter((k) => {
+    const a = prev[k];
+    const b = next[k];
+    return Array.isArray(a) && Array.isArray(b) ? JSON.stringify(a) !== JSON.stringify(b) : a !== b;
+  });
+  if (keys.length === 0) return 'Edit';
+  const labels = new Set(keys.map((k) => paramLabel(k)));
+  if (labels.size !== 1) return 'Adjust';
+  const label = [...labels][0];
+  if (ADD_REMOVE_LABELS.has(label)) {
+    const wasDefault = keys.every((k) => paramIsDefault(prev, k));
+    const nowDefault = keys.every((k) => paramIsDefault(next, k));
+    if (wasDefault && !nowDefault) return `Add ${label.toLowerCase()}`;
+    if (!wasDefault && nowDefault) return `Remove ${label.toLowerCase()}`;
+  }
+  return label;
 }
 
 // esLoad opens an edit session for the newly focused photo.
@@ -192,7 +236,9 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
   if (useEditSession.getState().photoId !== photoId) return; // superseded
   const draft = params ?? { ...NEUTRAL };
   setState((s) => {
-    const history = s.history[photoId] ? s.history : { ...s.history, [photoId]: { stack: [draft], index: 0 } };
+    const history = s.history[photoId]
+      ? s.history
+      : { ...s.history, [photoId]: { stack: [{ params: draft, label: 'Original' }], index: 0 } };
     return { draft, loading: false, history };
   });
 }
@@ -315,11 +361,11 @@ async function renderPreview(client: ApiClient, full: boolean) {
   }
 }
 
-function pushHistory(photoId: number, params: Params) {
+function pushHistory(photoId: number, params: Params, label: string) {
   setState((s) => {
-    const entry = s.history[photoId] ?? { stack: [{ ...NEUTRAL }], index: 0 };
-    if (sameParams(entry.stack[entry.index], params)) return {};
-    const stack = [...entry.stack.slice(0, entry.index + 1), params].slice(-50);
+    const entry = s.history[photoId] ?? { stack: [{ params: { ...NEUTRAL }, label: 'Original' }], index: 0 };
+    if (sameParams(entry.stack[entry.index].params, params)) return {};
+    const stack = [...entry.stack.slice(0, entry.index + 1), { params, label }].slice(-50);
     return { history: { ...s.history, [photoId]: { stack, index: stack.length - 1 } } };
   });
 }
@@ -341,7 +387,9 @@ export function esCommit(client: ApiClient, patch?: Partial<Params>) {
   if (!s.draft || s.photoId == null) return;
   const params = patch ? { ...s.draft, ...patch } : s.draft;
   if (patch) setState({ draft: params });
-  pushHistory(s.photoId, params);
+  const h = s.history[s.photoId];
+  const prev = h ? h.stack[h.index].params : { ...NEUTRAL };
+  pushHistory(s.photoId, params, labelForDiff(prev, params));
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
   persist(client, params, ids);
   // Settle render: drag frames were low-res, so bring the loupe back to the
@@ -351,11 +399,15 @@ export function esCommit(client: ApiClient, patch?: Partial<Params>) {
 
 // esApplyParams replaces the whole draft (paste, picker result, undo) with
 // immediate preview + persist.
-export function esApplyParams(client: ApiClient, params: Params, opts?: { skipHistory?: boolean }) {
+export function esApplyParams(
+  client: ApiClient,
+  params: Params,
+  opts?: { skipHistory?: boolean; label?: string },
+) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
   setState({ draft: params });
-  if (!opts?.skipHistory) pushHistory(s.photoId, params);
+  if (!opts?.skipHistory) pushHistory(s.photoId, params, opts?.label ?? 'Edit');
   schedulePreview(client, true);
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
   persist(client, params, ids);
@@ -367,11 +419,11 @@ export function esApplyParams(client: ApiClient, params: Params, opts?: { skipHi
 // Rapid toggling only ever renders 1024 frames — the coalescer never sees the
 // full flag until the idle timer fires — and the sharp 2048 lands once the
 // user stops. esUpdate/esCommit/esLoad clear settleTimer when they supersede.
-function esApplyParamsPreview(client: ApiClient, params: Params) {
+function esApplyParamsPreview(client: ApiClient, params: Params, label: string) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
   setState({ draft: params });
-  pushHistory(s.photoId, params);
+  pushHistory(s.photoId, params, label);
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
   persist(client, params, ids);
   schedulePreview(client, false); // instant low-res
@@ -406,9 +458,19 @@ function moveHistory(client: ApiClient, dir: number) {
   if (s.photoId == null) return;
   const h = s.history[s.photoId];
   if (!h) return;
-  const index = h.index + dir;
-  if (index < 0 || index >= h.stack.length) return;
-  const params = h.stack[index];
+  esJumpTo(client, h.index + dir);
+}
+
+// esJumpTo moves the focused photo's history to an absolute index (Undo/Redo
+// go through it via ±1, the Presets history list clicks straight to any
+// point). Persists to the focused photo only — history is per image.
+export function esJumpTo(client: ApiClient, index: number) {
+  const s = useEditSession.getState();
+  if (s.photoId == null) return;
+  const h = s.history[s.photoId];
+  if (!h) return;
+  if (index < 0 || index >= h.stack.length || index === h.index) return;
+  const params = h.stack[index].params;
   setState({
     draft: params,
     history: { ...s.history, [s.photoId]: { ...h, index } },
@@ -417,6 +479,14 @@ function moveHistory(client: ApiClient, dir: number) {
   setEditParams(client, s.photoId, params).catch((err) =>
     toast.error(`Save failed: ${(err as Error).message}`),
   );
+}
+
+// esHistory reads the focused photo's timeline for the Presets history list:
+// the labeled snapshots and the current index, or null when nothing is loaded.
+export function esHistory(s: EditSessionState): { entries: HistorySnapshot[]; index: number } | null {
+  if (s.photoId == null) return null;
+  const h = s.history[s.photoId];
+  return h ? { entries: h.stack, index: h.index } : null;
 }
 
 // esStep adjusts the active (or given) control from the keyboard: +/- steps
@@ -458,7 +528,7 @@ export function esReset(client: ApiClient) {
       if (useEditSession.getState().photoId !== photoId) return;
       const draft = params ?? { ...NEUTRAL };
       setState({ draft });
-      pushHistory(photoId, draft);
+      pushHistory(photoId, draft, 'Reset');
     })
     .catch((err) => toast.error((err as Error).message));
 }
@@ -480,7 +550,7 @@ export async function esAuto(client: ApiClient, sections: (AutoSection | 'all')[
   try {
     const params = await autoAdjust(client, pid, useEditSession.getState().draft!, sections);
     if (applyGen !== gen || useEditSession.getState().photoId !== pid) return; // superseded
-    esApplyParamsPreview(client, params);
+    esApplyParamsPreview(client, params, 'Auto');
   } catch (err) {
     toast.error(`Auto adjust failed: ${(err as Error).message}`);
   }
@@ -497,17 +567,32 @@ export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
   esFlushDraft();
   const gen = ++applyGen;
   const pid = s.photoId;
-  let base = useEditSession.getState().draft!;
-  if (preset.sections.length > 0) {
-    try {
-      base = await autoAdjust(client, pid, base, preset.sections);
-    } catch (err) {
-      toast.error(`Auto adjust failed: ${(err as Error).message}`);
-      return;
-    }
+  const base = useEditSession.getState().draft!;
+  try {
+    const out = await computePresetParams(client, pid, base, preset);
     if (applyGen !== gen || useEditSession.getState().photoId !== pid) return; // superseded
+    esApplyParamsPreview(client, out, preset.name);
+  } catch (err) {
+    toast.error(`Auto adjust failed: ${(err as Error).message}`);
   }
-  const out = { ...base };
+}
+
+// computePresetParams resolves a creative-auto preset to concrete params for a
+// photo without touching edit-session state: the preset's auto sections first
+// (skipped when empty — an offsets-only preset), then its style offsets on top,
+// clamped to the control ranges. Shared by esApplyAutoPreset (apply) and the
+// Presets-tab thumbnail renders (preview a preset before committing).
+export async function computePresetParams(
+  client: ApiClient,
+  photoId: number,
+  base: Params,
+  preset: AutoPreset,
+): Promise<Params> {
+  let resolved = base;
+  if (preset.sections.length > 0) {
+    resolved = await autoAdjust(client, photoId, base, preset.sections);
+  }
+  const out = { ...resolved };
   // Offset keys are numeric params (autoPresets.ts). A key covered by an
   // active auto section lands as a delta on top of the computed value;
   // anything else (creative sliders, or a section that's off) is written as
@@ -519,7 +604,7 @@ export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
     const v = offsetIsAdditive(key as OffsetKey, preset.sections) ? fields[key] + val : val;
     fields[key] = Math.min(spec.max, Math.max(spec.min, Math.round(v * 100) / 100));
   }
-  esApplyParamsPreview(client, out);
+  return out;
 }
 
 // esPickWB asks the backend to compute custom multipliers that neutralize
@@ -530,7 +615,7 @@ export async function esPickWB(client: ApiClient, x: number, y: number) {
   setState({ wbPicking: false });
   try {
     const params = await pickWhiteBalance(client, s.photoId, s.draft, x, y);
-    esApplyParams(client, params);
+    esApplyParams(client, params, { label: 'White balance' });
   } catch (err) {
     toast.error(`White balance pick failed: ${(err as Error).message}`);
   }

@@ -14,7 +14,17 @@ interface Bins {
 // Histogram renders the RGB distribution of what is on screen: the live
 // preview blob while editing, otherwise the committed 512px rendition
 // fetched over HTTP (the /img endpoint is CORS-open for exactly this).
-export function Histogram({ photo }: { photo: Photo }) {
+export function Histogram({
+  photo,
+  height = 52,
+  className,
+}: {
+  photo: Photo;
+  /** Canvas height in px (also its internal resolution). Info tab renders taller. */
+  height?: number;
+  /** Overrides the default develop-tab wrapper padding. */
+  className?: string;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const preview = useEditSession((s) => s.preview);
   const previewBlob = preview && preview.photoId === photo.id ? preview.blob : null;
@@ -41,17 +51,18 @@ export function Histogram({ photo }: { photo: Photo }) {
       ac.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photo.id, photo.editHash, photo.cacheKey, previewBlob]);
+  }, [photo.id, photo.editHash, photo.cacheKey, previewBlob, height]);
 
   return (
-    <div className="px-4 pt-[13px]">
+    <div className={className ?? 'px-4 pt-[13px]'}>
       {/* Histograms stay on a dark inset in both themes (handoff tokens). */}
       <canvas
         ref={canvasRef}
         data-testid="histogram"
         width={256}
-        height={52}
-        className="h-[52px] w-full rounded-md border border-white/10 bg-inset"
+        height={height}
+        style={{ height }}
+        className="w-full rounded-md border border-white/10 bg-inset"
       />
     </div>
   );
