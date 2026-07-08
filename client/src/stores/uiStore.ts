@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { FlagType, Photo, PhotoPatch } from '@/api/library';
-import type { UISettings } from '@/api/settings';
+import type { ExportOptions, UISettings } from '@/api/settings';
 import type { Params } from '@/api/edits';
 import { sanitizeDialKeys, type DialKey } from '@/lib/dials';
 import { sanitizeAutoPresets, type AutoPreset } from '@/lib/autoPresets';
@@ -13,6 +13,41 @@ export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
 // structured window; Cull and Develop are cinema canvases. Export lives in
 // a dialog, not a mode.
 export type Mode = 'library' | 'cull' | 'develop';
+
+export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
+  format: 'jpeg',
+  jpegQuality: 90,
+  resizeMode: 'full',
+  edgePx: 2160,
+  colorSpace: 'srgb',
+  sharpenTarget: 'off',
+  sharpenAmount: 'standard',
+};
+
+// Mirrors the server's normalizeExportOptions: missing or invalid fields
+// from older blobs fall back to the dialog defaults.
+function sanitizeExportOptions(o: Partial<ExportOptions> | undefined): ExportOptions {
+  return {
+    format: o?.format === 'tiff16' ? 'tiff16' : 'jpeg',
+    jpegQuality:
+      typeof o?.jpegQuality === 'number' && o.jpegQuality >= 1 && o.jpegQuality <= 100
+        ? Math.round(o.jpegQuality)
+        : DEFAULT_EXPORT_OPTIONS.jpegQuality,
+    resizeMode: o?.resizeMode === 'edge' ? 'edge' : 'full',
+    edgePx:
+      typeof o?.edgePx === 'number' && o.edgePx >= 16 && o.edgePx <= 65536
+        ? Math.round(o.edgePx)
+        : DEFAULT_EXPORT_OPTIONS.edgePx,
+    colorSpace:
+      o?.colorSpace === 'adobergb' || o?.colorSpace === 'prophoto' ? o.colorSpace : 'srgb',
+    sharpenTarget:
+      o?.sharpenTarget === 'screen' || o?.sharpenTarget === 'matte' || o?.sharpenTarget === 'glossy'
+        ? o.sharpenTarget
+        : 'off',
+    sharpenAmount:
+      o?.sharpenAmount === 'low' || o?.sharpenAmount === 'high' ? o.sharpenAmount : 'standard',
+  };
+}
 
 interface UIState {
   mode: Mode;
@@ -42,6 +77,8 @@ interface UIState {
   theme: Theme;
   // Last export destination directory ('' = none yet).
   exportDir: string;
+  // Last-used export dialog options; the dialog re-opens with these.
+  exportOptions: ExportOptions;
   // Develop drawer pinned open.
   developPinned: boolean;
   // Edit-panel group id -> open (absent = open).
@@ -136,6 +173,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   autoPresets: [],
   theme: 'dark',
   exportDir: '',
+  exportOptions: DEFAULT_EXPORT_OPTIONS,
   developPinned: true,
   editGroups: {},
   groupAliases: {},
@@ -178,6 +216,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       quickDials: sanitizeDialKeys(s.quickDials),
       autoPresets: sanitizeAutoPresets(s.autoPresets),
       exportDir: s.exportDir,
+      exportOptions: sanitizeExportOptions(s.exportOptions),
       developPinned: s.developPinned,
       editGroups: s.editGroups,
       groupAliases: s.groupAliases,

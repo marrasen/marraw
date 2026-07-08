@@ -33,17 +33,68 @@ type AutoPreset struct {
 	Offsets  map[string]float64 `json:"offsets"`
 }
 
+// ExportOptions is the last-used state of the export dialog, persisted as
+// one blob when an export starts (the dialog is "sticky", Lightroom-style).
+type ExportOptions struct {
+	Format      ExportFormat `json:"format"`
+	JpegQuality int          `json:"jpegQuality"`
+	// ResizeMode is "full" or "edge"; EdgePx is remembered even when full.
+	ResizeMode    string        `json:"resizeMode"`
+	EdgePx        int           `json:"edgePx"`
+	ColorSpace    ColorSpace    `json:"colorSpace"`
+	SharpenTarget SharpenTarget `json:"sharpenTarget"`
+	SharpenAmount SharpenAmount `json:"sharpenAmount"`
+}
+
+// normalizeExportOptions maps missing or invalid fields (older/partial blobs
+// unmarshal as zero values) to the dialog defaults, on both read and write.
+func normalizeExportOptions(o ExportOptions) ExportOptions {
+	if !enumValid(o.Format, ExportFormatValues()) {
+		o.Format = ExportJPEG
+	}
+	if o.JpegQuality < 1 || o.JpegQuality > 100 {
+		o.JpegQuality = 90
+	}
+	if o.ResizeMode != "edge" {
+		o.ResizeMode = "full"
+	}
+	if o.EdgePx < 16 || o.EdgePx > 65536 {
+		o.EdgePx = 2160
+	}
+	if !enumValid(o.ColorSpace, ColorSpaceValues()) {
+		o.ColorSpace = ColorSpaceSRGB
+	}
+	if !enumValid(o.SharpenTarget, SharpenTargetValues()) {
+		o.SharpenTarget = SharpenTargetOff
+	}
+	if !enumValid(o.SharpenAmount, SharpenAmountValues()) {
+		o.SharpenAmount = SharpenAmountStandard
+	}
+	return o
+}
+
+func enumValid[T comparable](v T, values []T) bool {
+	for _, x := range values {
+		if v == x {
+			return true
+		}
+	}
+	return false
+}
+
 // UISettings is every persisted client preference. One subscription key
 // serves them all: any setter re-pushes the full snapshot to every connected
 // window, which is what keeps multiple windows in sync.
 type UISettings struct {
-	Theme      Theme `json:"theme"`
+	Theme Theme `json:"theme"`
 	// GapMinutes is the cull time-gap grouping threshold; 0 = off.
 	GapMinutes  int          `json:"gapMinutes"`
 	CullDials   []string     `json:"cullDials"`
 	QuickDials  []string     `json:"quickDials"`
 	AutoPresets []AutoPreset `json:"autoPresets"`
 	ExportDir   string       `json:"exportDir"`
+	// ExportOptions is the export dialog's last-used state.
+	ExportOptions ExportOptions `json:"exportOptions"`
 	// DevelopPinned keeps the develop drawer expanded.
 	DevelopPinned bool `json:"developPinned"`
 	// EditGroups: edit-panel group id -> open. Absent means open.
@@ -73,6 +124,7 @@ const (
 	settingUIQuickDials    = "ui:quickDials"
 	settingUIAutoPresets   = "ui:autoPresets"
 	settingUIExportDir     = "ui:exportDir"
+	settingUIExportOptions = "ui:exportOptions"
 	settingUIDevelopPinned = "ui:developPinned"
 	settingUIEditGroups    = "ui:editGroups"
 	settingUIGroupAliases  = "ui:groupAliases"
@@ -114,6 +166,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		QuickDials:    jsonSetting(ctx, db, settingUIQuickDials, []string{}),
 		AutoPresets:   jsonSetting(ctx, db, settingUIAutoPresets, []AutoPreset{}),
 		ExportDir:     exportDir,
+		ExportOptions: normalizeExportOptions(jsonSetting(ctx, db, settingUIExportOptions, ExportOptions{})),
 		DevelopPinned: pinned,
 		EditGroups:    jsonSetting(ctx, db, settingUIEditGroups, map[string]bool{}),
 		GroupAliases:  jsonSetting(ctx, db, settingUIGroupAliases, map[string]string{}),
@@ -165,6 +218,11 @@ func (u *Settings) SetAutoPresets(ctx context.Context, presets []AutoPreset) err
 // SetExportDir persists the last export destination.
 func (u *Settings) SetExportDir(ctx context.Context, dir string) error {
 	return u.save(ctx, settingUIExportDir, dir)
+}
+
+// SetExportOptions persists the export dialog's last-used state.
+func (u *Settings) SetExportOptions(ctx context.Context, opts ExportOptions) error {
+	return u.saveJSON(ctx, settingUIExportOptions, normalizeExportOptions(opts))
 }
 
 // SetDevelopPinned persists the develop-drawer pin.

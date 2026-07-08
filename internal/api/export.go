@@ -26,6 +26,11 @@ type ExportRequest struct {
 	// ColorSpace picks the output primaries; empty = sRGB. JPEGs in wide
 	// spaces get a matching ICC profile embedded.
 	ColorSpace ColorSpace `json:"colorSpace" validate:"omitempty,oneof=srgb adobergb prophoto"`
+	// SharpenTarget applies output sharpening after the final resize; empty =
+	// off. JPEG only — TIFF16 stays a neutral flat master.
+	SharpenTarget SharpenTarget `json:"sharpenTarget" validate:"omitempty,oneof=off screen matte glossy"`
+	// SharpenAmount scales the sharpening; empty = standard.
+	SharpenAmount SharpenAmount `json:"sharpenAmount" validate:"omitempty,oneof=low standard high"`
 	// CreateDir creates DestDir if missing (the client asks the user first).
 	CreateDir bool `json:"createDir"`
 }
@@ -72,12 +77,14 @@ func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.Tas
 		var mu sync.Mutex
 		done, failed := 0, 0
 		err := export.Run(tctx, x.deps.DB, export.Request{
-			PhotoIDs:    req.PhotoIDs,
-			DestDir:     req.DestDir,
-			Format:      format,
-			JpegQuality: req.JpegQuality,
-			LongEdge:    req.LongEdge,
-			ColorSpace:  string(req.ColorSpace),
+			PhotoIDs:      req.PhotoIDs,
+			DestDir:       req.DestDir,
+			Format:        format,
+			JpegQuality:   req.JpegQuality,
+			LongEdge:      req.LongEdge,
+			ColorSpace:    string(req.ColorSpace),
+			SharpenTarget: string(req.SharpenTarget),
+			SharpenAmount: string(req.SharpenAmount),
 		}, func(it export.Item) {
 			mu.Lock()
 			done++

@@ -57,6 +57,34 @@ func ColorSpaceValues() []ColorSpace {
 	return []ColorSpace{ColorSpaceSRGB, ColorSpaceAdobeRGB, ColorSpaceProPhoto}
 }
 
+// SharpenTarget selects the output-sharpening medium for JPEG exports,
+// applied after the final resize.
+type SharpenTarget string
+
+const (
+	SharpenTargetOff    SharpenTarget = "off"
+	SharpenTargetScreen SharpenTarget = "screen"
+	SharpenTargetMatte  SharpenTarget = "matte"
+	SharpenTargetGlossy SharpenTarget = "glossy"
+)
+
+func SharpenTargetValues() []SharpenTarget {
+	return []SharpenTarget{SharpenTargetOff, SharpenTargetScreen, SharpenTargetMatte, SharpenTargetGlossy}
+}
+
+// SharpenAmount scales the output-sharpening strength.
+type SharpenAmount string
+
+const (
+	SharpenAmountLow      SharpenAmount = "low"
+	SharpenAmountStandard SharpenAmount = "standard"
+	SharpenAmountHigh     SharpenAmount = "high"
+)
+
+func SharpenAmountValues() []SharpenAmount {
+	return []SharpenAmount{SharpenAmountLow, SharpenAmountStandard, SharpenAmountHigh}
+}
+
 // Photo is the client-facing photo record.
 type Photo struct {
 	ID          int64   `json:"id"`

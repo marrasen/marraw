@@ -34,6 +34,11 @@ type Request struct {
 	// "adobergb", or "prophoto". LibRaw converts during decode; JPEGs get a
 	// matching ICC profile embedded (sRGB stays untagged).
 	ColorSpace string
+	// SharpenTarget/SharpenAmount select output sharpening for JPEGs, applied
+	// after the final resize: "off"/"screen"/"matte"/"glossy" and
+	// "low"/"standard"/"high" ("" = off / standard).
+	SharpenTarget string
+	SharpenAmount string
 }
 
 type Item struct {
@@ -49,9 +54,8 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 	if err := os.MkdirAll(req.DestDir, 0o755); err != nil {
 		return err
 	}
-	quality := req.JpegQuality
-	if quality <= 0 || quality > 100 {
-		quality = 90
+	if req.JpegQuality <= 0 || req.JpegQuality > 100 {
+		req.JpegQuality = 90
 	}
 
 	// Claim output names up front (sequentially) so concurrent workers
@@ -59,7 +63,10 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 	names := newNamer(req.DestDir)
 
 	g, gctx := errgroup.WithContext(ctx)
-	g.SetLimit(min(runtime.NumCPU(), 8))
+	// Export is a deliberate foreground action with its own LibRaw handles
+	// (separate from the decode pool), so saturate every thread — the user is
+	// waiting on the whole batch.
+	g.SetLimit(runtime.NumCPU())
 	for _, id := range req.PhotoIDs {
 		photo, err := db.GetPhoto(ctx, id)
 		if err != nil {
@@ -71,7 +78,7 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 			if gctx.Err() != nil {
 				return gctx.Err()
 			}
-			err := exportOne(photo, filepath.Join(req.DestDir, outName), req.Format, quality, req.LongEdge, req.ColorSpace)
+			err := exportOne(photo, filepath.Join(req.DestDir, outName), req)
 			onItem(Item{PhotoID: photo.ID, FileName: outName, Err: err})
 			return nil
 		})
@@ -79,7 +86,7 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 	return g.Wait()
 }
 
-func exportOne(photo store.Photo, outPath, format string, quality, longEdge int, colorSpace string) error {
+func exportOne(photo store.Photo, outPath string, req Request) error {
 	proc, err := libraw.New()
 	if err != nil {
 		return err
@@ -99,8 +106,8 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int,
 	if params == nil || params.Demosaic == "" {
 		lp.UserQual = libraw.DemosaicAHD
 	}
-	lp.OutputColor = ColorSpaceOutput(colorSpace)
-	if format == "tiff16" {
+	lp.OutputColor = ColorSpaceOutput(req.ColorSpace)
+	if req.Format == "tiff16" {
 		lp.OutputBPS = 16
 	}
 
@@ -119,11 +126,11 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int,
 	if err != nil {
 		return err
 	}
-	switch format {
+	switch req.Format {
 	case "tiff16":
-		err = encodeTIFF16(f, img, longEdge)
+		err = encodeTIFF16(f, img, req.LongEdge)
 	default:
-		err = encodeJPEG(f, img, quality, longEdge, gamma, params, ICCFor(colorSpace))
+		err = encodeJPEG(f, img, req, gamma, params, ICCFor(req.ColorSpace))
 	}
 	if err != nil {
 		f.Close()
@@ -137,7 +144,7 @@ func exportOne(photo store.Photo, outPath, format string, quality, longEdge int,
 	return os.Rename(tmp, outPath)
 }
 
-func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma float64, params *edit.Params, icc []byte) error {
+func encodeJPEG(f *os.File, img *libraw.Image, req Request, lookGamma float64, params *edit.Params, icc []byte) error {
 	if img.Bits != 8 {
 		return fmt.Errorf("export: jpeg needs 8-bit output, got %d", img.Bits)
 	}
@@ -154,13 +161,14 @@ func encodeJPEG(f *os.File, img *libraw.Image, quality, longEdge int, lookGamma 
 	rgba = pyramid.ApplyGeometry(rgba, params)
 	pyramid.ApplyLook(rgba, lookGamma, params)
 	pyramid.ApplyDetail(rgba, params)
-	out := resizeRGBA(rgba, longEdge)
+	out := resizeRGBA(rgba, req.LongEdge)
+	pyramid.ApplyOutputSharpen(out, req.SharpenTarget, req.SharpenAmount)
 	if icc == nil {
-		return jpeg.Encode(f, out, &jpeg.Options{Quality: quality})
+		return jpeg.Encode(f, out, &jpeg.Options{Quality: req.JpegQuality})
 	}
 	// Wide gamut: encode to memory, then splice the ICC profile in.
 	buf := &bytes.Buffer{}
-	if err := jpeg.Encode(buf, out, &jpeg.Options{Quality: quality}); err != nil {
+	if err := jpeg.Encode(buf, out, &jpeg.Options{Quality: req.JpegQuality}); err != nil {
 		return err
 	}
 	_, err := f.Write(embedICCJPEG(buf.Bytes(), icc))

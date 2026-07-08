@@ -8,6 +8,8 @@ export const ExportRequestSchema = z.object({
     jpegQuality: z.number().int().min(0).max(100),
     longEdge: z.number().int().min(0).max(65536),
     colorSpace: z.union([z.literal(""), z.enum(["srgb", "adobergb", "prophoto"])]),
+    sharpenTarget: z.union([z.literal(""), z.enum(["off", "screen", "matte", "glossy"])]),
+    sharpenAmount: z.union([z.literal(""), z.enum(["low", "standard", "high"])]),
     createDir: z.boolean(),
 });
 

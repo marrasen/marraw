@@ -7,6 +7,7 @@ import type {
     UseQueryOptions,
     UseQueryResult,
 } from './client';
+import type { ColorSpaceType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
 
 export const Theme = {
     Dark: "dark",
@@ -22,6 +23,16 @@ export interface AutoPreset {
     offsets: Record<string, number>;
 }
 
+export interface ExportOptions {
+    format: ExportFormatType;
+    jpegQuality: number;
+    resizeMode: string;
+    edgePx: number;
+    colorSpace: ColorSpaceType;
+    sharpenTarget: SharpenTargetType;
+    sharpenAmount: SharpenAmountType;
+}
+
 export interface UISettings {
     theme: ThemeType;
     gapMinutes: number;
@@ -29,6 +40,7 @@ export interface UISettings {
     quickDials: string[];
     autoPresets: AutoPreset[];
     exportDir: string;
+    exportOptions: ExportOptions;
     developPinned: boolean;
     editGroups: Record<string, boolean>;
     groupAliases: Record<string, string>;
@@ -111,6 +123,19 @@ setExportDir.method = 'Settings.SetExportDir' as const;
 
 export function subscribeSetExportDir(client: ApiClient, dir: string, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetExportDir', [dir], callback, onError, options);
+}
+
+
+export function setExportOptions(client: ApiClient, opts: ExportOptions, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetExportOptions', [opts], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setExportOptions.method = 'Settings.SetExportOptions' as const;
+
+export function subscribeSetExportOptions(client: ApiClient, opts: ExportOptions, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetExportOptions', [opts], callback, onError, options);
 }
 
 
@@ -267,6 +292,21 @@ export function useSetExportDir(dir: string, options?: UseQueryOptions<void>): U
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [dir], _subscribe: { method: 'Settings.SetExportDir', params: [dir] } });
+}
+
+/**
+ * Subscribes to `Settings.SetExportOptions` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetExportOptions(opts: ExportOptions, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, opts: ExportOptions) => setExportOptions(client, opts, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [opts], _subscribe: { method: 'Settings.SetExportOptions', params: [opts] } });
 }
 
 /**

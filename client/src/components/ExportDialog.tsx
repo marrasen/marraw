@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
-import { checkDest, startExport, type ColorSpaceType, type ExportFormatType } from '@/api/export';
+import {
+  type ColorSpaceType,
+  type ExportFormatType,
+  type SharpenAmountType,
+  type SharpenTargetType,
+} from '@/api/api';
+import { checkDest, startExport } from '@/api/export';
 import { useApiClient } from '@/api/client';
 import type { Photo } from '@/api/library';
 import { Button } from '@/components/ui/button';
@@ -9,7 +15,7 @@ import { Segmented } from '@/components/ui/segmented';
 import { Slider } from '@/components/ui/slider';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
-import { updateExportDir } from '@/lib/uiSettings';
+import { updateExportDir, updateExportOptions } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
 
@@ -21,6 +27,17 @@ const COLOR_ITEMS: { value: ColorSpaceType; label: string }[] = [
   { value: 'srgb', label: 'sRGB' },
   { value: 'adobergb', label: 'Adobe RGB' },
   { value: 'prophoto', label: 'ProPhoto' },
+];
+const SHARPEN_TARGET_ITEMS: { value: SharpenTargetType; label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'screen', label: 'Screen' },
+  { value: 'matte', label: 'Matte' },
+  { value: 'glossy', label: 'Glossy' },
+];
+const SHARPEN_AMOUNT_ITEMS: { value: SharpenAmountType; label: string }[] = [
+  { value: 'low', label: 'Low' },
+  { value: 'standard', label: 'Standard' },
+  { value: 'high', label: 'High' },
 ];
 
 /**
@@ -42,18 +59,28 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   const [resize, setResize] = useState<'full' | 'edge'>('full');
   const [edgePx, setEdgePx] = useState(2160);
   const [colorSpace, setColorSpace] = useState<ColorSpaceType>('srgb');
+  const [sharpenTarget, setSharpenTarget] = useState<SharpenTargetType>('off');
+  const [sharpenAmount, setSharpenAmount] = useState<SharpenAmountType>('standard');
   const [starting, setStarting] = useState(false);
   const [needsCreate, setNeedsCreate] = useState(false);
 
-  // Prefill the destination when the dialog opens: the previously used
-  // directory, else "<current folder>\Exports".
+  // Prefill from the last-used options when the dialog opens: the previous
+  // destination (else "<current folder>\Exports") plus the persisted export
+  // options blob.
   useEffect(() => {
     if (!open) return;
     setNeedsCreate(false);
-    // Read imperatively: a subscription echo must not clobber a path the
-    // user is typing while the dialog is open.
-    const last = useUIStore.getState().exportDir;
-    setDestDir(last || (folderPath ? `${folderPath}\\Exports` : ''));
+    // Read imperatively: a subscription echo must not clobber a value the
+    // user is editing while the dialog is open.
+    const { exportDir, exportOptions } = useUIStore.getState();
+    setDestDir(exportDir || (folderPath ? `${folderPath}\\Exports` : ''));
+    setFormat(exportOptions.format);
+    setQuality(exportOptions.jpegQuality);
+    setResize(exportOptions.resizeMode === 'edge' ? 'edge' : 'full');
+    setEdgePx(exportOptions.edgePx);
+    setColorSpace(exportOptions.colorSpace);
+    setSharpenTarget(exportOptions.sharpenTarget);
+    setSharpenAmount(exportOptions.sharpenAmount);
   }, [open, folderPath]);
 
   const ids = selection.size > 0 ? [...selection] : photos.map((p) => p.id);
@@ -82,9 +109,20 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
         jpegQuality: quality,
         longEdge,
         colorSpace,
+        sharpenTarget,
+        sharpenAmount,
         createDir,
       });
       updateExportDir(client, destDir);
+      updateExportOptions(client, {
+        format,
+        jpegQuality: quality,
+        resizeMode: resize,
+        edgePx,
+        colorSpace,
+        sharpenTarget,
+        sharpenAmount,
+      });
       setOpen(false); // progress lives in the top-bar task chip
     } catch (err) {
       toast.error(`Export failed to start: ${(err as Error).message}`);
@@ -98,6 +136,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
     format === 'jpeg' ? `JPEG q${quality}` : '16-bit TIFF',
     resize === 'edge' ? `${edgePx}px` : 'full res',
     ...(colorSpace !== 'srgb' ? [COLOR_ITEMS.find((c) => c.value === colorSpace)!.label] : []),
+    ...(format === 'jpeg' && sharpenTarget !== 'off' ? [`sharpen ${sharpenTarget}`] : []),
     'runs in the background',
   ].join(' · ');
 
@@ -229,6 +268,31 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
               className="border-0 bg-secondary dark:bg-white/5"
             />,
           )}
+          {format === 'jpeg' &&
+            row(
+              'Sharpen for',
+              <Segmented
+                aria-label="Sharpen for"
+                size="sm"
+                items={SHARPEN_TARGET_ITEMS}
+                value={sharpenTarget}
+                onValueChange={setSharpenTarget}
+                className="border-0 bg-secondary dark:bg-white/5"
+              />,
+            )}
+          {format === 'jpeg' &&
+            sharpenTarget !== 'off' &&
+            row(
+              'Amount',
+              <Segmented
+                aria-label="Sharpen amount"
+                size="sm"
+                items={SHARPEN_AMOUNT_ITEMS}
+                value={sharpenAmount}
+                onValueChange={setSharpenAmount}
+                className="border-0 bg-secondary dark:bg-white/5"
+              />,
+            )}
           {needsCreate && (
             <div className="rounded-lg border border-rating/40 bg-rating/10 p-2.5 text-xs">
               The folder <span className="font-mono">{destDir}</span> does not exist. Create it?

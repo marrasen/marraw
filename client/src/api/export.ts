@@ -7,19 +7,7 @@ import type {
     UseQueryOptions,
     UseQueryResult,
 } from './client';
-
-export const ColorSpace = {
-    Srgb: "srgb",
-    Adobergb: "adobergb",
-    Prophoto: "prophoto",
-} as const;
-export type ColorSpaceType = typeof ColorSpace[keyof typeof ColorSpace];
-
-export const ExportFormat = {
-    Jpeg: "jpeg",
-    Tiff16: "tiff16",
-} as const;
-export type ExportFormatType = typeof ExportFormat[keyof typeof ExportFormat];
+import type { ColorSpaceType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
 
 export interface DestInfo {
     exists: boolean;
@@ -32,6 +20,8 @@ export interface ExportRequest {
     jpegQuality: number;
     longEdge: number;
     colorSpace: ColorSpaceType;
+    sharpenTarget: SharpenTargetType;
+    sharpenAmount: SharpenAmountType;
     createDir: boolean;
 }
 

@@ -11,6 +11,7 @@ import {
   setDevelopPinned,
   setEditGroupOpen,
   setExportDir,
+  setExportOptions,
   setGapMinutes,
   setGroupAlias,
   setQuickDials,
@@ -18,6 +19,7 @@ import {
   setTheme,
   useGetUISettings,
   type AutoPreset as WireAutoPreset,
+  type ExportOptions,
 } from '@/api/settings';
 import type { ApiClient } from '@/api/client';
 import type { AutoPreset } from '@/lib/autoPresets';
@@ -64,6 +66,11 @@ export function updateAutoPresets(client: ApiClient, presets: AutoPreset[]) {
 export function updateExportDir(client: ApiClient, dir: string) {
   useUIStore.setState({ exportDir: dir });
   setExportDir(client, dir).catch(swallow);
+}
+
+export function updateExportOptions(client: ApiClient, opts: ExportOptions) {
+  useUIStore.setState({ exportOptions: opts });
+  setExportOptions(client, opts).catch(swallow);
 }
 
 export function updateDevelopPinned(client: ApiClient, pinned: boolean) {
