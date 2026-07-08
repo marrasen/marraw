@@ -121,3 +121,74 @@ scripts/            setup-libraw.ps1, smoke.mjs
   (enabled server-wide),
   [fixed-size array codegen](https://github.com/marrasen/aprot/issues/240)
   (`wbMul` is a typed tuple).
+
+## Missing for professional-grade editing
+
+The features below are the gap between marraw's current global-adjustment
+pipeline and what a Lightroom/Capture One-class editor offers. They are
+listed roughly in dependency order — local masking underpins most of the
+rest.
+
+### Local adjustments & masking
+
+- **Mask engine**: a per-photo stack of masks, each carrying its own copy
+  of the look-stage adjustments (exposure, contrast, WB, saturation, …)
+  blended over the base render. Stored as JSON edit state, evaluated after
+  the global look stage, previewed at half-size like the global sliders.
+- **Radial and linear gradients**: elliptical and graduated masks with
+  feather, invert, and rotation — the workhorses for skies, vignettes, and
+  subject pop.
+- **Brush masks**: freehand paint/erase with flow, size, and feather,
+  stored as a resolution-independent stroke path (re-rasterized per preview
+  level) rather than a baked bitmap.
+- **AI / range masks**: subject, sky, and background auto-selection, plus
+  luminance/color range masks and intersect/subtract combination so a
+  gradient can be constrained to just the sky.
+
+### Tone & color depth
+
+- **HDR editing and output**: decode and edit in a scene-referred, >1.0
+  headroom working space; gain-map (ISO 21496-1) or PQ/HLG export, and an
+  HDR-capable preview path so highlights are graded rather than clipped.
+- **Wide-gamut pipeline**: a color-managed working space (e.g. linear
+  Rec.2020 / ACEScg) with display transforms, replacing the current
+  sRGB-ish look math, so gamut-clipping and out-of-gamut handling are
+  correct.
+- **Tone curve and per-channel curves**: parametric + point RGB and
+  per-channel R/G/B curves, the tool most conspicuously absent from the
+  global look stage.
+- **HSL / color grading**: eight-band HSL mixer and shadow/midtone/highlight
+  color wheels (the split-toning already present, generalized).
+
+### Detail, optics & geometry
+
+- **Detail**: capture sharpening with masking, and modern denoise
+  (luminance + color, ideally ML-assisted) — currently only LibRaw's NR is
+  exposed.
+- **Spatial look tools**: clarity/texture/dehaze (local-contrast at
+  multiple radii), already flagged above under global gaps.
+- **Lens corrections**: profile-based distortion, vignetting, and
+  chromatic-aberration removal (LensFun/embedded profiles), plus manual
+  defringe; only LibRaw's CA toggle exists today.
+- **Geometry**: perspective/keystone correction and upright, coarse
+  90°/180° rotation + flip (the crop + straighten stage is shipped; see the
+  orientation-swap caveat above).
+- **Healing & clone**: spot removal / content-aware heal for dust and
+  blemishes.
+
+### Workflow & interop
+
+- **Secondary display**: a Lightroom-style second window pinned to another
+  monitor (loupe/compare/grid) for tethered or dual-screen culling —
+  distinct from the multi-window shell that already ships.
+- **XMP sidecar + catalog interop**: read/write XMP so edits round-trip
+  with Lightroom/darktable/Capture One (already noted under known gaps).
+- **Presets, profiles & snapshots**: saveable develop presets, camera/
+  creative profiles (DCP), edit history with named snapshots, and
+  before/after compare.
+- **Panorama & HDR merge**: multi-frame stitch and bracket merge producing a
+  new editable RAW/DNG.
+- **Watermarking**: text and image (logo/PNG) watermarks applied at export
+  with position, scale, opacity, and inset controls, stored as a reusable
+  preset and composited in the export pipeline.
+- **Tethered capture** and **soft-proofing** for print/output profiles.
