@@ -13,7 +13,7 @@ import { EditPanel } from '@/components/EditPanel';
 import { ExportDialog } from '@/components/ExportDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { StatusBar } from '@/components/StatusBar';
-import { TaskToasts, TaskTray } from '@/components/TaskTray';
+import { TaskToasts } from '@/components/TaskTray';
 import { clampRailWidth, RAIL_WIDTH_DEFAULT, useUIStore } from '@/stores/uiStore';
 import { GridView } from '@/views/GridView';
 import { CullView } from '@/views/CullView';
@@ -106,7 +106,6 @@ export default function App() {
       <CommandPalette />
       <ShortcutsOverlay />
       <TaskToasts />
-      <TaskTray />
       <Toaster position="bottom-right" />
     </div>
   );

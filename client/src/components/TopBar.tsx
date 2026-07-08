@@ -58,7 +58,7 @@ export function TopBar() {
         }}
         className={cn('shrink-0 [-webkit-app-region:no-drag]', !hasFolder && 'opacity-50')}
       />
-      <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-3" data-testid="task-tray">
+      <div className="flex min-w-0 flex-1 basis-0 items-center justify-end gap-3">
         <button
           className="flex h-[30px] shrink-0 items-center gap-2 rounded-lg border border-border bg-secondary px-3 text-xs whitespace-nowrap text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag] dark:bg-white/5"
           onClick={() => setPaletteOpen(true)}
