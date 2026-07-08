@@ -266,10 +266,19 @@ export function CinemaImage({
   // snaps instead of tweening between unrelated geometries.
   const snapKey = `${photo.id}|${cropUI}|${haveDims}`;
   const prevSnapKey = useRef('');
+  // Only a deliberate zoom change (wheel, buttons, Z, double-click — every
+  // path routes through setLoupeZoom, so `zoom` moves) should tween. A passive
+  // fitScale recompute — the background metadata scan pushing a fresh photo
+  // list with corrected dimensions/orientation, or a window resize — leaves
+  // `zoom` at 'fit' and MUST snap: animating it reads as the photo spuriously
+  // zooming in and springing back.
+  const prevZoom = useRef(zoom);
   useEffect(() => {
     const snap = prevSnapKey.current !== snapKey;
     prevSnapKey.current = snapKey;
-    if (snap || !haveDims || Math.abs(scale - shownRef.current) < 1e-4) {
+    const zoomChanged = prevZoom.current !== zoom;
+    prevZoom.current = zoom;
+    if (snap || !zoomChanged || !haveDims || Math.abs(scale - shownRef.current) < 1e-4) {
       setShownScale(scale);
       return;
     }
@@ -283,7 +292,7 @@ export function CinemaImage({
       if (p < 1) raf = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(raf);
-  }, [scale, snapKey, haveDims]);
+  }, [scale, snapKey, haveDims, zoom]);
 
   const boxW = Math.max(1, Math.round(dw * shownScale));
   const boxH = Math.max(1, Math.round(dh * shownScale));
