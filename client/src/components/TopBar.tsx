@@ -70,7 +70,9 @@ export function TopBar() {
           <span className="max-[860px]:hidden">Jump to anything</span>
           <span className="rounded bg-black/10 px-1.5 py-px font-mono dark:bg-white/10">{modK}</span>
         </button>
-        <TaskTray />
+        <div data-testid="task-tray">
+          <TaskTray />
+        </div>
         {window.win && <div className="h-[22px] w-px bg-black/10 dark:bg-white/9" />}
         <WindowControls />
       </div>

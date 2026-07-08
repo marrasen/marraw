@@ -103,6 +103,12 @@ type UISettings struct {
 	GroupAliases map[string]string `json:"groupAliases"`
 	// RailGroups: lowercased library-group parent path -> open. Absent = open.
 	RailGroups map[string]bool `json:"railGroups"`
+	// RailWidth is the library rail width in px (drag its right edge).
+	RailWidth int `json:"railWidth"`
+	// PrerenderFullres pre-renders 1:1 full-resolution tiles for a folder
+	// after the calibrate and pre-render passes. Off by default — full-res
+	// tiles are large, so it can push the preview cache past its cap.
+	PrerenderFullres bool `json:"prerenderFullres"`
 }
 
 // Settings serves the persisted client preferences. Everything lives in the
@@ -129,6 +135,15 @@ const (
 	settingUIEditGroups    = "ui:editGroups"
 	settingUIGroupAliases  = "ui:groupAliases"
 	settingUIRailGroups    = "ui:railGroups"
+	settingUIRailWidth     = "ui:railWidth"
+	settingUIPrerenderFull = "ui:prerenderFullres"
+)
+
+// Library rail width bounds; the default matches the design handoff.
+const (
+	railWidthMin     = 180
+	railWidthDefault = 214
+	railWidthMax     = 440
 )
 
 // GetUISettings returns all persisted client preferences with defaults
@@ -155,22 +170,34 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 
 	exportDir, _ := db.GetSetting(ctx, settingUIExportDir)
 
+	railWidth := railWidthDefault
+	if raw, _ := db.GetSetting(ctx, settingUIRailWidth); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= railWidthMin && n <= railWidthMax {
+			railWidth = n
+		}
+	}
+
+	// Off unless explicitly enabled.
+	prerenderFullRaw, _ := db.GetSetting(ctx, settingUIPrerenderFull)
+
 	// Pinned by default; only an explicit "false" unpins (SidecarWrites style).
 	pinnedRaw, _ := db.GetSetting(ctx, settingUIDevelopPinned)
 	pinned := pinnedRaw != "false"
 
 	return &UISettings{
-		Theme:         theme,
-		GapMinutes:    gap,
-		CullDials:     jsonSetting(ctx, db, settingUICullDials, []string{}),
-		QuickDials:    jsonSetting(ctx, db, settingUIQuickDials, []string{}),
-		AutoPresets:   jsonSetting(ctx, db, settingUIAutoPresets, []AutoPreset{}),
-		ExportDir:     exportDir,
-		ExportOptions: normalizeExportOptions(jsonSetting(ctx, db, settingUIExportOptions, ExportOptions{})),
-		DevelopPinned: pinned,
-		EditGroups:    jsonSetting(ctx, db, settingUIEditGroups, map[string]bool{}),
-		GroupAliases:  jsonSetting(ctx, db, settingUIGroupAliases, map[string]string{}),
-		RailGroups:    jsonSetting(ctx, db, settingUIRailGroups, map[string]bool{}),
+		Theme:            theme,
+		GapMinutes:       gap,
+		CullDials:        jsonSetting(ctx, db, settingUICullDials, []string{}),
+		QuickDials:       jsonSetting(ctx, db, settingUIQuickDials, []string{}),
+		AutoPresets:      jsonSetting(ctx, db, settingUIAutoPresets, []AutoPreset{}),
+		ExportDir:        exportDir,
+		ExportOptions:    normalizeExportOptions(jsonSetting(ctx, db, settingUIExportOptions, ExportOptions{})),
+		DevelopPinned:    pinned,
+		EditGroups:       jsonSetting(ctx, db, settingUIEditGroups, map[string]bool{}),
+		GroupAliases:     jsonSetting(ctx, db, settingUIGroupAliases, map[string]string{}),
+		RailGroups:       jsonSetting(ctx, db, settingUIRailGroups, map[string]bool{}),
+		RailWidth:        railWidth,
+		PrerenderFullres: prerenderFullRaw == "true",
 	}, nil
 }
 
@@ -255,6 +282,24 @@ func (u *Settings) SetRailGroupOpen(ctx context.Context, parentPath string, open
 	return updateMapSetting(ctx, u, settingUIRailGroups, parentPath, !open, func(m map[string]bool) {
 		m[parentPath] = false
 	})
+}
+
+// SetRailWidth persists the library rail width in pixels.
+func (u *Settings) SetRailWidth(ctx context.Context, px int) error {
+	if px < railWidthMin || px > railWidthMax {
+		return aprot.ErrInvalidParams(fmt.Sprintf("rail width must be %d..%d", railWidthMin, railWidthMax))
+	}
+	return u.save(ctx, settingUIRailWidth, strconv.Itoa(px))
+}
+
+// SetPrerenderFullres persists whether opened folders auto-render 1:1
+// full-resolution tiles after the pre-render pass.
+func (u *Settings) SetPrerenderFullres(ctx context.Context, enabled bool) error {
+	v := "false"
+	if enabled {
+		v = "true"
+	}
+	return u.save(ctx, settingUIPrerenderFull, v)
 }
 
 // save writes one row and pushes the fresh snapshot to every window.

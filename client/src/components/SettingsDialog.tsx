@@ -18,7 +18,12 @@ import {
   type OffsetKey,
 } from '@/lib/autoPresets';
 import type { AutoSection } from '@/lib/editSession';
-import { updateAutoPresets, updateCullDials, updateQuickDials } from '@/lib/uiSettings';
+import {
+  updateAutoPresets,
+  updateCullDials,
+  updatePrerenderFullres,
+  updateQuickDials,
+} from '@/lib/uiSettings';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
@@ -427,8 +432,21 @@ function CacheSection() {
   const usedPct =
     info && info.capBytes > 0 ? Math.min(100, (info.bytes / info.capBytes) * 100) : 0;
 
+  const prerenderFullres = useUIStore((s) => s.prerenderFullres);
+
   return (
     <div className="flex flex-col">
+      <SettingRow
+        title="Pre-render 1:1 full resolution"
+        description="After a folder's previews are built, render every photo's 1:1 tiles ahead of time so zooming to 100% is instant. Full-res tiles are large — raise the cache limit below for big libraries, or they'll be evicted before you view them. You can also render a single folder on demand from its right-click menu."
+        control={
+          <Switch
+            checked={prerenderFullres}
+            onCheckedChange={(v) => updatePrerenderFullres(client, v)}
+            aria-label="Pre-render 1:1 full resolution"
+          />
+        }
+      />
       <SettingRow
         title="Cache directory"
         description={

@@ -9,6 +9,7 @@ import {
   Folder,
   FolderPen,
   Info,
+  Maximize2,
   Pencil,
   Play,
   Plus,
@@ -18,7 +19,12 @@ import {
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { openFolder, renameFolderOnDisk, type LibraryRoot } from '@/api/library';
+import {
+  openFolder,
+  renameFolderOnDisk,
+  renderFolderFullres,
+  type LibraryRoot,
+} from '@/api/library';
 import { useApiClient } from '@/api/client';
 import { useMyTasks } from '@/api/tasks';
 import { ChipSpinner } from '@/components/ui/task-chip';
@@ -50,7 +56,8 @@ function groupName(g: RootGroup, aliases: Record<string, string>) {
 }
 
 /**
- * The curated library rail (214px): shoot folders the user added, grouped by
+ * The curated library rail (resizable, 214px default): shoot folders the
+ * user added, grouped by
  * their parent folder on disk, with organize context menus. Replaces the old
  * whole-filesystem tree — browsing now lives in the Add-folder picker.
  */
@@ -368,6 +375,14 @@ function ShootRow({
     }
   };
 
+  // Kick off the 1:1 full-resolution pre-render; progress shows in the task
+  // tray, so this just starts it and reports failures.
+  const renderFullres = () => {
+    renderFolderFullres(client, root.path)
+      .then(() => toast.success(`Rendering 1:1 previews for ${rootName(root)}…`))
+      .catch((err) => toast.error(`Render 1:1 failed: ${(err as Error).message}`));
+  };
+
   return (
     <ContextMenu>
       <ContextMenuTrigger
@@ -444,6 +459,9 @@ function ShootRow({
         </ContextMenuItem>
         <ContextMenuItem onClick={open}>
           <RefreshCw /> <span className="flex-1">Rescan for new photos</span>
+        </ContextMenuItem>
+        <ContextMenuItem onClick={renderFullres}>
+          <Maximize2 /> <span className="flex-1">Render 1:1</span>
         </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem variant="destructive" onClick={remove}>

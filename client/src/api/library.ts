@@ -244,6 +244,19 @@ export function subscribeRenameFolderOnDisk(client: ApiClient, path: string, new
 }
 
 
+export function renderFolderFullres(client: ApiClient, path: string, options?: RequestOptions): Promise<FolderInfo> {
+    return client.request<FolderInfo>('Library.RenderFolderFullres', [path], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+renderFolderFullres.method = 'Library.RenderFolderFullres' as const;
+
+export function subscribeRenderFolderFullres(client: ApiClient, path: string, callback: (data: FolderInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<FolderInfo>('Library.RenderFolderFullres', [path], callback, onError, options);
+}
+
+
 export function setFavoriteFolders(client: ApiClient, paths: string[], options?: RequestOptions): Promise<void> {
     return client.request<void>('Library.SetFavoriteFolders', [paths], options);
 }
@@ -486,6 +499,21 @@ export function useRenameFolderOnDisk(path: string, newName: string, options?: U
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [path, newName], _subscribe: { method: 'Library.RenameFolderOnDisk', params: [path, newName] } });
+}
+
+/**
+ * Subscribes to `Library.RenderFolderFullres` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useRenderFolderFullres(path: string, options?: UseQueryOptions<FolderInfo>): UseQueryResult<FolderInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, path: string) => renderFolderFullres(client, path, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Library.RenderFolderFullres', params: [path] } });
 }
 
 /**

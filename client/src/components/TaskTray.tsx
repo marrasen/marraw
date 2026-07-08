@@ -7,6 +7,7 @@ import type { SharedTaskState } from '@/api/tasks-handler';
 import { cn } from '@/lib/utils';
 import { useEditSession } from '@/lib/editSession';
 import { useTaskToasts } from '@/lib/taskToasts';
+import { useUIStore } from '@/stores/uiStore';
 
 // RenderSpinner: a tiny status-bar note while an edit preview render is in
 // flight (not a shared task — request-scoped).

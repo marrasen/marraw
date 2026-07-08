@@ -13,7 +13,8 @@ import { EditPanel } from '@/components/EditPanel';
 import { ExportDialog } from '@/components/ExportDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { StatusBar } from '@/components/StatusBar';
-import { TaskToasts } from '@/components/TaskTray';
+import { TaskToasts, TaskTray } from '@/components/TaskTray';
+import { useUIStore } from '@/stores/uiStore';
 import { GridView } from '@/views/GridView';
 import { CullView } from '@/views/CullView';
 import { DevelopView } from '@/views/DevelopView';
@@ -21,10 +22,10 @@ import { useKeyboard } from '@/lib/keyboard';
 import { usePhotos } from '@/lib/usePhotos';
 import { useFolderScan } from '@/lib/useFolderScan';
 import { openRoot, samePath, saveRoots, useLibraryRoots } from '@/lib/library';
-import { UISettingsSync } from '@/lib/uiSettings';
+import { updateRailWidth, UISettingsSync } from '@/lib/uiSettings';
 import { openFolder } from '@/api/library';
 import { useApiClient } from '@/api/client';
-import { useUIStore } from '@/stores/uiStore';
+import { clampRailWidth, RAIL_WIDTH_DEFAULT, useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
 
 // Auto-open a folder passed via ?openFolder= (used by the UI smoke test and
@@ -90,11 +91,7 @@ export default function App() {
       {/* Cinema modes are edge-to-edge; their floating HUD replaces the bar. */}
       {structured && <TopBar />}
       <div className="flex min-h-0 flex-1">
-        {structured && (
-          <aside className="w-[214px] shrink-0 border-r">
-            <LibraryRail />
-          </aside>
-        )}
+        {structured && <ResizableLibraryRail />}
         {folderId != null ? (
           <Workspace folderId={folderId} />
         ) : isLoading ? null : empty ? (
@@ -110,8 +107,48 @@ export default function App() {
       <CommandPalette />
       <ShortcutsOverlay />
       <TaskToasts />
+      <TaskTray />
       <Toaster position="bottom-right" />
     </div>
+  );
+}
+
+// The library rail with a draggable right edge. Width follows the pointer
+// live via the store (optimistic, no server chatter) and persists once on
+// release; double-click snaps back to the design default.
+function ResizableLibraryRail() {
+  const client = useApiClient();
+  const railWidth = useUIStore((s) => s.railWidth);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    const startX = e.clientX;
+    const startWidth = useUIStore.getState().railWidth;
+    handle.setPointerCapture(e.pointerId);
+    const onMove = (ev: PointerEvent) =>
+      useUIStore.setState({ railWidth: clampRailWidth(startWidth + ev.clientX - startX) });
+    const onUp = () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      updateRailWidth(client, useUIStore.getState().railWidth);
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+  };
+
+  return (
+    <aside className="relative shrink-0 border-r" style={{ width: railWidth }}>
+      <LibraryRail />
+      <div
+        className="absolute inset-y-0 -right-[3px] z-10 w-[6px] cursor-col-resize touch-none hover:bg-primary/35 active:bg-primary/55"
+        onPointerDown={onPointerDown}
+        onDoubleClick={() => updateRailWidth(client, RAIL_WIDTH_DEFAULT)}
+      />
+    </aside>
   );
 }
 

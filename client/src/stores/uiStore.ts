@@ -24,6 +24,16 @@ export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   sharpenAmount: 'standard',
 };
 
+// Library rail width bounds — mirror the server's SetRailWidth validation.
+export const RAIL_WIDTH_DEFAULT = 214;
+export const RAIL_WIDTH_MIN = 180;
+export const RAIL_WIDTH_MAX = 440;
+
+export function clampRailWidth(px: number): number {
+  if (!Number.isFinite(px)) return RAIL_WIDTH_DEFAULT;
+  return Math.min(RAIL_WIDTH_MAX, Math.max(RAIL_WIDTH_MIN, Math.round(px)));
+}
+
 // Mirrors the server's normalizeExportOptions: missing or invalid fields
 // from older blobs fall back to the dialog defaults.
 function sanitizeExportOptions(o: Partial<ExportOptions> | undefined): ExportOptions {
@@ -81,12 +91,17 @@ interface UIState {
   exportOptions: ExportOptions;
   // Develop drawer pinned open.
   developPinned: boolean;
+  // Pre-render 1:1 full-resolution tiles for opened folders (off by default;
+  // large on disk).
+  prerenderFullres: boolean;
   // Edit-panel group id -> open (absent = open).
   editGroups: Record<string, boolean>;
   // Library-group display aliases / rail collapse state, keyed by the
   // lowercased parent path (absent = no alias / open).
   groupAliases: Record<string, string>;
   railGroups: Record<string, boolean>;
+  // Library rail width in px (drag its right edge; RAIL_WIDTH_* bounds).
+  railWidth: number;
   // True once the first uiSettings snapshot has arrived.
   settingsLoaded: boolean;
   // ---- end server-persisted mirror
@@ -175,9 +190,11 @@ export const useUIStore = create<UIState>((set, get) => ({
   exportDir: '',
   exportOptions: DEFAULT_EXPORT_OPTIONS,
   developPinned: true,
+  prerenderFullres: false,
   editGroups: {},
   groupAliases: {},
   railGroups: {},
+  railWidth: RAIL_WIDTH_DEFAULT,
   settingsLoaded: false,
   focusId: null,
   anchorId: null,
@@ -218,9 +235,11 @@ export const useUIStore = create<UIState>((set, get) => ({
       exportDir: s.exportDir,
       exportOptions: sanitizeExportOptions(s.exportOptions),
       developPinned: s.developPinned,
+      prerenderFullres: s.prerenderFullres,
       editGroups: s.editGroups,
       groupAliases: s.groupAliases,
       railGroups: s.railGroups,
+      railWidth: clampRailWidth(s.railWidth),
       settingsLoaded: true,
     }),
 

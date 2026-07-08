@@ -14,8 +14,10 @@ import {
   setExportOptions,
   setGapMinutes,
   setGroupAlias,
+  setPrerenderFullres,
   setQuickDials,
   setRailGroupOpen,
+  setRailWidth,
   setTheme,
   useGetUISettings,
   type AutoPreset as WireAutoPreset,
@@ -24,7 +26,7 @@ import {
 import type { ApiClient } from '@/api/client';
 import type { AutoPreset } from '@/lib/autoPresets';
 import type { DialKey } from '@/lib/dials';
-import { useUIStore, type Theme } from '@/stores/uiStore';
+import { clampRailWidth, useUIStore, type Theme } from '@/stores/uiStore';
 
 // Mirrors every uiSettings snapshot into the store. Render once, above
 // everything that reads settings.
@@ -78,6 +80,11 @@ export function updateDevelopPinned(client: ApiClient, pinned: boolean) {
   setDevelopPinned(client, pinned).catch(swallow);
 }
 
+export function updatePrerenderFullres(client: ApiClient, enabled: boolean) {
+  useUIStore.setState({ prerenderFullres: enabled });
+  setPrerenderFullres(client, enabled).catch(swallow);
+}
+
 export function updateEditGroupOpen(client: ApiClient, id: string, open: boolean) {
   const next = { ...useUIStore.getState().editGroups };
   if (open) delete next[id];
@@ -104,6 +111,12 @@ export function updateRailGroupOpen(client: ApiClient, parentPath: string, open:
   else next[key] = false;
   useUIStore.setState({ railGroups: next });
   setRailGroupOpen(client, key, open).catch(swallow);
+}
+
+export function updateRailWidth(client: ApiClient, px: number) {
+  const width = clampRailWidth(px);
+  useUIStore.setState({ railWidth: width });
+  setRailWidth(client, width).catch(swallow);
 }
 
 // The client preset type narrows sections/offset keys; the wire type is the

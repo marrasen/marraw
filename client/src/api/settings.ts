@@ -45,6 +45,8 @@ export interface UISettings {
     editGroups: Record<string, boolean>;
     groupAliases: Record<string, string>;
     railGroups: Record<string, boolean>;
+    railWidth: number;
+    prerenderFullres: boolean;
 }
 
 
@@ -165,6 +167,19 @@ export function subscribeSetGroupAlias(client: ApiClient, parentPath: string, al
 }
 
 
+export function setPrerenderFullres(client: ApiClient, enabled: boolean, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetPrerenderFullres', [enabled], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setPrerenderFullres.method = 'Settings.SetPrerenderFullres' as const;
+
+export function subscribeSetPrerenderFullres(client: ApiClient, enabled: boolean, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetPrerenderFullres', [enabled], callback, onError, options);
+}
+
+
 export function setQuickDials(client: ApiClient, dials: string[], options?: RequestOptions): Promise<void> {
     return client.request<void>('Settings.SetQuickDials', [dials], options);
 }
@@ -188,6 +203,19 @@ setRailGroupOpen.method = 'Settings.SetRailGroupOpen' as const;
 
 export function subscribeSetRailGroupOpen(client: ApiClient, parentPath: string, open: boolean, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetRailGroupOpen', [parentPath, open], callback, onError, options);
+}
+
+
+export function setRailWidth(client: ApiClient, px: number, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetRailWidth', [px], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setRailWidth.method = 'Settings.SetRailWidth' as const;
+
+export function subscribeSetRailWidth(client: ApiClient, px: number, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetRailWidth', [px], callback, onError, options);
 }
 
 
@@ -340,6 +368,21 @@ export function useSetGroupAlias(parentPath: string, alias: string, options?: Us
 }
 
 /**
+ * Subscribes to `Settings.SetPrerenderFullres` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetPrerenderFullres(enabled: boolean, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, enabled: boolean) => setPrerenderFullres(client, enabled, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [enabled], _subscribe: { method: 'Settings.SetPrerenderFullres', params: [enabled] } });
+}
+
+/**
  * Subscribes to `Settings.SetQuickDials` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -367,6 +410,21 @@ export function useSetRailGroupOpen(parentPath: string, open: boolean, options?:
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [parentPath, open], _subscribe: { method: 'Settings.SetRailGroupOpen', params: [parentPath, open] } });
+}
+
+/**
+ * Subscribes to `Settings.SetRailWidth` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetRailWidth(px: number, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, px: number) => setRailWidth(client, px, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [px], _subscribe: { method: 'Settings.SetRailWidth', params: [px] } });
 }
 
 /**

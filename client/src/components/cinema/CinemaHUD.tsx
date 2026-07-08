@@ -1,5 +1,4 @@
 import { Segmented } from '@/components/ui/segmented';
-import { TaskTray } from '@/components/TaskTray';
 import { WindowControls } from '@/components/WindowControls';
 import { useConnection } from '@/api/client';
 import { modK } from '@/lib/platform';
@@ -84,7 +83,6 @@ export function CinemaHUD({
           !hidden && 'pointer-events-auto',
         )}
       >
-        <TaskTray />
         {right}
         <WindowControls variant="glass" />
       </div>
