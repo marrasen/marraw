@@ -142,24 +142,30 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: 
     if (i < 0) return;
     const ac = new AbortController();
     const next = new Map<string, HTMLImageElement>();
+    const warm = (p: Photo, lvl: Level) => {
+      const url = imgUrl(p, lvl);
+      const img = held.current.get(url) ?? new Image();
+      if (!img.src) {
+        img.src = url;
+        img.decode().catch(() => {});
+      }
+      next.set(url, img);
+    };
     for (const j of [i + 1, i - 1, i + 2]) {
       const p = photos[j];
       if (!p) continue;
-      // Warm both the fit underlay (512) and the fit-sharp / 1:1 bridge (2048).
-      // The backend renders every smaller level from the same decode, so the
-      // 2048 request alone materializes 512 on disk — pre-decoding it here just
-      // lands it in the browser too, so the underlay paints with no round trip
-      // the instant the neighbour is focused.
-      for (const lvl of ['512', '2048'] as const) {
-        const url = imgUrl(p, lvl);
-        const img = held.current.get(url) ?? new Image();
-        if (!img.src) {
-          img.src = url;
-          img.decode().catch(() => {});
-        }
-        next.set(url, img);
-      }
+      // The 512 underlay is cheap (warmed at scan, a disk hit) and keeps the
+      // low-res bridge instant on arrow-through, so warm it for every neighbour.
+      // The heavy 2048 is warmed ONLY at tile depth (1:1), where it is the
+      // wanted bridge and browsing is deliberate: prefetching it in fit fires a
+      // full RAW render per neighbour at visible priority, saturating the decode
+      // pool and the browser's connection budget with long uncancellable renders
+      // — that starves the warm 512s and freezes the browse. In fit the sharp
+      // 2048 loads on demand for the focused photo only (plus the background
+      // pre-render pass warming ahead).
+      warm(p, '512');
       if (!tiles) continue;
+      warm(p, '2048');
       const tile = tileUrl(p, 0, 0);
       if (!triggered.current.has(tile)) {
         triggered.current.add(tile);
@@ -350,6 +356,8 @@ export function CinemaImage({
   // stepping through a burst stays instant.
   const wantTiles = !previewUrl && level === 'tiles' && !cropping;
   const src = previewUrl ?? imgUrl(photo, level === 'tiles' ? '2048' : level);
+  // The pyramid level fit displays (never 'tiles' in the fit branch below).
+  const fitLevel: Level = level === 'tiles' ? '2048' : level;
   const [shownSrc, setShownSrc] = useState('');
   // Warm neighbours whenever the loupe is showing committed renditions (fit
   // included — that path has no tile layer to bridge a cold 2048); fire the
@@ -729,38 +737,42 @@ export function CinemaImage({
               }
             }}
           >
-            {/* Low-res bridge: the always-warm 512 fills the same box so a
-                photo switch shows the CORRECT frame soft immediately, then the
-                sharp DecodedImage covers it once decoded — the fit-depth
-                counterpart to the 2048-under-tiles bridge at 1:1. Keyed on the
-                photo so navigation remounts a fresh element (an <img> keeps its
-                old pixels across a src change, which would re-hold the previous
-                photo). While the sharp frame still belongs to the previous
-                photo (!showsCurrent) the bridge floats on top of it; the moment
-                the current sharp lands it drops behind and is covered. Left
-                transparent until its own decode lands, so the stale sharp frame
-                shows through in the gap — no black flash. Off during crop
-                (rotated flat frame) and live edit (the blob is the truth). */}
+            {/* Low-res bridge: the always-warm 512 fills the same box and, as a
+                double-buffered DecodedImage, holds the previous frame until the
+                new 512 decodes — never transparent, so a fast browse never
+                blinks through to nothing. It sits BEHIND the sharp layer; the
+                sharp only covers it once it actually has the current photo's
+                pixels. Off during crop (rotated flat frame) and live edit (the
+                blob is the truth). */}
             {!cropUI && !previewUrl && (
-              <img
-                key={photo.id}
-                src={imgUrl(photo, '512')}
-                draggable={false}
-                alt=""
-                className={cn('absolute inset-0 size-full', !showsCurrent && 'z-10')}
+              <DecodedImage src={imgUrl(photo, '512')} className="absolute inset-0 size-full" />
+            )}
+            {!cropUI && !previewUrl && !wantTiles ? (
+              // Fit: show the pre-rendered rendition the instant it exists and
+              // NEVER trigger an on-demand render just to browse — a not-yet-
+              // pre-rendered photo paints the 512 above with no stall. Keyed on
+              // the photo so a switch starts fresh (no lingering previous frame,
+              // nothing mid-decode to cancel).
+              <FitImage
+                key={`${photo.id}|${photo.editHash}`}
+                photo={photo}
+                level={fitLevel}
+                onShown={setShownSrc}
+                className="absolute inset-0 size-full"
+              />
+            ) : (
+              <DecodedImage
+                src={src}
+                onShown={setShownSrc}
+                className="absolute inset-0 size-full"
+                // While cropping, the straighten angle is a live client-side
+                // rotation of the flat frame — instant, full-resolution feedback
+                // — matched exactly by the backend crop on commit. Gated on the
+                // flat frame actually being up: rotating a crop-baked render
+                // would rotate the crop twice.
+                style={cropUI && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
               />
             )}
-            <DecodedImage
-              src={src}
-              onShown={setShownSrc}
-              className="absolute inset-0 size-full"
-              // While cropping, the straighten angle is a live client-side
-              // rotation of the flat frame — instant, full-resolution feedback
-              // — matched exactly by the backend crop on commit. Gated on the
-              // flat frame actually being up: rotating a crop-baked render
-              // would rotate the crop twice.
-              style={cropUI && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
-            />
             {wantTiles && shownSrc.includes(`/img/${photo.id}/`) && (
               <TileLayer
                 key={`${photo.id}|${photo.cacheKey}|${photo.editHash}`}
@@ -1264,4 +1276,69 @@ export function DecodedImage({
     };
   }, [src]);
   return <img src={shown} draggable={false} alt="" className={className} style={style} />;
+}
+
+// FitImage paints the fit-loupe sharp layer from the PRE-RENDERED pyramid only.
+// It requests the target level cacheOnly, so the server serves the warm file or
+// a 404 — it never kicks a blocking RAW decode just because the user browsed
+// onto the photo. A hit shows the sharp rendition instantly; a miss renders
+// nothing (returns null) and the always-warm 512 underlay behind shows through,
+// so a fast scan across not-yet-pre-rendered frames never stalls and there is
+// no render to cancel. On a miss it then, after a short settle, kicks ONE
+// render for THIS photo so a frame paused on sharpens, and re-requests the warm
+// file when that lands — cheap when the background pre-render pass has already
+// covered it, and the settle means skimming past fires nothing. The parent keys
+// this by photo, so a switch remounts fresh (no lingering frame, and unmount
+// aborts any in-flight kick — the pool cancels it at the next checkpoint).
+function FitImage({
+  photo,
+  level,
+  onShown,
+  className,
+}: {
+  photo: Photo;
+  level: Level;
+  onShown?: (src: string) => void;
+  className?: string;
+}) {
+  const [missed, setMissed] = useState(false);
+  // Bumped once a settle-kicked render lands so the cacheOnly <img> re-requests
+  // the now-warm file; part of the <img> key so it remounts to refetch.
+  const [warmed, setWarmed] = useState(0);
+  const cacheUrl = imgUrl(photo, level, { cacheOnly: true });
+
+  useEffect(() => {
+    if (!missed) return;
+    const img = new Image();
+    let alive = true;
+    const t = window.setTimeout(() => {
+      img.src = imgUrl(photo, level); // render-allowed: one render for this photo
+      img
+        .decode()
+        .then(() => {
+          if (!alive) return;
+          setMissed(false);
+          setWarmed((n) => n + 1);
+        })
+        .catch(() => {});
+    }, 140);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+      if (!img.complete) img.src = '';
+    };
+  }, [missed, photo, level]);
+
+  if (missed) return null;
+  return (
+    <img
+      key={warmed}
+      src={cacheUrl}
+      draggable={false}
+      alt=""
+      className={className}
+      onLoad={() => onShown?.(cacheUrl)}
+      onError={() => setMissed(true)}
+    />
+  );
 }
