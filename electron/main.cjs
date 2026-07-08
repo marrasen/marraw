@@ -27,6 +27,10 @@ if (UITEST) {
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 }
+// Trackpad pinch: let Chromium deliver pinch as synthetic ctrl+wheel events for
+// the loupe's onWheel zoom to consume, and disable the native compositor pinch-zoom
+// (visual viewport) that otherwise inverts and springs back on release.
+app.commandLine.appendSwitch('disable-pinch');
 let child = null;
 let quitting = false;
 

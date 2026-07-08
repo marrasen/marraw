@@ -281,12 +281,21 @@ export function CinemaImage({
   // `zoom` at 'fit' and MUST snap: animating it reads as the photo spuriously
   // zooming in and springing back.
   const prevZoom = useRef(zoom);
+  // Set on every wheel/pinch zoom (onWheel below) so the tween effect snaps
+  // instead of easing for continuous input.
+  const snapZoomRef = useRef(false);
   useEffect(() => {
     const snap = prevSnapKey.current !== snapKey;
     prevSnapKey.current = snapKey;
     const zoomChanged = prevZoom.current !== zoom;
     prevZoom.current = zoom;
-    if (snap || !zoomChanged || !haveDims || Math.abs(scale - shownRef.current) < 1e-4) {
+    // Wheel/pinch zoom snaps: it's continuous input, and easing a moving target
+    // both lags visibly and (because onWheel anchors off the mid-tween shownScale)
+    // makes the cursor-anchor math wobble the faster you scroll. Only deliberate
+    // keyboard/button/double-click steps tween.
+    const wheelSnap = snapZoomRef.current;
+    snapZoomRef.current = false;
+    if (wheelSnap || snap || !zoomChanged || !haveDims || Math.abs(scale - shownRef.current) < 1e-4) {
       setShownScale(scale);
       return;
     }
@@ -521,6 +530,7 @@ export function CinemaImage({
         maxY > 0 ? Math.min(1, Math.max(0, sy / maxY)) : 0.5,
       ];
     }
+    snapZoomRef.current = true;
     setZoom(next);
   };
 
