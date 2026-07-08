@@ -216,6 +216,7 @@ func toAPIPhoto(p store.Photo) Photo {
 		Flag:        FlagFromInt(p.Flag),
 		MetaLoaded:  p.MetaLoaded,
 		FileSize:    p.FileSize,
+		BaseExpEV:   p.BaseExpEV.Float64, // sql.NullFloat64 zero-values to 0 when unmeasured
 		Width:       p.Width,
 		Height:      p.Height,
 		Orientation: p.Orientation,

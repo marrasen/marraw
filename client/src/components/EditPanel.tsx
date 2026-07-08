@@ -131,7 +131,7 @@ function SinglePhotoPanel({
         {tab === 'develop' && (
           <>
             {photo && <Histogram photo={photo} />}
-            <DevelopPanel client={client} targetCount={targetCount} />
+            <DevelopPanel client={client} photo={photo} targetCount={targetCount} />
           </>
         )}
         {tab === 'presets' && <PresetsPanel client={client} photo={photo} targetCount={targetCount} />}
@@ -233,7 +233,20 @@ function PhotoHeader({ photo }: { photo: Photo }) {
   );
 }
 
-function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount: number }) {
+function DevelopPanel({
+  client,
+  photo,
+  targetCount,
+}: {
+  client: ApiClient;
+  photo?: Photo;
+  targetCount: number;
+}) {
+  // The exposure dial's neutral is the photo's seeded camera-mimic
+  // compensation (base_exp_ev), NOT 0: a fresh photo shows e.g. +0.85 EV and
+  // that IS its default, so "reset" returns here and the ↺ button hides while
+  // exposure sits at the seed. Zero when unmeasured — the pre-seed behaviour.
+  const seedExpEV = photo?.baseExpEV ?? 0;
   const liveDraft = useEditSession((s) => s.draft);
   // Falling back to the held previous draft keeps the panel rendered through
   // esLoad's null gap: swapping everything for "Loading edits…" and back on
@@ -270,7 +283,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
     tone: groupChanged(draft, [
       'expEV', 'expPreserve', 'bright', 'gamma', 'shadow',
       'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
-    ]),
+    ], seedExpEV),
     presence: groupChanged(draft, ['clarity', 'texture', 'dehaze']),
     wb: groupChanged(draft, ['wbMode', 'wbMul', 'wbTemp', 'wbTint', 'wbKelvin']),
     color: groupChanged(draft, [
@@ -366,10 +379,13 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           min={-2}
           max={3}
           step={0.05}
-          neutral={0}
+          // Default is the seeded camera-mimic lift, not 0 — reset returns
+          // there (a lone expEV=0 renders identically to the seed anyway,
+          // since neutral params re-enable LibRaw auto-brighten).
+          neutral={seedExpEV}
           onChange={(v) => update({ expEV: v })}
           onCommit={(v) => commit({ expEV: v })}
-          onClear={() => clear({ expEV: 0 })}
+          onClear={() => clear({ expEV: seedExpEV })}
           {...num('expEV')}
         />
         <EditSlider
@@ -665,16 +681,19 @@ function useActiveScroll(active?: boolean) {
 // used for the per-group "has adjustments" dot and the per-slider clear
 // buttons. The WB mode and demosaic defaults are stored as "" (see the
 // generated-union notes above); everything else defaults to NEUTRAL.
-function isDefault(draft: Params, key: keyof Params): boolean {
+function isDefault(draft: Params, key: keyof Params, seedExpEV = 0): boolean {
   const v = draft[key];
+  // Exposure's default is the photo's seeded camera-mimic lift, not 0, so an
+  // untouched seeded photo reads as unchanged (no group dot).
+  if (key === 'expEV') return Math.abs(draft.expEV - seedExpEV) <= 1e-9;
   if (key === 'wbMode') return (v as string) === '' || v === 'camera';
   if (key === 'wbMul') return (v as number[]).every((m) => m === 0);
   if (key === 'demosaic') return (v as string) === '';
   return v === NEUTRAL[key];
 }
 
-function groupChanged(draft: Params, keys: (keyof Params)[]): boolean {
-  return keys.some((k) => !isDefault(draft, k));
+function groupChanged(draft: Params, keys: (keyof Params)[], seedExpEV = 0): boolean {
+  return keys.some((k) => !isDefault(draft, k, seedExpEV));
 }
 
 // Group is one collapsible develop-panel section, drawn flat per the

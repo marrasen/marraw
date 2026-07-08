@@ -186,6 +186,10 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 		})
 	}
 	task.Err(g.Wait())
+	// The measurements landed in the DB but the folder list clients already
+	// hold predates them; re-list so photo.baseExpEV (the exposure dial's
+	// neutral) matches the seed GetEditParams now returns.
+	l.deps.TriggerRefresh(photosKey(folderID))
 }
 
 // metaPass backfills missing photo metadata under a shared task.

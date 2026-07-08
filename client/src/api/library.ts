@@ -63,6 +63,7 @@ export interface Photo {
     flag: FlagType;
     metaLoaded: boolean;
     fileSize: number;
+    baseExpEV: number;
     width: number;
     height: number;
     orientation: number;

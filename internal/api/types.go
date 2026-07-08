@@ -87,14 +87,18 @@ func SharpenAmountValues() []SharpenAmount {
 
 // Photo is the client-facing photo record.
 type Photo struct {
-	ID          int64   `json:"id"`
-	FileName    string  `json:"fileName"`
-	CacheKey    string  `json:"cacheKey"`
-	EditHash    string  `json:"editHash"`
-	Rating      int     `json:"rating"`
-	Flag        Flag    `json:"flag"`
-	MetaLoaded  bool    `json:"metaLoaded"`
-	FileSize    int64   `json:"fileSize"` // bytes on disk, 0 = unknown
+	ID         int64  `json:"id"`
+	FileName   string `json:"fileName"`
+	CacheKey   string `json:"cacheKey"`
+	EditHash   string `json:"editHash"`
+	Rating     int    `json:"rating"`
+	Flag       Flag   `json:"flag"`
+	MetaLoaded bool   `json:"metaLoaded"`
+	FileSize   int64  `json:"fileSize"` // bytes on disk, 0 = unknown
+	// BaseExpEV is the measured camera-mimic exposure compensation that seeds
+	// the exposure dial (see Edits.seededParams). It is the slider's neutral:
+	// the exposure "reset" returns here, not to 0. 0 = unmeasured / no lift.
+	BaseExpEV   float64 `json:"baseExpEV"`
 	Width       int     `json:"width"`
 	Height      int     `json:"height"`
 	Orientation int     `json:"orientation"`
