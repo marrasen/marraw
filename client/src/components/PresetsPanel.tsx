@@ -3,7 +3,7 @@
 // copy/paste/reset clipboard actions (moved off the develop stack), and a
 // clickable edit-history timeline. It drives the same edit-session functions
 // the keyboard and command palette do — nothing here holds edit state itself.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Copy, ClipboardPaste, RotateCcw } from 'lucide-react';
 import type { Photo } from '@/api/library';
@@ -169,15 +169,19 @@ function usePresetThumbs(client: ApiClient, photo: Photo | undefined, presets: A
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   // Re-render when a preset's definition (not just its id) changes.
   const presetsKey = JSON.stringify(presets.map((p) => [p.id, p.sections, p.offsets]));
-  const photoKey = photo ? `${photo.id}:${photo.editHash}` : '';
-  const draftRef = useRef(useEditSession.getState().draft);
-  draftRef.current = useEditSession.getState().draft;
+  const photoId = photo?.id;
 
   useEffect(() => {
     if (!photo || presets.length === 0) return;
     let alive = true;
     const urls: string[] = [];
-    const base = draftRef.current ?? { ...NEUTRAL };
+    // Snapshot the base ONCE (the draft when this photo / preset set loaded).
+    // Keying on photoId (not editHash) keeps the thumbnails a stable function
+    // of photo × preset: they regenerate on a photo switch or a preset-def
+    // edit, NOT on every commit — a commit only nudges editHash, and firing an
+    // autoAdjust + preview round-trip per preset on each one is what made the
+    // grid churn.
+    const base = useEditSession.getState().draft ?? { ...NEUTRAL };
     setThumbs({});
     (async () => {
       for (const preset of presets) {
@@ -198,7 +202,7 @@ function usePresetThumbs(client: ApiClient, photo: Photo | undefined, presets: A
       urls.forEach((u) => URL.revokeObjectURL(u));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, photoKey, presetsKey]);
+  }, [client, photoId, presetsKey]);
 
   return thumbs;
 }
