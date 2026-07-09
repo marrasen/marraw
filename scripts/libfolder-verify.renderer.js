@@ -25,12 +25,24 @@ const until = async (fn, ms, what) => {
 const shootRows = () => [...document.querySelectorAll('[data-testid="rail-shoot"]')];
 const shootNames = () => shootRows().map((el) => el.dataset.name);
 const shootByName = (n) => shootRows().find((el) => el.dataset.name === n);
-// The stand-in for an unplugged external drive: a manual root whose folder does
-// not exist yet. The driver creates it while the app is running.
-const offlineRow = () =>
-  [...document.querySelectorAll('[data-testid="rail-root"]')].find((el) =>
-    el.dataset.name.endsWith('-offline'),
-  );
+// Stand-ins for unplugged external drives: manual roots whose folders do not
+// exist. The driver creates `-offline` while the app runs; `-gone` never
+// appears, and gets removed from the library while still unreachable.
+const rootRows = () => [...document.querySelectorAll('[data-testid="rail-root"]')];
+const rootRowEnding = (suffix) => rootRows().find((el) => el.dataset.name.endsWith(suffix));
+const offlineRow = () => rootRowEnding('-offline');
+const goneRow = () => rootRowEnding('-gone');
+
+const menuItems = () => [...document.querySelectorAll('[role="menuitem"]')];
+const menuItem = (text) => menuItems().find((el) => el.innerText.includes(text));
+const openMenu = async (row) => {
+  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 120 }));
+  return until(() => (menuItems().length ? menuItems() : null), 5000, 'context menu');
+};
+const closeMenu = async () => {
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await sleep(400);
+};
 
 try {
   const parent = await until(
@@ -56,22 +68,11 @@ try {
 
   // A discovered child cannot be "removed" — it would reappear on the next
   // listing — so it offers Hide instead.
-  shootByName('Ceremony').dispatchEvent(
-    new MouseEvent('contextmenu', { bubbles: true, clientX: 40, clientY: 120 }),
-  );
-  const menu = await until(
-    () => {
-      const el = document.querySelector('[role="menu"]');
-      return el && el.innerText ? el.innerText : null;
-    },
-    5000,
-    'child context menu',
-  );
-  R.childOffersHide = menu.includes('Hide from library');
-  R.childHidesRemove = !menu.includes('Remove from library');
-  R.childHidesSubfolderToggle = !menu.includes('Include subfolders');
-  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  await sleep(400);
+  await openMenu(shootByName('Ceremony'));
+  R.childOffersHide = !!menuItem('Hide from library');
+  R.childHidesRemove = !menuItem('Remove from library');
+  R.childHidesSubfolderToggle = !menuItem('Include subfolders');
+  await closeMenu();
 
   // THE acceptance test. The driver creates <parent>/Party and copies a RAW
   // into it a few seconds after launch. Nothing in the UI is touched: the row
@@ -88,6 +89,19 @@ try {
     off.dataset.online === '0' && badged(off)
       ? true
       : `online=${off.dataset.online} badge=${badged(off)}`;
+
+  // An offline folder must still be removable: removing touches only the stored
+  // root list, never the disk. Anything that needs the files is disabled.
+  const gone = await until(goneRow, 20000, 'second offline root row');
+  await openMenu(gone);
+  R.offlineLocateIsDisabled = menuItem('Locate on disk').hasAttribute('data-disabled');
+  R.offlineRescanIsDisabled = menuItem('Rescan for new photos').hasAttribute('data-disabled');
+  const removeItem = menuItem('Remove from library');
+  R.offlineRemoveIsEnabled = !removeItem.hasAttribute('data-disabled');
+  removeItem.click();
+  await until(() => goneRow() == null, 10000, 'offline root removed');
+  R.offlineRemoveWorks = true;
+  await closeMenu();
 
   R.partyAbsentInitially = !shootNames().includes('Party');
   await until(() => shootNames().includes('Party'), 60000, 'watcher surfaces new folder');

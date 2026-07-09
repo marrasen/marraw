@@ -30,6 +30,13 @@ export function rootName(root: LibraryRoot) {
 
 export const samePath = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
+/** Whether `path` is `ancestor` itself or lies beneath it. */
+export function isUnder(path: string, ancestor: string) {
+  const p = path.replace(/[\\/]+$/, '').toLowerCase();
+  const a = ancestor.replace(/[\\/]+$/, '').toLowerCase();
+  return p === a || p.startsWith(`${a}\\`) || p.startsWith(`${a}/`);
+}
+
 // Groups are the parent folder on disk (NOT auto date-detection); order
 // follows the stored root order, grouped by first appearance.
 export interface RootGroup {

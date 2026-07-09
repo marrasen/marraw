@@ -66,9 +66,12 @@ await new Promise((resolve, reject) => {
   ws.onopen = resolve;
   ws.onerror = () => reject(new Error('cannot connect to marrawd :8483'));
 });
-// A second root standing in for an external drive that is not plugged in: the
-// path simply does not exist yet. The driver creates it mid-run.
+// Two roots standing in for external drives that are not plugged in: the paths
+// simply do not exist. The driver creates `offline` mid-run to test recovery;
+// `gone` is never created, and the UI test removes it from the library while it
+// is still unreachable.
 const offline = `${parent}-offline`;
+const gone = `${parent}-gone`;
 
 const before = await call('Library.GetLibraryRoots', []);
 await call('Library.SetLibraryRoots', [
@@ -76,6 +79,7 @@ await call('Library.SetLibraryRoots', [
     ...before,
     { path: parent, alias: '', includeSubfolders: false, photoCount: 0, isParent: true },
     { path: offline, alias: '', includeSubfolders: false, photoCount: 0, isParent: false },
+    { path: gone, alias: '', includeSubfolders: false, photoCount: 0, isParent: false },
   ],
 ]);
 

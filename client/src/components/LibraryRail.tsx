@@ -46,6 +46,7 @@ import {
   openRoot,
   openShoot,
   parentKey,
+  isUnder,
   railBlocks,
   rootName,
   samePath,
@@ -352,11 +353,13 @@ function ManagedParent({
   };
 
   // Removing a library folder removes exactly one stored root; its children were
-  // never stored.
+  // never stored. Nothing here touches the disk, so it works while the drive is
+  // offline — which is also why the open folder is matched by path rather than
+  // against the child list: offline, that list is empty.
   const remove = () => {
     void saveRoots(client, roots.filter((r) => !samePath(r.path, root.path)));
     const { folderPath } = useUIStore.getState();
-    if (folderPath && rows.some((s) => samePath(s.path, folderPath))) {
+    if (folderPath && isUnder(folderPath, root.path)) {
       useUIStore.setState({ folderId: null, folderPath: null });
     }
   };
@@ -416,7 +419,7 @@ function ManagedParent({
           <ContextMenuItem
             hint="Explorer"
             onClick={() => window.marraw?.revealInExplorer(root.path)}
-            disabled={!window.marraw}
+            disabled={!window.marraw || !online}
           >
             <ExternalLink /> <span className="flex-1">Locate on disk</span>
           </ContextMenuItem>
@@ -441,7 +444,11 @@ function ManagedParent({
             <div className="flex flex-col gap-px">
               <span>Remove library folder</span>
               <span className="text-[11px] text-faint">
-                {rows.length} folder{rows.length === 1 ? '' : 's'} · files stay on disk
+                {/* Offline, the child list is empty — "0 folders" would read as
+                    if there were nothing to lose. */}
+                {online
+                  ? `${rows.length} folder${rows.length === 1 ? '' : 's'} · files stay on disk`
+                  : 'Files stay on disk'}
               </span>
             </div>
           </ContextMenuItem>
@@ -871,7 +878,7 @@ function RootRow({
         <ContextMenuItem
           hint="Explorer"
           onClick={() => window.marraw?.revealInExplorer(root.path)}
-          disabled={!window.marraw}
+          disabled={!window.marraw || !online}
         >
           <ExternalLink /> <span className="flex-1 text-foreground">Locate on disk</span>
         </ContextMenuItem>
