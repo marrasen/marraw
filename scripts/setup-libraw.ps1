@@ -1,5 +1,10 @@
 # Downloads LibRaw and builds a static, thread-safe libraw.a with MinGW-w64.
 # Output: third_party/libraw/{lib/libraw.a, include/libraw/*.h}
+
+# The parallel compile below needs ForEach-Object -Parallel, which Windows
+# PowerShell 5.1 does not have.
+#Requires -Version 7.0
+
 param(
     [string]$Version = "0.22.1",
     [switch]$OpenMP,

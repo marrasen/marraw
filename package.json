@@ -7,7 +7,7 @@
   "private": true,
   "main": "electron/main.cjs",
   "scripts": {
-    "setup:libraw": "powershell -ExecutionPolicy Bypass -File scripts/setup-libraw.ps1",
+    "setup:libraw": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/setup-libraw.ps1",
     "gen": "go run ./tools/generate",
     "gen:icon": "node scripts/gen-icon.mjs",
     "dev:server": "go run ./cmd/marrawd --dev --port 8483",
