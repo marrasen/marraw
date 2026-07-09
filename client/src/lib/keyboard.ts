@@ -11,6 +11,7 @@ import {
   esAuto,
   esMoveActive,
   esRedo,
+  esReset,
   esSetActive,
   esSetCropping,
   esSetWBPicking,
@@ -24,7 +25,7 @@ import {
 
 // Keys that focus an edit control; +/- then adjusts it, Esc returns to the
 // image (where +/- zooms again).
-const CONTROL_KEYS: Record<string, ControlId> = {
+export const CONTROL_KEYS: Record<string, ControlId> = {
   e: 'expEV',
   b: 'bright',
   t: 'wbTemp',
@@ -52,8 +53,11 @@ const CONTROL_KEYS: Record<string, ControlId> = {
 //   W             toggle the white-balance eyedropper (Enter keep · Esc cancel)
 //   Ctrl+↑/↓      focus the previous/next develop control (alias of plain ↑/↓)
 //   +/- / Z / Space   zoom (loupe, no control focused; Z/Space toggle 1:1↔fit)
+//   Tab           in Develop, cycle the Develop/Presets/Info tabs (⇧ backward);
+//                 elsewhere Tab is swallowed — native focus is useless here
 //   Ctrl+A/C/V    select all, copy/paste edit settings
 //   Ctrl+Z/Y      per-photo edit undo/redo
+//   Ctrl+0        reset all develop settings
 //   Ctrl+E        export dialog
 //   Ctrl+U        auto dynamics (+Shift = auto colours, +Alt = auto everything)
 //   Ctrl+1..9     creative auto presets (Settings → Auto presets)
@@ -131,6 +135,11 @@ export function useKeyboard() {
             e.preventDefault();
             s.setExportOpen(true);
             return;
+          case '0':
+            if (!es.draft) return;
+            e.preventDefault();
+            esReset(client);
+            return;
           case 'k':
             e.preventDefault();
             s.setPaletteOpen(!s.paletteOpen);
@@ -187,14 +196,19 @@ export function useKeyboard() {
         return;
       }
 
-      // Tab cycles the Develop panel's Develop/Presets/Info tabs — only in
-      // Develop, where that panel is the focus. (Plain Tab elsewhere keeps its
-      // browser walk.) Shift+Tab steps backward.
-      if (e.key === 'Tab' && s.mode === 'develop') {
+      // Tab is swallowed everywhere: native focus traversal is useless here
+      // because Enter and Space are bound to actions, so a tab-focused control
+      // can't be activated. Jump to any control or tab via ⌘K instead. In
+      // Develop, Tab still cycles the Develop/Presets/Info panel tabs (⇧
+      // backward). Open dialogs keep their own focus trap.
+      if (e.key === 'Tab') {
+        if (s.settingsOpen || s.addFolderOpen || s.shortcutsOpen) return;
         e.preventDefault();
-        const order: DevelopTab[] = ['develop', 'presets', 'info'];
-        const i = order.indexOf(s.developTab);
-        s.setDevelopTab(order[(i + (e.shiftKey ? order.length - 1 : 1)) % order.length]);
+        if (s.mode === 'develop') {
+          const order: DevelopTab[] = ['develop', 'presets', 'info'];
+          const i = order.indexOf(s.developTab);
+          s.setDevelopTab(order[(i + (e.shiftKey ? order.length - 1 : 1)) % order.length]);
+        }
         return;
       }
 

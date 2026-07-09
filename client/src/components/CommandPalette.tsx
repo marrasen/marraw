@@ -5,14 +5,16 @@ import { cn } from '@/lib/utils';
 import {
   esApplyAutoPreset,
   esAuto,
+  esReset,
   esSetActive,
   esSetCropping,
   esSetWBPicking,
-  type ControlId,
 } from '@/lib/editSession';
+import { DIALS } from '@/lib/dials';
+import { CONTROL_KEYS } from '@/lib/keyboard';
 import type { AutoPreset } from '@/lib/autoPresets';
 import { useTheme } from '@/components/theme-provider';
-import { useUIStore } from '@/stores/uiStore';
+import { useUIStore, type DevelopTab } from '@/stores/uiStore';
 
 interface Command {
   id: string;
@@ -22,26 +24,11 @@ interface Command {
   run: (client: ApiClient) => void;
 }
 
-// Develop controls reachable by name — jumping switches to Develop and
-// focuses the control so +/- adjust immediately.
-const CONTROLS: { id: ControlId; label: string; hint?: string }[] = [
-  { id: 'expEV', label: 'Exposure', hint: 'E' },
-  { id: 'bright', label: 'Brightness', hint: 'B' },
-  { id: 'gamma', label: 'Gamma', hint: 'G' },
-  { id: 'shadow', label: 'Shadow slope', hint: 'S' },
-  { id: 'contrast', label: 'Contrast', hint: 'C' },
-  { id: 'wbMode', label: 'White balance mode', hint: 'W' },
-  { id: 'wbTemp', label: 'Temperature', hint: 'T' },
-  { id: 'wbTint', label: 'Tint', hint: 'I' },
-  { id: 'wbKelvin', label: 'Kelvin', hint: 'K' },
-  { id: 'saturation', label: 'Saturation', hint: 'A' },
-  { id: 'vibrance', label: 'Vibrance', hint: 'V' },
-  { id: 'vignette', label: 'Vignette', hint: 'O' },
-  { id: 'highlight', label: 'Highlight recovery', hint: 'H' },
-  { id: 'nrThreshold', label: 'Noise reduction', hint: 'N' },
-  { id: 'medPasses', label: 'Median passes', hint: 'M' },
-  { id: 'demosaic', label: 'Demosaic', hint: 'D' },
-];
+// Hint letters for the controls that carry a keyboard shortcut (reverse of
+// CONTROL_KEYS), shown next to the matching palette entry.
+const CONTROL_HINTS: Partial<Record<string, string>> = Object.fromEntries(
+  Object.entries(CONTROL_KEYS).map(([key, id]) => [id, key.toUpperCase()]),
+);
 
 function buildCommands(
   hasFolder: boolean,
@@ -49,6 +36,12 @@ function buildCommands(
   setTheme: (t: 'dark' | 'light' | 'system') => void,
 ): Command[] {
   const ui = () => useUIStore.getState();
+  // Jumping to a develop control or panel switches to Develop and reveals the
+  // right tab, so the target isn't hidden behind Presets/Info.
+  const goDevelop = (tab: DevelopTab = 'develop') => {
+    ui().setMode('develop');
+    ui().setDevelopTab(tab);
+  };
   const out: Command[] = [
     { id: 'mode-library', label: 'Go to Library', group: 'Modes', run: () => ui().setMode('library') },
   ];
@@ -74,24 +67,28 @@ function buildCommands(
   );
   if (hasFolder) {
     out.push(
+      { id: 'tab-develop', label: 'Develop panel', group: 'Panels', hint: 'Tab', run: () => goDevelop('develop') },
+      { id: 'tab-presets', label: 'Presets panel', group: 'Panels', run: () => goDevelop('presets') },
+      { id: 'tab-info', label: 'Info panel', group: 'Panels', run: () => goDevelop('info') },
       { id: 'crop', label: 'Crop & straighten', group: 'Develop', hint: 'R', run: (client) => {
-          ui().setMode('develop');
+          goDevelop();
           esSetCropping(client, true);
         } },
       { id: 'wb-pick', label: 'White balance eyedropper', group: 'Develop', run: () => {
-          ui().setMode('develop');
+          goDevelop();
           esSetWBPicking(true);
         } },
+      { id: 'reset', label: 'Reset develop settings', group: 'Develop', hint: 'Ctrl+0', run: (client) => esReset(client) },
       { id: 'auto-tone', label: 'Auto dynamics', group: 'Develop', hint: 'Ctrl+U', run: (client) => {
-          ui().setMode('develop');
+          goDevelop();
           void esAuto(client, ['tone']);
         } },
       { id: 'auto-color', label: 'Auto colours', group: 'Develop', hint: 'Ctrl+⇧+U', run: (client) => {
-          ui().setMode('develop');
+          goDevelop();
           void esAuto(client, ['wb', 'color']);
         } },
       { id: 'auto-all', label: 'Auto everything', group: 'Develop', hint: 'Ctrl+Alt+U', run: (client) => {
-          ui().setMode('develop');
+          goDevelop();
           void esAuto(client, ['all']);
         } },
       ...autoPresets.map((p, i) => ({
@@ -100,18 +97,18 @@ function buildCommands(
         group: 'Auto presets',
         hint: i < 9 ? `Ctrl+${i + 1}` : undefined,
         run: (client: ApiClient) => {
-          ui().setMode('develop');
+          goDevelop();
           void esApplyAutoPreset(client, p);
         },
       })),
-      ...CONTROLS.map((c) => ({
-        id: `ctl-${c.id}`,
-        label: c.label,
+      ...DIALS.map((d) => ({
+        id: `ctl-${d.key}`,
+        label: d.label,
         group: 'Develop',
-        hint: c.hint,
+        hint: CONTROL_HINTS[d.key],
         run: (client: ApiClient) => {
-          ui().setMode('develop');
-          esSetActive(client, c.id);
+          goDevelop();
+          esSetActive(client, d.key);
         },
       })),
     );

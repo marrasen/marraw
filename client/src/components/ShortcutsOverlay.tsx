@@ -38,6 +38,7 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
       ['Adjust', '+ / − · ⇧'],
       ['Release slider', 'Esc'],
       ['Copy / paste / crop', 'Ctrl+C Ctrl+V R'],
+      ['Reset all', 'Ctrl+0'],
       ['Auto tone / colours / all', 'Ctrl+U · +⇧ · +Alt'],
       ['Auto presets', 'Ctrl+1–9'],
     ],
