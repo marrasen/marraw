@@ -1,4 +1,5 @@
 import { Segmented } from '@/components/ui/segmented';
+import { TaskTray } from '@/components/TaskTray';
 import { WindowControls } from '@/components/WindowControls';
 import { useConnection } from '@/api/client';
 import { modK } from '@/lib/platform';
@@ -38,16 +39,18 @@ export function CinemaHUD({
   const current = folderPath ? roots.find((r) => samePath(r.path, folderPath)) : undefined;
 
   return (
-    <div
-      className={cn(
-        'pointer-events-none absolute inset-x-0 top-0 z-30 transition-opacity duration-300',
-        hidden && 'opacity-0',
-      )}
-    >
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-30">
       {/* The top band doubles as the frameless window's move handle; the
-          glass clusters below carve themselves out with no-drag. */}
+          glass clusters below carve themselves out with no-drag. The idle
+          fade lives on each cluster, not the root, so the task tray (right
+          cluster) can stay visible while the rest of the chrome fades. */}
       <div className="pointer-events-auto absolute inset-x-0 top-0 h-12 [-webkit-app-region:drag]" />
-      <div className={cn('absolute top-4 left-[18px] [-webkit-app-region:no-drag]', !hidden && 'pointer-events-auto')}>
+      <div
+        className={cn(
+          'absolute top-4 left-[18px] transition-opacity duration-300 [-webkit-app-region:no-drag]',
+          hidden ? 'opacity-0' : 'pointer-events-auto',
+        )}
+      >
         <div className="glass flex items-center gap-2.5 rounded-[9px] px-3 py-[7px]">
           <div className="flex size-[18px] items-center justify-center rounded-[5px] bg-primary text-[11px] font-bold text-primary-foreground">
             m
@@ -65,7 +68,12 @@ export function CinemaHUD({
           />
         </div>
       </div>
-      <div className={cn('absolute top-4 left-1/2 -translate-x-1/2 [-webkit-app-region:no-drag]', !hidden && 'pointer-events-auto')}>
+      <div
+        className={cn(
+          'absolute top-4 left-1/2 -translate-x-1/2 transition-opacity duration-300 [-webkit-app-region:no-drag]',
+          hidden ? 'opacity-0' : 'pointer-events-auto',
+        )}
+      >
         <Segmented
           aria-label="Mode"
           variant="glass"
@@ -77,14 +85,20 @@ export function CinemaHUD({
           }}
         />
       </div>
-      <div
-        className={cn(
-          'absolute top-4 right-[18px] flex items-center gap-3 [-webkit-app-region:no-drag]',
-          !hidden && 'pointer-events-auto',
-        )}
-      >
-        {right}
-        <WindowControls variant="glass" />
+      {/* The tray sits outside the fading group and stays pointer-interactive
+          so a running background job never disappears on idle. When no task
+          runs TaskTray renders null, leaving the cluster's layout unchanged. */}
+      <div className="pointer-events-auto absolute top-4 right-[18px] flex items-center gap-3 [-webkit-app-region:no-drag]">
+        <TaskTray />
+        <div
+          className={cn(
+            'flex items-center gap-3 transition-opacity duration-300',
+            hidden && 'pointer-events-none opacity-0',
+          )}
+        >
+          {right}
+          <WindowControls variant="glass" />
+        </div>
       </div>
     </div>
   );

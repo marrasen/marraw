@@ -11,6 +11,7 @@ import (
 	"image"
 	"image/jpeg"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -411,7 +412,13 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 // result is always a fresh buffer (a copy even when no downscale is needed),
 // so the in-place ApplyLook never mutates src — the caller may hand in a
 // shared, cached decode.
-func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit.Params) *image.RGBA {
+// expDeltaEV shifts exposure by that many stops post-decode, folded in before
+// the look stage. It is the transient-preview escape hatch: the fast path may
+// hand in a decode baked at a different exposure than `edits` asks for (reused
+// across an exposure-only change to skip the demosaic), and this closes the
+// gap approximately. 0 for the accurate cache render, whose decode already
+// carries the exact exposure via LibRaw's pre-demosaic exp_shift.
+func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit.Params, expDeltaEV float64) *image.RGBA {
 	scale := func(img *image.RGBA) *image.RGBA {
 		b := img.Bounds()
 		long := max(b.Dx(), b.Dy())
@@ -435,15 +442,52 @@ func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit
 	} else {
 		dst = scale(ApplyGeometry(src, edits))
 	}
+	// Runs on the scaled copy, never on src (which may be a shared cached
+	// decode), so a concurrent reuse of the same decode is unaffected.
+	applyExposureLUT(dst, expDeltaEV)
 	ApplyLook(dst, lookGamma, edits)
 	ApplyDetail(dst, edits)
 	return dst
 }
 
+// previewExposureGamma is the decode's own display encoding: the LibRaw 8-bit
+// output sits at roughly linear^(1/2.222) (see ApplyLook / samplePatchLinear),
+// so the exposure fold undoes THIS to reach linear light. It is NOT lookGamma —
+// that is the calibrated tone lift ApplyLook adds afterward; folding exposure in
+// lookGamma space (≈0.72) over-brightened the frame by ~2× on a positive move.
+const previewExposureGamma = 2.222
+
+// applyExposureLUT brightens/darkens by expDeltaEV stops via a per-channel LUT:
+// linearize the decode (undo previewExposureGamma), scale by 2^Δ in linear
+// light, re-encode. A no-op at Δ==0. Highlights already clipped in the 8-bit
+// decode can't be recovered — this is only ever the fleeting reused-decode
+// preview; the accurate render bakes exposure pre-demosaic.
+func applyExposureLUT(img *image.RGBA, expDeltaEV float64) {
+	if expDeltaEV == 0 {
+		return
+	}
+	scale := math.Exp2(expDeltaEV)
+	inv := 1 / previewExposureGamma
+	var lut [256]uint8
+	for i := range lut {
+		x := math.Pow(float64(i)/255, previewExposureGamma) * scale
+		if x > 1 {
+			x = 1
+		}
+		lut[i] = uint8(math.Round(255 * math.Pow(x, inv)))
+	}
+	pix := img.Pix
+	for i := 0; i+3 < len(pix); i += 4 {
+		pix[i] = lut[pix[i]]
+		pix[i+1] = lut[pix[i+1]]
+		pix[i+2] = lut[pix[i+2]]
+	}
+}
+
 // WritePreview writes the 2048 rendition on the interactive path so a
 // following commit serves the same pixels over /img.
 func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGamma float64, edits *edit.Params) error {
-	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits), cacheKey, "2048", editHash, 80)
+	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits, 0), cacheKey, "2048", editHash, 80)
 }
 
 // WriteLevels writes a chain of downscaled renditions from src, skipping

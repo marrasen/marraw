@@ -21,9 +21,15 @@ import (
 // TaskMeta is the typed metadata attached to shared background tasks so the
 // client task tray can render kind-specific UI (reveal export folder, …).
 type TaskMeta struct {
-	Kind    string `json:"kind"` // "scan" | "calibrate" | "prerender" | "fullres" | "export"
-	Folder  string `json:"folder,omitempty"`
-	DestDir string `json:"destDir,omitempty"`
+	Kind string `json:"kind"` // "scan" | "calibrate" | "prerender" | "fullres" | "export"
+	// Folder is the album's display name (base of FolderPath), shown in the
+	// tray sub-label.
+	Folder string `json:"folder,omitempty"`
+	// FolderPath is the album's full path on disk, so the library rail can
+	// light up the matching root while this task runs. Empty for tasks not
+	// tied to a single album.
+	FolderPath string `json:"folderPath,omitempty"`
+	DestDir    string `json:"destDir,omitempty"`
 }
 
 // startFolderJobs cancels the previous folder's background work and starts
@@ -41,15 +47,14 @@ func (l *Library) startFolderJobs(reqCtx context.Context, folderID int64, path s
 	d.folderJobsCancel = cancel
 	d.jobMu.Unlock()
 
-	name := filepath.Base(path)
 	go func() {
-		l.metaPass(ctx, folderID, name)
-		l.calibratePass(ctx, folderID, name)
-		l.prerenderPass(ctx, folderID, name)
+		l.metaPass(ctx, folderID, path)
+		l.calibratePass(ctx, folderID, path)
+		l.prerenderPass(ctx, folderID, path)
 		// Opt-in: 1:1 full-resolution tiles, the most expensive pass, runs
 		// last so it never delays the loupe-ready renditions above.
 		if raw, _ := d.DB.GetSetting(ctx, settingUIPrerenderFull); raw == "true" {
-			l.fullresPass(ctx, folderID, name)
+			l.fullresPass(ctx, folderID, path)
 		}
 	}()
 }
@@ -68,7 +73,7 @@ func (l *Library) RenderFolderFullres(ctx context.Context, path string) (*Folder
 	if err != nil {
 		return nil, aprot.ErrInvalidParams(err.Error())
 	}
-	go l.fullresPass(context.WithoutCancel(ctx), folderID, filepath.Base(path))
+	go l.fullresPass(context.WithoutCancel(ctx), folderID, path)
 	return &FolderInfo{FolderID: folderID, Path: path, PhotoCount: count}, nil
 }
 
@@ -77,7 +82,8 @@ func (l *Library) RenderFolderFullres(ctx context.Context, path string) (*Folder
 // cancellable task. A single decode per photo renders all of its tiles, so
 // EnsureTile at 0,0 is enough to materialize the whole grid. Background
 // priority keeps interactive edits and visible loads ahead of it.
-func (l *Library) fullresPass(ctx context.Context, folderID int64, name string) {
+func (l *Library) fullresPass(ctx context.Context, folderID int64, path string) {
+	name := filepath.Base(path)
 	photos, err := l.deps.DB.ListPhotos(ctx, folderID)
 	if err != nil {
 		return
@@ -95,7 +101,7 @@ func (l *Library) fullresPass(ctx context.Context, folderID int64, name string) 
 	}
 
 	tctx, task := tasks.StartTask[TaskMeta](ctx, "Rendering 1:1 "+name, tasks.Shared())
-	task.SetMeta(TaskMeta{Kind: "fullres", Folder: name})
+	task.SetMeta(TaskMeta{Kind: "fullres", Folder: name, FolderPath: path})
 	total := len(work)
 	task.Progress(0, total)
 
@@ -127,7 +133,8 @@ func (l *Library) fullresPass(ctx context.Context, folderID int64, name string) 
 // so the camera-mimic compensation is visible in the develop values instead
 // of silently vanishing on the first edit. Two demosaic-free half-size
 // decodes per photo — much cheaper than the pre-render pass that follows.
-func (l *Library) calibratePass(ctx context.Context, folderID int64, name string) {
+func (l *Library) calibratePass(ctx context.Context, folderID int64, path string) {
+	name := filepath.Base(path)
 	photos, err := l.deps.DB.ListPhotos(ctx, folderID)
 	if err != nil {
 		return
@@ -143,7 +150,7 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, name string
 	}
 
 	tctx, task := tasks.StartTask[TaskMeta](ctx, "Calibrating "+name, tasks.Shared())
-	task.SetMeta(TaskMeta{Kind: "calibrate", Folder: name})
+	task.SetMeta(TaskMeta{Kind: "calibrate", Folder: name, FolderPath: path})
 	total := len(work)
 	task.Progress(0, total)
 
@@ -179,16 +186,21 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, name string
 		})
 	}
 	task.Err(g.Wait())
+	// The measurements landed in the DB but the folder list clients already
+	// hold predates them; re-list so photo.baseExpEV (the exposure dial's
+	// neutral) matches the seed GetEditParams now returns.
+	l.deps.TriggerRefresh(photosKey(folderID))
 }
 
 // metaPass backfills missing photo metadata under a shared task.
-func (l *Library) metaPass(ctx context.Context, folderID int64, name string) {
+func (l *Library) metaPass(ctx context.Context, folderID int64, path string) {
+	name := filepath.Base(path)
 	n, err := l.deps.Scanner.MetaCount(ctx, folderID)
 	if err != nil || n == 0 {
 		return
 	}
 	tctx, task := tasks.StartTask[TaskMeta](ctx, "Scanning "+name, tasks.Shared())
-	task.SetMeta(TaskMeta{Kind: "scan", Folder: name})
+	task.SetMeta(TaskMeta{Kind: "scan", Folder: name, FolderPath: path})
 	task.Progress(0, n)
 	task.Err(l.deps.Scanner.Backfill(tctx, folderID, task.Progress))
 }
@@ -197,7 +209,8 @@ func (l *Library) metaPass(ctx context.Context, folderID int64, name string) {
 // every smaller level) for photos that don't have one yet, under a shared
 // cancellable task. Runs at background priority so visible/interactive
 // requests always preempt it in the decode pool.
-func (l *Library) prerenderPass(ctx context.Context, folderID int64, name string) {
+func (l *Library) prerenderPass(ctx context.Context, folderID int64, path string) {
+	name := filepath.Base(path)
 	photos, err := l.deps.DB.ListPhotos(ctx, folderID)
 	if err != nil {
 		return
@@ -213,7 +226,7 @@ func (l *Library) prerenderPass(ctx context.Context, folderID int64, name string
 	}
 
 	tctx, task := tasks.StartTask[TaskMeta](ctx, fmt.Sprintf("Pre-rendering %s", name), tasks.Shared())
-	task.SetMeta(TaskMeta{Kind: "prerender", Folder: name})
+	task.SetMeta(TaskMeta{Kind: "prerender", Folder: name, FolderPath: path})
 	total := len(work)
 	task.Progress(0, total)
 

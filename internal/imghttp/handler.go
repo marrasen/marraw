@@ -73,6 +73,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	path := h.Cache.PathFor(photo.CacheKey, level, editHash)
 	if _, err := os.Stat(path); err != nil {
+		// cacheOnly callers (the fit loupe) want the pre-rendered rendition or
+		// nothing — never an on-demand RAW decode. Browsing then paints the
+		// warm low-res underlay instead of blocking on a full render, and the
+		// background pre-render pass is what fills the cache. A 404 here is the
+		// expected "not warm yet" signal, not an error.
+		if r.URL.Query().Get("cacheOnly") != "" {
+			http.Error(w, "not cached", http.StatusNotFound)
+			return
+		}
 		if !generatable(photo, editHash) {
 			http.Error(w, "unknown edit state", http.StatusNotFound)
 			return

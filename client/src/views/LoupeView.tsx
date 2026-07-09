@@ -9,6 +9,7 @@ import { ChipSpinner } from '@/components/ui/task-chip';
 import { cn } from '@/lib/utils';
 import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
 import { esClearPreview, esCommit, esPickWB, esPreviewSettled, esSetCropping, esUpdate, useEditSession } from '@/lib/editSession';
+import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
@@ -122,14 +123,17 @@ function levelForPx(px: number): Level | 'tiles' {
   return 'tiles';
 }
 
-// useTilePrefetch warms the photos adjacent to the focused one while the
-// loupe is past pyramid depth: it pre-decodes their 2048 underlay (the
-// bridge shown at the moment of a switch) and requests one tile, which makes
-// the backend render the photo's whole tile set ahead of time — the visible
-// tiles then come out of the local cache in tens of milliseconds. Underlay
-// refs are held only for the current window so the browser can evict older
-// decodes.
-function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
+// useTilePrefetch warms the photos adjacent to the focused one so stepping
+// through a burst stays instant. It pre-decodes their 2048 rendition — the
+// fit underlay AND the 1:1 bridge, and the single decode the backend runs for
+// it also yields every smaller level, so whatever level the neighbour's fit
+// needs is warm too. `active` runs this whenever the loupe is up (fit included,
+// which is where a cold 2048 otherwise stalls the arrow keys). `tiles`
+// additionally requests one full-res tile per neighbour, making the backend
+// render the whole tile set ahead of a 1:1 landing — only worth its cost past
+// pyramid depth. Underlay refs are held only for the current window so the
+// browser can evict older decodes.
+function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: boolean) {
   const held = useRef<Map<string, HTMLImageElement>>(new Map());
   const triggered = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -138,16 +142,30 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
     if (i < 0) return;
     const ac = new AbortController();
     const next = new Map<string, HTMLImageElement>();
-    for (const j of [i + 1, i - 1, i + 2]) {
-      const p = photos[j];
-      if (!p) continue;
-      const url = imgUrl(p, '2048');
+    const warm = (p: Photo, lvl: Level) => {
+      const url = imgUrl(p, lvl);
       const img = held.current.get(url) ?? new Image();
       if (!img.src) {
         img.src = url;
         img.decode().catch(() => {});
       }
       next.set(url, img);
+    };
+    for (const j of [i + 1, i - 1, i + 2]) {
+      const p = photos[j];
+      if (!p) continue;
+      // The 512 underlay is cheap (warmed at scan, a disk hit) and keeps the
+      // low-res bridge instant on arrow-through, so warm it for every neighbour.
+      // The heavy 2048 is warmed ONLY at tile depth (1:1), where it is the
+      // wanted bridge and browsing is deliberate: prefetching it in fit fires a
+      // full RAW render per neighbour at visible priority, saturating the decode
+      // pool and the browser's connection budget with long uncancellable renders
+      // — that starves the warm 512s and freezes the browse. In fit the sharp
+      // 2048 loads on demand for the focused photo only (plus the background
+      // pre-render pass warming ahead).
+      warm(p, '512');
+      if (!tiles) continue;
+      warm(p, '2048');
       const tile = tileUrl(p, 0, 0);
       if (!triggered.current.has(tile)) {
         triggered.current.add(tile);
@@ -165,7 +183,7 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean) {
     // prefetched neighbor, the main image/tile layer re-requests it at
     // visible priority and the pool dedups against any run still going.
     return () => ac.abort();
-  }, [photos, photo, active]);
+  }, [photos, photo, active, tiles]);
 }
 
 // CinemaImage is the shared photo engine of every cinema surface: the
@@ -179,6 +197,7 @@ export function CinemaImage({
   onZoomInfo,
   renderingBadgeBottom = 180,
   navigatorBottom = 18,
+  showNavigator = true,
 }: {
   photo: Photo;
   photos: Photo[];
@@ -187,6 +206,12 @@ export function CinemaImage({
   /** Bottom offset of the "Rendering full resolution" badge (above the mode's control bar). */
   renderingBadgeBottom?: number;
   navigatorBottom?: number;
+  /**
+   * Show the floating navigator inset over the canvas. Develop turns it off —
+   * the always-visible drawer would cover it, so the Info tab hosts a
+   * live navigator fed from the shared loupeNav store instead.
+   */
+  showNavigator?: boolean;
 }) {
   const client = useApiClient();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -266,10 +291,28 @@ export function CinemaImage({
   // snaps instead of tweening between unrelated geometries.
   const snapKey = `${photo.id}|${cropUI}|${haveDims}`;
   const prevSnapKey = useRef('');
+  // Only a deliberate zoom change (wheel, buttons, Z, double-click — every
+  // path routes through setLoupeZoom, so `zoom` moves) should tween. A passive
+  // fitScale recompute — the background metadata scan pushing a fresh photo
+  // list with corrected dimensions/orientation, or a window resize — leaves
+  // `zoom` at 'fit' and MUST snap: animating it reads as the photo spuriously
+  // zooming in and springing back.
+  const prevZoom = useRef(zoom);
+  // Set on every wheel/pinch zoom (onWheel below) so the tween effect snaps
+  // instead of easing for continuous input.
+  const snapZoomRef = useRef(false);
   useEffect(() => {
     const snap = prevSnapKey.current !== snapKey;
     prevSnapKey.current = snapKey;
-    if (snap || !haveDims || Math.abs(scale - shownRef.current) < 1e-4) {
+    const zoomChanged = prevZoom.current !== zoom;
+    prevZoom.current = zoom;
+    // Wheel/pinch zoom snaps: it's continuous input, and easing a moving target
+    // both lags visibly and (because onWheel anchors off the mid-tween shownScale)
+    // makes the cursor-anchor math wobble the faster you scroll. Only deliberate
+    // keyboard/button/double-click steps tween.
+    const wheelSnap = snapZoomRef.current;
+    snapZoomRef.current = false;
+    if (wheelSnap || snap || !zoomChanged || !haveDims || Math.abs(scale - shownRef.current) < 1e-4) {
       setShownScale(scale);
       return;
     }
@@ -283,7 +326,7 @@ export function CinemaImage({
       if (p < 1) raf = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(raf);
-  }, [scale, snapKey, haveDims]);
+  }, [scale, snapKey, haveDims, zoom]);
 
   const boxW = Math.max(1, Math.round(dw * shownScale));
   const boxH = Math.max(1, Math.round(dh * shownScale));
@@ -313,8 +356,13 @@ export function CinemaImage({
   // stepping through a burst stays instant.
   const wantTiles = !previewUrl && level === 'tiles' && !cropping;
   const src = previewUrl ?? imgUrl(photo, level === 'tiles' ? '2048' : level);
+  // The pyramid level fit displays (never 'tiles' in the fit branch below).
+  const fitLevel: Level = level === 'tiles' ? '2048' : level;
   const [shownSrc, setShownSrc] = useState('');
-  useTilePrefetch(photos, photo, wantTiles);
+  // Warm neighbours whenever the loupe is showing committed renditions (fit
+  // included — that path has no tile layer to bridge a cold 2048); fire the
+  // full-res tile trigger only past pyramid depth.
+  useTilePrefetch(photos, photo, !previewUrl && !cropping && haveDims, wantTiles);
 
   // Once a commit lands (the photo's editHash changes to the newly rendered
   // state) AND we're past pyramid depth, drop the live 2048 preview so the
@@ -334,6 +382,12 @@ export function CinemaImage({
       lastHash.current = photo.editHash; // always consume the hash advance
       if (levelRef.current !== 'tiles') return;
       if (useEditSession.getState().cropping) return;
+      // A one-shot auto/preset apply advances the hash immediately (its persist)
+      // while deferring the sharp render — evicting here would drop the instant
+      // low-res blob and fall back to a committed rendition that isn't rendered
+      // yet. Keep the preview until the session settles; the settled clear below
+      // then takes over once the 2048 lands.
+      if (!esPreviewSettled()) return;
       const p = useEditSession.getState().preview;
       if (p && p.photoId === photo.id) esClearPreview();
     }
@@ -504,6 +558,7 @@ export function CinemaImage({
         maxY > 0 ? Math.min(1, Math.max(0, sy / maxY)) : 0.5,
       ];
     }
+    snapZoomRef.current = true;
     setZoom(next);
   };
 
@@ -610,6 +665,20 @@ export function CinemaImage({
     el.scrollTop = slackY + fy * boxH - el.clientHeight / 2;
   };
 
+  // Publish live pan/zoom to the shared store so an off-canvas navigator (the
+  // Develop Info tab) can mirror the viewport and drive panning. panTo closes
+  // over the current geometry, so register a stable wrapper backed by a ref to
+  // the latest closure and clear it on unmount.
+  const panToRef = useRef(panTo);
+  panToRef.current = panTo;
+  useEffect(() => {
+    setLoupeNav({ panTo: (fx, fy) => panToRef.current(fx, fy) });
+    return () => setLoupeNav({ panTo: null });
+  }, []);
+  useEffect(() => {
+    setLoupeNav({ viewport, scale, isFit: zoom === 'fit' });
+  }, [viewport, scale, zoom]);
+
   const onMagnifierMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!wbPicking) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -668,17 +737,42 @@ export function CinemaImage({
               }
             }}
           >
-            <DecodedImage
-              src={src}
-              onShown={setShownSrc}
-              className="absolute inset-0 size-full"
-              // While cropping, the straighten angle is a live client-side
-              // rotation of the flat frame — instant, full-resolution feedback
-              // — matched exactly by the backend crop on commit. Gated on the
-              // flat frame actually being up: rotating a crop-baked render
-              // would rotate the crop twice.
-              style={cropUI && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
-            />
+            {/* Low-res bridge: the always-warm 512 fills the same box and, as a
+                double-buffered DecodedImage, holds the previous frame until the
+                new 512 decodes — never transparent, so a fast browse never
+                blinks through to nothing. It sits BEHIND the sharp layer; the
+                sharp only covers it once it actually has the current photo's
+                pixels. Off during crop (rotated flat frame) and live edit (the
+                blob is the truth). */}
+            {!cropUI && !previewUrl && (
+              <DecodedImage src={imgUrl(photo, '512')} className="absolute inset-0 size-full" />
+            )}
+            {!cropUI && !previewUrl && !wantTiles ? (
+              // Fit: show the pre-rendered rendition the instant it exists and
+              // NEVER trigger an on-demand render just to browse — a not-yet-
+              // pre-rendered photo paints the 512 above with no stall. Keyed on
+              // the photo so a switch starts fresh (no lingering previous frame,
+              // nothing mid-decode to cancel).
+              <FitImage
+                key={`${photo.id}|${photo.editHash}`}
+                photo={photo}
+                level={fitLevel}
+                onShown={setShownSrc}
+                className="absolute inset-0 size-full"
+              />
+            ) : (
+              <DecodedImage
+                src={src}
+                onShown={setShownSrc}
+                className="absolute inset-0 size-full"
+                // While cropping, the straighten angle is a live client-side
+                // rotation of the flat frame — instant, full-resolution feedback
+                // — matched exactly by the backend crop on commit. Gated on the
+                // flat frame actually being up: rotating a crop-baked render
+                // would rotate the crop twice.
+                style={cropUI && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
+              />
+            )}
             {wantTiles && shownSrc.includes(`/img/${photo.id}/`) && (
               <TileLayer
                 key={`${photo.id}|${photo.cacheKey}|${photo.editHash}`}
@@ -774,7 +868,7 @@ export function CinemaImage({
           onPickAspect={applyAspect}
         />
       ) : (
-        !wbPicking && (
+        showNavigator && !wbPicking && (
           <NavigatorInset
             photo={photo}
             scale={scale}
@@ -898,6 +992,66 @@ function Magnifier({
   );
 }
 
+// NavigatorMap: the interactive minimap itself — the 256px rendition with the
+// visible-region rectangle over it, click/drag to recenter the pan. Shared by
+// the floating NavigatorInset (over the canvas) and the Develop Info tab
+// (in-panel, fed from the loupeNav store).
+export function NavigatorMap({
+  photo,
+  viewport,
+  onPan,
+  className,
+}: {
+  photo: Photo;
+  viewport: [number, number, number, number];
+  onPan?: (fx: number, fy: number) => void;
+  className?: string;
+}) {
+  const [vx, vy, vw, vh] = viewport;
+  const [dragging, setDragging] = useState(false);
+  const zoomed = vw < 0.999 || vh < 0.999;
+
+  const panFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    onPan?.(
+      Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
+      Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
+    );
+  };
+
+  return (
+    <div
+      className={cn('relative touch-none overflow-hidden rounded-md', zoomed && (dragging ? 'cursor-grabbing' : 'cursor-grab'), className)}
+      onPointerDown={(e) => {
+        if (!zoomed) return;
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        setDragging(true);
+        panFromEvent(e);
+      }}
+      onPointerMove={(e) => dragging && panFromEvent(e)}
+      onPointerUp={(e) => {
+        setDragging(false);
+        e.currentTarget.releasePointerCapture?.(e.pointerId);
+      }}
+      onPointerCancel={() => setDragging(false)}
+    >
+      <img src={imgUrl(photo, '256')} alt="" draggable={false} className="block w-full" />
+      {zoomed && (
+        <div
+          className="pointer-events-none absolute rounded-[2px] border-[1.5px] border-white"
+          style={{
+            left: `${vx * 100}%`,
+            top: `${vy * 100}%`,
+            width: `${vw * 100}%`,
+            height: `${vh * 100}%`,
+            boxShadow: '0 0 0 999px rgba(0,0,0,.34)',
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 // NavigatorInset: the 200px glass minimap (bottom right) with the visible
 // region outlined; click to recenter the pan there.
 function NavigatorInset({
@@ -916,18 +1070,9 @@ function NavigatorInset({
   /** Center the main viewport on this image fraction (drag or click). */
   onPan?: (fx: number, fy: number) => void;
 }) {
-  const [vx, vy, vw, vh] = viewport;
-  const [dragging, setDragging] = useState(false);
+  const [, , vw, vh] = viewport;
   const zoomed = vw < 0.999 || vh < 0.999;
   if (isFit && !zoomed) return null;
-
-  const panFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    onPan?.(
-      Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
-      Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
-    );
-  };
 
   return (
     <div className="glass absolute right-[18px] z-30 w-[200px] rounded-[11px] p-[9px]" style={{ bottom }}>
@@ -937,35 +1082,7 @@ function NavigatorInset({
           {Math.round(scale * 100)}%
         </span>
       </div>
-      <div
-        className={cn('relative touch-none overflow-hidden rounded-md', zoomed && (dragging ? 'cursor-grabbing' : 'cursor-grab'))}
-        onPointerDown={(e) => {
-          if (!zoomed) return;
-          e.currentTarget.setPointerCapture?.(e.pointerId);
-          setDragging(true);
-          panFromEvent(e);
-        }}
-        onPointerMove={(e) => dragging && panFromEvent(e)}
-        onPointerUp={(e) => {
-          setDragging(false);
-          e.currentTarget.releasePointerCapture?.(e.pointerId);
-        }}
-        onPointerCancel={() => setDragging(false)}
-      >
-        <img src={imgUrl(photo, '256')} alt="" draggable={false} className="block w-full" />
-        {zoomed && (
-          <div
-            className="pointer-events-none absolute rounded-[2px] border-[1.5px] border-white"
-            style={{
-              left: `${vx * 100}%`,
-              top: `${vy * 100}%`,
-              width: `${vw * 100}%`,
-              height: `${vh * 100}%`,
-              boxShadow: '0 0 0 999px rgba(0,0,0,.34)',
-            }}
-          />
-        )}
-      </div>
+      <NavigatorMap photo={photo} viewport={viewport} onPan={onPan} />
     </div>
   );
 }
@@ -1159,4 +1276,69 @@ export function DecodedImage({
     };
   }, [src]);
   return <img src={shown} draggable={false} alt="" className={className} style={style} />;
+}
+
+// FitImage paints the fit-loupe sharp layer from the PRE-RENDERED pyramid only.
+// It requests the target level cacheOnly, so the server serves the warm file or
+// a 404 — it never kicks a blocking RAW decode just because the user browsed
+// onto the photo. A hit shows the sharp rendition instantly; a miss renders
+// nothing (returns null) and the always-warm 512 underlay behind shows through,
+// so a fast scan across not-yet-pre-rendered frames never stalls and there is
+// no render to cancel. On a miss it then, after a short settle, kicks ONE
+// render for THIS photo so a frame paused on sharpens, and re-requests the warm
+// file when that lands — cheap when the background pre-render pass has already
+// covered it, and the settle means skimming past fires nothing. The parent keys
+// this by photo, so a switch remounts fresh (no lingering frame, and unmount
+// aborts any in-flight kick — the pool cancels it at the next checkpoint).
+function FitImage({
+  photo,
+  level,
+  onShown,
+  className,
+}: {
+  photo: Photo;
+  level: Level;
+  onShown?: (src: string) => void;
+  className?: string;
+}) {
+  const [missed, setMissed] = useState(false);
+  // Bumped once a settle-kicked render lands so the cacheOnly <img> re-requests
+  // the now-warm file; part of the <img> key so it remounts to refetch.
+  const [warmed, setWarmed] = useState(0);
+  const cacheUrl = imgUrl(photo, level, { cacheOnly: true });
+
+  useEffect(() => {
+    if (!missed) return;
+    const img = new Image();
+    let alive = true;
+    const t = window.setTimeout(() => {
+      img.src = imgUrl(photo, level); // render-allowed: one render for this photo
+      img
+        .decode()
+        .then(() => {
+          if (!alive) return;
+          setMissed(false);
+          setWarmed((n) => n + 1);
+        })
+        .catch(() => {});
+    }, 140);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+      if (!img.complete) img.src = '';
+    };
+  }, [missed, photo, level]);
+
+  if (missed) return null;
+  return (
+    <img
+      key={warmed}
+      src={cacheUrl}
+      draggable={false}
+      alt=""
+      className={className}
+      onLoad={() => onShown?.(cacheUrl)}
+      onError={() => setMissed(true)}
+    />
+  );
 }

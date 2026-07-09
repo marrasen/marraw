@@ -9,20 +9,21 @@ import { applyBatchEdit, type Delta, type Params } from '@/api/edits';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { Separator } from '@/components/ui/separator';
+import { Segmented } from '@/components/ui/segmented';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Histogram } from '@/components/Histogram';
+import { PresetsPanel } from '@/components/PresetsPanel';
+import { InfoPanel } from '@/components/InfoPanel';
+import { formatAperture, formatShutter } from '@/lib/exif';
 import { updateEditGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 import {
-  esApplyParams,
   esAuto,
   esCanRedo,
   esCanUndo,
   esCommit,
   esLoad,
   esRedo,
-  esReset,
   esSetActive,
   esSetApplyIds,
   esSetCropping,
@@ -97,11 +98,45 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
     return <BatchSection key={ids.join(',')} client={client} ids={ids} />;
   }
   const photo = photos.find((p) => p.id === focusId);
+  return <SinglePhotoPanel client={client} photo={photo} targetCount={ids.length} />;
+}
+
+// SinglePhotoPanel: the identity/cull header, then the Develop / Presets /
+// Info tab strip and its content. Tab state is client-only (uiStore) so it
+// persists across the two mount sites (Develop drawer ⇄ Library aside).
+const TAB_ITEMS = [
+  { value: 'develop' as const, label: 'Develop' },
+  { value: 'presets' as const, label: 'Presets' },
+  { value: 'info' as const, label: 'Info' },
+];
+
+function SinglePhotoPanel({
+  client,
+  photo,
+  targetCount,
+}: {
+  client: ApiClient;
+  photo?: Photo;
+  targetCount: number;
+}) {
+  const tab = useUIStore((s) => s.developTab);
+  const setTab = useUIStore((s) => s.setDevelopTab);
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
+    <div className="flex h-full flex-col overflow-hidden">
       {photo && <PhotoHeader photo={photo} />}
-      {photo && <Histogram photo={photo} />}
-      <DevelopPanel client={client} targetCount={ids.length} />
+      <div className="px-4 pt-[11px] pb-1">
+        <Segmented size="sm" aria-label="Panel" value={tab} onValueChange={setTab} items={TAB_ITEMS} />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {tab === 'develop' && (
+          <>
+            {photo && <Histogram photo={photo} />}
+            <DevelopPanel client={client} photo={photo} targetCount={targetCount} />
+          </>
+        )}
+        {tab === 'presets' && <PresetsPanel client={client} photo={photo} targetCount={targetCount} />}
+        {tab === 'info' && photo && <InfoPanel photo={photo} />}
+      </div>
     </div>
   );
 }
@@ -198,20 +233,20 @@ function PhotoHeader({ photo }: { photo: Photo }) {
   );
 }
 
-function formatShutter(s: number): string {
-  if (s <= 0) return '—';
-  if (s >= 1) return `${s.toFixed(1)}s`;
-  return `1/${Math.round(1 / s)}s`;
-}
-
-// EXIF apertures arrive as raw floats (5.599999999…); one decimal is how
-// f-numbers are spoken, and trailing .0 is dropped (ƒ/8, not ƒ/8.0).
-function formatAperture(a: number): string {
-  if (a <= 0) return '—';
-  return String(Math.round(a * 10) / 10);
-}
-
-function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount: number }) {
+function DevelopPanel({
+  client,
+  photo,
+  targetCount,
+}: {
+  client: ApiClient;
+  photo?: Photo;
+  targetCount: number;
+}) {
+  // The exposure dial's neutral is the photo's seeded camera-mimic
+  // compensation (base_exp_ev), NOT 0: a fresh photo shows e.g. +0.85 EV and
+  // that IS its default, so "reset" returns here and the ↺ button hides while
+  // exposure sits at the seed. Zero when unmeasured — the pre-seed behaviour.
+  const seedExpEV = photo?.baseExpEV ?? 0;
   const liveDraft = useEditSession((s) => s.draft);
   // Falling back to the held previous draft keeps the panel rendered through
   // esLoad's null gap: swapping everything for "Loading edits…" and back on
@@ -224,8 +259,6 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
   const cropping = useEditSession((s) => s.cropping);
   const canUndo = useEditSession(esCanUndo);
   const canRedo = useEditSession(esCanRedo);
-  const setClipboard = useUIStore((s) => s.setClipboard);
-  const clipboard = useUIStore((s) => s.clipboard);
   const setMode = useUIStore((s) => s.setMode);
   const wbModeRef = useActiveScroll(activeControl === 'wbMode');
 
@@ -250,7 +283,7 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
     tone: groupChanged(draft, [
       'expEV', 'expPreserve', 'bright', 'gamma', 'shadow',
       'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
-    ]),
+    ], seedExpEV),
     presence: groupChanged(draft, ['clarity', 'texture', 'dehaze']),
     wb: groupChanged(draft, ['wbMode', 'wbMul', 'wbTemp', 'wbTint', 'wbKelvin']),
     color: groupChanged(draft, [
@@ -275,15 +308,6 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           </span>
         )}
         <span className="ml-auto flex items-center gap-1">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 px-1.5 text-[11px]"
-            onClick={() => void esAuto(client, ['all'])}
-            title="Auto everything (Ctrl+Alt+U)"
-          >
-            Auto
-          </Button>
           <Button size="icon-sm" variant="ghost" disabled={!canUndo} onClick={() => esUndo(client)} title="Undo (Ctrl+Z)">
             <Undo2 />
           </Button>
@@ -355,10 +379,13 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
           min={-2}
           max={3}
           step={0.05}
-          neutral={0}
+          // Default is the seeded camera-mimic lift, not 0 — reset returns
+          // there (a lone expEV=0 renders identically to the seed anyway,
+          // since neutral params re-enable LibRaw auto-brighten).
+          neutral={seedExpEV}
           onChange={(v) => update({ expEV: v })}
           onCommit={(v) => commit({ expEV: v })}
-          onClear={() => clear({ expEV: 0 })}
+          onClear={() => clear({ expEV: seedExpEV })}
           {...num('expEV')}
         />
         <EditSlider
@@ -631,35 +658,10 @@ function DevelopPanel({ client, targetCount }: { client: ApiClient; targetCount:
         <PctSlider label="CA blue/yellow" field="caBlue" draft={draft} update={update} commit={commit} {...num('caBlue')} />
       </Group>
 
-      <Separator className="mt-3" />
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setClipboard(draft);
-            toast.success('Edit settings copied');
-          }}
-        >
-          Copy
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!clipboard}
-          onClick={() => clipboard && esApplyParams(client, clipboard)}
-        >
-          Paste
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => esReset(client)}>
-          Reset
-        </Button>
-      </div>
-      <p className="mt-3 mb-1 text-xs text-muted-foreground">
+      <p className="mt-4 mb-1 text-xs text-muted-foreground">
         Drag a slider for a live preview; release to save. Press a control's key (E, B, W, …) or
         walk with Ctrl+↑/↓, then +/- adjusts; Esc returns to the image. Ctrl+Z/Ctrl+Y undo/redo
-        per photo.
+        per photo. Copy, paste, reset and presets live in the Presets tab.
       </p>
     </div>
   );
@@ -679,16 +681,19 @@ function useActiveScroll(active?: boolean) {
 // used for the per-group "has adjustments" dot and the per-slider clear
 // buttons. The WB mode and demosaic defaults are stored as "" (see the
 // generated-union notes above); everything else defaults to NEUTRAL.
-function isDefault(draft: Params, key: keyof Params): boolean {
+function isDefault(draft: Params, key: keyof Params, seedExpEV = 0): boolean {
   const v = draft[key];
+  // Exposure's default is the photo's seeded camera-mimic lift, not 0, so an
+  // untouched seeded photo reads as unchanged (no group dot).
+  if (key === 'expEV') return Math.abs(draft.expEV - seedExpEV) <= 1e-9;
   if (key === 'wbMode') return (v as string) === '' || v === 'camera';
   if (key === 'wbMul') return (v as number[]).every((m) => m === 0);
   if (key === 'demosaic') return (v as string) === '';
   return v === NEUTRAL[key];
 }
 
-function groupChanged(draft: Params, keys: (keyof Params)[]): boolean {
-  return keys.some((k) => !isDefault(draft, k));
+function groupChanged(draft: Params, keys: (keyof Params)[], seedExpEV = 0): boolean {
+  return keys.some((k) => !isDefault(draft, k, seedExpEV));
 }
 
 // Group is one collapsible develop-panel section, drawn flat per the

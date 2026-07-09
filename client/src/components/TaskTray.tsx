@@ -2,12 +2,19 @@ import { useState } from 'react';
 import { Check, ChevronDown, Loader2, X } from 'lucide-react';
 import { ChipProgress, ChipSpinner, TaskChip } from '@/components/ui/task-chip';
 import { useApiClient } from '@/api/client';
-import { useMyTasks, cancelSharedTask } from '@/api/tasks';
+import { useSharedTasks, cancelSharedTask } from '@/api/tasks';
 import type { SharedTaskState } from '@/api/tasks-handler';
 import { cn } from '@/lib/utils';
 import { useEditSession } from '@/lib/editSession';
 import { useTaskToasts } from '@/lib/taskToasts';
-import { useUIStore } from '@/stores/uiStore';
+
+// Every top-level daemon task, regardless of which window/connection started
+// it. marraw is single-user localhost, and owner-only filtering (useMyTasks)
+// drops a running job the moment the WS reconnects — its IsOwner flag is keyed
+// to the old connection id — or when a second window opens.
+function useDaemonTasks(): SharedTaskState[] {
+  return useSharedTasks().filter((t) => !t.parentId);
+}
 
 // RenderSpinner: a tiny status-bar note while an edit preview render is in
 // flight (not a shared task — request-scoped).
@@ -27,7 +34,7 @@ export function RenderSpinner() {
 // in the top bar (library grid) and the cinema HUD's right cluster.
 export function TaskTray() {
   const client = useApiClient();
-  const tasks = useMyTasks();
+  const tasks = useDaemonTasks();
   const [open, setOpen] = useState(false);
 
   const running = tasks.filter((t) => t.status === 'running' || t.status === 'created');
@@ -41,7 +48,7 @@ export function TaskTray() {
       {running.length <= 1 && running[0] ? (
         <TaskChip
           label={running[0].title}
-          count={running[0].total ? `${running[0].current ?? 0}/${running[0].total.toLocaleString()}` : undefined}
+          count={running[0].total ? `${running[0].current ?? 0}/${running[0].total}` : undefined}
           pct={pctOf(running[0])}
           onCancel={() => cancelSharedTask(client, running[0].id).catch(() => {})}
           onClick={() => setOpen((v) => !v)}
@@ -70,7 +77,7 @@ export function TaskTray() {
 // once in App so "done"/"failed" fire in every mode — including the cinema
 // canvases where the tray chip fades out with the chrome.
 export function TaskToasts() {
-  useTaskToasts(useMyTasks());
+  useTaskToasts(useDaemonTasks());
   return null;
 }
 
@@ -109,7 +116,7 @@ function TaskTrayCard({ tasks, onClose }: { tasks: SharedTaskState[]; onClose: (
                     <span className="truncate text-xs text-foreground">{t.title}</span>
                     {t.total != null && t.total > 0 && (
                       <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground tabular-nums">
-                        {(t.current ?? 0).toLocaleString()}/{t.total.toLocaleString()}
+                        {(t.current ?? 0)}/{t.total}
                       </span>
                     )}
                   </div>

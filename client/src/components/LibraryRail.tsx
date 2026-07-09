@@ -26,7 +26,7 @@ import {
   type LibraryRoot,
 } from '@/api/library';
 import { useApiClient } from '@/api/client';
-import { useMyTasks } from '@/api/tasks';
+import { useSharedTasks } from '@/api/tasks';
 import { ChipSpinner } from '@/components/ui/task-chip';
 import {
   ContextMenu,
@@ -340,7 +340,7 @@ function ShootRow({
   const client = useApiClient();
   const folderPath = useUIStore((s) => s.folderPath);
   const active = folderPath != null && samePath(folderPath, root.path);
-  const scanning = useIsScanning(root.path);
+  const scanning = useFolderBusy(root.path);
 
   const open = () => void openRoot(client, roots, root);
 
@@ -522,13 +522,15 @@ function RenameEditor({
   );
 }
 
-// useIsScanning: a background scan/prerender task whose meta.folder matches
-// this root is running.
-function useIsScanning(path: string) {
-  const tasks = useMyTasks();
+// useFolderBusy: any background task tied to this album — scanning,
+// calibrating, pre-rendering, 1:1 rendering, or exporting from it — is
+// running. Shared (not owner-only) so work started in another window or
+// surviving a reconnect still lights up the folder.
+function useFolderBusy(path: string) {
+  const tasks = useSharedTasks();
   return tasks.some((t) => {
     if (t.status !== 'running' && t.status !== 'created') return false;
-    const meta = t.meta as { folder?: string } | undefined;
-    return meta?.folder != null && samePath(meta.folder, path);
+    const meta = t.meta as { folderPath?: string } | undefined;
+    return meta?.folderPath != null && samePath(meta.folderPath, path);
   });
 }

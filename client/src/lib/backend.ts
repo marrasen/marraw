@@ -32,11 +32,18 @@ const RENDER_VERSION = 'r7';
 
 // imgUrl builds a content-addressed image URL: cacheKey (v), editHash (e),
 // and render version (r) are part of the URL, so the browser cache never
-// serves stale pixels.
-export function imgUrl(p: ImgRef, level: Level, editHashOverride?: string): string {
-  const e = editHashOverride ?? p.editHash;
+// serves stale pixels. cacheOnly asks the server for the pre-rendered file or
+// a 404 — never an on-demand render — so the fit loupe can show what's warm
+// without triggering (and blocking on) a full RAW decode while browsing.
+export function imgUrl(
+  p: ImgRef,
+  level: Level,
+  opts?: { editHash?: string; cacheOnly?: boolean },
+): string {
+  const e = opts?.editHash ?? p.editHash;
   const params = new URLSearchParams({ v: p.cacheKey, r: RENDER_VERSION });
   if (e && e !== 'base') params.set('e', e);
+  if (opts?.cacheOnly) params.set('cacheOnly', '1');
   if (backend.token) params.set('t', backend.token);
   return `${backend.http}/img/${p.id}/${level}?${params}`;
 }

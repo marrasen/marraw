@@ -216,17 +216,37 @@ func (e *Params) Hash() string {
 // deterministic edit whose LibRaw subset happens to be neutral still keys
 // apart from the auto-brighten base render.
 func (e *Params) LibrawInputsHash() string {
-	l := Params{
+	l := e.librawInputs()
+	l.Normalize()
+	b, _ := json.Marshal(&l)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// LibrawInputsHashNoExp is LibrawInputsHash with exposure (ExpEV/ExpPreserve)
+// excluded, so two decodes that differ only in exposure share one hash. The
+// transient preview path uses this to reuse a warm decode across an
+// exposure-only change and fold the difference in post-decode (pyramid's
+// RenderPreview expDeltaEV); the accurate cache render still keys on the full
+// LibrawInputsHash and re-demosaics at the exact exposure.
+func (e *Params) LibrawInputsHashNoExp() string {
+	l := e.librawInputs()
+	l.ExpEV, l.ExpPreserve = 0, 0
+	l.Normalize()
+	b, _ := json.Marshal(&l)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// librawInputs returns the subset of params that change the LibRaw decode.
+func (e *Params) librawInputs() Params {
+	return Params{
 		ExpEV: e.ExpEV, ExpPreserve: e.ExpPreserve,
 		WBMode: e.WBMode, WBMul: e.WBMul, WBTemp: e.WBTemp, WBTint: e.WBTint, WBKelvin: e.WBKelvin,
 		Bright: e.Bright, Gamma: e.Gamma, Shadow: e.Shadow,
 		Highlight: e.Highlight, NRThreshold: e.NRThreshold, FBDDNoiseRd: e.FBDDNoiseRd, MedPasses: e.MedPasses,
 		Demosaic: e.Demosaic, CARed: e.CARed, CABlue: e.CABlue,
 	}
-	l.Normalize()
-	b, _ := json.Marshal(&l)
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])[:12]
 }
 
 // Parse decodes stored edit-params JSON.

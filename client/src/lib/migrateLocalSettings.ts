@@ -7,7 +7,6 @@
 import {
   setAutoPresets,
   setCullDials,
-  setDevelopPinned,
   setEditGroupOpen,
   setExportDir,
   setGapMinutes,
@@ -73,10 +72,6 @@ export async function migrateLocalSettings(client: ApiClient): Promise<void> {
 
   const exportDir = localStorage.getItem('marraw.exportDir');
   if (exportDir) push(setExportDir(client, exportDir));
-
-  if (localStorage.getItem('marraw:developPinned') === '0') {
-    push(setDevelopPinned(client, false));
-  }
 
   // Dynamic families. Open/no-alias is the default server-side, so only the
   // non-default entries need migrating.

@@ -123,6 +123,11 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	// TypeScript types generated for the client-side patch reducer.
 	registry.RegisterPushEventFor(library, PhotoPatchEvent{})
 
-	tasks.EnableWithMeta[TaskMeta](registry)
+	// marraw is single-user localhost: any window may cancel any task. This
+	// also restores cancel rights after a reconnect, which the default
+	// connection-keyed policy would drop.
+	tasks.EnableWithMeta[TaskMeta](registry, tasks.WithCancelAuthorizer(
+		func(context.Context, tasks.TaskCancelInfo) error { return nil },
+	))
 	return registry, library, edits, export
 }

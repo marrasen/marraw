@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { Pin, PinOff } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
 import { CinemaImage } from '@/views/LoupeView';
@@ -13,7 +12,6 @@ import { EditPanel } from '@/components/EditPanel';
 import { DIALS } from '@/lib/dials';
 import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
 import { groupByGap } from '@/lib/timeGaps';
-import { updateDevelopPinned } from '@/lib/uiSettings';
 import { useIdle } from '@/lib/useIdle';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
@@ -26,12 +24,10 @@ import { useUIStore } from '@/stores/uiStore';
  * keeps the take in reach.
  */
 export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) {
-  const client = useApiClient();
   const focusId = useUIStore((s) => s.focusId);
   const gapMinutes = useUIStore((s) => s.gapMinutes);
   const cropping = useEditSession((s) => s.cropping);
   const wbPicking = useEditSession((s) => s.wbPicking);
-  const pinned = useUIStore((s) => s.developPinned);
   const idle = useIdle();
   const [scale, setScale] = useState(1);
 
@@ -46,7 +42,6 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
   }
 
   const overlayActive = cropping || wbPicking;
-  const togglePin = () => updateDevelopPinned(client, !pinned);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -55,11 +50,11 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
         photos={photos}
         onZoomInfo={setScale}
         renderingBadgeBottom={216}
-        navigatorBottom={pinned ? 18 : 150}
+        showNavigator={false}
       />
       {!overlayActive && (
         <CinemaHUD
-          hidden={idle && !pinned}
+          hidden={idle}
           status={
             <span className="font-mono text-[11px] text-[#aab0ff]">
               {photo.fileName.split(/[\\/]/).pop()}
@@ -73,45 +68,23 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
           }
         />
       )}
-      {/* Pinnable full-stack drawer. Stays MOUNTED through crop/eyedropper
-          overlays (it owns the edit-session lifecycle) — only hidden. */}
+      {/* Always-visible full-stack drawer (Develop / Presets / Info tabs live
+          inside EditPanel). Stays MOUNTED through crop/eyedropper overlays (it
+          owns the edit-session lifecycle) — only slid out of the way. */}
       <div
         className={cn(
           'glass absolute top-16 right-4 bottom-4 z-30 flex w-[352px] flex-col overflow-hidden rounded-[13px] transition-transform duration-200',
-          (!pinned || overlayActive) && 'translate-x-[calc(100%+32px)]',
+          overlayActive && 'translate-x-[calc(100%+32px)]',
         )}
       >
-        <div className="flex items-center justify-between px-4 pt-[13px] pb-1">
-          <span className="text-[10px] tracking-[.07em] text-muted-foreground uppercase">
-            Develop · full stack
-          </span>
-          <button
-            className="flex items-center gap-1 text-[11px] text-[#aab0ff] hover:text-foreground"
-            onClick={togglePin}
-            title={pinned ? 'Unpin drawer' : 'Pin drawer'}
-          >
-            <Pin className="size-3" strokeWidth={1.5} />
-            Pinned
-          </button>
-        </div>
         <div className="min-h-0 flex-1">
           <EditPanel photos={all} />
         </div>
       </div>
       {!overlayActive && (
         <>
-          {!pinned && (
-            <button
-              className="glass absolute top-16 right-4 z-30 flex items-center gap-1.5 rounded-[9px] px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
-              onClick={togglePin}
-              title="Pin the develop drawer"
-            >
-              <PinOff className="size-3.5" strokeWidth={1.5} />
-              Develop
-            </button>
-          )}
-          <QuickDock hidden={idle} shifted={pinned} zoom={<ZoomCluster scale={scale} />} />
-          <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} shifted={pinned} />
+          <QuickDock hidden={idle} shifted zoom={<ZoomCluster scale={scale} />} />
+          <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} shifted />
         </>
       )}
     </div>

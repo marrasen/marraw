@@ -201,7 +201,7 @@ function SelectionBar() {
           title={clipboard ? `Paste copied settings onto ${selection.size} photos` : 'Copy settings first (Ctrl+C)'}
           onClick={() => {
             if (!clipboard) return;
-            esApplyParams(client, clipboard);
+            esApplyParams(client, clipboard, { label: 'Paste' });
             toast.success(`Settings pasted to ${selection.size} photos`);
           }}
         >

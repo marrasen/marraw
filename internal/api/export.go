@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/marrasen/aprot"
@@ -65,12 +66,20 @@ func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.Tas
 	}
 
 	total := len(req.PhotoIDs)
+	// Resolve the source album so the library rail can light up the folder
+	// these photos come from while the export runs. A selection lives in one
+	// open folder, so the first photo's folder is the album.
+	meta := TaskMeta{Kind: "export", DestDir: req.DestDir}
+	if photos, err := x.deps.DB.GetPhotos(ctx, req.PhotoIDs); err == nil && len(photos) > 0 {
+		meta.FolderPath = photos[0].FolderPath
+		meta.Folder = filepath.Base(photos[0].FolderPath)
+	}
 	tctx, task := tasks.StartTask[TaskMeta](
 		context.WithoutCancel(ctx),
 		fmt.Sprintf("Exporting %d photo%s", total, plural(total)),
 		tasks.Shared(),
 	)
-	task.SetMeta(TaskMeta{Kind: "export", DestDir: req.DestDir})
+	task.SetMeta(meta)
 	task.Progress(0, total)
 
 	go func() {

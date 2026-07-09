@@ -491,8 +491,17 @@ try {
   await sleep(300);
   R.cinemaNoTopBar = !document.querySelector('[data-testid="task-tray"]');
   const expDest = ui().folderPath.replace(/[\\/][^\\/]+[\\/]?$/, '') + '\\marraw-uitest-export';
+  // Export several photos so the job runs long enough to survive two mode
+  // switches — the whole point of the persistence checks below.
+  const expCount = Math.min(8, ui().visibleIds.length);
+  const expLabel = `Exporting ${expCount} photo${expCount === 1 ? '' : 's'}`;
+  // The task chip (single job) or the collapsed "N tasks" summary pill — a
+  // concurrent background job (prerender on a cold daemon) yields the pill.
+  const taskChipUp = () =>
+    [...document.querySelectorAll('span')].some((s) => s.textContent.trim().startsWith('Exporting ')) ||
+    [...document.querySelectorAll('span')].some((s) => /^\d+ tasks$/.test(s.textContent.trim()));
   await mw.startExport({
-    photoIds: [ui().visibleIds[0]],
+    photoIds: ui().visibleIds.slice(0, expCount),
     destDir: expDest,
     format: 'jpeg',
     jpegQuality: 90,
@@ -500,17 +509,20 @@ try {
     colorSpace: 'srgb',
     createDir: true,
   });
-  // A concurrent background job (prerender on a cold daemon) collapses the
-  // single chip into the "N tasks" summary pill — accept either.
-  R.cinemaExportChip = !!(await until(
-    () =>
-      [...document.querySelectorAll('span')].some((s) => s.textContent.trim().startsWith('Exporting 1 photo')) ||
-      [...document.querySelectorAll('span')].some((s) => /^\d+ tasks$/.test(s.textContent.trim())),
-    15000,
-    'export chip in cinema HUD',
-  ));
+  R.cinemaExportChip = !!(await until(taskChipUp, 15000, 'export chip in cinema HUD'));
+  // Regression: switching modes remounted the tray with empty local state, so
+  // a still-running job's chip vanished until its next lifecycle event. The
+  // shared per-client store must keep it visible across every mode.
+  ui().setMode('library');
+  await until(() => ui().mode === 'library', 5000, 'library mode for tray persistence');
+  R.trayPersistsLibrary = !!(await until(taskChipUp, 8000, 'task chip persists into Library'));
+  ui().setMode('cull');
+  await until(() => ui().mode === 'cull', 5000, 'cull mode for tray persistence');
+  R.trayPersistsCull = !!(await until(taskChipUp, 8000, 'task chip persists into Cull'));
+  ui().setMode('develop');
+  await until(() => ui().mode === 'develop', 5000, 'develop mode after tray persistence');
   R.cinemaExportToast = !!(await until(
-    () => [...document.querySelectorAll('[data-sonner-toast]')].some((t) => t.textContent.includes('Exporting 1 photo done')),
+    () => [...document.querySelectorAll('[data-sonner-toast]')].some((t) => t.textContent.includes(`${expLabel} done`)),
     60000,
     'export done toast in cinema mode',
   ));

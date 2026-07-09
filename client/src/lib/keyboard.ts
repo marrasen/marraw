@@ -4,7 +4,7 @@ import { getEditParams } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { toast } from 'sonner';
 import { applyRating as doRating, applyFlag as doFlag } from '@/lib/actions';
-import { useUIStore, selectionOrFocus } from '@/stores/uiStore';
+import { useUIStore, selectionOrFocus, type DevelopTab } from '@/stores/uiStore';
 import {
   esApplyAutoPreset,
   esApplyParams,
@@ -112,7 +112,7 @@ export function useKeyboard() {
           case 'v': {
             if (!s.clipboard || s.focusId == null) return;
             e.preventDefault();
-            esApplyParams(client, s.clipboard);
+            esApplyParams(client, s.clipboard, { label: 'Paste' });
             toast.success('Edit settings pasted');
             return;
           }
@@ -185,6 +185,17 @@ export function useKeyboard() {
         return;
       }
 
+      // Tab cycles the Develop panel's Develop/Presets/Info tabs — only in
+      // Develop, where that panel is the focus. (Plain Tab elsewhere keeps its
+      // browser walk.) Shift+Tab steps backward.
+      if (e.key === 'Tab' && s.mode === 'develop') {
+        e.preventDefault();
+        const order: DevelopTab[] = ['develop', 'presets', 'info'];
+        const i = order.indexOf(s.developTab);
+        s.setDevelopTab(order[(i + (e.shiftKey ? order.length - 1 : 1)) % order.length]);
+        return;
+      }
+
       // G in Cull blows the scrubber into the contact sheet (elsewhere G
       // stays the Gamma control hotkey).
       if (key === 'g' && s.mode === 'cull') {
@@ -195,6 +206,7 @@ export function useKeyboard() {
 
       if (CONTROL_KEYS[key] && es.draft && s.mode !== 'cull') {
         e.preventDefault();
+        s.setDevelopTab('develop'); // reveal the slider if on the Presets/Info tab
         esSetActive(client, CONTROL_KEYS[key]);
         return;
       }

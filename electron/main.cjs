@@ -6,10 +6,24 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
 
+// Taskbar/window icon. Only needed for the dev/unpackaged run — the packaged
+// exe carries its own icon (electron-builder win.icon), and build/ isn't
+// bundled, so fall back to Electron's default there.
+const ICON_PATH = path.join(__dirname, '..', 'assets', 'icon.ico');
+const WINDOW_ICON = fs.existsSync(ICON_PATH) ? ICON_PATH : undefined;
+
 const DEV = process.env.MARRAW_DEV === '1';
+// Preview: production performance without packaging. Loads the built client
+// (client/dist) and spawns the built daemon (build/marrawd.exe) — same code
+// paths as the installed app, but run straight from the repo with no Vite
+// dev server, no HMR, and no DevTools. See `npm run preview`.
+const PREVIEW = process.env.MARRAW_PREVIEW === '1';
+// Run from the repo (build/marrawd.exe) rather than the packaged resources dir.
+const UNPACKAGED = DEV || PREVIEW;
 // Scripted harness runs (ui-verify, shot): animation frames must keep
 // flowing even when the window is occluded. webPreferences.backgroundThrottling
 // alone does not cover Chromium's compositor-side occlusion backgrounding —
@@ -20,6 +34,10 @@ if (UITEST) {
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 }
+// Trackpad pinch: let Chromium deliver pinch as synthetic ctrl+wheel events for
+// the loupe's onWheel zoom to consume, and disable the native compositor pinch-zoom
+// (visual viewport) that otherwise inverts and springs back on release.
+app.commandLine.appendSwitch('disable-pinch');
 let child = null;
 let quitting = false;
 
@@ -29,7 +47,7 @@ async function startDaemon() {
     return { port: process.env.MARRAW_PORT, token: '' };
   }
   const token = crypto.randomUUID();
-  const exe = DEV
+  const exe = UNPACKAGED
     ? path.join(__dirname, '..', 'build', 'marrawd.exe')
     : path.join(process.resourcesPath, 'marrawd.exe');
   child = spawn(exe, ['--port', '0', '--data-dir', app.getPath('userData')], {
@@ -98,6 +116,7 @@ async function createWindow(opts = {}) {
     minWidth: 1280, // the handoff's "minimum comfortable window"
     frame: false, // no native title bar — marraw draws its own controls
     backgroundColor: '#0c0d0f',
+    icon: WINDOW_ICON,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -132,7 +151,7 @@ async function createWindow(opts = {}) {
     if (process.env.MARRAW_SHOT) query.shot = process.env.MARRAW_SHOT; // scripts/shot.mjs
   }
 
-  if (DEV) {
+  if (DEV && !PREVIEW) {
     const qs = new URLSearchParams(query).toString();
     // Vite auto-increments its port when 5173 is taken by another project;
     // MARRAW_VITE_PORT points dev Electron at the right instance.

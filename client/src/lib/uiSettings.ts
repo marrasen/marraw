@@ -8,7 +8,6 @@ import { useEffect } from 'react';
 import {
   setAutoPresets,
   setCullDials,
-  setDevelopPinned,
   setEditGroupOpen,
   setExportDir,
   setExportOptions,
@@ -73,11 +72,6 @@ export function updateExportDir(client: ApiClient, dir: string) {
 export function updateExportOptions(client: ApiClient, opts: ExportOptions) {
   useUIStore.setState({ exportOptions: opts });
   setExportOptions(client, opts).catch(swallow);
-}
-
-export function updateDevelopPinned(client: ApiClient, pinned: boolean) {
-  useUIStore.setState({ developPinned: pinned });
-  setDevelopPinned(client, pinned).catch(swallow);
 }
 
 export function updatePrerenderFullres(client: ApiClient, enabled: boolean) {

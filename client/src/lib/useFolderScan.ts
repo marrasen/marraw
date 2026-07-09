@@ -16,8 +16,8 @@ export function useFolderScan(folderPath: string | null): ScanProgress | null {
   if (!folderPath) return null;
   const t = tasks.find((t) => {
     if (t.status !== 'running' && t.status !== 'created') return false;
-    const meta = t.meta as { kind?: string; folder?: string } | undefined;
-    return meta?.kind === 'scan' && meta.folder != null && samePath(meta.folder, folderPath);
+    const meta = t.meta as { kind?: string; folderPath?: string } | undefined;
+    return meta?.kind === 'scan' && meta.folderPath != null && samePath(meta.folderPath, folderPath);
   });
   return t ? { current: t.current ?? 0, total: t.total ?? 0 } : null;
 }
