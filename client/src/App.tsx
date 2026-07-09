@@ -77,6 +77,18 @@ export default function App() {
   useEffect(() => {
     window.win?.onFullScreenChange((fs) => useUIStore.setState({ fullscreen: fs }));
   }, []);
+  // Trackpad pinch arrives as ctrl+wheel. The loupe consumes it for image zoom;
+  // everywhere else it must NOT trigger Chromium's page/visual-viewport zoom.
+  // React registers wheel listeners as passive, so preventDefault only bites from
+  // a native non-passive listener.
+  useEffect(() => {
+    const block = (e: WheelEvent) => {
+      if (e.ctrlKey) e.preventDefault();
+    };
+    window.addEventListener('wheel', block, { passive: false, capture: true });
+    return () =>
+      window.removeEventListener('wheel', block, { capture: true } as EventListenerOptions);
+  }, []);
   const folderId = useUIStore((s) => s.folderId);
   const mode = useUIStore((s) => s.mode);
   const view = useUIStore((s) => s.view);

@@ -576,7 +576,7 @@ export function CinemaImage({
   wheelZoomRef.current = scale;
   const onWheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey) return;
-    const next = Math.min(4, Math.max(0.05, wheelZoomRef.current * Math.exp(-e.deltaY * 0.0015)));
+    const next = Math.min(4, Math.max(0.05, wheelZoomRef.current * Math.exp(-e.deltaY * 0.003)));
     wheelZoomRef.current = next;
     const el = containerRef.current;
     if (el && haveDims) {

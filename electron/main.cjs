@@ -35,9 +35,14 @@ if (UITEST) {
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 }
 // Trackpad pinch: let Chromium deliver pinch as synthetic ctrl+wheel events for
-// the loupe's onWheel zoom to consume, and disable the native compositor pinch-zoom
-// (visual viewport) that otherwise inverts and springs back on release.
-app.commandLine.appendSwitch('disable-pinch');
+// the loupe's onWheel zoom to consume. On macOS the compositor visual-viewport
+// pinch inverts and springs back on release, so disable it there — ctrl+wheel
+// still flows. On Windows this same switch swallows the precision-touchpad pinch
+// BEFORE Chromium turns it into ctrl+wheel, killing loupe zoom, so it must NOT be
+// set; the default page/viewport zoom is suppressed in JS instead (App.tsx guard).
+if (process.platform === 'darwin') {
+  app.commandLine.appendSwitch('disable-pinch');
+}
 let child = null;
 let quitting = false;
 
