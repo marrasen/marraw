@@ -23,7 +23,15 @@ const PRESETS: { min: number; hint?: string }[] = [
  * The group-by-gap threshold control (Cull HUD / contact sheet): presets
  * mapped to how photographers shoot, a custom minute value, or Off.
  */
-export function GapControl({ glass }: { glass?: boolean }) {
+export function GapControl({
+  glass,
+  labelClassName,
+}: {
+  glass?: boolean;
+  /** Extra classes for the "Group by gap" label — lets the filter bar hide it
+      on a narrow toolbar via a container-query variant. */
+  labelClassName?: string;
+}) {
   const client = useApiClient();
   const gapMinutes = useUIStore((s) => s.gapMinutes);
   const setGapMinutes = (min: number | null) =>
@@ -39,7 +47,7 @@ export function GapControl({ glass }: { glass?: boolean }) {
           glass ? 'glass' : 'border border-border bg-secondary dark:bg-white/5',
         )}
       >
-        <span className="whitespace-nowrap text-muted-foreground">Group by gap</span>
+        <span className={cn('whitespace-nowrap text-muted-foreground', labelClassName)}>Group by gap</span>
         <span className="flex items-center gap-1.5 rounded-[5px] bg-primary/20 px-2 py-0.5 font-mono whitespace-nowrap text-accent-text">
           {gapMinutes == null ? 'Off' : `${gapMinutes} min`}
           <span className="opacity-60">▾</span>

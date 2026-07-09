@@ -198,6 +198,7 @@ function Workspace({ folderId }: { folderId: number }) {
   const view = useUIStore((s) => s.view);
   const mode = useUIStore((s) => s.mode);
   const folderPath = useUIStore((s) => s.folderPath);
+  const showEditPanel = useUIStore((s) => s.showEditPanel);
   const { all, visible } = usePhotos(folderId);
   const picked = all.filter((p) => p.flag === 'pick').length;
   const scan = useFolderScan(folderPath);
@@ -221,7 +222,7 @@ function Workspace({ folderId }: { folderId: number }) {
           <CullView photos={visible} />
         ) : structured ? (
           <>
-            <FilterBar shownCount={visible.length} totalCount={all.length} scan={scan} />
+            <FilterBar />
             <GridView photos={visible} folderId={folderId} />
             <StatusBar shown={visible.length} total={all.length} picked={picked} scan={scan} />
           </>
@@ -229,7 +230,7 @@ function Workspace({ folderId }: { folderId: number }) {
           <DevelopView photos={visible} all={all} />
         )}
       </main>
-      {structured && (
+      {structured && showEditPanel && (
         <aside className="w-[300px] shrink-0 border-l">
           <EditPanel photos={all} />
         </aside>

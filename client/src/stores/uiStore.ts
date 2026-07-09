@@ -73,6 +73,8 @@ interface UIState {
   fullscreen: boolean;
   // Cull: the contact sheet (G). Per-window, not persisted.
   contactSheet: boolean;
+  // Library: show/hide the 300px develop aside. Per-window, not persisted.
+  showEditPanel: boolean;
 
   // ---- Server-persisted settings (settings table, one `uiSettings`
   // subscription). This store is a read mirror: <UISettingsSync/> pushes
@@ -153,6 +155,8 @@ interface UIState {
   setPaletteOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setContactSheet: (open: boolean) => void;
+  setShowEditPanel: (open: boolean) => void;
+  toggleEditPanel: () => void;
   setDevelopTab: (t: DevelopTab) => void;
   applyUISettings: (s: UISettings) => void;
   setFolder: (id: number, path: string) => void;
@@ -186,6 +190,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   shortcutsOpen: false,
   fullscreen: false,
   contactSheet: false,
+  showEditPanel: true,
   gapMinutes: 6,
   cullDials: [],
   quickDials: [],
@@ -228,6 +233,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setContactSheet: (open) => set({ contactSheet: open }),
+  setShowEditPanel: (open) => set({ showEditPanel: open }),
+  toggleEditPanel: () => set((s) => ({ showEditPanel: !s.showEditPanel })),
   setDevelopTab: (t) => set({ developTab: t }),
   // Server snapshot in (wire shapes sanitized to the client types).
   applyUISettings: (s) =>

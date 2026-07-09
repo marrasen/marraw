@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutGrid, Star, Trash2 } from 'lucide-react';
+import { LayoutGrid, PanelRight, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePhotos } from '@/api/library';
 import { resetEdits } from '@/api/edits';
@@ -7,6 +7,11 @@ import { useApiClient } from '@/api/client';
 import { GapControl } from '@/components/cinema/GapControl';
 import { Segmented } from '@/components/ui/segmented';
 import { Slider } from '@/components/ui/slider';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -28,31 +33,28 @@ const FLAG_ITEMS: { value: FlagFilter; label: string }[] = [
   { value: 'exclude', label: 'Excluded' },
 ];
 
-export function FilterBar({
-  shownCount,
-  totalCount,
-  scan,
-}: {
-  shownCount: number;
-  totalCount: number;
-  /** A running header-indexing scan flips the count to "N ready / M". */
-  scan?: { current: number; total: number } | null;
-}) {
+export function FilterBar() {
   const minRating = useUIStore((s) => s.minRating);
   const flagFilter = useUIStore((s) => s.flagFilter);
   const setFilters = useUIStore((s) => s.setFilters);
   const view = useUIStore((s) => s.view);
   const cellSize = useUIStore((s) => s.cellSize);
   const setCellSize = useUIStore((s) => s.setCellSize);
+  const showEditPanel = useUIStore((s) => s.showEditPanel);
+  const toggleEditPanel = useUIStore((s) => s.toggleEditPanel);
   const multiSelect = useUIStore((s) => s.selection.size > 1);
 
   // A multi-photo selection takes over the filter row (handoff "BATCH").
   if (multiSelect) return <SelectionBar />;
 
   return (
-    <div className="flex h-[47px] shrink-0 items-center gap-4 border-b px-[18px]">
+    // @container so the controls can collapse against the toolbar's own width
+    // (rail is user-resizable, so a viewport breakpoint would misjudge space).
+    // overflow-hidden is a hard backstop against any control spilling into the
+    // develop panel. The live shown/total count lives in the StatusBar below.
+    <div className="@container flex h-[47px] shrink-0 items-center gap-4 overflow-hidden border-b px-[18px] @max-[700px]:gap-2">
       <div className="flex items-center gap-2" role="group" aria-label="Minimum rating filter">
-        <span className="text-[11.5px] text-muted-foreground">Rating</span>
+        <span className="text-[11.5px] text-muted-foreground @max-[960px]:hidden">Rating</span>
         <div className="flex gap-px">
           {[1, 2, 3, 4, 5].map((n) => (
             <button
@@ -72,7 +74,7 @@ export function FilterBar({
             </button>
           ))}
         </div>
-        <span className="text-[11px] text-muted-foreground">&amp; up</span>
+        <span className="text-[11px] text-muted-foreground @max-[960px]:hidden">&amp; up</span>
       </div>
 
       <div className="h-5 w-px bg-border" />
@@ -90,42 +92,86 @@ export function FilterBar({
 
       {view === 'grid' && (
         <>
-          <GapControl />
-          <div className="h-5 w-px bg-border" />
-          <div className="flex items-center gap-2" title="Thumbnail size">
-            <LayoutGrid className="size-[13px] shrink-0 text-muted-foreground" strokeWidth={1.5} />
-            {/* Fixed-width wrapper, not className on the root: the root's own
-                data-horizontal:w-full outranks a width utility passed in and
-                collapses the track to its intrinsic (thumb-only) width. */}
-            <div className="w-[104px]">
-              <Slider
-                value={cellSize}
-                min={120}
-                max={400}
-                step={20}
-                onValueChange={(v) => setCellSize(v as number)}
-                aria-label="Thumbnail size"
-              />
-            </div>
-            <span className="w-[42px] font-mono text-[11px] text-muted-foreground tabular-nums">
-              {cellSize}px
-            </span>
+          {/* Group-by-gap — a secondary control; drops out first when tight so
+              the flag filter and panel toggle keep their room. */}
+          <div className="flex items-center gap-4 @max-[700px]:gap-2 @max-[720px]:hidden">
+            <GapControl labelClassName="@max-[880px]:hidden" />
+            <div className="h-5 w-px bg-border" />
           </div>
-          <div className="h-5 w-px bg-border" />
+
+          {/* Thumbnail size: inline slider on a roomy bar, folded behind the
+              grid icon as it tightens, then gone entirely on the narrowest. */}
+          <div className="flex items-center gap-4 @max-[700px]:gap-2 @max-[640px]:hidden">
+            <div className="flex items-center gap-2 @max-[780px]:hidden" title="Thumbnail size">
+              <LayoutGrid
+                className="size-[13px] shrink-0 text-muted-foreground"
+                strokeWidth={1.5}
+              />
+              {/* Fixed-width wrapper, not className on the root: the root's own
+                  data-horizontal:w-full outranks a width utility passed in and
+                  collapses the track to its intrinsic (thumb-only) width. */}
+              <div className="w-[104px]">
+                <Slider
+                  value={cellSize}
+                  min={120}
+                  max={400}
+                  step={20}
+                  onValueChange={(v) => setCellSize(v as number)}
+                  aria-label="Thumbnail size"
+                />
+              </div>
+              <span className="w-[42px] font-mono text-[11px] text-muted-foreground tabular-nums">
+                {cellSize}px
+              </span>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground @max-[780px]:flex"
+                title="Thumbnail size"
+                aria-label="Thumbnail size"
+              >
+                <LayoutGrid className="size-[15px]" strokeWidth={1.5} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[188px] p-3">
+                <div className="flex items-center gap-2" onKeyDown={(e) => e.stopPropagation()}>
+                  <LayoutGrid
+                    className="size-[13px] shrink-0 text-muted-foreground"
+                    strokeWidth={1.5}
+                  />
+                  <div className="flex-1">
+                    <Slider
+                      value={cellSize}
+                      min={120}
+                      max={400}
+                      step={20}
+                      onValueChange={(v) => setCellSize(v as number)}
+                      aria-label="Thumbnail size"
+                    />
+                  </div>
+                  <span className="w-[42px] font-mono text-[11px] text-muted-foreground tabular-nums">
+                    {cellSize}px
+                  </span>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <div className="h-5 w-px bg-border" />
+          </div>
         </>
       )}
 
-      {scan ? (
-        <span className="font-mono text-xs text-secondary-foreground">
-          <span className="text-foreground">{scan.current.toLocaleString()}</span> ready{' '}
-          <span className="text-faint">/ {Math.max(scan.total, totalCount).toLocaleString()}</span>
-        </span>
-      ) : (
-        <span className="font-mono text-xs text-secondary-foreground">
-          <span className="text-foreground">{shownCount.toLocaleString()}</span> shown{' '}
-          <span className="text-faint">/ {totalCount.toLocaleString()}</span>
-        </span>
-      )}
+      <button
+        onClick={toggleEditPanel}
+        className={cn(
+          'flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-secondary hover:text-foreground',
+          showEditPanel ? 'text-foreground' : 'text-muted-foreground',
+        )}
+        title={showEditPanel ? 'Hide develop panel' : 'Show develop panel'}
+        aria-label={showEditPanel ? 'Hide develop panel' : 'Show develop panel'}
+        aria-pressed={showEditPanel}
+      >
+        <PanelRight className="size-[15px]" strokeWidth={1.5} />
+      </button>
     </div>
   );
 }
