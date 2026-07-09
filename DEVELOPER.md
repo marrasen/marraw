@@ -41,8 +41,7 @@ LibRaw output is flat next to camera JPEGs — manufacturer tone curves are
 proprietary and adaptive (e.g. Sony DRO). On the first RAW render of each
 photo, marraw calibrates a per-photo tone lift by matching mean luminance
 against the camera's own embedded JPEG, stores it (`photos.look_gamma`), and
-applies it consistently to previews, edit renders, and JPEG exports. TIFF16
-stays neutral as a flat master.
+applies it consistently to previews, edit renders, and exports.
 
 > **Bump `renderVersion` (Go) and `RENDER_VERSION` (TS) together whenever the
 > render pipeline changes.** Image URLs are served as immutable and will

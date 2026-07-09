@@ -5,7 +5,6 @@ package export
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -15,7 +14,6 @@ import (
 	"strings"
 
 	xdraw "golang.org/x/image/draw"
-	"golang.org/x/image/tiff"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/marrasen/marraw/internal/edit"
@@ -27,15 +25,15 @@ import (
 type Request struct {
 	PhotoIDs    []int64
 	DestDir     string
-	Format      string // "jpeg" or "tiff16"
-	JpegQuality int    // 0 = 90
+	Format      string // "jpeg" or "tiff8"
+	JpegQuality int    // 0 = 90; ignored by tiff8
 	LongEdge    int    // 0 = full resolution
 	// ColorSpace selects the output primaries: "srgb" (default),
-	// "adobergb", or "prophoto". LibRaw converts during decode; JPEGs get a
-	// matching ICC profile embedded (sRGB stays untagged).
+	// "adobergb", or "prophoto". LibRaw converts during decode; both encoders
+	// embed a matching ICC profile (sRGB stays untagged).
 	ColorSpace string
-	// SharpenTarget/SharpenAmount select output sharpening for JPEGs, applied
-	// after the final resize: "off"/"screen"/"matte"/"glossy" and
+	// SharpenTarget/SharpenAmount select output sharpening, applied after the
+	// final resize: "off"/"screen"/"matte"/"glossy" and
 	// "low"/"standard"/"high" ("" = off / standard).
 	SharpenTarget string
 	SharpenAmount string
@@ -107,9 +105,6 @@ func exportOne(photo store.Photo, outPath string, req Request) error {
 		lp.UserQual = libraw.DemosaicAHD
 	}
 	lp.OutputColor = ColorSpaceOutput(req.ColorSpace)
-	if req.Format == "tiff16" {
-		lp.OutputBPS = 16
-	}
 
 	img, err := proc.Process(lp)
 	if err != nil {
@@ -121,16 +116,22 @@ func exportOne(photo store.Photo, outPath string, req Request) error {
 		gamma = pyramid.FallbackLookGamma
 	}
 
+	rendered, err := renderFinal(img, gamma, params, req)
+	if err != nil {
+		return err
+	}
+
 	tmp := outPath + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
+	icc := ICCFor(req.ColorSpace)
 	switch req.Format {
-	case "tiff16":
-		err = encodeTIFF16(f, img, req.LongEdge)
+	case "tiff8":
+		err = encodeTIFF8(f, rendered, icc)
 	default:
-		err = encodeJPEG(f, img, req, gamma, params, ICCFor(req.ColorSpace))
+		err = encodeJPEG(f, rendered, req.JpegQuality, icc)
 	}
 	if err != nil {
 		f.Close()
@@ -144,61 +145,40 @@ func exportOne(photo store.Photo, outPath string, req Request) error {
 	return os.Rename(tmp, outPath)
 }
 
-func encodeJPEG(f *os.File, img *libraw.Image, req Request, lookGamma float64, params *edit.Params, icc []byte) error {
+// renderFinal turns the freshly decoded RAW into exactly the pixels the user
+// saw in the loupe: crop and straighten, the look, detail, then the output
+// resize and sharpening. Both encoders share it — a JPEG and a TIFF of the
+// same photo differ only in how the pixels are written down.
+func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, req Request) (*image.RGBA, error) {
 	if img.Bits != 8 {
-		return fmt.Errorf("export: jpeg needs 8-bit output, got %d", img.Bits)
+		return nil, fmt.Errorf("export: needs 8-bit output, got %d", img.Bits)
 	}
 	rgba := image.NewRGBA(image.Rect(0, 0, img.Width, img.Height))
-	for i, j := 0, 0; i < len(img.Data); i, j = i+3, j+4 {
+	for i, j := 0, 0; i+2 < len(img.Data); i, j = i+3, j+4 {
 		rgba.Pix[j+0] = img.Data[i+0]
 		rgba.Pix[j+1] = img.Data[i+1]
 		rgba.Pix[j+2] = img.Data[i+2]
 		rgba.Pix[j+3] = 0xff
 	}
-	// Match what the user saw in the preview: crop/straighten, then the look.
-	// TIFF16 stays neutral AND full-frame — the flat, uncropped master for
-	// external editing.
 	rgba = pyramid.ApplyGeometry(rgba, params)
 	pyramid.ApplyLook(rgba, lookGamma, params)
 	pyramid.ApplyDetail(rgba, params)
 	out := resizeRGBA(rgba, req.LongEdge)
 	pyramid.ApplyOutputSharpen(out, req.SharpenTarget, req.SharpenAmount)
+	return out, nil
+}
+
+func encodeJPEG(f *os.File, img *image.RGBA, quality int, icc []byte) error {
 	if icc == nil {
-		return jpeg.Encode(f, out, &jpeg.Options{Quality: req.JpegQuality})
+		return jpeg.Encode(f, img, &jpeg.Options{Quality: quality})
 	}
 	// Wide gamut: encode to memory, then splice the ICC profile in.
 	buf := &bytes.Buffer{}
-	if err := jpeg.Encode(buf, out, &jpeg.Options{Quality: req.JpegQuality}); err != nil {
+	if err := jpeg.Encode(buf, img, &jpeg.Options{Quality: quality}); err != nil {
 		return err
 	}
 	_, err := f.Write(embedICCJPEG(buf.Bytes(), icc))
 	return err
-}
-
-func encodeTIFF16(f *os.File, img *libraw.Image, longEdge int) error {
-	if img.Bits != 16 {
-		return fmt.Errorf("export: tiff16 needs 16-bit output, got %d", img.Bits)
-	}
-	rgba := image.NewRGBA64(image.Rect(0, 0, img.Width, img.Height))
-	// LibRaw 16-bit output is host-endian (little on Windows); RGBA64 wants
-	// big-endian pixel bytes.
-	for i, j := 0, 0; i+5 < len(img.Data); i, j = i+6, j+8 {
-		r := binary.LittleEndian.Uint16(img.Data[i:])
-		g := binary.LittleEndian.Uint16(img.Data[i+2:])
-		b := binary.LittleEndian.Uint16(img.Data[i+4:])
-		binary.BigEndian.PutUint16(rgba.Pix[j:], r)
-		binary.BigEndian.PutUint16(rgba.Pix[j+2:], g)
-		binary.BigEndian.PutUint16(rgba.Pix[j+4:], b)
-		binary.BigEndian.PutUint16(rgba.Pix[j+6:], 0xffff)
-	}
-	var out image.Image = rgba
-	if longEdge > 0 && max(img.Width, img.Height) > longEdge {
-		w, h := fitLongEdge(img.Width, img.Height, longEdge)
-		dst := image.NewRGBA64(image.Rect(0, 0, w, h))
-		xdraw.CatmullRom.Scale(dst, dst.Bounds(), rgba, rgba.Bounds(), xdraw.Src, nil)
-		out = dst
-	}
-	return tiff.Encode(f, out, &tiff.Options{Compression: tiff.Deflate, Predictor: true})
 }
 
 func resizeRGBA(src *image.RGBA, longEdge int) *image.RGBA {
@@ -231,7 +211,7 @@ func newNamer(destDir string) *namer {
 
 func (n *namer) claim(srcName, format string) string {
 	ext := ".jpg"
-	if format == "tiff16" {
+	if format == "tiff8" {
 		ext = ".tif"
 	}
 	base := strings.TrimSuffix(srcName, filepath.Ext(srcName))

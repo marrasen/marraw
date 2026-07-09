@@ -10,7 +10,7 @@ export type ColorSpaceType = typeof ColorSpace[keyof typeof ColorSpace];
 
 export const ExportFormat = {
     Jpeg: "jpeg",
-    Tiff16: "tiff16",
+    Tiff8: "tiff8",
 } as const;
 export type ExportFormatType = typeof ExportFormat[keyof typeof ExportFormat];
 

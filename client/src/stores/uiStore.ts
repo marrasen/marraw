@@ -40,7 +40,9 @@ export function clampRailWidth(px: number): number {
 // from older blobs fall back to the dialog defaults.
 function sanitizeExportOptions(o: Partial<ExportOptions> | undefined): ExportOptions {
   return {
-    format: o?.format === 'tiff16' ? 'tiff16' : 'jpeg',
+    // An older blob may still say 'tiff16'; that format is gone, so it falls
+    // back to the jpeg default like any other unknown value.
+    format: o?.format === 'tiff8' ? 'tiff8' : 'jpeg',
     jpegQuality:
       typeof o?.jpegQuality === 'number' && o.jpegQuality >= 1 && o.jpegQuality <= 100
         ? Math.round(o.jpegQuality)

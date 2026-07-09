@@ -92,7 +92,7 @@ control, any preset.
 | **Library** | Virtualized grid, adjustable thumbnail size, time-gap grouping, multi-select, rating/flag badges. |
 | **Cull** | Full-bleed cinema loupe, scrubber deck, pick/reject bar, contact sheet (`G`). |
 | **Develop** | Darkroom canvas, pinnable panel, floating quick-dials you choose, crop and white-balance overlays. |
-| **Export** | JPEG or 16-bit TIFF, batched across every core. |
+| **Export** | JPEG or lossless TIFF, batched across every core. |
 
 ### Editing tools
 
@@ -113,10 +113,16 @@ Every slider has a letter shortcut: press it, then `+`/`-` to adjust
 
 ### Export
 
-JPEG (quality 1–100) or 16-bit TIFF. Optional long-edge resize, sRGB /
-Adobe RGB / ProPhoto with an embedded ICC profile, and output sharpening tuned
-for screen, matte or glossy paper. Runs in the background across all cores at
-full AHD demosaic quality.
+JPEG (quality 1–100) or lossless 8-bit RGB TIFF, for when you want no
+compression artifacts at all. Both render exactly what the loupe showed you —
+crop, look, detail — with optional long-edge resize, sRGB / Adobe RGB /
+ProPhoto with an embedded ICC profile, and output sharpening tuned for screen,
+matte or glossy paper. Runs in the background across all cores at full AHD
+demosaic quality.
+
+If you want to finish a photo in another editor, open the RAW there rather than
+exporting an intermediate — nothing marraw can write carries more information
+than the file your camera already made.
 
 ### Supported files
 
@@ -158,15 +164,15 @@ them is load-bearing for your work, marraw is not ready for you yet.
   **not** round-trip with Lightroom, darktable or Capture One.
 - ❌ **No photo search, keywords, or collections.** You filter by rating and
   flag within a folder. That's it.
-- ❌ **No sort control.** Photos are always ordered by filename.
+- ❌ **No sort control.** Photos are always ordered by capture time, falling
+  back to filename for frames whose EXIF carries no date.
 - ❌ **No presets library** beyond auto-presets, and no DCP camera profiles.
 
 **Export & output**
 
-- ⚠️ **16-bit TIFF export is a flat, uncropped master.** It deliberately
-  ignores your look adjustments *and your crop* — it is a neutral hand-off to
-  another editor, not a rendering of what you see on screen. If you want your
-  edit, export JPEG.
+- ❌ **No 16-bit output.** TIFF export is 8-bit. If you intend to push tones
+  hard in another editor, edit its RAW there instead of round-tripping a
+  render through marraw.
 - ❌ **No custom filename templates**, sequence numbering or metadata writing.
 - ❌ **No PNG, WebP or DNG output**, no watermarking.
 

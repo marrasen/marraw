@@ -24,11 +24,11 @@ type ExportRequest struct {
 	Format      ExportFormat `json:"format"`
 	JpegQuality int          `json:"jpegQuality" validate:"gte=0,lte=100"`
 	LongEdge    int          `json:"longEdge" validate:"gte=0,lte=65536"`
-	// ColorSpace picks the output primaries; empty = sRGB. JPEGs in wide
-	// spaces get a matching ICC profile embedded.
+	// ColorSpace picks the output primaries; empty = sRGB. Wide-space exports
+	// get a matching ICC profile embedded, in both formats.
 	ColorSpace ColorSpace `json:"colorSpace" validate:"omitempty,oneof=srgb adobergb prophoto"`
 	// SharpenTarget applies output sharpening after the final resize; empty =
-	// off. JPEG only — TIFF16 stays a neutral flat master.
+	// off.
 	SharpenTarget SharpenTarget `json:"sharpenTarget" validate:"omitempty,oneof=off screen matte glossy"`
 	// SharpenAmount scales the sharpening; empty = standard.
 	SharpenAmount SharpenAmount `json:"sharpenAmount" validate:"omitempty,oneof=low standard high"`

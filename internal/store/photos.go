@@ -222,10 +222,23 @@ func (db *DB) SetBaseExpEV(ctx context.Context, id int64, ev float64) error {
 	return err
 }
 
+// ListPhotos returns a folder's photos in capture order.
+//
+// Ordering by taken_at rather than file_name is what makes time-gap grouping
+// trustworthy: two bodies shooting the same event, or a counter rolling over
+// from DSC09999 to DSC00001, put file_name order badly out of step with
+// capture order, and a gap group computed from a mis-ordered list is nonsense.
+//
+// taken_at is 0 until the background metadata pass reaches a photo, so a
+// freshly scanned folder sorts by file_name exactly as before, then settles
+// into capture order as the backfill lands. Untimed photos (no EXIF date) sort
+// last, among themselves by name; file_name breaks ties so the order is total
+// and stable across queries.
 func (db *DB) ListPhotos(ctx context.Context, folderID int64) ([]Photo, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT `+photoCols+` FROM photos p JOIN folders f ON f.id = p.folder_id
-		WHERE p.folder_id = ? ORDER BY p.file_name`, folderID)
+		WHERE p.folder_id = ?
+		ORDER BY (p.taken_at = 0), p.taken_at, p.file_name`, folderID)
 	if err != nil {
 		return nil, err
 	}

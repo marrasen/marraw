@@ -4,7 +4,7 @@ import { z } from 'zod';
 export const ExportRequestSchema = z.object({
     photoIds: z.array(z.number().int()).min(1),
     destDir: z.string().min(1),
-    format: z.enum(["jpeg", "tiff16"]),
+    format: z.enum(["jpeg", "tiff8"]),
     jpegQuality: z.number().int().min(0).max(100),
     longEdge: z.number().int().min(0).max(65536),
     colorSpace: z.union([z.literal(""), z.enum(["srgb", "adobergb", "prophoto"])]),

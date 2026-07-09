@@ -21,7 +21,7 @@ import '@/lib/electron';
 
 const FORMAT_ITEMS: { value: ExportFormatType; label: string }[] = [
   { value: 'jpeg', label: 'JPEG' },
-  { value: 'tiff16', label: '16-bit TIFF' },
+  { value: 'tiff8', label: 'TIFF' },
 ];
 const COLOR_ITEMS: { value: ColorSpaceType; label: string }[] = [
   { value: 'srgb', label: 'sRGB' },
@@ -133,10 +133,10 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
 
   const summary = [
     `${ids.length} file${ids.length === 1 ? '' : 's'}`,
-    format === 'jpeg' ? `JPEG q${quality}` : '16-bit TIFF',
+    format === 'jpeg' ? `JPEG q${quality}` : 'TIFF lossless',
     resize === 'edge' ? `${edgePx}px` : 'full res',
     ...(colorSpace !== 'srgb' ? [COLOR_ITEMS.find((c) => c.value === colorSpace)!.label] : []),
-    ...(format === 'jpeg' && sharpenTarget !== 'off' ? [`sharpen ${sharpenTarget}`] : []),
+    ...(sharpenTarget !== 'off' ? [`sharpen ${sharpenTarget}`] : []),
     'runs in the background',
   ].join(' · ');
 
@@ -268,20 +268,20 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
               className="border-0 bg-secondary dark:bg-white/5"
             />,
           )}
-          {format === 'jpeg' &&
-            row(
-              'Sharpen for',
-              <Segmented
-                aria-label="Sharpen for"
-                size="sm"
-                items={SHARPEN_TARGET_ITEMS}
-                value={sharpenTarget}
-                onValueChange={setSharpenTarget}
-                className="border-0 bg-secondary dark:bg-white/5"
-              />,
-            )}
-          {format === 'jpeg' &&
-            sharpenTarget !== 'off' &&
+          {/* Output sharpening is a property of the final render, not of the
+              container, so it applies to TIFF too. */}
+          {row(
+            'Sharpen for',
+            <Segmented
+              aria-label="Sharpen for"
+              size="sm"
+              items={SHARPEN_TARGET_ITEMS}
+              value={sharpenTarget}
+              onValueChange={setSharpenTarget}
+              className="border-0 bg-secondary dark:bg-white/5"
+            />,
+          )}
+          {sharpenTarget !== 'off' &&
             row(
               'Amount',
               <Segmented
