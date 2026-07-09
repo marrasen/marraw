@@ -46,10 +46,36 @@ if (process.platform === 'darwin') {
 let child = null;
 let quitting = false;
 
+// Shell preferences, kept out of the daemon's uiSettings on purpose: the
+// updater has to make a decision at launch, before (and even if) marrawd ever
+// comes up. userData survives reinstalls, which is what an update opt-out
+// wants.
+function prefsPath() {
+  return path.join(app.getPath('userData'), 'preferences.json');
+}
+function readPrefs() {
+  try {
+    return JSON.parse(fs.readFileSync(prefsPath(), 'utf8'));
+  } catch {
+    return {}; // absent or corrupt: fall back to defaults
+  }
+}
+function writePrefs(prefs) {
+  try {
+    fs.writeFileSync(prefsPath(), JSON.stringify(prefs, null, 2));
+  } catch (err) {
+    console.error(`[prefs] write failed: ${err.message}`);
+  }
+}
+// Opt-out, not opt-in: an unsigned app that silently goes stale is worse than
+// one that updates itself.
+const autoUpdateEnabled = () => readPrefs().autoUpdate !== false;
+
 // Check GitHub Releases on launch, download a newer version in the background,
 // swap it in on quit. Draft releases are invisible here, so an unpublished
 // draft never reaches anyone. Never fatal: an unreachable update server must
 // not stop the app from starting.
+let autoUpdater = null;
 function initAutoUpdater() {
   // Dev/preview run from the repo with no update metadata; UITEST owns its
   // process and must not race a background download.
@@ -57,8 +83,16 @@ function initAutoUpdater() {
   // Squirrel.Mac refuses to update a bundle without a valid signature, so
   // there is nothing to start until marraw has an Apple Developer ID.
   if (process.platform === 'darwin') return;
-
-  let autoUpdater;
+  if (!autoUpdateEnabled()) {
+    console.log('[updater] disabled in settings');
+    return;
+  }
+  if (autoUpdater) {
+    // Re-enabled mid-session: the listeners are already attached, just look.
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+    return;
+  }
   try {
     ({ autoUpdater } = require('electron-updater'));
   } catch (err) {
@@ -73,6 +107,21 @@ function initAutoUpdater() {
     console.error(`[updater] check failed: ${err?.message ?? err}`);
   });
 }
+
+ipcMain.handle('marraw:get-auto-update', () => autoUpdateEnabled());
+ipcMain.handle('marraw:set-auto-update', (_ev, on) => {
+  const prefs = readPrefs();
+  prefs.autoUpdate = !!on;
+  writePrefs(prefs);
+  if (prefs.autoUpdate) {
+    initAutoUpdater();
+  } else if (autoUpdater) {
+    // Stop a staged update from being applied on quit. A download already in
+    // flight finishes; it just never gets installed.
+    autoUpdater.autoInstallOnAppQuit = false;
+  }
+  return prefs.autoUpdate;
+});
 
 async function startDaemon() {
   // Dev convenience: attach to an already-running `marrawd --dev`.

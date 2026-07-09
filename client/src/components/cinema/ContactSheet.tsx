@@ -72,6 +72,8 @@ export function ContactSheet({ photos, groups }: { photos: Photo[]; groups: Time
                 </span>
               )}
             </div>
+            {/* 8 columns: keep CONTACT_SHEET_COLS (lib/gridNav) in step, or
+                ↑/↓ will not land where the frames are drawn. */}
             <div className="grid grid-cols-8 gap-2">
               {g.photos.map((p) => (
                 <SheetCell

@@ -65,7 +65,10 @@ export function usePhotos(folderId: number): PhotoLists {
 
   // Keep keyboard navigation in sync with what is on screen.
   useEffect(() => {
-    useUIStore.getState().setVisibleIds(visible.map((p) => p.id));
+    useUIStore.getState().setVisibleIds(
+      visible.map((p) => p.id),
+      visible.map((p) => p.takenAt),
+    );
   }, [visible]);
 
   // Flags per photo so P/X can toggle against the current state.

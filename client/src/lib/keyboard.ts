@@ -4,6 +4,8 @@ import { getEditParams } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { toast } from 'sonner';
 import { applyRating as doRating, applyFlag as doFlag } from '@/lib/actions';
+import { CONTACT_SHEET_COLS, rowNeighbor } from '@/lib/gridNav';
+import { gapGroupStarts } from '@/lib/timeGaps';
 import { useUIStore, selectionOrFocus, type DevelopTab } from '@/stores/uiStore';
 import {
   esApplyAutoPreset,
@@ -80,9 +82,27 @@ export function useKeyboard() {
         s.focus(ids[next], { extend: e.shiftKey });
       };
       // Vertical arrows move by a row: the grid's live column count, the
-      // contact sheet's fixed 8, one frame in a loupe.
-      const rowStep =
-        s.mode === 'cull' && s.contactSheet ? 8 : s.mode === 'library' && s.view === 'grid' ? s.gridCols : 1;
+      // contact sheet's fixed 8, one frame in a loupe. Both grids restart
+      // their rows at each time-gap group header, so a row is not a flat
+      // ±cols step through the photo list — resolve it against the same
+      // group boundaries the headers are drawn at.
+      const rowCols =
+        s.mode === 'cull' && s.contactSheet
+          ? CONTACT_SHEET_COLS
+          : s.mode === 'library' && s.view === 'grid'
+            ? s.gridCols
+            : 1;
+      const moveRow = (dir: -1 | 1) => {
+        const ids = s.visibleIds;
+        if (ids.length === 0) return;
+        const cur = s.focusId != null ? ids.indexOf(s.focusId) : -1;
+        if (cur < 0) {
+          s.focus(ids[0], { extend: e.shiftKey });
+          return;
+        }
+        const starts = gapGroupStarts(s.visibleTakenAt, s.gapMinutes);
+        s.focus(ids[rowNeighbor(cur, ids.length, rowCols, starts, dir)], { extend: e.shiftKey });
+      };
 
       const applyRating = (n: number) => doRating(client, selectionOrFocus(), n);
       // P/X toggle: pressing the key of the flag the focused photo already
@@ -259,17 +279,18 @@ export function useKeyboard() {
           move(1);
           break;
         // In a develop loupe ↑/↓ walk the controls instead: photo-nav there is
-        // redundant with ←/→ (rowStep is 1), and the grid/contact sheet keep
-        // their row navigation. Same gate as the control-letter hotkeys.
+        // redundant with ←/→ (a loupe row is one frame), and the grid/contact
+        // sheet keep their row navigation. Same gate as the control-letter
+        // hotkeys.
         case 'ArrowUp':
           e.preventDefault();
           if (es.draft && s.mode !== 'cull' && s.view === 'loupe') esMoveActive(-1);
-          else move(-rowStep);
+          else moveRow(-1);
           break;
         case 'ArrowDown':
           e.preventDefault();
           if (es.draft && s.mode !== 'cull' && s.view === 'loupe') esMoveActive(1);
-          else move(rowStep);
+          else moveRow(1);
           break;
         case '0':
         case '1':

@@ -112,6 +112,13 @@ Backend smoke test (needs a folder of RAW files and a running dev server):
 node scripts/smoke.mjs "D:\Photos\some-shoot"
 ```
 
+Grid row navigation across time-gap groups is pure and has its own harness
+(no dev server, no RAW files):
+
+```powershell
+node scripts/gridnav-verify.mjs
+```
+
 UI verification harnesses live in `scripts/` (`ui-verify.mjs`, `shot.mjs`,
 `auto-verify.mjs`, …). Kill any user-launched Electron first — the GPU cache
 lock will stall rAF.
@@ -169,6 +176,12 @@ on any `v*` tag.
 The packaged app checks GitHub Releases on launch via `electron-updater`
 (wired up in `electron/main.cjs`), downloads a newer version in the background,
 and installs it on quit. It is disabled in dev, preview and UI-test runs.
+
+Users can turn it off in **Settings → General → Automatic updates**. That
+preference lives in `preferences.json` under `app.getPath('userData')`, *not*
+in the daemon's `uiSettings`: the updater has to decide whether to run at
+launch, before — and even if — `marrawd` ever comes up. The toggle is hidden
+on macOS, where an unsigned bundle can never self-update.
 
 Because the app is **not code-signed**:
 

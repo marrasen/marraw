@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld('marraw', {
   // Absolute path of a dragged-in File (drop a folder anywhere to add it).
   getPathForFile: (file) => webUtils.getPathForFile(file),
   isDirectory: (path) => ipcRenderer.invoke('marraw:is-directory', path),
+  // Background auto-update opt-out. Unsigned macOS builds can never update
+  // themselves, so the setting is hidden rather than shown as a dead toggle.
+  updatesSupported: process.platform !== 'darwin',
+  getAutoUpdate: () => ipcRenderer.invoke('marraw:get-auto-update'),
+  setAutoUpdate: (on) => ipcRenderer.invoke('marraw:set-auto-update', on),
 });
 
 // Frameless-window controls (diff handoff "frameless window + baked-in controls").

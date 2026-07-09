@@ -39,6 +39,16 @@ to full-resolution tiles, downloading and decoding only the crop you are
 actually looking at, over an upscaled underlay, while the *next* photo's tiles
 pre-render in the background. Comparing a burst at 100% doesn't stutter.
 
+**It knows a shoot is made of bursts, not files.**
+Point marraw at a folder and it reads the capture timestamps, then breaks the
+grid wherever you stopped shooting for longer than a threshold you pick. Each
+run of frames gets a header with its time range, its frame count, and — the
+useful part — *how long the dead time before it was*: `+42 min gap before`.
+A wedding, a match, a hike down a trail all arrive pre-segmented into the
+moments you actually shot, without stacks to expand, albums to build, or a
+single click. The Cull contact sheet (`G`) shows the same groups as sections,
+so you can see a whole day's structure at once.
+
 **Culling is keyboard-first, and the loupe remembers where you were.**
 Arrows navigate, `1`–`5` rate, `P` picks, `X` excludes, `Enter` goes deeper.
 Zoom and pan position persist across arrow navigation, so stepping through a

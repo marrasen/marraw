@@ -11,43 +11,60 @@ export interface TimeGroup {
 }
 
 /**
- * groupByGap splits photos into time-gap groups: a new group starts when the
- * gap between consecutive frames exceeds thresholdMin minutes. Photos keep
- * their list order (file-name order tracks capture order); frames without a
- * capture time never open a gap. thresholdMin null/0 = one flat group.
+ * gapGroupStarts returns the index of each group's first photo: a new group
+ * starts when the gap between consecutive frames exceeds thresholdMin minutes.
+ * Photos keep their list order (file-name order tracks capture order); frames
+ * without a capture time never open a gap. thresholdMin null/0 = one flat
+ * group, i.e. `[0]`.
+ *
+ * This is the boundary logic shared by everything that lays out groups — the
+ * grid, the contact sheet, and keyboard row navigation. They must agree on
+ * where a group begins or ↑/↓ lands on the wrong frame.
+ */
+export function gapGroupStarts(takenAt: readonly number[], thresholdMin: number | null): number[] {
+  if (takenAt.length === 0) return [];
+  if (!thresholdMin || thresholdMin <= 0) return [0];
+  const starts: number[] = [];
+  let lastTaken = 0;
+  for (let i = 0; i < takenAt.length; i++) {
+    const t = takenAt[i];
+    const gapSec = t > 0 && lastTaken > 0 ? t - lastTaken : 0;
+    if (starts.length === 0 || gapSec > thresholdMin * 60) starts.push(i);
+    if (t > 0) lastTaken = t;
+  }
+  return starts;
+}
+
+/**
+ * groupByGap splits photos into time-gap groups at the gapGroupStarts
+ * boundaries, carrying each group's time range and the dead time before it.
  */
 export function groupByGap(photos: Photo[], thresholdMin: number | null): TimeGroup[] {
-  if (photos.length === 0) return [];
-  if (!thresholdMin || thresholdMin <= 0) {
-    return [
-      {
-        photos,
-        start: photos[0]?.takenAt ?? 0,
-        end: photos[photos.length - 1]?.takenAt ?? 0,
-        gapBeforeMin: null,
-      },
-    ];
-  }
+  const starts = gapGroupStarts(
+    photos.map((p) => p.takenAt),
+    thresholdMin,
+  );
   const groups: TimeGroup[] = [];
-  let cur: TimeGroup | null = null;
   let lastTaken = 0;
-  for (const p of photos) {
-    const gapSec = p.takenAt > 0 && lastTaken > 0 ? p.takenAt - lastTaken : 0;
-    if (cur == null || gapSec > thresholdMin * 60) {
-      cur = {
-        photos: [],
-        start: p.takenAt,
-        end: p.takenAt,
-        gapBeforeMin: cur == null ? null : Math.round(gapSec / 60),
-      };
-      groups.push(cur);
+  for (let g = 0; g < starts.length; g++) {
+    const to = g + 1 < starts.length ? starts[g + 1] : photos.length;
+    const slice = photos.slice(starts[g], to);
+    const first = slice[0];
+    const gapSec = first.takenAt > 0 && lastTaken > 0 ? first.takenAt - lastTaken : 0;
+    const cur: TimeGroup = {
+      photos: slice,
+      start: first.takenAt,
+      end: first.takenAt,
+      gapBeforeMin: g === 0 ? null : Math.round(gapSec / 60),
+    };
+    for (const p of slice) {
+      if (p.takenAt > 0) {
+        cur.end = p.takenAt;
+        if (cur.start === 0) cur.start = p.takenAt;
+        lastTaken = p.takenAt;
+      }
     }
-    cur.photos.push(p);
-    if (p.takenAt > 0) {
-      cur.end = p.takenAt;
-      if (cur.start === 0) cur.start = p.takenAt;
-      lastTaken = p.takenAt;
-    }
+    groups.push(cur);
   }
   return groups;
 }

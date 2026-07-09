@@ -126,6 +126,9 @@ interface UIState {
   // Grid geometry + currently visible list, for keyboard navigation.
   gridCols: number;
   visibleIds: number[];
+  // Capture times parallel to visibleIds. Row navigation needs the same
+  // time-gap group boundaries the grid draws headers at.
+  visibleTakenAt: number[];
   // Current flag per photo (kept fresh by usePhotos) so the P/X keys can
   // toggle instead of blindly setting.
   photoFlags: Map<number, FlagType>;
@@ -168,7 +171,7 @@ interface UIState {
   applyPatches: (patches: PhotoPatch[]) => void;
   applyLocal: (ids: number[], patch: Partial<Photo>) => void;
   setGrid: (cols: number) => void;
-  setVisibleIds: (ids: number[]) => void;
+  setVisibleIds: (ids: number[], takenAt: number[]) => void;
   setPhotoFlags: (flags: Map<number, FlagType>) => void;
   setClipboard: (p: Params | null) => void;
   setExportOpen: (open: boolean) => void;
@@ -213,6 +216,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   overrides: new Map(),
   gridCols: 4,
   visibleIds: [],
+  visibleTakenAt: [],
   photoFlags: new Map<number, FlagType>(),
   clipboard: null,
   exportOpen: false,
@@ -319,7 +323,7 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   setGrid: (cols) => set({ gridCols: cols }),
 
-  setVisibleIds: (ids) =>
+  setVisibleIds: (ids, takenAt) =>
     set((s) => {
       // Keep the cursor position when the focused photo drops out of the
       // filtered list (e.g. pressing X under the "Unculled" filter): move
@@ -331,10 +335,10 @@ export const useUIStore = create<UIState>((set, get) => ({
           const nextId = ids[Math.min(prevIdx, ids.length - 1)];
           const selection = new Set([...s.selection].filter((id) => ids.includes(id)));
           if (selection.size === 0) selection.add(nextId);
-          return { visibleIds: ids, focusId: nextId, anchorId: nextId, selection };
+          return { visibleIds: ids, visibleTakenAt: takenAt, focusId: nextId, anchorId: nextId, selection };
         }
       }
-      return { visibleIds: ids };
+      return { visibleIds: ids, visibleTakenAt: takenAt };
     }),
 
   setPhotoFlags: (flags) => set({ photoFlags: flags }),

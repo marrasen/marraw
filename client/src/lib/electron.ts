@@ -7,6 +7,10 @@ declare global {
       revealInExplorer: (path: string) => void;
       getPathForFile: (file: File) => string;
       isDirectory: (path: string) => Promise<boolean>;
+      // Absent on builds predating the auto-update setting — feature-check.
+      updatesSupported?: boolean;
+      getAutoUpdate?: () => Promise<boolean>;
+      setAutoUpdate?: (on: boolean) => Promise<boolean>;
     };
     win?: {
       minimize: () => void;

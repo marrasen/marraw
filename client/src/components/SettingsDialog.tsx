@@ -10,6 +10,7 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useTheme } from '@/components/theme-provider';
+import '@/lib/electron';
 import { DIALS, type DialDef, type DialKey } from '@/lib/dials';
 import {
   newAutoPreset,
@@ -125,21 +126,65 @@ function SettingRow({
 function GeneralSection() {
   const { theme, setTheme } = useTheme();
   return (
+    <div className="flex flex-col">
+      <SettingRow
+        title="Appearance"
+        description="marraw is dark by default so photos read true; a full light theme is available."
+        control={
+          <Segmented
+            aria-label="Theme"
+            size="sm"
+            items={[
+              { value: 'dark', label: 'Dark' },
+              { value: 'light', label: 'Light' },
+              { value: 'system', label: 'System' },
+            ]}
+            value={theme}
+            onValueChange={(v) => setTheme(v)}
+          />
+        }
+      />
+      <AutoUpdateRow />
+    </div>
+  );
+}
+
+/**
+ * Auto-update lives in the Electron shell rather than the daemon's settings:
+ * the check runs at launch, before marrawd is up. Hidden in a browser tab and
+ * on macOS, where an unsigned bundle can never update itself.
+ */
+function AutoUpdateRow() {
+  const bridge = window.marraw;
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    bridge?.getAutoUpdate?.().then((v) => live && setEnabled(v), () => {});
+    return () => {
+      live = false;
+    };
+  }, [bridge]);
+
+  if (!bridge?.getAutoUpdate || !bridge.updatesSupported || enabled === null) return null;
+
+  const toggle = (on: boolean) => {
+    setEnabled(on); // optimistic: the switch must not lag the pointer
+    bridge.setAutoUpdate?.(on).then(
+      (v) => setEnabled(v),
+      (err: Error) => {
+        setEnabled(!on);
+        toast.error(err.message);
+      },
+    );
+  };
+
+  return (
     <SettingRow
-      title="Appearance"
-      description="marraw is dark by default so photos read true; a full light theme is available."
+      title="Automatic updates"
+      description="Check for a new version on launch, download it in the background, and install it when marraw quits. Turn this off to update by hand from the releases page."
       control={
-        <Segmented
-          aria-label="Theme"
-          size="sm"
-          items={[
-            { value: 'dark', label: 'Dark' },
-            { value: 'light', label: 'Light' },
-            { value: 'system', label: 'System' },
-          ]}
-          value={theme}
-          onValueChange={(v) => setTheme(v)}
-        />
+        <Switch checked={enabled} onCheckedChange={toggle} aria-label="Automatic updates" />
       }
     />
   );
