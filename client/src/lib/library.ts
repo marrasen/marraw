@@ -4,6 +4,7 @@ import {
   setLibraryRoots,
   useGetLibraryRoots,
   type LibraryRoot,
+  type Shoot,
 } from '@/api/library';
 import type { ApiClient } from '@/api/client';
 import { useUIStore } from '@/stores/uiStore';
@@ -53,6 +54,46 @@ export function groupRoots(roots: LibraryRoot[]): RootGroup[] {
   return groups;
 }
 
+/**
+ * One block in the rail: either a managed library folder (children discovered
+ * from disk) or a derived group of hand-added shoot roots that share a parent
+ * directory.
+ */
+export type RailBlock =
+  | { kind: 'parent'; root: LibraryRoot }
+  | { kind: 'group'; group: RootGroup };
+
+/**
+ * Orders the rail's blocks by each block's first appearance in the stored root
+ * order — the same rule groupRoots already uses — so reorder, Move up, and Move
+ * down keep working by rewriting that one list.
+ */
+export function railBlocks(roots: LibraryRoot[]): RailBlock[] {
+  const groups = groupRoots(roots.filter((r) => !r.isParent));
+  const groupAt = new Map<string, RootGroup>();
+  for (const g of groups) groupAt.set(g.roots[0].path.toLowerCase(), g);
+
+  const blocks: RailBlock[] = [];
+  for (const r of roots) {
+    if (r.isParent) {
+      blocks.push({ kind: 'parent', root: r });
+      continue;
+    }
+    const g = groupAt.get(r.path.toLowerCase());
+    if (g) blocks.push({ kind: 'group', group: g });
+  }
+  return blocks;
+}
+
+/**
+ * Settings key for a managed parent's collapse state and display alias.
+ *
+ * A derived group is keyed by the directory *containing* its roots, while a
+ * parent's own path is the natural key for it — for `D:\Photos` those are the
+ * same string, and the two blocks would share state. The prefix separates them.
+ */
+export const parentKey = (path: string) => `parent:${path}`;
+
 export function useLibraryRoots(): { roots: LibraryRoot[]; isLoading: boolean } {
   const { data, isLoading } = useGetLibraryRoots();
   return { roots: data ?? [], isLoading };
@@ -78,6 +119,20 @@ export async function openRoot(client: ApiClient, roots: LibraryRoot[], root: Li
       );
       void saveRoots(client, next);
     }
+  } catch (err) {
+    toast.error(`Cannot open folder: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Opens a discovered shoot. Unlike openRoot there is no photo-count write-back:
+ * a shoot has no stored record to write to, and the server re-lists the parent
+ * with the fresh count once the scan lands.
+ */
+export async function openShoot(client: ApiClient, shoot: Shoot) {
+  try {
+    const info = await openFolder(client, shoot.path);
+    useUIStore.getState().setFolder(info.folderId, shoot.path);
   } catch (err) {
     toast.error(`Cannot open folder: ${(err as Error).message}`);
   }

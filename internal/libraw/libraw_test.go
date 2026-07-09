@@ -121,3 +121,38 @@ func meanLuma(img *Image) float64 {
 	}
 	return float64(sum) / float64(len(img.Data))
 }
+
+// A pooled Processor is reused across jobs, and libraw_recycle() deliberately
+// preserves params. So a half-size decode (the calibration pass) would leave
+// half_size set, and the next job's Metadata() — which never applies params —
+// would record half the real dimensions into the catalog.
+func TestRecycleResetsParams(t *testing.T) {
+	path := sampleRAW(t)
+	p, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+
+	if err := p.Open(path); err != nil {
+		t.Fatal(err)
+	}
+	full := p.Metadata()
+
+	// Decode at half size, as pyramid.MeasureAutoBrightEV does.
+	params := DefaultParams()
+	params.HalfSize = true
+	if _, err := p.Process(params); err != nil {
+		t.Fatal(err)
+	}
+	p.Recycle()
+
+	if err := p.Open(path); err != nil {
+		t.Fatal(err)
+	}
+	got := p.Metadata()
+	if got.Width != full.Width || got.Height != full.Height {
+		t.Fatalf("after a half-size decode + Recycle, Metadata = %dx%d, want %dx%d",
+			got.Width, got.Height, full.Width, full.Height)
+	}
+}

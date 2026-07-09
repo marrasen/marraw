@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -68,6 +69,31 @@ func (db *DB) UpsertFolder(ctx context.Context, path string) (int64, error) {
 		ON CONFLICT(path) DO UPDATE SET path = excluded.path
 		RETURNING id`, path).Scan(&id)
 	return id, err
+}
+
+// FolderPhotoCount returns the catalogued photo count for a folder path, and
+// whether the folder has ever been scanned. Comparing paths case-insensitively
+// matches how the rest of the app treats Windows paths.
+func (db *DB) FolderPhotoCount(ctx context.Context, path string) (int, bool, error) {
+	path = filepath.Clean(path)
+	// The folder lookup is separate from the count: an aggregate over a
+	// non-existent folder still yields one row holding 0, which would report an
+	// unscanned folder as an empty one.
+	var id int64
+	err := db.QueryRowContext(ctx,
+		`SELECT id FROM folders WHERE path = ? COLLATE NOCASE`, path).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	var n int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM photos WHERE folder_id = ?`, id).Scan(&n); err != nil {
+		return 0, false, err
+	}
+	return n, true, nil
 }
 
 // RenameFolderPaths moves a folder row (and any rows for folders nested

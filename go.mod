@@ -3,6 +3,7 @@ module github.com/marrasen/marraw
 go 1.26
 
 require (
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/marrasen/aprot v0.47.0
 	golang.org/x/image v0.43.0
 	golang.org/x/sync v0.21.0

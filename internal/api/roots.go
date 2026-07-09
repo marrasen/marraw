@@ -19,6 +19,12 @@ const (
 	libraryRootsKey     = "libraryRoots"
 )
 
+// shootsKey is the subscription refresh key for one managed parent's child
+// list, mirroring photosKey(folderID) for a folder's photo list.
+func shootsKey(parent string) string {
+	return "shoots:" + strings.ToLower(filepath.Clean(parent))
+}
+
 // GetLibraryRoots returns the curated library: every shoot folder the user
 // added, in display order. Subscription query — SetLibraryRoots and on-disk
 // renames push updates.
@@ -47,7 +53,148 @@ func (l *Library) SetLibraryRoots(ctx context.Context, roots []LibraryRoot) erro
 		return err
 	}
 	aprot.TriggerRefresh(ctx, libraryRootsKey)
+	l.syncWatchedParents(roots)
+	for _, r := range roots {
+		if r.IsParent {
+			aprot.TriggerRefresh(ctx, shootsKey(r.Path))
+		}
+	}
 	return nil
+}
+
+// syncWatchedParents keeps the filesystem watcher's parent set in step with the
+// stored roots.
+func (l *Library) syncWatchedParents(roots []LibraryRoot) {
+	if l.deps.Watch == nil {
+		return
+	}
+	var parents []string
+	for _, r := range roots {
+		if r.IsParent {
+			parents = append(parents, r.Path)
+		}
+	}
+	l.deps.Watch.SetParents(parents)
+}
+
+// isParentRoot reports whether path is a stored managed parent.
+func (l *Library) isParentRoot(ctx context.Context, path string) bool {
+	r, ok := l.rootFor(ctx, path)
+	return ok && r.IsParent
+}
+
+// scanRecursionFor decides how deep a folder is scanned.
+//
+// An exact stored root always wins: if the user configured D:\Shoots\Wedding as
+// a shoot with include-subfolders off, that beats the fact that D:\Shoots is a
+// managed parent. Otherwise an immediate child of a parent scans recursively,
+// so a shoot's own subfolders roll into its grid rather than becoming shoots of
+// their own. Rule 2 compares against filepath.Dir, not a path prefix — a
+// grandchild is never a shoot.
+func (l *Library) scanRecursionFor(ctx context.Context, path string) bool {
+	clean := filepath.Clean(path)
+	roots := l.libraryRoots(ctx)
+	for _, r := range roots {
+		if strings.EqualFold(r.Path, clean) {
+			if r.IsParent {
+				// The parent's own row holds only the RAWs loose in it; the
+				// nested ones belong to its children.
+				return false
+			}
+			return r.IncludeSubfolders
+		}
+	}
+	parent := filepath.Dir(clean)
+	for _, r := range roots {
+		if r.IsParent && strings.EqualFold(r.Path, parent) {
+			return true
+		}
+	}
+	return false
+}
+
+// ListShoots lists the folders of a managed parent: its immediate subdirectories
+// that hold RAWs anywhere beneath them, plus the parent itself when RAWs sit
+// loose in it. Subscription query — the watcher pushes updates as folders and
+// photos appear on disk.
+func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, error) {
+	aprot.RegisterRefreshTrigger(ctx, shootsKey(parentPath))
+
+	parent := filepath.Clean(parentPath)
+	dirents, err := os.ReadDir(parent)
+	if err != nil {
+		return nil, aprot.ErrInvalidParams(fmt.Sprintf("cannot read %s: %v", parent, err))
+	}
+
+	roots := l.libraryRoots(ctx)
+	excluded := map[string]bool{}
+	for _, r := range roots {
+		if r.IsParent && strings.EqualFold(r.Path, parent) {
+			for _, e := range r.ExcludedChildren {
+				excluded[strings.ToLower(e)] = true
+			}
+		}
+	}
+	isStoredRoot := func(p string) bool {
+		for _, r := range roots {
+			if strings.EqualFold(r.Path, p) {
+				return true
+			}
+		}
+		return false
+	}
+
+	out := []Shoot{}
+	// The parent's own loose RAWs are a flat count: anything nested belongs to
+	// one of the children below.
+	if n := countDirectRaws(parent); n > 0 {
+		out = append(out, Shoot{Path: parent, Name: filepath.Base(parent), PhotoCount: n, IsSelf: true})
+	}
+
+	var children []Shoot
+	for _, de := range dirents {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !de.IsDir() || scan.SkipDirName(de.Name()) {
+			continue
+		}
+		full := filepath.Join(parent, de.Name())
+		// A child that is itself a stored root renders in its own right; listing
+		// it here too would show the same folder twice.
+		if isStoredRoot(full) || excluded[strings.ToLower(full)] {
+			continue
+		}
+		count, ok := l.shootCount(ctx, full)
+		if !ok {
+			continue
+		}
+		children = append(children, Shoot{Path: full, Name: de.Name(), PhotoCount: count})
+	}
+	sort.Slice(children, func(i, j int) bool {
+		return strings.ToLower(children[i].Name) < strings.ToLower(children[j].Name)
+	})
+	return append(out, children...), nil
+}
+
+// shootCount returns a child's photo count and whether it qualifies as a shoot.
+//
+// A scanned folder answers from the catalog, which is both authoritative and
+// free — the steady-state case, since the rail's folders are the ones being
+// opened. An unscanned folder falls back to its direct RAW count (one ReadDir,
+// exact for the usual flat folder of ARWs). Only a folder with no direct RAWs
+// pays for a walk, and HasRaw stops at the first file it finds.
+func (l *Library) shootCount(ctx context.Context, path string) (int, bool) {
+	if n, scanned, err := l.deps.DB.FolderPhotoCount(ctx, path); err == nil && scanned {
+		return n, n > 0
+	}
+	if n := countDirectRaws(path); n > 0 {
+		return n, true
+	}
+	if scan.HasRaw(ctx, path) {
+		return 0, true
+	}
+	return 0, false
 }
 
 func (l *Library) libraryRoots(ctx context.Context) []LibraryRoot {
@@ -180,6 +327,9 @@ func (l *Library) RenameFolderOnDisk(ctx context.Context, path string, newName s
 		}
 	}
 	aprot.TriggerRefresh(ctx, libraryRootsKey)
+	// The renamed folder may be a discovered child of a managed parent, or a
+	// parent itself; refresh both listings so the rail follows the rename.
+	aprot.TriggerRefresh(ctx, shootsKey(filepath.Dir(oldPath)), shootsKey(oldPath), shootsKey(newPath))
 	return &RenameResult{Path: newPath}, nil
 }
 

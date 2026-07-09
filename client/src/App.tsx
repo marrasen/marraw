@@ -21,7 +21,16 @@ import { DevelopView } from '@/views/DevelopView';
 import { useKeyboard } from '@/lib/keyboard';
 import { usePhotos } from '@/lib/usePhotos';
 import { useFolderScan } from '@/lib/useFolderScan';
-import { openRoot, samePath, saveRoots, useLibraryRoots } from '@/lib/library';
+import type { LibraryRoot } from '@/api/library';
+import {
+  baseName,
+  openRoot,
+  openShoot,
+  parentPath,
+  samePath,
+  saveRoots,
+  useLibraryRoots,
+} from '@/lib/library';
 import { updateRailWidth, UISettingsSync } from '@/lib/uiSettings';
 import { openFolder } from '@/api/library';
 import { useApiClient } from '@/api/client';
@@ -55,7 +64,17 @@ function useDropFolder() {
         toast.info('That folder is already in the library');
         return;
       }
-      const next = [...roots, { path, alias: '', includeSubfolders: true, photoCount: 0 }];
+      // Already discovered as a child of a library folder: adding it as a root
+      // of its own would pull it out of that block into a duplicate group.
+      if (roots.some((r) => r.isParent && samePath(r.path, parentPath(path)))) {
+        toast.info('That folder is already in the library');
+        void openShoot(client, { path, name: baseName(path), photoCount: 0, isSelf: false });
+        return;
+      }
+      const next: LibraryRoot[] = [
+        ...roots,
+        { path, alias: '', includeSubfolders: true, photoCount: 0, isParent: false },
+      ];
       await saveRoots(client, next);
       toast.success(`Added ${path} to the library`);
       void openRoot(client, next, next[next.length - 1]);

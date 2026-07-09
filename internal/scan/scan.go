@@ -40,6 +40,46 @@ func IsRawFile(name string) bool {
 	return rawExts[strings.ToLower(filepath.Ext(name))]
 }
 
+// SkipDirName reports whether a directory name is noise that scans and watches
+// must ignore.
+func SkipDirName(name string) bool { return skipDirName(name) }
+
+// HasRaw reports whether any RAW file exists anywhere beneath root, stopping at
+// the first one found. It answers "is this folder a shoot?" without paying for
+// a full CollectEntries walk — only a genuinely photo-free subtree costs a
+// complete traversal.
+func HasRaw(ctx context.Context, root string) bool {
+	const maxDepth = 12
+	type dirItem struct {
+		abs   string
+		depth int
+	}
+	queue := []dirItem{{abs: root}}
+	for len(queue) > 0 {
+		if ctx.Err() != nil {
+			return false
+		}
+		d := queue[0]
+		queue = queue[1:]
+		dirents, err := os.ReadDir(d.abs)
+		if err != nil {
+			continue
+		}
+		for _, de := range dirents {
+			if de.IsDir() {
+				if d.depth < maxDepth && !skipDirName(de.Name()) {
+					queue = append(queue, dirItem{abs: filepath.Join(d.abs, de.Name()), depth: d.depth + 1})
+				}
+				continue
+			}
+			if IsRawFile(de.Name()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // skipDirName filters noise directories out of recursive walks: exports,
 // select copies, thumbnail caches, our own preview cache, and dot/system
 // folders.

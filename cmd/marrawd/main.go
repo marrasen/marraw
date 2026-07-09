@@ -94,7 +94,7 @@ func main() {
 	}
 
 	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir}
-	registry, _, _, _ := api.NewRegistry(deps)
+	registry, library, _, _ := api.NewRegistry(deps)
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any
 	// future large streams; the generated client understands both framings.
@@ -118,6 +118,15 @@ func main() {
 		server.TriggerRefresh(fmt.Sprintf("photos:%d", folderID))
 	}
 	cache.OnPhotoChanged = scanner.OnPhotosChanged
+
+	// After SetServer, so the watcher's refresh pushes reach subscribers. A
+	// watcher that will not start is not fatal — folders keep their manual
+	// rescan.
+	if watcher, err := api.StartWatcher(context.Background(), library); err != nil {
+		log.Printf("watch: disabled (%v); folders rely on manual rescan", err)
+	} else {
+		defer watcher.Close()
+	}
 
 	// The renderer runs on file:// (Origin "null") in production; trust is
 	// established by the shared token, not the origin.

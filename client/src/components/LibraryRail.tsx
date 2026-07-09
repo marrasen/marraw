@@ -6,8 +6,10 @@ import {
   Check,
   Copy,
   ExternalLink,
+  EyeOff,
   Folder,
   FolderPen,
+  FolderTree,
   Info,
   Maximize2,
   Pencil,
@@ -23,7 +25,9 @@ import {
   openFolder,
   renameFolderOnDisk,
   renderFolderFullres,
+  useListShoots,
   type LibraryRoot,
+  type Shoot,
 } from '@/api/library';
 import { useApiClient } from '@/api/client';
 import { useSharedTasks } from '@/api/tasks';
@@ -38,28 +42,42 @@ import {
 import { cn } from '@/lib/utils';
 import {
   baseName,
-  groupRoots,
   openRoot,
+  openShoot,
+  parentKey,
+  railBlocks,
   rootName,
   samePath,
   saveRoots,
   useLibraryRoots,
+  type RailBlock,
   type RootGroup,
 } from '@/lib/library';
 import { updateGroupAlias, updateRailGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 
-// Group display aliases are a pure display preference, persisted server-side
-// (uiSettings.groupAliases, keyed by the lowercased parent path).
-function groupName(g: RootGroup, aliases: Record<string, string>) {
-  return aliases[g.parentPath.toLowerCase()] || g.parentName;
+// Display aliases are a pure display preference, persisted server-side
+// (uiSettings.groupAliases), keyed by the lowercased settings key.
+function aliasFor(key: string, fallback: string, aliases: Record<string, string>) {
+  return aliases[key.toLowerCase()] || fallback;
+}
+
+/** The roots a block owns, for rewriting the stored order. */
+function blockRoots(b: RailBlock): LibraryRoot[] {
+  return b.kind === 'parent' ? [b.root] : b.group.roots;
+}
+
+function blockId(b: RailBlock): string {
+  return b.kind === 'parent'
+    ? `p:${b.root.path.toLowerCase()}`
+    : `g:${b.group.parentPath.toLowerCase()}`;
 }
 
 /**
- * The curated library rail (resizable, 214px default): shoot folders the
- * user added, grouped by
- * their parent folder on disk, with organize context menus. Replaces the old
- * whole-filesystem tree — browsing now lives in the Add-folder picker.
+ * The curated library rail (resizable, 214px default): the shoot folders and
+ * library folders the user added, with organize context menus. Hand-added
+ * shoots are grouped by their parent directory on disk; a library folder is a
+ * stored parent whose child shoots are discovered from disk.
  */
 export function LibraryRail() {
   const { roots } = useLibraryRoots();
@@ -69,16 +87,21 @@ export function LibraryRail() {
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
   const groupAliases = useUIStore((s) => s.groupAliases);
 
-  const groups = useMemo(() => groupRoots(roots), [roots]);
+  const blocks = useMemo(() => railBlocks(roots), [roots]);
   const q = filter.trim().toLowerCase();
-  const visibleGroups = q
-    ? groups
-        .map((g) => ({
-          ...g,
-          roots: g.roots.filter((r) => rootName(r).toLowerCase().includes(q)),
-        }))
-        .filter((g) => g.roots.length > 0 || groupName(g, groupAliases).toLowerCase().includes(q))
-    : groups;
+
+  // Managed parents filter their own (server-supplied) rows; only the derived
+  // groups can be narrowed here.
+  const visible = q
+    ? blocks.filter((b) => {
+        if (b.kind === 'parent') return true;
+        const name = aliasFor(b.group.parentPath, b.group.parentName, groupAliases);
+        return (
+          name.toLowerCase().includes(q) ||
+          b.group.roots.some((r) => rootName(r).toLowerCase().includes(q))
+        );
+      })
+    : blocks;
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-[12.5px]">
@@ -109,18 +132,29 @@ export function LibraryRail() {
             </span>
           </div>
           <div className="flex flex-1 flex-col gap-px overflow-y-auto px-2">
-            {visibleGroups.map((g, gi) => (
-              <Group
-                key={g.parentPath.toLowerCase()}
-                group={g}
-                groupIndex={gi}
-                groups={groups}
-                roots={roots}
-                renaming={renaming}
-                setRenaming={setRenaming}
-                forceOpen={q !== ''}
-              />
-            ))}
+            {visible.map((b) =>
+              b.kind === 'parent' ? (
+                <ManagedParent
+                  key={blockId(b)}
+                  root={b.root}
+                  roots={roots}
+                  blocks={blocks}
+                  filter={q}
+                  renaming={renaming}
+                  setRenaming={setRenaming}
+                />
+              ) : (
+                <Group
+                  key={blockId(b)}
+                  group={b.group}
+                  blocks={blocks}
+                  roots={roots}
+                  renaming={renaming}
+                  setRenaming={setRenaming}
+                  forceOpen={q !== ''}
+                />
+              ),
+            )}
           </div>
         </>
       )}
@@ -145,18 +179,398 @@ export function LibraryRail() {
   );
 }
 
+// ---------------------------------------------------------------- reordering
+
+/** Rewrites the stored root order after a block moves. */
+function reorder(client: ReturnType<typeof useApiClient>, ordered: RailBlock[]) {
+  void saveRoots(client, ordered.flatMap(blockRoots));
+}
+
+function moveBlock(
+  client: ReturnType<typeof useApiClient>,
+  blocks: RailBlock[],
+  self: RailBlock,
+  dir: -1 | 1,
+) {
+  const i = blocks.findIndex((b) => blockId(b) === blockId(self));
+  const target = blocks[i + dir];
+  if (i < 0 || !target) return;
+  const ordered = blocks.slice();
+  ordered[i] = target;
+  ordered[i + dir] = self;
+  reorder(client, ordered);
+}
+
+function blockIndex(blocks: RailBlock[], self: RailBlock) {
+  return blocks.findIndex((b) => blockId(b) === blockId(self));
+}
+
+/** Drag a block header onto another to reorder. */
+function dropHandlers(
+  client: ReturnType<typeof useApiClient>,
+  blocks: RailBlock[],
+  self: RailBlock,
+) {
+  return {
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => e.dataTransfer.setData('marraw/block', blockId(self)),
+    onDragOver: (e: React.DragEvent) => {
+      if (e.dataTransfer.types.includes('marraw/block')) e.preventDefault();
+    },
+    onDrop: (e: React.DragEvent) => {
+      const from = e.dataTransfer.getData('marraw/block');
+      if (!from || from === blockId(self)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const moving = blocks.find((b) => blockId(b) === from);
+      if (!moving) return;
+      const ordered = blocks.filter((b) => blockId(b) !== from);
+      ordered.splice(blockIndex(ordered, self), 0, moving);
+      reorder(client, ordered);
+    },
+  };
+}
+
+// ---------------------------------------------------------------- header
+
+function BlockHeader({
+  name,
+  subtitle,
+  open,
+  icon,
+  onToggle,
+  drag,
+  testId,
+}: {
+  name: string;
+  subtitle: string;
+  open: boolean;
+  icon?: React.ReactNode;
+  onToggle: () => void;
+  drag: ReturnType<typeof dropHandlers>;
+  testId?: string;
+}) {
+  return (
+    <ContextMenuTrigger
+      className="flex cursor-default flex-col gap-px rounded-md px-2 pt-2 pb-1 hover:bg-accent"
+      onClick={onToggle}
+      data-testid={testId}
+      {...drag}
+    >
+      <div className="flex items-center gap-[7px]">
+        <span
+          className={cn('text-[9px] text-muted-foreground transition-transform', open && 'rotate-90')}
+        >
+          ▶
+        </span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="truncate font-semibold text-foreground">{name}</span>
+          {icon}
+        </span>
+      </div>
+      <span className="truncate pl-4 font-mono text-[10px] text-faint" title={subtitle}>
+        {subtitle}
+      </span>
+    </ContextMenuTrigger>
+  );
+}
+
+// ---------------------------------------------------------------- managed parent
+
+/**
+ * A library folder: a stored parent whose child shoots come from the daemon,
+ * re-listed whenever the watcher sees the folder change on disk. The children
+ * are never stored, so they carry no alias and cannot be removed — only hidden.
+ */
+function ManagedParent({
+  root,
+  roots,
+  blocks,
+  filter,
+  renaming,
+  setRenaming,
+}: {
+  root: LibraryRoot;
+  roots: LibraryRoot[];
+  blocks: RailBlock[];
+  filter: string;
+  renaming: string | null;
+  setRenaming: (v: string | null) => void;
+}) {
+  const client = useApiClient();
+  const groupAliases = useUIStore((s) => s.groupAliases);
+  const key = parentKey(root.path);
+  const open = useUIStore((s) => s.railGroups[key.toLowerCase()] !== false);
+  const { data: shoots, refetch } = useListShoots(root.path);
+
+  const self: RailBlock = { kind: 'parent', root };
+  const name = aliasFor(key, baseName(root.path), groupAliases);
+  const rows = useMemo(
+    () => (shoots ?? []).filter((s) => !filter || s.name.toLowerCase().includes(filter)),
+    [shoots, filter],
+  );
+
+  if (filter && rows.length === 0 && !name.toLowerCase().includes(filter)) return null;
+
+  const showRows = open || filter !== '';
+  const i = blockIndex(blocks, self);
+
+  const rescanAll = () => {
+    for (const s of rows) void openFolder(client, s.path).catch(() => {});
+    toast.success(`Rescanning ${rows.length} folder${rows.length === 1 ? '' : 's'}`);
+  };
+
+  // Removing a library folder removes exactly one stored root; its children were
+  // never stored.
+  const remove = () => {
+    void saveRoots(client, roots.filter((r) => !samePath(r.path, root.path)));
+    const { folderPath } = useUIStore.getState();
+    if (folderPath && rows.some((s) => samePath(s.path, folderPath))) {
+      useUIStore.setState({ folderId: null, folderPath: null });
+    }
+  };
+
+  if (renaming === key) {
+    return (
+      <RenameEditor
+        initial={name}
+        diskName={baseName(root.path)}
+        onSubmit={(alias) => {
+          updateGroupAlias(client, key, alias && alias !== baseName(root.path) ? alias : '');
+          setRenaming(null);
+        }}
+        onCancel={() => setRenaming(null)}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-px">
+      <ContextMenu>
+        <BlockHeader
+          name={name}
+          subtitle={root.path}
+          open={showRows}
+          icon={
+            <FolderTree
+              className="size-3 shrink-0 text-accent-text"
+              strokeWidth={1.5}
+              aria-label="Library folder"
+            />
+          }
+          onToggle={() => updateRailGroupOpen(client, key, !open)}
+          drag={dropHandlers(client, blocks, self)}
+          testId="rail-parent"
+        />
+        <ContextMenuContent>
+          <div className="flex flex-col gap-px px-2.5 pt-1.5 pb-2">
+            <span className="truncate font-semibold text-foreground">{name}</span>
+            <span className="truncate font-mono text-[10px] text-faint">
+              {root.path} · {rows.length} folder{rows.length === 1 ? '' : 's'} · auto-updating
+            </span>
+          </div>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => setRenaming(key)}>
+            <Pencil /> <span className="flex-1">Rename group…</span>
+          </ContextMenuItem>
+          <ContextMenuItem
+            hint="Explorer"
+            onClick={() => window.marraw?.revealInExplorer(root.path)}
+            disabled={!window.marraw}
+          >
+            <ExternalLink /> <span className="flex-1">Locate on disk</span>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => refetch()}>
+            <RefreshCw /> <span className="flex-1 text-foreground">Refresh</span>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={rescanAll}>
+            <RefreshCw /> <span className="flex-1">Rescan all shoots</span>
+          </ContextMenuItem>
+          <ContextMenuItem disabled={i === 0} onClick={() => moveBlock(client, blocks, self, -1)}>
+            <ArrowUp /> <span className="flex-1">Move up</span>
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={i === blocks.length - 1}
+            onClick={() => moveBlock(client, blocks, self, 1)}
+          >
+            <ArrowDown /> <span className="flex-1">Move down</span>
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onClick={remove}>
+            <Trash2 />
+            <div className="flex flex-col gap-px">
+              <span>Remove library folder</span>
+              <span className="text-[11px] text-faint">
+                {rows.length} folder{rows.length === 1 ? '' : 's'} · files stay on disk
+              </span>
+            </div>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+
+      {showRows && shoots != null && shoots.length === 0 && (
+        <span className="px-6 py-1.5 text-[11px] text-faint">No photo folders yet</span>
+      )}
+      {showRows &&
+        rows.map((s) => <ShootRow key={s.path} shoot={s} parent={root} roots={roots} />)}
+    </div>
+  );
+}
+
+/**
+ * A discovered shoot. It has no stored record, so there is no display alias to
+ * rename and no root to remove — hiding it writes to the parent's exclusion
+ * list, because "Remove" would be a lie: the next listing would bring it back.
+ */
+function ShootRow({
+  shoot,
+  parent,
+  roots,
+}: {
+  shoot: Shoot;
+  parent: LibraryRoot;
+  roots: LibraryRoot[];
+}) {
+  const client = useApiClient();
+  const folderPath = useUIStore((s) => s.folderPath);
+  const active = folderPath != null && samePath(folderPath, shoot.path);
+  const scanning = useFolderBusy(shoot.path);
+
+  const open = () => void openShoot(client, shoot);
+
+  const hide = () => {
+    const next = roots.map((r) =>
+      samePath(r.path, parent.path)
+        ? { ...r, excludedChildren: [...(r.excludedChildren ?? []), shoot.path.toLowerCase()] }
+        : r,
+    );
+    void saveRoots(client, next);
+    if (active) useUIStore.setState({ folderId: null, folderPath: null });
+    toast.success(`Hid ${shoot.name}`, { description: 'Files stay on disk.' });
+  };
+
+  const renameOnDisk = async () => {
+    const name = window.prompt('New folder name on disk:', shoot.name);
+    if (!name || name === shoot.name) return;
+    try {
+      const res = await renameFolderOnDisk(client, shoot.path, name);
+      toast.success(`Renamed on disk → ${res.path}`);
+      if (active) useUIStore.setState({ folderPath: res.path });
+    } catch (err) {
+      toast.error(`Rename failed: ${(err as Error).message}`);
+    }
+  };
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger
+        className={cn(
+          'flex h-[30px] shrink-0 cursor-pointer items-center gap-[7px] rounded-[7px] pr-2 pl-6',
+          active ? 'bg-sidebar-accent font-semibold text-foreground' : 'hover:bg-accent',
+        )}
+        onClick={open}
+        title={shoot.path}
+        data-testid="rail-shoot"
+        data-name={shoot.name}
+        data-count={shoot.photoCount}
+        data-self={shoot.isSelf ? '1' : undefined}
+      >
+        <Folder
+          className={cn('size-[13px] shrink-0', active ? 'text-accent-text' : 'text-muted-foreground')}
+          strokeWidth={1.5}
+        />
+        <span className="flex-1 truncate">
+          {shoot.name}
+          {shoot.isSelf && <span className="ml-1 text-faint">· loose files</span>}
+        </span>
+        {scanning ? (
+          <ChipSpinner className="size-3" />
+        ) : shoot.photoCount > 0 ? (
+          <span className="font-mono text-[10.5px] font-normal text-faint">
+            {shoot.photoCount.toLocaleString()}
+          </span>
+        ) : null}
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <div className="flex items-start gap-2 px-2.5 pt-1.5 pb-2">
+          <Folder className="mt-0.5 size-3.5 shrink-0 text-accent-text" strokeWidth={1.5} />
+          <div className="flex min-w-0 flex-col gap-px">
+            <span className="truncate font-semibold text-foreground">{shoot.name}</span>
+            <span className="font-mono text-[10px] text-faint">
+              {shoot.photoCount > 0 ? `${shoot.photoCount.toLocaleString()} RAW` : shoot.path}
+            </span>
+          </div>
+        </div>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          hint="Enter"
+          onClick={() =>
+            void openShoot(client, shoot).then(() => useUIStore.getState().setMode('cull'))
+          }
+        >
+          <Play /> <span className="flex-1 text-foreground">Open in Cull</span>
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => window.win?.openNewWindow(shoot.path)}
+          disabled={!window.win}
+        >
+          <AppWindow /> <span className="flex-1">Open in new window</span>
+        </ContextMenuItem>
+        {!shoot.isSelf && (
+          <ContextMenuItem onClick={renameOnDisk}>
+            <FolderPen /> <span className="flex-1">Rename on disk…</span>
+          </ContextMenuItem>
+        )}
+        <ContextMenuItem
+          hint="Explorer"
+          onClick={() => window.marraw?.revealInExplorer(shoot.path)}
+          disabled={!window.marraw}
+        >
+          <ExternalLink /> <span className="flex-1 text-foreground">Locate on disk</span>
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(shoot.path);
+            toast.success('Path copied');
+          }}
+        >
+          <Copy /> <span className="flex-1">Copy path</span>
+        </ContextMenuItem>
+        <ContextMenuItem onClick={open}>
+          <RefreshCw /> <span className="flex-1">Rescan for new photos</span>
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => void startFullres(client, shoot.path, shoot.name)}>
+          <Maximize2 /> <span className="flex-1">Render 1:1</span>
+        </ContextMenuItem>
+        {!shoot.isSelf && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem variant="destructive" onClick={hide}>
+              <EyeOff />
+              <div className="flex flex-col gap-px">
+                <span>Hide from library</span>
+                <span className="text-[11px] text-faint">Files stay on disk</span>
+              </div>
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+// ---------------------------------------------------------------- derived group
+
 function Group({
   group,
-  groupIndex,
-  groups,
+  blocks,
   roots,
   renaming,
   setRenaming,
   forceOpen,
 }: {
   group: RootGroup;
-  groupIndex: number;
-  groups: RootGroup[];
+  blocks: RailBlock[];
   roots: LibraryRoot[];
   renaming: string | null;
   setRenaming: (v: string | null) => void;
@@ -168,31 +582,9 @@ function Group({
   const groupRenameId = `group:${group.parentPath.toLowerCase()}`;
   const showRows = open || forceOpen;
 
-  const toggleOpen = () => updateRailGroupOpen(client, group.parentPath, !open);
-
-  // Move the whole group block up/down in the stored root order.
-  const moveGroup = (dir: -1 | 1) => {
-    const target = groups[groupIndex + dir];
-    if (!target) return;
-    const ordered = groups.slice();
-    ordered[groupIndex] = target;
-    ordered[groupIndex + dir] = group;
-    void saveRoots(client, ordered.flatMap((g) => g.roots));
-  };
-
-  // Drag a group header onto another group to reorder ("drag also works").
-  const onDropGroup = (e: React.DragEvent) => {
-    const from = e.dataTransfer.getData('marraw/group');
-    if (!from || samePath(from, group.parentPath)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const moving = groups.find((g) => samePath(g.parentPath, from));
-    if (!moving) return;
-    const ordered = groups.filter((g) => !samePath(g.parentPath, from));
-    const idx = ordered.findIndex((g) => samePath(g.parentPath, group.parentPath));
-    ordered.splice(idx, 0, moving);
-    void saveRoots(client, ordered.flatMap((g) => g.roots));
-  };
+  const self: RailBlock = { kind: 'group', group };
+  const i = blockIndex(blocks, self);
+  const name = aliasFor(group.parentPath, group.parentName, groupAliases);
 
   const rescanAll = () => {
     for (const r of group.roots) void openFolder(client, r.path).catch(() => {});
@@ -212,7 +604,7 @@ function Group({
     <div className="flex flex-col gap-px">
       {renaming === groupRenameId ? (
         <RenameEditor
-          initial={groupName(group, groupAliases)}
+          initial={name}
           diskName={group.parentName}
           onSubmit={(alias) => {
             updateGroupAlias(
@@ -226,40 +618,16 @@ function Group({
         />
       ) : (
         <ContextMenu>
-          <ContextMenuTrigger
-            className="flex cursor-default flex-col gap-px rounded-md px-2 pt-2 pb-1 hover:bg-accent"
-            onClick={toggleOpen}
-            draggable
-            onDragStart={(e: React.DragEvent) =>
-              e.dataTransfer.setData('marraw/group', group.parentPath)
-            }
-            onDragOver={(e: React.DragEvent) => {
-              if (e.dataTransfer.types.includes('marraw/group')) e.preventDefault();
-            }}
-            onDrop={onDropGroup}
-          >
-            <div className="flex items-center gap-[7px]">
-              <span
-                className={cn(
-                  'text-[9px] text-muted-foreground transition-transform',
-                  showRows && 'rotate-90',
-                )}
-              >
-                ▶
-              </span>
-              <span className="flex-1 truncate font-semibold text-foreground">
-                {groupName(group, groupAliases)}
-              </span>
-            </div>
-            <span className="truncate pl-4 font-mono text-[10px] text-faint" title={group.parentPath}>
-              {group.parentPath}
-            </span>
-          </ContextMenuTrigger>
+          <BlockHeader
+            name={name}
+            subtitle={group.parentPath}
+            open={showRows}
+            onToggle={() => updateRailGroupOpen(client, group.parentPath, !open)}
+            drag={dropHandlers(client, blocks, self)}
+          />
           <ContextMenuContent>
             <div className="flex flex-col gap-px px-2.5 pt-1.5 pb-2">
-              <span className="truncate font-semibold text-foreground">
-                {groupName(group, groupAliases)}
-              </span>
+              <span className="truncate font-semibold text-foreground">{name}</span>
               <span className="truncate font-mono text-[10px] text-faint">
                 {group.parentPath} · {group.roots.length} shoot{group.roots.length === 1 ? '' : 's'}
               </span>
@@ -278,10 +646,13 @@ function Group({
             <ContextMenuItem onClick={rescanAll}>
               <RefreshCw /> <span className="flex-1">Rescan all shoots</span>
             </ContextMenuItem>
-            <ContextMenuItem disabled={groupIndex === 0} onClick={() => moveGroup(-1)}>
+            <ContextMenuItem disabled={i === 0} onClick={() => moveBlock(client, blocks, self, -1)}>
               <ArrowUp /> <span className="flex-1">Move up</span>
             </ContextMenuItem>
-            <ContextMenuItem disabled={groupIndex === groups.length - 1} onClick={() => moveGroup(1)}>
+            <ContextMenuItem
+              disabled={i === blocks.length - 1}
+              onClick={() => moveBlock(client, blocks, self, 1)}
+            >
               <ArrowDown /> <span className="flex-1">Move down</span>
             </ContextMenuItem>
             <ContextMenuSeparator />
@@ -316,7 +687,7 @@ function Group({
               onCancel={() => setRenaming(null)}
             />
           ) : (
-            <ShootRow
+            <RootRow
               key={r.path}
               root={r}
               roots={roots}
@@ -328,7 +699,8 @@ function Group({
   );
 }
 
-function ShootRow({
+/** A hand-added shoot root, with its stored alias and include-subfolders flag. */
+function RootRow({
   root,
   roots,
   onRename,
@@ -373,14 +745,6 @@ function ShootRow({
     } catch (err) {
       toast.error(`Rename failed: ${(err as Error).message}`);
     }
-  };
-
-  // Kick off the 1:1 full-resolution pre-render; progress shows in the task
-  // tray, so this just starts it and reports failures.
-  const renderFullres = () => {
-    renderFolderFullres(client, root.path)
-      .then(() => toast.success(`Rendering 1:1 previews for ${rootName(root)}…`))
-      .catch((err) => toast.error(`Render 1:1 failed: ${(err as Error).message}`));
   };
 
   return (
@@ -460,7 +824,7 @@ function ShootRow({
         <ContextMenuItem onClick={open}>
           <RefreshCw /> <span className="flex-1">Rescan for new photos</span>
         </ContextMenuItem>
-        <ContextMenuItem onClick={renderFullres}>
+        <ContextMenuItem onClick={() => void startFullres(client, root.path, rootName(root))}>
           <Maximize2 /> <span className="flex-1">Render 1:1</span>
         </ContextMenuItem>
         <ContextMenuSeparator />
@@ -474,6 +838,14 @@ function ShootRow({
       </ContextMenuContent>
     </ContextMenu>
   );
+}
+
+// Kicks off the 1:1 full-resolution pre-render; progress shows in the task
+// tray, so this just starts it and reports failures.
+function startFullres(client: ReturnType<typeof useApiClient>, path: string, name: string) {
+  return renderFolderFullres(client, path)
+    .then(() => toast.success(`Rendering 1:1 previews for ${name}…`))
+    .catch((err) => toast.error(`Render 1:1 failed: ${(err as Error).message}`));
 }
 
 // Inline alias rename per the ORGANIZE plate: accent-bordered input plus the

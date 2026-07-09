@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 type DB struct {
 	*sql.DB
@@ -93,6 +93,16 @@ func (db *DB) migrate(ctx context.Context) error {
 			if _, err := tx.ExecContext(ctx,
 				`ALTER TABLE photos ADD COLUMN updated_at INTEGER`); err != nil {
 				return fmt.Errorf("store: migrate v5: %w", err)
+			}
+		}
+		if v < 6 {
+			// A pool worker's LibRaw handle kept params across jobs, so a photo
+			// whose metadata was read right after a calibration decode recorded
+			// half its real width and height (libraw.Processor.Open now resets
+			// params first). Any row could be affected; re-read them. The pass
+			// is metadata-only — no pixel decode — and runs in the background.
+			if _, err := tx.ExecContext(ctx, `UPDATE photos SET meta_loaded = 0`); err != nil {
+				return fmt.Errorf("store: migrate v6: %w", err)
 			}
 		}
 	}

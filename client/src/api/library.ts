@@ -52,6 +52,8 @@ export interface LibraryRoot {
     alias: string;
     includeSubfolders: boolean;
     photoCount: number;
+    isParent: boolean;
+    excludedChildren?: string[];
 }
 
 export interface Photo {
@@ -100,6 +102,13 @@ export interface RawTotal {
 
 export interface RenameResult {
     path: string;
+}
+
+export interface Shoot {
+    path: string;
+    name: string;
+    photoCount: number;
+    isSelf: boolean;
 }
 
 
@@ -217,6 +226,19 @@ listPhotos.method = 'Library.ListPhotos' as const;
 
 export function subscribeListPhotos(client: ApiClient, folderID: number, callback: (data: Photo[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<Photo[]>('Library.ListPhotos', [folderID], callback, onError, options);
+}
+
+
+export function listShoots(client: ApiClient, parentPath: string, options?: RequestOptions): Promise<Shoot[]> {
+    return client.request<Shoot[]>('Library.ListShoots', [parentPath], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+listShoots.method = 'Library.ListShoots' as const;
+
+export function subscribeListShoots(client: ApiClient, parentPath: string, callback: (data: Shoot[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Shoot[]>('Library.ListShoots', [parentPath], callback, onError, options);
 }
 
 
@@ -471,6 +493,21 @@ export function useListPhotos(folderID: number, options?: UseQueryOptions<Photo[
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [folderID], _subscribe: { method: 'Library.ListPhotos', params: [folderID] } });
+}
+
+/**
+ * Subscribes to `Library.ListShoots` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useListShoots(parentPath: string, options?: UseQueryOptions<Shoot[]>): UseQueryResult<Shoot[]> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, parentPath: string) => listShoots(client, parentPath, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [parentPath], _subscribe: { method: 'Library.ListShoots', params: [parentPath] } });
 }
 
 /**

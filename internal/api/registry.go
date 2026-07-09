@@ -14,6 +14,7 @@ import (
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
+	"github.com/marrasen/marraw/internal/watch"
 )
 
 // Deps carries the backend services handlers operate on. For TypeScript
@@ -29,6 +30,10 @@ type Deps struct {
 	// DefaultCacheDir is the built-in preview-cache location (under the app
 	// data dir); System.SetCacheDir("") restores it.
 	DefaultCacheDir string
+	// Watch notices new folders and new photos on disk. Nil is valid: a
+	// zero-value Deps is used for TypeScript generation, and a daemon whose
+	// watch handle failed to open still works through manual rescans.
+	Watch *watch.Watcher
 
 	mu     sync.RWMutex
 	server *aprot.Server
@@ -37,6 +42,20 @@ type Deps struct {
 	// previous folder's metadata/pre-render passes.
 	jobMu            sync.Mutex
 	folderJobsCancel context.CancelFunc
+
+	// ingestMu guards the per-folder ingest state used by watcher-driven
+	// rescans, which deliberately run outside the folder-jobs slot.
+	ingestMu sync.Mutex
+	ingest   map[int64]*ingestState
+}
+
+// ingestState serialises watcher-driven passes for one folder. A pass already
+// in flight snapshotted the photos needing work when it started, so it can
+// never pick up files that landed after it — hence dirty, which re-runs it once
+// afterwards rather than stacking a duplicate pass.
+type ingestState struct {
+	running bool
+	dirty   bool
 }
 
 // SetServer wires the aprot server in after construction (the registry must

@@ -47,16 +47,26 @@ func (l *Library) startFolderJobs(reqCtx context.Context, folderID int64, path s
 	d.folderJobsCancel = cancel
 	d.jobMu.Unlock()
 
-	go func() {
-		l.metaPass(ctx, folderID, path)
-		l.calibratePass(ctx, folderID, path)
-		l.prerenderPass(ctx, folderID, path)
-		// Opt-in: 1:1 full-resolution tiles, the most expensive pass, runs
-		// last so it never delays the loupe-ready renditions above.
-		if raw, _ := d.DB.GetSetting(ctx, settingUIPrerenderFull); raw == "true" {
-			l.fullresPass(ctx, folderID, path)
-		}
-	}()
+	go l.folderPasses(ctx, folderID, path)
+}
+
+// folderPasses brings a folder's photos up to date: metadata, the camera-mimic
+// calibration, the loupe-ready rendition, and optionally the 1:1 tiles. Every
+// pass filters to the photos that still need it and returns without opening a
+// task when there are none, so running this over an already-processed folder
+// costs a few queries and stat calls.
+//
+// Shared by the open path (through startFolderJobs, which owns the cancel slot)
+// and the watcher's ingest path (which must not touch that slot).
+func (l *Library) folderPasses(ctx context.Context, folderID int64, path string) {
+	l.metaPass(ctx, folderID, path)
+	l.calibratePass(ctx, folderID, path)
+	l.prerenderPass(ctx, folderID, path)
+	// Opt-in: 1:1 full-resolution tiles, the most expensive pass, runs
+	// last so it never delays the loupe-ready renditions above.
+	if raw, _ := l.deps.DB.GetSetting(ctx, settingUIPrerenderFull); raw == "true" {
+		l.fullresPass(ctx, folderID, path)
+	}
 }
 
 // RenderFolderFullres pre-renders 1:1 full-resolution tiles for every photo in
@@ -65,11 +75,7 @@ func (l *Library) startFolderJobs(reqCtx context.Context, folderID int64, path s
 // cancellable task; the pass rides on a cancel-free context so navigating away
 // doesn't abort it — the user cancels from the task tray.
 func (l *Library) RenderFolderFullres(ctx context.Context, path string) (*FolderInfo, error) {
-	recursive := false
-	if root, ok := l.rootFor(ctx, path); ok {
-		recursive = root.IncludeSubfolders
-	}
-	folderID, count, err := l.deps.Scanner.OpenFolder(ctx, path, recursive)
+	folderID, count, err := l.deps.Scanner.OpenFolder(ctx, path, l.scanRecursionFor(ctx, path))
 	if err != nil {
 		return nil, aprot.ErrInvalidParams(err.Error())
 	}

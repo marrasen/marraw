@@ -141,6 +141,30 @@ type LibraryRoot struct {
 	// PhotoCount is the last known RAW count, refreshed by the client after
 	// each open/rescan — display only, never authoritative.
 	PhotoCount int `json:"photoCount"`
+	// IsParent marks a managed "library folder": its child shoots are
+	// discovered from disk by ListShoots and deliberately never stored here.
+	// SetLibraryRoots is a whole-list replace driven by the client, so a
+	// synthesized child returned from GetLibraryRoots would be written straight
+	// back as a real root on the next reorder — putting children on a separate
+	// RPC makes that impossible rather than merely unlikely.
+	IsParent bool `json:"isParent"`
+	// ExcludedChildren are discovered children the user hid, as lowercased
+	// absolute paths. Only meaningful on a parent.
+	ExcludedChildren []string `json:"excludedChildren,omitempty"`
+}
+
+// Shoot is one folder discovered beneath a managed parent, or the parent's own
+// row for RAWs sitting loose in it. Shoots are re-derived from disk on every
+// listing and never persisted.
+type Shoot struct {
+	Path string `json:"path"`
+	Name string `json:"name"`
+	// PhotoCount is exact once the folder has been scanned; before that it is
+	// the direct RAW count, which undercounts a shoot with nested subfolders.
+	// Display only, like LibraryRoot.PhotoCount.
+	PhotoCount int `json:"photoCount"`
+	// IsSelf marks the parent's own row.
+	IsSelf bool `json:"isSelf"`
 }
 
 // PickEntry is one folder row in the Add-folder picker: a subdirectory with

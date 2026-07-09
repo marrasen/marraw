@@ -48,6 +48,15 @@ func (p *Processor) Open(path string) error {
 	if err != nil {
 		return fmt.Errorf("libraw: bad path %q: %w", path, err)
 	}
+	// libraw_recycle deliberately preserves params, and a pool worker reuses one
+	// handle across jobs. Opening a file sizes it according to the params in
+	// effect at that moment, so a half-size decode (the calibration pass) would
+	// leave half_size set and the next job's Metadata() — which applies no
+	// params of its own — would report half the file's real dimensions straight
+	// into the catalog. Reset before opening, not after: it is the open that
+	// computes the dimensions. Process() applies its own params afterwards, so
+	// nothing else is affected.
+	DefaultParams().apply(p.h)
 	if ret := C.libraw_open_wfile(p.h, (*C.wchar_t)(unsafe.Pointer(w))); ret != 0 {
 		return lrErr("open "+path, ret)
 	}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marrasen/aprot"
@@ -23,6 +24,11 @@ import (
 // Library handles folder browsing and culling.
 type Library struct {
 	deps *Deps
+
+	// focusMu guards the focus set: the folders recently opened by any window,
+	// each with a detached copy of the request context that opened it.
+	focusMu sync.Mutex
+	focused []focusedFolder
 }
 
 // ListDrives returns the filesystem roots to seed the folder tree.
@@ -91,21 +97,117 @@ func hasSubdirs(path string) bool {
 // OpenFolder scans a folder into the library and returns its id and photo
 // count. Fast: no decoding happens here — the metadata backfill and the
 // pre-render pass start in the background as cancellable shared tasks.
+//
+// Re-opening an already-scanned folder is how new photos are picked up on
+// demand: SyncFolder inserts the new rows, and every background pass filters to
+// the work that is not already done.
 func (l *Library) OpenFolder(ctx context.Context, path string) (*FolderInfo, error) {
-	// Library roots carry a per-root include-subfolders flag; folders opened
-	// outside the curated library scan flat.
-	recursive := false
-	if root, ok := l.rootFor(ctx, path); ok {
-		recursive = root.IncludeSubfolders
-	}
+	recursive := l.scanRecursionFor(ctx, path)
 	folderID, count, err := l.deps.Scanner.OpenFolder(ctx, path, recursive)
 	if err != nil {
 		return nil, aprot.ErrInvalidParams(err.Error())
 	}
 	aprot.TriggerRefresh(ctx, photosKey(folderID))
+	if parent := filepath.Dir(filepath.Clean(path)); l.isParentRoot(ctx, parent) {
+		aprot.TriggerRefresh(ctx, shootsKey(parent))
+	}
 	l.rememberRecent(ctx, path)
+	l.rememberFocus(path, context.WithoutCancel(ctx))
+	if l.deps.Watch != nil {
+		l.deps.Watch.FocusShoot(path, recursive)
+	}
 	l.startFolderJobs(ctx, folderID, path)
 	return &FolderInfo{FolderID: folderID, Path: path, PhotoCount: count}, nil
+}
+
+// maxFocusedFolders bounds the focus set. It is not 1: two windows share one
+// daemon and can sit on two different folders.
+const maxFocusedFolders = 4
+
+type focusedFolder struct {
+	path string
+	ctx  context.Context
+}
+
+// rememberFocus records a detached copy of the request context for a folder the
+// user just opened.
+//
+// The context is the point. Background passes announce themselves as shared
+// tasks, and tasks.StartTask reads the connection and the task manager out of
+// the context — without them it silently degrades to a no-op task that runs the
+// work but shows no tray chip and cannot be cancelled. context.WithoutCancel
+// keeps those values while dropping the request's cancellation, which is
+// exactly the fire-and-forget shape startFolderJobs already relies on.
+func (l *Library) rememberFocus(path string, ctx context.Context) {
+	clean := filepath.Clean(path)
+	l.focusMu.Lock()
+	defer l.focusMu.Unlock()
+	next := []focusedFolder{{path: clean, ctx: ctx}}
+	for _, f := range l.focused {
+		if strings.EqualFold(f.path, clean) {
+			continue
+		}
+		next = append(next, f)
+		if len(next) == maxFocusedFolders {
+			break
+		}
+	}
+	l.focused = next
+}
+
+// focusCtx returns the stashed context for an open folder. Its second result
+// doubles as "is this folder open?" — the gate on whether new photos there get
+// the expensive passes.
+func (l *Library) focusCtx(path string) (context.Context, bool) {
+	clean := filepath.Clean(path)
+	l.focusMu.Lock()
+	defer l.focusMu.Unlock()
+	for _, f := range l.focused {
+		if strings.EqualFold(f.path, clean) {
+			return f.ctx, true
+		}
+	}
+	return nil, false
+}
+
+// ingestFolder runs the background passes over a folder's new photos, outside
+// the folder-jobs slot so it cannot cancel the work of a folder the user is
+// looking at in another window. Concurrent with an in-flight startFolderJobs on
+// the same folder it is safe but wasteful: both snapshot independently, the
+// decode pool deduplicates each photo, and SetMeta is idempotent.
+func (l *Library) ingestFolder(ctx context.Context, folderID int64, path string) {
+	d := l.deps
+	d.ingestMu.Lock()
+	if d.ingest == nil {
+		d.ingest = map[int64]*ingestState{}
+	}
+	st, ok := d.ingest[folderID]
+	if !ok {
+		st = &ingestState{}
+		d.ingest[folderID] = st
+	}
+	if st.running {
+		st.dirty = true
+		d.ingestMu.Unlock()
+		return
+	}
+	st.running = true
+	d.ingestMu.Unlock()
+
+	go func() {
+		for {
+			l.folderPasses(ctx, folderID, path)
+			d.ingestMu.Lock()
+			if !st.dirty {
+				st.running = false
+				delete(d.ingest, folderID)
+				d.ingestMu.Unlock()
+				return
+			}
+			st.dirty = false
+			d.ingestMu.Unlock()
+		}
+	}()
 }
 
 const (

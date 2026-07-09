@@ -13,8 +13,17 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { openRoot, samePath, saveRoots, useLibraryRoots } from '@/lib/library';
+import { openRoot, parentPath, samePath, saveRoots, useLibraryRoots } from '@/lib/library';
 import { useUIStore } from '@/stores/uiStore';
+
+/**
+ * How a picked folder joins the library.
+ *
+ * `shoot` — the folder is one album of photos. `library` — the folder is a
+ * parent: marraw lists the subfolders that hold RAWs as albums, and keeps
+ * watching it, so a folder created later shows up on its own.
+ */
+type AddAs = 'shoot' | 'library';
 
 // Breadcrumb segments with cumulative paths ("C:\Users\Marcus" → C: · Users · Marcus).
 function crumbs(path: string): { name: string; path: string }[] {
@@ -48,8 +57,10 @@ function PickerBody({ onClose }: { onClose: () => void }) {
   const [path, setPath] = useState<string | null>(null);
   const [checked, setChecked] = useState<Map<string, { path: string; direct: number }>>(new Map());
   const [subfolders, setSubfolders] = useState(true);
+  const [addAs, setAddAs] = useState<AddAs>('shoot');
 
   const location = path ?? drives?.[0]?.path ?? null;
+  const asLibrary = addAs === 'library';
 
   const toggle = (p: string, direct: number) => {
     setChecked((prev) => {
@@ -72,16 +83,36 @@ function PickerBody({ onClose }: { onClose: () => void }) {
     const newRoots: LibraryRoot[] = fresh.map((s) => ({
       path: s.path,
       alias: '',
-      includeSubfolders: subfolders,
-      photoCount: subfolders ? 0 : s.direct,
+      includeSubfolders: asLibrary ? false : subfolders,
+      photoCount: asLibrary || subfolders ? 0 : s.direct,
+      isParent: asLibrary,
     }));
-    const all = [...roots, ...newRoots];
+
+    // A shoot that sits directly inside a new library folder is now discovered
+    // from disk. Leaving the hand-added root in place would render the same
+    // folder twice, under two identically-named headers.
+    const absorbed = asLibrary
+      ? roots.filter(
+          (r) => !r.isParent && fresh.some((s) => samePath(parentPath(r.path), s.path)),
+        )
+      : [];
+    const kept = roots.filter((r) => !absorbed.includes(r));
+
+    const all = [...kept, ...newRoots];
     await saveRoots(client, all);
     onClose();
-    toast.success(
-      `Added ${fresh.length} folder${fresh.length === 1 ? '' : 's'} to the library`,
-    );
-    void openRoot(client, all, newRoots[0]);
+
+    const noun = asLibrary ? 'library folder' : 'folder';
+    toast.success(`Added ${fresh.length} ${noun}${fresh.length === 1 ? '' : 's'} to the library`, {
+      description:
+        absorbed.length > 0
+          ? `${absorbed.length} existing folder${absorbed.length === 1 ? ' is' : 's are'} now managed here.`
+          : undefined,
+    });
+
+    // A library folder has no photos of its own to open; its children appear in
+    // the rail as the daemon lists them.
+    if (!asLibrary) void openRoot(client, all, newRoots[0]);
   };
 
   return (
@@ -141,27 +172,70 @@ function PickerBody({ onClose }: { onClose: () => void }) {
               checked={checked}
               onNavigate={setPath}
               onToggle={toggle}
-              subfolders={subfolders}
+              selectAnyWithSubdirs={asLibrary || subfolders}
             />
           )}
         </div>
 
-        <div className="flex items-center gap-4 border-t px-[22px] py-3.5">
-          <label className="flex cursor-pointer items-center gap-2.5">
-            <Switch checked={subfolders} onCheckedChange={setSubfolders} />
-            <span className="text-[12.5px] text-secondary-foreground">Include subfolders</span>
-          </label>
-          <div className="flex-1" />
-          <FooterCount selected={selected} subfolders={subfolders} />
-          <Button variant="outline" size="lg" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button size="lg" disabled={selected.length === 0} onClick={() => void add()}>
-            Add to library
-          </Button>
+        <div className="flex flex-col gap-2.5 border-t px-[22px] py-3">
+          <div className="flex items-center gap-3">
+            <span className="text-[12.5px] text-secondary-foreground">Add as</span>
+            <AddAsToggle value={addAs} onChange={setAddAs} />
+            {asLibrary ? (
+              <span className="text-[11.5px] text-faint">
+                Subfolders with photos become albums, and new ones appear automatically.
+              </span>
+            ) : (
+              <label className="flex cursor-pointer items-center gap-2.5">
+                <Switch checked={subfolders} onCheckedChange={setSubfolders} />
+                <span className="text-[12.5px] text-secondary-foreground">Include subfolders</span>
+              </label>
+            )}
+          </div>
+          <div className="flex items-center gap-4">
+            <FooterCount selected={selected} recursive={asLibrary || subfolders} asLibrary={asLibrary} />
+            <div className="flex-1" />
+            <Button variant="outline" size="lg" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button size="lg" disabled={selected.length === 0} onClick={() => void add()}>
+              {asLibrary ? 'Add as library folder' : 'Add to library'}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function AddAsToggle({ value, onChange }: { value: AddAs; onChange: (v: AddAs) => void }) {
+  const options: { id: AddAs; label: string; title: string }[] = [
+    { id: 'shoot', label: 'Shoot', title: 'One album of photos' },
+    {
+      id: 'library',
+      label: 'Library folder',
+      title: 'A parent folder; its subfolders become albums, and new ones appear automatically',
+    },
+  ];
+  return (
+    <div className="flex h-[26px] items-center gap-0.5 rounded-[7px] border bg-secondary p-0.5 dark:bg-white/5">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          title={o.title}
+          aria-pressed={value === o.id}
+          className={cn(
+            'h-full rounded-[5px] px-2.5 text-[12px]',
+            value === o.id
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+          onClick={() => onChange(o.id)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -170,13 +244,15 @@ function FolderList({
   checked,
   onNavigate,
   onToggle,
-  subfolders,
+  selectAnyWithSubdirs,
 }: {
   path: string;
   checked: Map<string, { path: string; direct: number }>;
   onNavigate: (p: string) => void;
   onToggle: (p: string, direct: number) => void;
-  subfolders: boolean;
+  // A folder with no direct RAWs is still worth picking when the photos live in
+  // its subfolders — true both for a recursive shoot and for a library folder.
+  selectAnyWithSubdirs: boolean;
 }) {
   const { data: entries, isLoading, error } = useListDirRaws(path);
   const parts = crumbs(path);
@@ -223,9 +299,9 @@ function FolderList({
         )}
         {entries?.map((e) => {
           const isChecked = checked.has(e.path.toLowerCase());
-          // No direct RAWs → dimmed; still selectable when subfolder
-          // recursion could pull nested shoots in.
-          const selectable = e.rawCount > 0 || (subfolders && e.hasSubdirs);
+          // No direct RAWs → dimmed; still selectable when the photos could
+          // live in its subfolders.
+          const selectable = e.rawCount > 0 || (selectAnyWithSubdirs && e.hasSubdirs);
           return (
             <div
               key={e.path}
@@ -285,15 +361,17 @@ function FolderList({
 // daemon, debounced while the user keeps ticking boxes.
 function FooterCount({
   selected,
-  subfolders,
+  recursive,
+  asLibrary,
 }: {
   selected: { path: string; direct: number }[];
-  subfolders: boolean;
+  recursive: boolean;
+  asLibrary: boolean;
 }) {
   const client = useApiClient();
   // Recursive totals are keyed by the selection they were computed for, so a
   // stale response never shows against a changed selection.
-  const [recursive, setRecursive] = useState<{ key: string; files: number } | null>(null);
+  const [recursiveTotal, setRecursiveTotal] = useState<{ key: string; files: number } | null>(null);
   const reqId = useRef(0);
 
   const flatTotal = useMemo(() => selected.reduce((n, s) => n + s.direct, 0), [selected]);
@@ -301,30 +379,32 @@ function FooterCount({
   const pathsKey = paths.join('|').toLowerCase();
 
   useEffect(() => {
-    if (!subfolders || paths.length === 0) return;
+    if (!recursive || paths.length === 0) return;
     const id = ++reqId.current;
     const t = setTimeout(() => {
       countRaws(client, paths, true)
         .then((res) => {
-          if (reqId.current === id) setRecursive({ key: pathsKey, files: res.files });
+          if (reqId.current === id) setRecursiveTotal({ key: pathsKey, files: res.files });
         })
         .catch(() => {});
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathsKey, subfolders, client]);
+  }, [pathsKey, recursive, client]);
 
   if (selected.length === 0) {
     return <span className="font-mono text-[11.5px] text-faint">No folders selected</span>;
   }
-  const total = subfolders
-    ? recursive?.key === pathsKey
-      ? recursive.files
+  const total = recursive
+    ? recursiveTotal?.key === pathsKey
+      ? recursiveTotal.files
       : null
     : flatTotal;
+  const noun = asLibrary ? 'library folder' : 'folder';
   return (
     <span className="font-mono text-[11.5px] text-muted-foreground">
-      {selected.length} folder{selected.length === 1 ? '' : 's'} ·{' '}
+      {selected.length} {noun}
+      {selected.length === 1 ? '' : 's'} ·{' '}
       {total == null ? 'counting…' : `${total.toLocaleString()} RAW files`}
     </span>
   );
