@@ -64,7 +64,9 @@ export function esMoveActive(dir: 1 | -1) {
   do {
     i += dir;
   } while (i >= 0 && i < order.length && groups[CONTROL_GROUP[order[i]]] === false);
-  if (i >= 0 && i < order.length) setState({ activeControl: order[i] });
+  // Walking to a control reveals the full drawer (so the moving ring reads),
+  // exiting the heads-up +/- adjust.
+  if (i >= 0 && i < order.length) setState({ activeControl: order[i], keyAdjust: false });
 }
 
 interface Preview {
@@ -108,6 +110,12 @@ interface EditSessionState {
   // Reset/Cancel. Null when the picker is closed.
   wbPickBase: Params | null;
   cropping: boolean; // crop overlay active: loupe shows the uncropped frame
+  // Heads-up keyboard adjust: set while +/- is nudging the active control so
+  // Develop hides its chrome + drawer and floats a compact bottom readout of
+  // just that slider. Cleared by focusing/walking a control, a photo switch,
+  // or pointer activity — never by the +/- keydowns themselves, so repeated
+  // presses keep the UI hidden ("don't activate if hidden").
+  keyAdjust: boolean;
 }
 
 export const useEditSession = create<EditSessionState>(() => ({
@@ -123,6 +131,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   wbPicking: false,
   wbPickBase: null,
   cropping: false,
+  keyAdjust: false,
 }));
 
 // Preview renders are coalesced, not debounced: a render fires immediately
@@ -243,6 +252,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     wbPicking: false,
     wbPickBase: null,
     cropping: false,
+    keyAdjust: false,
   }));
   const params = await getEditParams(client, photoId).catch(() => null);
   if (useEditSession.getState().photoId !== photoId) return; // superseded
@@ -270,7 +280,16 @@ export function esSetActive(client: ApiClient, control: ControlId | null) {
   if (group && useUIStore.getState().editGroups[group] === false) {
     updateEditGroupOpen(client, group, true);
   }
-  setState({ activeControl: control });
+  // Focusing a control (hotkey letter, click, palette) shows the full drawer,
+  // ending any heads-up +/- adjust.
+  setState({ activeControl: control, keyAdjust: false });
+}
+
+// esSetKeyAdjust toggles the heads-up keyboard-adjust mode. The bottom slider
+// readout clears it on pointer activity so grabbing the mouse restores the
+// full chrome + drawer.
+export function esSetKeyAdjust(on: boolean) {
+  setState({ keyAdjust: on });
 }
 
 // esSetWBPicking opens/closes the WB eyedropper. Opening snapshots the current
@@ -531,6 +550,8 @@ export function esHistory(s: EditSessionState): { entries: HistorySnapshot[]; in
 export function esStep(client: ApiClient, control: ControlId, dir: 1 | -1, big = false) {
   const s = useEditSession.getState();
   if (!s.draft) return;
+  // A +/- nudge hides Develop's chrome/drawer and floats the compact readout.
+  if (!s.keyAdjust) setState({ keyAdjust: true });
   const spec = CONTROL_SPECS[control];
   let patch: Partial<Params>;
   if (spec.kind === 'numeric') {

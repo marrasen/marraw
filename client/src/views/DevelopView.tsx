@@ -7,6 +7,7 @@ import { GapControl } from '@/components/cinema/GapControl';
 import { MiniCycle } from '@/components/cinema/MiniCycle';
 import { MiniSlider } from '@/components/cinema/MiniSlider';
 import { ScrubberDeck } from '@/components/cinema/ScrubberDeck';
+import { SliderHUD } from '@/components/cinema/SliderHUD';
 import { ZoomCluster } from '@/components/cinema/ZoomCluster';
 import { EditPanel } from '@/components/EditPanel';
 import { DIALS } from '@/lib/dials';
@@ -28,6 +29,8 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
   const gapMinutes = useUIStore((s) => s.gapMinutes);
   const cropping = useEditSession((s) => s.cropping);
   const wbPicking = useEditSession((s) => s.wbPicking);
+  const keyAdjust = useEditSession((s) => s.keyAdjust);
+  const activeControl = useEditSession((s) => s.activeControl);
   const idle = useIdle();
   const [scale, setScale] = useState(1);
 
@@ -42,6 +45,12 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
   }
 
   const overlayActive = cropping || wbPicking;
+  // Nudging a focused control with +/- floats a compact bottom readout and
+  // hides the drawer + chrome (which the idle timer also does). Guarded on an
+  // active control so a stale keyAdjust can never hide the UI with nothing to
+  // show.
+  const adjusting = keyAdjust && activeControl != null;
+  const chromeHidden = idle || adjusting;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -54,7 +63,7 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
       />
       {!overlayActive && (
         <CinemaHUD
-          hidden={idle}
+          hidden={chromeHidden}
           status={
             <span className="font-mono text-[11px] text-[#aab0ff]">
               {photo.fileName.split(/[\\/]/).pop()}
@@ -68,13 +77,17 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
           }
         />
       )}
-      {/* Always-visible full-stack drawer (Develop / Presets / Info tabs live
-          inside EditPanel). Stays MOUNTED through crop/eyedropper overlays (it
-          owns the edit-session lifecycle) — only slid out of the way. */}
+      {/* Full-stack drawer (Develop / Presets / Info tabs live inside
+          EditPanel). Stays MOUNTED through crop/eyedropper overlays (it owns
+          the edit-session lifecycle) and through the idle fade — only slid out
+          of the way or faded, never unmounted. */}
       <div
         className={cn(
-          'glass absolute top-16 right-4 bottom-4 z-30 flex w-[352px] flex-col overflow-hidden rounded-[13px] transition-transform duration-200',
+          'glass absolute top-16 right-4 bottom-4 z-30 flex w-[352px] flex-col overflow-hidden rounded-[13px] transition-[transform,opacity] duration-200',
           overlayActive && 'translate-x-[calc(100%+32px)]',
+          // Fade out with the rest of the chrome when idle, and while a +/-
+          // adjust floats the compact bottom readout instead.
+          chromeHidden && 'pointer-events-none opacity-0',
         )}
       >
         <div className="min-h-0 flex-1">
@@ -83,8 +96,9 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
       </div>
       {!overlayActive && (
         <>
-          <QuickDock hidden={idle} shifted zoom={<ZoomCluster scale={scale} />} />
-          <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} shifted />
+          <QuickDock hidden={chromeHidden} shifted zoom={<ZoomCluster scale={scale} />} />
+          <ScrubberDeck groups={groups} focusId={photo.id} hidden={chromeHidden} shifted />
+          {adjusting && <SliderHUD />}
         </>
       )}
     </div>
