@@ -1,194 +1,203 @@
 # marraw
 
-Fast RAW photo organizing and editing for Windows. Go + LibRaw backend,
-React/TypeScript client, [aprot](https://github.com/marrasen/aprot) RPC,
-shipped as an Electron app.
+Fast RAW photo culling and editing. Built for photographers who shoot a lot,
+keep a little, and want the boring part to be over quickly.
 
-## How it works
+marraw is a desktop app: a Go daemon that talks to LibRaw does the pixel work,
+a React front-end does the rest, and Electron holds it together.
 
-- **marrawd** (Go daemon) serves the aprot API over WebSocket and pyramid
-  preview images over HTTP on one localhost port. LibRaw is statically
-  linked via cgo; a worker pool (one LibRaw handle per core) feeds a
-  priority queue (interactive > visible > prefetch > background).
-- **Pyramid cache**: every photo gets JPEG renditions at 256/512/1024/2048
-  px, keyed by file identity (`sha256(path|size|mtime)`) and edit state
-  hash. Grid thumbs come from the RAW's embedded JPEG (no decode, ~ms);
-  larger levels from a `half_size` LibRaw decode. URLs are
-  content-addressed, so the browser cache is always valid. Past 2048 the
-  loupe switches to full-resolution 1024 px tiles (one decode renders the
-  whole set, tiles JPEG-encode in parallel): the client downloads and
-  decodes only the visible crop over an upscaled-2048 underlay, and the
-  neighboring photos' tile sets pre-render while browsing at 1:1.
-- **Culling** is keyboard-first: arrows navigate, `1–5` rate, `P` pick,
-  `X` exclude, `U` unflag, `Enter` loupe, `Ctrl+E` export. Rating changes
-  broadcast granular patch events — no list re-fetch. The loupe zooms with
-  `+`/`-`/`Z`/Ctrl+wheel or the zoom toolbar, and keeps zoom + pan position
-  across arrow navigation so a burst series can be compared at the same
-  crop. Grid thumbnail size has a slider in the filter bar.
-- **Adaptive base look**: LibRaw output is flat next to camera JPEGs
-  (manufacturer tone curves are proprietary and adaptive, e.g. Sony DRO).
-  On the first RAW render of each photo, marraw calibrates a per-photo tone
-  lift by matching mean luminance against the camera's own embedded JPEG,
-  stores it (`photos.look_gamma`), and applies it consistently to previews,
-  edit renders, and JPEG exports (TIFF16 stays neutral as a flat master).
-  Bump `renderVersion` (Go) + `RENDER_VERSION` (TS) together when the
-  render pipeline changes — image URLs are cached as immutable.
-- **Editing** is non-destructive: LibRaw params (exposure, WB — as-shot /
-  auto / absolute Kelvin / picked, highlight recovery, brightness, NR,
-  demosaic choice, chromatic-aberration correction, …) plus look-stage
-  adjustments computed after LibRaw (contrast, whites/blacks,
-  shadows/highlights, saturation, vibrance, split toning, vignette), and a
-  post-decode geometry stage (crop + straighten, edited with an interactive
-  loupe overlay), all stored as JSON in SQLite. While a slider drags, the
-  backend re-processes the photo's already-unpacked handle at half size
-  (~400 ms warm on 42 MP files) and the loupe swaps in the new rendition
-  flicker-free. Multi-select applies relative adjustments ("+0.5 EV on 10
-  photos"); copy/paste edit settings with Ctrl+C/V.
-- **Export** saturates all cores via an errgroup pool, full-quality AHD
-  demosaic, JPEG or 16-bit TIFF, with streaming progress.
+> **Status: early. Windows only.**
+> Version 0.1 is usable daily but the feature set is deliberately narrow — read
+> [What marraw does *not* do](#what-marraw-does-not-do) before you invest time
+> in it. Nothing is stopping a macOS/Linux build except work; see
+> [DEVELOPER.md](DEVELOPER.md#porting-to-macos-and-linux).
 
-## Development setup
+---
 
-Prereqs: Go 1.26+, Node 24+, MinGW-w64 gcc in PATH.
+## Install
 
-```powershell
-npm run setup:libraw   # download + build static libraw.a (one-time)
-npm install
-npm --prefix client install
-npm run gen            # aprot codegen -> client/src/api
-npm run dev            # marrawd on :8483 + Vite on :5173 (browser dev)
-npm run dev:electron   # Electron shell attached to the dev servers
-```
+Grab `marraw-Setup-<version>.exe` from the
+[latest release](https://github.com/marrasen/marraw/releases/latest).
 
-Backend smoke test (needs a folder of RAW files and a running dev server):
+The installer is not code-signed yet, so Windows SmartScreen will warn you once
+— **More info → Run anyway**. After that the app updates itself: it checks
+GitHub on launch, downloads new versions in the background, and installs them
+when you quit.
 
-```powershell
-node scripts/smoke.mjs "D:\Photos\some-shoot"
-```
+**Requirements:** Windows 10 or 11, 64-bit. No LibRaw DLLs, no runtime, no
+Python. One installer.
 
-Go tests (the libraw wrapper tests need real RAW files; set
-`MARRAW_TEST_RAW_DIR`):
+---
 
-```powershell
-go test ./internal/...
-```
+## What makes it different
 
-## Packaging
+**It is fast, and it stays fast at 1:1.**
+Grid thumbnails come straight from the RAW's embedded JPEG — no decode, so a
+folder of 1,500 frames is browsable immediately. Every photo is cached as a
+pyramid of JPEG renditions (256 → 2048 px). Zoom past 2048 and marraw switches
+to full-resolution tiles, downloading and decoding only the crop you are
+actually looking at, over an upscaled underlay, while the *next* photo's tiles
+pre-render in the background. Comparing a burst at 100% doesn't stutter.
 
-```powershell
-npm run dist           # -> dist/marraw-Setup-<version>.exe
-```
+**Culling is keyboard-first, and the loupe remembers where you were.**
+Arrows navigate, `1`–`5` rate, `P` picks, `X` excludes, `Enter` goes deeper.
+Zoom and pan position persist across arrow navigation, so stepping through a
+burst series compares the *same* crop of every frame — which is the whole point
+of pixel-peeping a burst.
 
-The NSIS installer bundles `marrawd.exe` (LibRaw statically linked — no
-DLLs) as an extra resource. The Electron main process spawns it with a
-random port + auth token, waits for the `MARRAW_READY port=N` handshake,
-and kills it on quit (the daemon also exits if its stdin closes, so a
-crashed shell never leaves an orphan).
+**RAWs don't look flat out of the box.**
+LibRaw's default output is noticeably duller than your camera's JPEG, because
+manufacturer tone curves are proprietary and adaptive (Sony DRO, and friends).
+On a photo's first render marraw measures the camera's own embedded JPEG,
+calibrates a per-photo tone lift to match its mean luminance, and applies that
+consistently everywhere — previews, edits, exports. You start from something
+that looks like what you saw on the back of the camera.
 
-## Repo layout
+**Editing is non-destructive and responsive.**
+Drag a slider and the backend re-processes the already-unpacked RAW handle at
+half size (~400 ms warm on 42 MP files); transient drags skip re-demosaicing
+entirely. Every photo carries its own undo/redo stack and a clickable history
+timeline.
 
-```
-cmd/marrawd/        daemon entrypoint (flags: --port, --dev, --data-dir)
-internal/libraw/    cgo wrapper (the only package importing "C")
-internal/decode/    priority worker pool + open-handle LRU for editing
-internal/pyramid/   preview cache: generation, keying, size-cap janitor
-internal/store/     SQLite (modernc, WAL): folders, photos, ratings, edits
-internal/scan/      folder scan + background metadata/thumb backfill
-internal/edit/      edit params <-> LibRaw params mapping + hashing
-internal/api/       aprot handler groups (Library, Edits, Export)
-internal/imghttp/   GET /img/{id}/{level}?v=&e= endpoint
-internal/export/    parallel full-quality export
-tools/generate/     aprot TypeScript codegen
-client/             Vite + React + TS + Tailwind + shadcn/ui
-electron/           main.cjs (spawn/handshake), preload.cjs
-scripts/            setup-libraw.ps1, smoke.mjs
-```
+**It does not hold your photos hostage.**
+Edits, ratings and flags are written to a `.marraw.json` sidecar next to each
+RAW (toggleable). Delete a photo and it goes to the Recycle Bin, not a void.
+There is no catalog to import into and nothing to migrate out of.
 
-## Known gaps / next steps
+**Batch work is first-class.**
+Select ten frames and apply *relative* adjustments — "+0.5 EV on all of these"
+— rather than stamping one absolute value over ten different exposures. Copy
+and paste edit settings with `Ctrl+C`/`Ctrl+V`. `Ctrl+U` auto-tones; `Ctrl+1`–`9`
+apply your own saved creative auto-presets.
 
-- XMP sidecar export for Lightroom/darktable interop.
-- Coarse 90°/180° rotation and flip (crop + straighten shipped; coarse
-  rotation still needs care around the orientation-swap in the tile grid).
-- Spatial adjustments: sharpening/clarity (unsharp mask), HSL color mixer,
-  dehaze, lens-profile corrections, local masks.
-- aprot wishlist that fell out of this project — all shipped in aprot
-  v0.47.0 and adopted here:
-  [delta/patch subscriptions](https://github.com/marrasen/aprot/issues/237)
-  (photo rating/flag/edit patches),
-  [binary payloads](https://github.com/marrasen/aprot/issues/238)
-  (edit previews ride the WebSocket as JPEG blobs),
-  [stream chunking](https://github.com/marrasen/aprot/issues/239)
-  (enabled server-wide),
-  [fixed-size array codegen](https://github.com/marrasen/aprot/issues/240)
-  (`wbMul` is a typed tuple).
+**`Ctrl+K` jumps to anything** — any mode, any panel, any single develop
+control, any preset.
 
-## Missing for professional-grade editing
+---
 
-The features below are the gap between marraw's current global-adjustment
-pipeline and what a Lightroom/Capture One-class editor offers. They are
-listed roughly in dependency order — local masking underpins most of the
-rest.
+## The workspace
 
-### Local adjustments & masking
+| Mode | For |
+| --- | --- |
+| **Library** | Virtualized grid, adjustable thumbnail size, time-gap grouping, multi-select, rating/flag badges. |
+| **Cull** | Full-bleed cinema loupe, scrubber deck, pick/reject bar, contact sheet (`G`). |
+| **Develop** | Darkroom canvas, pinnable panel, floating quick-dials you choose, crop and white-balance overlays. |
+| **Export** | JPEG or 16-bit TIFF, batched across every core. |
 
-- **Mask engine**: a per-photo stack of masks, each carrying its own copy
-  of the look-stage adjustments (exposure, contrast, WB, saturation, …)
-  blended over the base render. Stored as JSON edit state, evaluated after
-  the global look stage, previewed at half-size like the global sliders.
-- **Radial and linear gradients**: elliptical and graduated masks with
-  feather, invert, and rotation — the workhorses for skies, vignettes, and
-  subject pop.
-- **Brush masks**: freehand paint/erase with flow, size, and feather,
-  stored as a resolution-independent stroke path (re-rasterized per preview
-  level) rather than a baked bitmap.
-- **AI / range masks**: subject, sky, and background auto-selection, plus
-  luminance/color range masks and intersect/subtract combination so a
-  gradient can be constrained to just the sky.
+### Editing tools
 
-### Tone & color depth
+- **Crop & straighten** — interactive overlay, ±15° straighten.
+- **Tone** — exposure, preserve highlights, brightness, gamma, shadow slope,
+  contrast, whites, blacks, shadows, highlights.
+- **Presence** — clarity, texture, dehaze.
+- **White balance** — as shot / auto / Kelvin, temperature, tint, and an
+  eyedropper (`W`).
+- **Color** — saturation, vibrance, split toning (shadow + highlight tint).
+- **Effects** — creative vignette.
+- **Detail** — sharpen, highlight recovery (clip/unclip/blend/rebuild), noise
+  reduction, FBDD denoise, median passes, demosaic algorithm (VNG/PPG/AHD/DHT),
+  manual chromatic-aberration correction.
 
-- **HDR editing and output**: decode and edit in a scene-referred, >1.0
-  headroom working space; gain-map (ISO 21496-1) or PQ/HLG export, and an
-  HDR-capable preview path so highlights are graded rather than clipped.
-- **Wide-gamut pipeline**: a color-managed working space (e.g. linear
-  Rec.2020 / ACEScg) with display transforms, replacing the current
-  sRGB-ish look math, so gamut-clipping and out-of-gamut handling are
-  correct.
-- **Tone curve and per-channel curves**: parametric + point RGB and
-  per-channel R/G/B curves, the tool most conspicuously absent from the
-  global look stage.
-- **HSL / color grading**: eight-band HSL mixer and shadow/midtone/highlight
-  color wheels (the split-toning already present, generalized).
+Every slider has a letter shortcut: press it, then `+`/`-` to adjust
+(`Shift` for a big step), `Esc` to release. Press `?` for the full list.
 
-### Detail, optics & geometry
+### Export
 
-- **Detail**: capture sharpening with masking, and modern denoise
-  (luminance + color, ideally ML-assisted) — currently only LibRaw's NR is
-  exposed.
-- **Spatial look tools**: clarity/texture/dehaze (local-contrast at
-  multiple radii), already flagged above under global gaps.
-- **Lens corrections**: profile-based distortion, vignetting, and
-  chromatic-aberration removal (LensFun/embedded profiles), plus manual
-  defringe; only LibRaw's CA toggle exists today.
-- **Geometry**: perspective/keystone correction and upright, coarse
-  90°/180° rotation + flip (the crop + straighten stage is shipped; see the
-  orientation-swap caveat above).
-- **Healing & clone**: spot removal / content-aware heal for dust and
-  blemishes.
+JPEG (quality 1–100) or 16-bit TIFF. Optional long-edge resize, sRGB /
+Adobe RGB / ProPhoto with an embedded ICC profile, and output sharpening tuned
+for screen, matte or glossy paper. Runs in the background across all cores at
+full AHD demosaic quality.
 
-### Workflow & interop
+### Supported files
 
-- **Secondary display**: a Lightroom-style second window pinned to another
-  monitor (loupe/compare/grid) for tethered or dual-screen culling —
-  distinct from the multi-window shell that already ships.
-- **XMP sidecar + catalog interop**: read/write XMP so edits round-trip
-  with Lightroom/darktable/Capture One (already noted under known gaps).
-- **Presets, profiles & snapshots**: saveable develop presets, camera/
-  creative profiles (DCP), edit history with named snapshots, and
-  before/after compare.
-- **Panorama & HDR merge**: multi-frame stitch and bracket merge producing a
-  new editable RAW/DNG.
-- **Watermarking**: text and image (logo/PNG) watermarks applied at export
-  with position, scale, opacity, and inset controls, stored as a reusable
-  preset and composited in the export pipeline.
-- **Tethered capture** and **soft-proofing** for print/output profiles.
+Sony `.arw` `.sr2` `.srf` · Canon `.cr2` `.cr3` `.crw` · Nikon `.nef` `.nrw` ·
+Fuji `.raf` · Olympus `.orf` · Panasonic `.rw2` · Pentax `.pef` ·
+Samsung `.srw` · Sigma `.x3f` · Hasselblad `.3fr` `.fff` · Phase One `.iiq` ·
+Adobe/various `.dng` · plus `.erf` `.mef` `.mos` `.mrw` `.rwl`
+
+---
+
+## What marraw does *not* do
+
+Read this list before you install. These are absences, not bugs — if one of
+them is load-bearing for your work, marraw is not ready for you yet.
+
+**Editing**
+
+- ❌ **No local adjustments of any kind.** No brush, no radial or graduated
+  filters, no AI subject/sky masks. Every adjustment is global to the frame.
+  This is the single biggest gap.
+- ❌ **No tone curve.** Contrast and the whites/blacks/shadows/highlights
+  sliders drive a fixed parametric curve. There is no point curve and no
+  per-channel R/G/B curves.
+- ❌ **No HSL / color mixer.** Only global saturation, vibrance and split
+  toning.
+- ❌ **No healing, cloning or spot removal.** Dust gets fixed elsewhere.
+- ❌ **No lens profile corrections.** No distortion or vignetting profiles, no
+  automatic defringe — only a manual CA slider and a creative vignette.
+- ❌ **No modern denoise.** You get LibRaw's wavelet/FBDD/median, not
+  ML-assisted luminance and color NR.
+- ❌ **No 90°/180° rotation or flip.** Straighten works; coarse rotation does
+  not exist yet.
+- ❌ **No HDR editing or output**, and no wide-gamut working space. The look
+  math is sRGB-ish and highlights clip rather than grade.
+
+**Library**
+
+- ❌ **No XMP interop.** Sidecars are marraw's own `.marraw.json`. Edits will
+  **not** round-trip with Lightroom, darktable or Capture One.
+- ❌ **No photo search, keywords, or collections.** You filter by rating and
+  flag within a folder. That's it.
+- ❌ **No sort control.** Photos are always ordered by filename.
+- ❌ **No presets library** beyond auto-presets, and no DCP camera profiles.
+
+**Export & output**
+
+- ⚠️ **16-bit TIFF export is a flat, uncropped master.** It deliberately
+  ignores your look adjustments *and your crop* — it is a neutral hand-off to
+  another editor, not a rendering of what you see on screen. If you want your
+  edit, export JPEG.
+- ❌ **No custom filename templates**, sequence numbering or metadata writing.
+- ❌ **No PNG, WebP or DNG output**, no watermarking.
+
+**Platform & workflow**
+
+- ❌ **Windows only.** No macOS or Linux build exists yet.
+- ❌ **Not code-signed.** Expect a SmartScreen warning on first install.
+- ❌ **No second-display window**, no tethered capture, no soft-proofing.
+- ❌ **No panorama stitch or HDR bracket merge.**
+
+Multi-window (several windows, one library) *does* work. So do light/dark
+themes, per-photo undo/redo, and a cache with a configurable size cap.
+
+---
+
+## Where your data lives
+
+- **Catalog** — SQLite under `%APPDATA%\marraw`.
+- **Preview cache** — same place, with a size cap you set in Settings.
+- **Your edits** — in the catalog *and* in a `.marraw.json` next to each RAW,
+  unless you turn sidecars off.
+
+Your RAW files are never modified or moved.
+
+---
+
+## Contributing
+
+Want to build this yourself or contribute? Everything is in
+**[DEVELOPER.md](DEVELOPER.md)** — architecture, setup, tests, packaging, the
+release process, and a worked plan for the macOS/Linux port.
+
+Issues and pull requests are welcome, especially for the port and for anything
+on the missing list above.
+
+---
+
+## License
+
+marraw is [MIT licensed](LICENSE).
+
+It statically links **LibRaw**, used here under its **CDDL-1.0** option, and
+ships inside **Electron** (MIT). Full attribution and source-availability
+notices are in **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**.

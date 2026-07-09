@@ -1,0 +1,181 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # Build an installer without publishing, to check the pipeline is healthy.
+  workflow_dispatch:
+
+# Needed to create the GitHub Release and upload assets to it.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  LIBRAW_VERSION: '0.22.1'
+  NODE_VERSION: '24'
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A tag whose version disagrees with package.json would publish an
+      # installer that electron-updater's latest.yml never points at.
+      - name: Check tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}' -replace '^v', ''
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($tag -ne $pkg) {
+            throw "tag v$tag does not match package.json version $pkg"
+          }
+          Write-Host "releasing $pkg"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      # cgo and the LibRaw build both need MinGW-w64. The runner image ships
+      # one, but its location has moved between images -- probe, then fall back
+      # to installing it. Entries written to GITHUB_PATH are *prepended*, so
+      # this g++ wins over Strawberry Perl's.
+      - name: Locate MinGW-w64
+        shell: pwsh
+        run: |
+          $probe = @(
+            'C:\msys64\ucrt64\bin'
+            'C:\msys64\mingw64\bin'
+            'C:\mingw64\bin'
+            'C:\ProgramData\mingw64\mingw64\bin'
+          )
+          $bin = $probe | Where-Object { Test-Path (Join-Path $_ 'g++.exe') } | Select-Object -First 1
+          if (-not $bin) {
+            Write-Host 'no MinGW on the image; installing'
+            choco install mingw --no-progress --yes
+            $bin = @(
+              'C:\ProgramData\mingw64\mingw64\bin'
+              'C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin'
+            ) | Where-Object { Test-Path (Join-Path $_ 'g++.exe') } | Select-Object -First 1
+          }
+          if (-not $bin) { throw 'MinGW-w64 g++ not found' }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          Write-Host "using $bin"
+
+      - name: Verify toolchain
+        shell: pwsh
+        run: |
+          g++ --version
+          ar --version | Select-Object -First 1
+          go env CC CGO_ENABLED
+
+      # libraw.a takes several minutes to compile. setup-libraw.ps1 exits early
+      # when the artifact is already present, so a cache hit skips the build.
+      - name: Cache LibRaw
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/libraw
+            third_party/LibRaw-${{ env.LIBRAW_VERSION }}.tar.gz
+          key: libraw-${{ runner.os }}-${{ env.LIBRAW_VERSION }}-${{ hashFiles('scripts/setup-libraw.ps1') }}
+
+      - name: Build LibRaw
+        run: npm run setup:libraw
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix client ci
+
+      - name: Generate API client
+        run: npm run gen
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Vet daemon
+        run: go build ./...
+
+      # Not a tag: prove the installer builds, keep it as an artifact.
+      - name: Build installer
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: npm run dist
+
+      # A tag: build and upload to a *draft* GitHub Release. Nothing reaches
+      # users -- and electron-updater sees nothing -- until you publish it.
+      - name: Build and publish draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist:publish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: marraw-windows
+          path: |
+            dist/*.exe
+            dist/*.yml
+          if-no-files-found: error
+
+# ---------------------------------------------------------------------------
+# macOS and Linux are scaffolded but not enabled: the cgo layer is currently
+# Windows-only (syscall.UTF16PtrFromString, libraw_open_wfile, -lws2_32), the
+# vendored libraw.a is a MinGW artifact, and electron/main.cjs hardcodes
+# marrawd.exe. cgo also rules out cross-compiling, so each platform needs its
+# own native runner.
+#
+# See DEVELOPER.md -> "Porting to macOS and Linux" for the six-step checklist.
+# Once that lands, uncomment these and add mac/linux targets to the
+# electron-builder `build` block in package.json.
+#
+# NOTE: macOS auto-update additionally requires a Developer ID signature --
+# Squirrel.Mac refuses to update an unsigned bundle. An unsigned .dmg installs
+# fine, it just never self-updates.
+# ---------------------------------------------------------------------------
+#
+#  macos:
+#    runs-on: macos-14        # arm64; add macos-13 to the matrix for x64
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/setup-go@v5
+#        with: { go-version-file: go.mod, cache: true }
+#      - uses: actions/setup-node@v4
+#        with: { node-version: '24', cache: npm }
+#      - run: ./scripts/setup-libraw.sh     # TODO: does not exist yet
+#      - run: npm ci && npm --prefix client ci
+#      - run: npm run gen
+#      - run: npm run dist:publish -- --mac
+#        env:
+#          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#          # CSC_LINK / CSC_KEY_PASSWORD / APPLE_ID / APPLE_TEAM_ID
+#          # / APPLE_APP_SPECIFIC_PASSWORD once signing is set up
+#
+#  linux:
+#    runs-on: ubuntu-latest
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: actions/setup-go@v5
+#        with: { go-version-file: go.mod, cache: true }
+#      - uses: actions/setup-node@v4
+#        with: { node-version: '24', cache: npm }
+#      - run: sudo apt-get update && sudo apt-get install -y build-essential
+#      - run: ./scripts/setup-libraw.sh     # TODO: does not exist yet
+#      - run: npm ci && npm --prefix client ci
+#      - run: npm run gen
+#      - run: npm run dist:publish -- --linux    # AppImage self-updates
+#        env:
+#          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

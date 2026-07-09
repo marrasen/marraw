@@ -46,6 +46,34 @@ if (process.platform === 'darwin') {
 let child = null;
 let quitting = false;
 
+// Check GitHub Releases on launch, download a newer version in the background,
+// swap it in on quit. Draft releases are invisible here, so an unpublished
+// draft never reaches anyone. Never fatal: an unreachable update server must
+// not stop the app from starting.
+function initAutoUpdater() {
+  // Dev/preview run from the repo with no update metadata; UITEST owns its
+  // process and must not race a background download.
+  if (!app.isPackaged || UITEST) return;
+  // Squirrel.Mac refuses to update a bundle without a valid signature, so
+  // there is nothing to start until marraw has an Apple Developer ID.
+  if (process.platform === 'darwin') return;
+
+  let autoUpdater;
+  try {
+    ({ autoUpdater } = require('electron-updater'));
+  } catch (err) {
+    console.error(`[updater] unavailable: ${err.message}`);
+    return;
+  }
+  autoUpdater.on('error', (err) => console.error(`[updater] ${err?.message ?? err}`));
+  autoUpdater.on('update-available', (i) => console.log(`[updater] ${i.version} available`));
+  autoUpdater.on('update-not-available', () => console.log('[updater] up to date'));
+  autoUpdater.on('update-downloaded', (i) => console.log(`[updater] ${i.version} installs on quit`));
+  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+    console.error(`[updater] check failed: ${err?.message ?? err}`);
+  });
+}
+
 async function startDaemon() {
   // Dev convenience: attach to an already-running `marrawd --dev`.
   if (DEV && process.env.MARRAW_PORT) {
@@ -266,7 +294,10 @@ if (!gotLock) {
         : undefined;
     void createWindow({ openFolder: folder });
   });
-  app.whenReady().then(() => createWindow({ initial: true }));
+  app.whenReady().then(() => {
+    void createWindow({ initial: true });
+    initAutoUpdater();
+  });
 }
 app.on('before-quit', () => {
   quitting = true;

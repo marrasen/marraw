@@ -21,7 +21,11 @@
     "build:server": "go build -ldflags \"-s -w\" -o build/marrawd.exe ./cmd/marrawd",
     "build:client": "npm --prefix client run build",
     "typecheck": "npm --prefix client run typecheck",
-    "dist": "npm run gen && npm run build:client && npm run build:server && electron-builder --win"
+    "dist": "npm run gen && npm run build:client && npm run build:server && electron-builder --win --publish never",
+    "dist:publish": "npm run gen && npm run build:client && npm run build:server && electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
@@ -35,6 +39,14 @@
     "directories": {
       "output": "dist"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "marrasen",
+        "repo": "marraw",
+        "releaseType": "draft"
+      }
+    ],
     "files": [
       "electron/**",
       "client/dist/**"
