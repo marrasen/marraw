@@ -85,6 +85,19 @@ npm --prefix client install
 npm run gen            # aprot codegen -> client/src/api
 ```
 
+`setup:libraw` compiles with `ForEach-Object -Parallel` and so needs
+PowerShell 7 (`pwsh`), not the Windows PowerShell 5.1 that `powershell` resolves
+to.
+
+marraw builds against the published `aprot` module in `go.mod`. To develop the
+two side by side, create a `go.work` — it is deliberately untracked, because a
+committed one would hardcode your checkout path and, worse, silently mask the
+case where marraw uses `aprot` code that has not been released yet:
+
+```powershell
+go work init . ..\aprot
+```
+
 ## Running
 
 ```powershell
