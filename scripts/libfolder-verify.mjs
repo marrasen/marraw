@@ -66,9 +66,17 @@ await new Promise((resolve, reject) => {
   ws.onopen = resolve;
   ws.onerror = () => reject(new Error('cannot connect to marrawd :8483'));
 });
+// A second root standing in for an external drive that is not plugged in: the
+// path simply does not exist yet. The driver creates it mid-run.
+const offline = `${parent}-offline`;
+
 const before = await call('Library.GetLibraryRoots', []);
 await call('Library.SetLibraryRoots', [
-  [...before, { path: parent, alias: '', includeSubfolders: false, photoCount: 0, isParent: true }],
+  [
+    ...before,
+    { path: parent, alias: '', includeSubfolders: false, photoCount: 0, isParent: true },
+    { path: offline, alias: '', includeSubfolders: false, photoCount: 0, isParent: false },
+  ],
 ]);
 
 // ---- launch the app --------------------------------------------------------
@@ -113,6 +121,13 @@ setTimeout(() => {
   setTimeout(() => {
     copyFileSync(join(FOLDER, raws[0]), join(party, 'P1.ARW'));
     console.log('[driver] copied P1.ARW');
+    // "Plug the drive back in." Nothing watches a path that does not exist, so
+    // only the availability poller can notice this.
+    setTimeout(() => {
+      mkdirSync(offline);
+      copyFileSync(join(FOLDER, raws[1]), join(offline, 'D1.ARW'));
+      console.log(`[driver] reconnected ${offline}`);
+    }, 3000);
   }, 5000);
 }, 9000);
 
@@ -124,12 +139,14 @@ try {
   await call('Library.SetLibraryRoots', [before]);
 } catch {}
 ws.close();
-for (let i = 0; i < 20; i++) {
-  try {
-    rmSync(parent, { recursive: true, force: true });
-    break;
-  } catch {
-    await new Promise((r) => setTimeout(r, 500)); // LibRaw may still hold files open
+for (const dir of [parent, offline]) {
+  for (let i = 0; i < 20; i++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      break;
+    } catch {
+      await new Promise((r) => setTimeout(r, 500)); // LibRaw may still hold files open
+    }
   }
 }
 

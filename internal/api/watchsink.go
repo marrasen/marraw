@@ -9,17 +9,27 @@ import (
 	"github.com/marrasen/marraw/internal/watch"
 )
 
-// StartWatcher wires the filesystem watcher to the library and seeds it with
-// the stored managed parents. A watcher that cannot start is not fatal: every
-// folder still has a manual rescan.
+// StartWatcher wires the filesystem watcher to the library, seeds it with the
+// stored managed parents, and starts the availability poller that notices an
+// external drive coming or going. A watcher that cannot start is not fatal:
+// every folder still has a manual rescan.
+//
+// The poller starts either way — offline detection must work even without
+// watches, and it is what re-attaches them when storage reappears.
 func StartWatcher(ctx context.Context, lib *Library) (*watch.Watcher, error) {
-	sink := &watchSink{lib: lib, bg: context.WithoutCancel(ctx)}
+	bg := context.WithoutCancel(ctx)
+	lib.deps.Avail = newAvailability()
+
+	sink := &watchSink{lib: lib, bg: bg}
 	w, err := watch.New(sink, watch.DefaultOptions(scan.IsRawFile, scan.SkipDirName))
 	if err != nil {
+		go lib.pollRootAvailability(ctx)
 		return nil, err
 	}
 	lib.deps.Watch = w
-	lib.syncWatchedParents(lib.libraryRoots(ctx))
+	// The first tick seeds the cache and calls syncWatchedParents, so offline
+	// parents never get a watch attempt.
+	go lib.pollRootAvailability(ctx)
 	return w, nil
 }
 

@@ -34,6 +34,9 @@ type Deps struct {
 	// zero-value Deps is used for TypeScript generation, and a daemon whose
 	// watch handle failed to open still works through manual rescans.
 	Watch *watch.Watcher
+	// Avail caches which roots' storage is currently reachable. Nil until the
+	// availability poller starts; rootOnline falls back to a live stat.
+	Avail *availability
 
 	mu     sync.RWMutex
 	server *aprot.Server

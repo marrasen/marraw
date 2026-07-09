@@ -104,6 +104,11 @@ export interface RenameResult {
     path: string;
 }
 
+export interface RootStatus {
+    path: string;
+    online: boolean;
+}
+
 export interface Shoot {
     path: string;
     name: string;
@@ -174,6 +179,19 @@ getLibraryRoots.method = 'Library.GetLibraryRoots' as const;
 
 export function subscribeGetLibraryRoots(client: ApiClient, callback: (data: LibraryRoot[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<LibraryRoot[]>('Library.GetLibraryRoots', [], callback, onError, options);
+}
+
+
+export function getRootStatus(client: ApiClient, options?: RequestOptions): Promise<RootStatus[]> {
+    return client.request<RootStatus[]>('Library.GetRootStatus', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+getRootStatus.method = 'Library.GetRootStatus' as const;
+
+export function subscribeGetRootStatus(client: ApiClient, callback: (data: RootStatus[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<RootStatus[]>('Library.GetRootStatus', [], callback, onError, options);
 }
 
 
@@ -434,6 +452,20 @@ export function useGetLibraryRoots(options?: UseQueryOptions<LibraryRoot[]>): Us
         [],
     );
     return useQuery(wrappedFn, { ...options, _subscribe: { method: 'Library.GetLibraryRoots', params: [] } });
+}
+
+/**
+ * Subscribes to `Library.GetRootStatus` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useGetRootStatus(options?: UseQueryOptions<RootStatus[]>): UseQueryResult<RootStatus[]> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => getRootStatus(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'Library.GetRootStatus', params: [] } });
 }
 
 /**

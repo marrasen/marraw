@@ -53,6 +53,9 @@ func (l *Library) SetLibraryRoots(ctx context.Context, roots []LibraryRoot) erro
 		return err
 	}
 	aprot.TriggerRefresh(ctx, libraryRootsKey)
+	// A newly added root has no cached reachability yet; GetRootStatus stats it
+	// on demand, and the poller adopts it on its next tick.
+	aprot.TriggerRefresh(ctx, rootStatusKey)
 	l.syncWatchedParents(roots)
 	for _, r := range roots {
 		if r.IsParent {
@@ -63,14 +66,16 @@ func (l *Library) SetLibraryRoots(ctx context.Context, roots []LibraryRoot) erro
 }
 
 // syncWatchedParents keeps the filesystem watcher's parent set in step with the
-// stored roots.
+// stored roots. Offline parents are left out: a directory that does not exist
+// cannot be watched, and retrying would only log. The availability poller calls
+// this again when the storage reappears.
 func (l *Library) syncWatchedParents(roots []LibraryRoot) {
 	if l.deps.Watch == nil {
 		return
 	}
 	var parents []string
 	for _, r := range roots {
-		if r.IsParent {
+		if r.IsParent && l.rootOnline(r.Path) {
 			parents = append(parents, r.Path)
 		}
 	}
@@ -121,6 +126,13 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 	aprot.RegisterRefreshTrigger(ctx, shootsKey(parentPath))
 
 	parent := filepath.Clean(parentPath)
+	// A disconnected drive is a normal state, not an error: the rail renders the
+	// parent with an Offline badge and no children, and picks them up again when
+	// the storage reappears. Only a folder that exists but cannot be read is a
+	// real failure worth surfacing.
+	if !l.rootOnline(parent) {
+		return []Shoot{}, nil
+	}
 	dirents, err := os.ReadDir(parent)
 	if err != nil {
 		return nil, aprot.ErrInvalidParams(fmt.Sprintf("cannot read %s: %v", parent, err))

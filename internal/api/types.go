@@ -153,6 +153,16 @@ type LibraryRoot struct {
 	ExcludedChildren []string `json:"excludedChildren,omitempty"`
 }
 
+// RootStatus is the live reachability of one stored root. It is served apart
+// from LibraryRoot on purpose: that struct round-trips through SetLibraryRoots,
+// so a derived field would be written back into the stored config.
+type RootStatus struct {
+	Path string `json:"path"`
+	// Online is false when the folder's storage is disconnected — an external
+	// drive that is unplugged, or a network share that is unreachable.
+	Online bool `json:"online"`
+}
+
 // Shoot is one folder discovered beneath a managed parent, or the parent's own
 // row for RAWs sitting loose in it. Shoots are re-derived from disk on every
 // listing and never persisted.

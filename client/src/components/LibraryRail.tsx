@@ -14,6 +14,7 @@ import {
   Maximize2,
   Pencil,
   Play,
+  PlugZap,
   Plus,
   RefreshCw,
   Search,
@@ -50,6 +51,7 @@ import {
   samePath,
   saveRoots,
   useLibraryRoots,
+  useRootOnline,
   type RailBlock,
   type RootGroup,
 } from '@/lib/library';
@@ -73,6 +75,29 @@ function blockId(b: RailBlock): string {
     : `g:${b.group.parentPath.toLowerCase()}`;
 }
 
+/** Whether a folder's storage is reachable, threaded down from one subscription. */
+type OnlineFn = (path: string) => boolean;
+
+/**
+ * The folder's storage is disconnected — an unplugged external drive, or an
+ * unreachable share. Nothing is lost; the daemon polls and the folder returns.
+ */
+function OfflineBadge({ className }: { className?: string }) {
+  return (
+    <span
+      data-testid="offline-badge"
+      className={cn(
+        'flex shrink-0 items-center gap-1 rounded-full bg-secondary px-1.5 py-px font-mono text-[9.5px] tracking-[.04em] text-muted-foreground uppercase dark:bg-white/8',
+        className,
+      )}
+      title="This folder's drive is not connected. It will come back on its own when you reconnect it."
+    >
+      <PlugZap className="size-[9px]" strokeWidth={2} />
+      Offline
+    </span>
+  );
+}
+
 /**
  * The curated library rail (resizable, 214px default): the shoot folders and
  * library folders the user added, with organize context menus. Hand-added
@@ -86,6 +111,8 @@ export function LibraryRail() {
   const setAddFolderOpen = useUIStore((s) => s.setAddFolderOpen);
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
   const groupAliases = useUIStore((s) => s.groupAliases);
+  // One subscription for the whole rail, not one per row.
+  const rootOnline = useRootOnline();
 
   const blocks = useMemo(() => railBlocks(roots), [roots]);
   const q = filter.trim().toLowerCase();
@@ -142,6 +169,7 @@ export function LibraryRail() {
                   filter={q}
                   renaming={renaming}
                   setRenaming={setRenaming}
+                  online={rootOnline(b.root.path)}
                 />
               ) : (
                 <Group
@@ -152,6 +180,7 @@ export function LibraryRail() {
                   renaming={renaming}
                   setRenaming={setRenaming}
                   forceOpen={q !== ''}
+                  rootOnline={rootOnline}
                 />
               ),
             )}
@@ -289,6 +318,7 @@ function ManagedParent({
   filter,
   renaming,
   setRenaming,
+  online,
 }: {
   root: LibraryRoot;
   roots: LibraryRoot[];
@@ -296,6 +326,7 @@ function ManagedParent({
   filter: string;
   renaming: string | null;
   setRenaming: (v: string | null) => void;
+  online: boolean;
 }) {
   const client = useApiClient();
   const groupAliases = useUIStore((s) => s.groupAliases);
@@ -352,11 +383,17 @@ function ManagedParent({
           subtitle={root.path}
           open={showRows}
           icon={
-            <FolderTree
-              className="size-3 shrink-0 text-accent-text"
-              strokeWidth={1.5}
-              aria-label="Library folder"
-            />
+            <>
+              <FolderTree
+                className={cn(
+                  'size-3 shrink-0',
+                  online ? 'text-accent-text' : 'text-muted-foreground',
+                )}
+                strokeWidth={1.5}
+                aria-label="Library folder"
+              />
+              {!online && <OfflineBadge />}
+            </>
           }
           onToggle={() => updateRailGroupOpen(client, key, !open)}
           drag={dropHandlers(client, blocks, self)}
@@ -366,7 +403,10 @@ function ManagedParent({
           <div className="flex flex-col gap-px px-2.5 pt-1.5 pb-2">
             <span className="truncate font-semibold text-foreground">{name}</span>
             <span className="truncate font-mono text-[10px] text-faint">
-              {root.path} · {rows.length} folder{rows.length === 1 ? '' : 's'} · auto-updating
+              {root.path} ·{' '}
+              {online
+                ? `${rows.length} folder${rows.length === 1 ? '' : 's'} · auto-updating`
+                : 'offline'}
             </span>
           </div>
           <ContextMenuSeparator />
@@ -383,7 +423,7 @@ function ManagedParent({
           <ContextMenuItem onClick={() => refetch()}>
             <RefreshCw /> <span className="flex-1 text-foreground">Refresh</span>
           </ContextMenuItem>
-          <ContextMenuItem onClick={rescanAll}>
+          <ContextMenuItem disabled={!online} onClick={rescanAll}>
             <RefreshCw /> <span className="flex-1">Rescan all shoots</span>
           </ContextMenuItem>
           <ContextMenuItem disabled={i === 0} onClick={() => moveBlock(client, blocks, self, -1)}>
@@ -408,10 +448,16 @@ function ManagedParent({
         </ContextMenuContent>
       </ContextMenu>
 
-      {showRows && shoots != null && shoots.length === 0 && (
+      {showRows && !online && (
+        <span className="px-6 py-1.5 text-[11px] leading-relaxed text-faint">
+          Drive not connected. Its folders reappear when you plug it back in.
+        </span>
+      )}
+      {showRows && online && shoots != null && shoots.length === 0 && (
         <span className="px-6 py-1.5 text-[11px] text-faint">No photo folders yet</span>
       )}
       {showRows &&
+        online &&
         rows.map((s) => <ShootRow key={s.path} shoot={s} parent={root} roots={roots} />)}
     </div>
   );
@@ -568,6 +614,7 @@ function Group({
   renaming,
   setRenaming,
   forceOpen,
+  rootOnline,
 }: {
   group: RootGroup;
   blocks: RailBlock[];
@@ -575,6 +622,7 @@ function Group({
   renaming: string | null;
   setRenaming: (v: string | null) => void;
   forceOpen: boolean;
+  rootOnline: OnlineFn;
 }) {
   const client = useApiClient();
   const groupAliases = useUIStore((s) => s.groupAliases);
@@ -691,6 +739,7 @@ function Group({
               key={r.path}
               root={r}
               roots={roots}
+              online={rootOnline(r.path)}
               onRename={() => setRenaming(r.path.toLowerCase())}
             />
           ),
@@ -703,10 +752,12 @@ function Group({
 function RootRow({
   root,
   roots,
+  online,
   onRename,
 }: {
   root: LibraryRoot;
   roots: LibraryRoot[];
+  online: boolean;
   onRename: () => void;
 }) {
   const client = useApiClient();
@@ -714,7 +765,15 @@ function RootRow({
   const active = folderPath != null && samePath(folderPath, root.path);
   const scanning = useFolderBusy(root.path);
 
-  const open = () => void openRoot(client, roots, root);
+  const open = () => {
+    if (!online) {
+      toast.error(`${rootName(root)} is offline`, {
+        description: 'Reconnect the drive — the folder returns on its own.',
+      });
+      return;
+    }
+    void openRoot(client, roots, root);
+  };
 
   const openInCull = () => {
     void openRoot(client, roots, root).then(() => useUIStore.getState().setMode('cull'));
@@ -761,14 +820,21 @@ function RootRow({
             onRename();
           }
         }}
-        title={root.path}
+        title={online ? root.path : `${root.path} — drive not connected`}
+        data-testid="rail-root"
+        data-name={rootName(root)}
+        data-online={online ? '1' : '0'}
       >
         <Folder
           className={cn('size-[13px] shrink-0', active ? 'text-accent-text' : 'text-muted-foreground')}
           strokeWidth={1.5}
         />
-        <span className="flex-1 truncate">{rootName(root)}</span>
-        {scanning ? (
+        <span className={cn('flex-1 truncate', !online && 'text-muted-foreground')}>
+          {rootName(root)}
+        </span>
+        {!online ? (
+          <OfflineBadge />
+        ) : scanning ? (
           <ChipSpinner className="size-3" />
         ) : root.photoCount > 0 ? (
           <span className="font-mono text-[10.5px] font-normal text-faint">
@@ -787,19 +853,19 @@ function RootRow({
           </div>
         </div>
         <ContextMenuSeparator />
-        <ContextMenuItem hint="Enter" onClick={openInCull}>
+        <ContextMenuItem hint="Enter" disabled={!online} onClick={openInCull}>
           <Play /> <span className="flex-1 text-foreground">Open in Cull</span>
         </ContextMenuItem>
         <ContextMenuItem
           onClick={() => window.win?.openNewWindow(root.path)}
-          disabled={!window.win}
+          disabled={!window.win || !online}
         >
           <AppWindow /> <span className="flex-1">Open in new window</span>
         </ContextMenuItem>
         <ContextMenuItem hint="F2" onClick={onRename}>
           <Pencil /> <span className="flex-1">Rename…</span>
         </ContextMenuItem>
-        <ContextMenuItem onClick={renameOnDisk}>
+        <ContextMenuItem disabled={!online} onClick={renameOnDisk}>
           <FolderPen /> <span className="flex-1">Rename on disk…</span>
         </ContextMenuItem>
         <ContextMenuItem
@@ -817,14 +883,17 @@ function RootRow({
         >
           <Copy /> <span className="flex-1">Copy path</span>
         </ContextMenuItem>
-        <ContextMenuItem onClick={toggleSubfolders}>
+        <ContextMenuItem disabled={!online} onClick={toggleSubfolders}>
           <Check className={cn(!root.includeSubfolders && 'invisible', 'text-primary!')} />
           <span className="flex-1">Include subfolders</span>
         </ContextMenuItem>
-        <ContextMenuItem onClick={open}>
+        <ContextMenuItem disabled={!online} onClick={open}>
           <RefreshCw /> <span className="flex-1">Rescan for new photos</span>
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => void startFullres(client, root.path, rootName(root))}>
+        <ContextMenuItem
+          disabled={!online}
+          onClick={() => void startFullres(client, root.path, rootName(root))}
+        >
           <Maximize2 /> <span className="flex-1">Render 1:1</span>
         </ContextMenuItem>
         <ContextMenuSeparator />

@@ -265,6 +265,40 @@ try {
     check('watcherRunsPrerenderPass', !!res, res ? '200' : 'no cached 2048');
   }
 
+  // ---- offline storage -----------------------------------------------------
+
+  // A root whose drive is disconnected: stat fails, so it reports offline and
+  // its child listing is empty rather than an error — the rail shows an Offline
+  // badge, not a broken block.
+  const detached = join(root, 'Detached');
+  await call('Library.SetLibraryRoots', [
+    [...before, parent, { path: detached, alias: '', includeSubfolders: false, photoCount: 0, isParent: true }],
+  ]);
+  const offlineStatus = await until(async () => {
+    const st = await call('Library.GetRootStatus', []);
+    const mine2 = st.find((s) => eq(s.path, detached));
+    return mine2 && mine2.online === false ? mine2 : null;
+  });
+  check('rootReportsOffline', !!offlineStatus);
+  const offlineShoots = await call('Library.ListShoots', [detached]);
+  check('offlineListShootsIsEmptyNotError', Array.isArray(offlineShoots) && offlineShoots.length === 0);
+
+  // Reconnect it. The poller — not any user action — must notice and flip it.
+  mkdirSync(detached);
+  copyFileSync(join(FOLDER, raws[0]), join(detached, 'IMG_H.ARW'));
+  const backOnline = await until(async () => {
+    const st = await call('Library.GetRootStatus', []);
+    return st.find((s) => eq(s.path, detached))?.online === true;
+  });
+  check('rootComesBackOnline', !!backOnline);
+  const reattached = await call('Library.ListShoots', [detached]);
+  check(
+    'onlineRootListsSelfShoot',
+    reattached.some((s) => s.isSelf && s.photoCount === 1),
+    JSON.stringify(reattached.map((s) => `${s.name}:${s.photoCount}`)),
+  );
+  await call('Library.SetLibraryRoots', [[...before, parent]]);
+
   // Re-opening an already-scanned folder must still pick up new files. This is
   // what folderPasses was extracted out of; it worked before this feature and
   // has to keep working.

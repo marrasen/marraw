@@ -3,6 +3,7 @@ import {
   openFolder,
   setLibraryRoots,
   useGetLibraryRoots,
+  useGetRootStatus,
   type LibraryRoot,
   type Shoot,
 } from '@/api/library';
@@ -97,6 +98,17 @@ export const parentKey = (path: string) => `parent:${path}`;
 export function useLibraryRoots(): { roots: LibraryRoot[]; isLoading: boolean } {
   const { data, isLoading } = useGetLibraryRoots();
   return { roots: data ?? [], isLoading };
+}
+
+/**
+ * Which roots' storage is reachable. Unknown paths read as online: the first
+ * snapshot arrives a moment after mount, and flashing "Offline" on a perfectly
+ * healthy library would be worse than a beat of silence.
+ */
+export function useRootOnline(): (path: string) => boolean {
+  const { data } = useGetRootStatus();
+  return (path: string) =>
+    data?.find((s) => samePath(s.path, path))?.online ?? true;
 }
 
 export function saveRoots(client: ApiClient, roots: LibraryRoot[]) {

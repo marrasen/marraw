@@ -25,6 +25,12 @@ const until = async (fn, ms, what) => {
 const shootRows = () => [...document.querySelectorAll('[data-testid="rail-shoot"]')];
 const shootNames = () => shootRows().map((el) => el.dataset.name);
 const shootByName = (n) => shootRows().find((el) => el.dataset.name === n);
+// The stand-in for an unplugged external drive: a manual root whose folder does
+// not exist yet. The driver creates it while the app is running.
+const offlineRow = () =>
+  [...document.querySelectorAll('[data-testid="rail-root"]')].find((el) =>
+    el.dataset.name.endsWith('-offline'),
+  );
 
 try {
   const parent = await until(
@@ -71,9 +77,28 @@ try {
   // into it a few seconds after launch. Nothing in the UI is touched: the row
   // can only appear because the daemon watched the parent, then watched the new
   // directory, and pushed a fresh listing.
+  // A root on storage that is not connected reads as Offline rather than as an
+  // empty or broken folder. Asserted before the long waits below — the driver
+  // reconnects that folder partway through the run.
+  // Match the badge element, not the row's text: the fixture folder is itself
+  // named "…-offline", and its own name would satisfy a text match.
+  const badged = (el) => !!el.querySelector('[data-testid="offline-badge"]');
+  const off = await until(offlineRow, 20000, 'offline root row');
+  R.offlineRootBadged =
+    off.dataset.online === '0' && badged(off)
+      ? true
+      : `online=${off.dataset.online} badge=${badged(off)}`;
+
   R.partyAbsentInitially = !shootNames().includes('Party');
   await until(() => shootNames().includes('Party'), 60000, 'watcher surfaces new folder');
   R.newFolderAppeared = true;
+
+  // The driver creates that missing folder mid-run. No watch can exist on a path
+  // that does not exist, so only the availability poller can bring it back.
+  await until(() => offlineRow()?.dataset.online === '1', 60000, 'root comes back online');
+  R.offlineRootRecovers = true;
+  R.offlineBadgeCleared = !badged(offlineRow());
+
   R.finalRows = shootNames().join(',');
   return R;
 } catch (err) {
