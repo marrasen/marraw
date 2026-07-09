@@ -6,6 +6,11 @@ keep a little, and want the boring part to be over quickly.
 marraw is a desktop app: a Go daemon that talks to LibRaw does the pixel work,
 a React front-end does the rest, and Electron holds it together.
 
+![Cull mode: a full-bleed photo of a Spitfire on an airfield, a pick/reject bar below it, and a filmstrip deck along the bottom broken into time-gap groups](screenshots/marraw_cull.jpg)
+
+<sup>Cull mode. The scrubber deck has already broken 191 frames into 31 groups —
+note the `+6 min gap`, `+3 min gap` dividers between runs.</sup>
+
 > **Status: early. Windows only.**
 > Version 0.1 is usable daily but the feature set is deliberately narrow — read
 > [What marraw does *not* do](#what-marraw-does-not-do) before you invest time
@@ -49,6 +54,11 @@ moments you actually shot, without stacks to expand, albums to build, or a
 single click. The Cull contact sheet (`G`) shows the same groups as sections,
 so you can see a whole day's structure at once.
 
+![The contact sheet: a dark grid of aerial photos under a header reading 10:04 – 10:06, 46 frames, with a +2 min gap before badge on the right](screenshots/marraw_contact_sheet.jpg)
+
+<sup>The contact sheet (`G`). Each section header carries its time range, its
+frame count, and how long the dead time before it was.</sup>
+
 **Culling is keyboard-first, and the loupe remembers where you were.**
 Arrows navigate, `1`–`5` rate, `P` picks, `X` excludes, `Enter` goes deeper.
 Zoom and pan position persist across arrow navigation, so stepping through a
@@ -83,6 +93,8 @@ apply your own saved creative auto-presets.
 **`Ctrl+K` jumps to anything** — any mode, any panel, any single develop
 control, any preset.
 
+![A command palette floating over a dimmed Develop window, prompting Jump to any mode, control, or action, listing Go to Library, Go to Cull, Go to Develop, Contact sheet, Export, Add folder to library, Settings, Keyboard shortcuts](screenshots/marraw_jump.jpg)
+
 ---
 
 ## The workspace
@@ -93,6 +105,11 @@ control, any preset.
 | **Cull** | Full-bleed cinema loupe, scrubber deck, pick/reject bar, contact sheet (`G`). |
 | **Develop** | Darkroom canvas, pinnable panel, floating quick-dials you choose, crop and white-balance overlays. |
 | **Export** | JPEG or lossless TIFF, batched across every core. |
+
+![Develop mode: the photo on a darkroom canvas, a floating quick-dial strip beneath it, and a right-hand panel with an RGB histogram over crop, tone, presence and white-balance sliders](screenshots/marraw_develop.jpg)
+
+<sup>Develop mode. The panel is pinned open; the quick-dials under the canvas
+(exposure, shadows, vibrance) are the three controls you chose to keep at hand.</sup>
 
 ### Editing tools
 
