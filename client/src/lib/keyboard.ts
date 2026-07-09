@@ -54,7 +54,8 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 //   E B T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
 //   W             toggle the white-balance eyedropper (Enter keep · Esc cancel)
 //   Ctrl+↑/↓      focus the previous/next develop control (alias of plain ↑/↓)
-//   +/- / Z / Space   zoom (loupe, no control focused; Z/Space toggle 1:1↔fit)
+//   +/- / Z / Space   zoom (loupe, no control focused — Cull never focuses one;
+//                 Z/Space toggle 1:1↔fit)
 //   Tab           in Develop, cycle the Develop/Presets/Info tabs (⇧ backward);
 //                 elsewhere Tab is swallowed — native focus is useless here
 //   Ctrl+A/C/V    select all, copy/paste edit settings

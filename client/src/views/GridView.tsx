@@ -6,6 +6,7 @@ import { useApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { dayLabel, gapLabel, groupByGap, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
+import { PyramidImage } from '@/components/PyramidImage';
 import { useUIStore } from '@/stores/uiStore';
 
 const CELL_GAP = 12;
@@ -209,10 +210,9 @@ function GridCell({ photo, w, h }: { photo: Photo; w: number; h: number }) {
       title={photo.fileName}
     >
       {!loaded && <div className="skeleton-shimmer absolute inset-0" />}
-      <img
+      <PyramidImage
         src={imgUrl(photo, level)}
         alt={photo.fileName}
-        draggable={false}
         loading="lazy"
         onLoad={() => setLoaded(true)}
         className={cn('size-full object-cover', !loaded && 'opacity-0')}

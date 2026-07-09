@@ -118,6 +118,59 @@ try {
   key('Escape');
   R.escClearsControl = es().activeControl === null && ui().view === 'loupe';
 
+  // --- Cull never carries a focused develop control ------------------------
+  // Cull draws no slider, so a control focused in Develop must not survive the
+  // switch: +/- there has to zoom the loupe and leave the draft alone (it used
+  // to nudge the invisible slider, and the zoom keys did nothing).
+  key('e');
+  R.cullFocusPrecondition = es().activeControl === 'expEV' ? true : `active=${es().activeControl}`;
+  ui().setMode('cull');
+  R.cullClearsControl = es().activeControl === null ? true : `active=${es().activeControl}`;
+  ui().setLoupeZoom('fit');
+  await sleep(400); // zoom tween + fit-scale mirror settle
+  const fitCull = ui().loupeFitScale;
+  const evCull = es().draft.expEV;
+  key('+'); key('+');
+  await sleep(100);
+  R.cullPlusZooms =
+    Math.abs(ui().loupeZoom - fitCull * 1.5625) < 1e-6
+      ? true
+      : `fitScale=${fitCull}, zoom=${ui().loupeZoom}`;
+  R.cullPlusKeepsDraft = es().draft.expEV === evCull ? true : `expEV ${evCull} -> ${es().draft.expEV}`;
+  key('-'); key('-');
+  await sleep(100);
+  R.cullMinusZooms = Math.abs(ui().loupeZoom - fitCull) < 1e-6 ? true : `zoom=${ui().loupeZoom}`;
+  ui().setLoupeZoom('fit');
+  ui().setMode('develop');
+  await until(() => es().draft != null, 8000, 'back in develop');
+
+  // --- a superseded edit hash must not break a thumbnail --------------------
+  // Every commit publishes the photo's new edit hash before any rendition for
+  // it exists, and the server renders only the hash a photo is CURRENTLY at
+  // (imghttp.generatable) — so a thumbnail request that lands after the next
+  // commit asks for a dead state and gets 404. Overriding the photo record's
+  // hash reproduces that deterministically: the strip <img> is handed a src the
+  // server cannot reproduce. It must keep its last good frame rather than paint
+  // the browser's broken-image glyph.
+  const thumbA = () => document.querySelector(`[data-strip-id="${photoA}"] img`);
+  await until(() => thumbA()?.complete && thumbA().naturalWidth > 0, 25000, 'photo A thumbnail warm');
+  const goodSrc = thumbA().src;
+  // An unedited photo carries no e= param (the base hash is implicit).
+  const deadUrl = /[?&]e=/.test(goodSrc)
+    ? goodSrc.replace(/([?&])e=[^&]+/, '$1e=deadbeefdeadbeef')
+    : `${goodSrc}&e=deadbeefdeadbeef`;
+  const deadRes = await fetch(deadUrl);
+  R.deadHashRejected = deadRes.status === 404 ? true : `status=${deadRes.status}`;
+  const overridesBefore = new Map(ui().overrides);
+  ui().applyLocal([photoA], { editHash: 'deadbeefdeadbeef' });
+  await sleep(2500); // request, 404, fallback swap, decode
+  R.deadHashNoBrokenGlyph = thumbA()?.complete && thumbA().naturalWidth > 0
+    ? true
+    : `complete=${thumbA()?.complete} naturalWidth=${thumbA()?.naturalWidth}`;
+  R.deadHashKeepsLastFrame = thumbA()?.src === goodSrc ? true : `src=${thumbA()?.src.slice(-42)}`;
+  mw.useUIStore.setState({ overrides: overridesBefore }); // drop the fake hash
+  await sleep(600);
+
   // --- histogram has pixels ----------------------------------------------
   await sleep(600);
   const hcanvas = document.querySelector('[data-testid="histogram"]');

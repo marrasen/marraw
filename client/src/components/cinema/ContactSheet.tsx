@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { gapLabel, rangeLabel, timeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { GapControl } from '@/components/cinema/GapControl';
+import { PyramidImage } from '@/components/PyramidImage';
 import { WindowControls } from '@/components/WindowControls';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
@@ -130,13 +131,7 @@ function SheetCell({
           photo.flag === 'exclude' && 'opacity-40',
         )}
       >
-        <img
-          src={imgUrl(photo, '256')}
-          alt=""
-          draggable={false}
-          loading="lazy"
-          className="size-full object-cover"
-        />
+        <PyramidImage src={imgUrl(photo, '256')} loading="lazy" className="size-full object-cover" />
       </div>
       {focused && (
         <div className="pointer-events-none absolute -inset-0.5 rounded border-2 border-primary" />

@@ -292,6 +292,18 @@ export function esSetKeyAdjust(on: boolean) {
   setState({ keyAdjust: on });
 }
 
+// Cull draws no develop control, so a control focused in Develop must not
+// survive the switch into it: +/- would keep nudging an invisible slider
+// instead of zooming the loupe, and Esc would spend a press clearing a focus
+// nobody can see. The hotkeys that focus a control already refuse to fire in
+// Cull; this closes the other door. uiStore cannot call in here (it is a
+// dependency of this module), so the invariant is enforced from this side.
+useUIStore.subscribe((s, prev) => {
+  if (s.mode === 'cull' && prev.mode !== 'cull' && useEditSession.getState().activeControl != null) {
+    setState({ activeControl: null, keyAdjust: false });
+  }
+});
+
 // esSetWBPicking opens/closes the WB eyedropper. Opening snapshots the current
 // draft as the revert target (wbPickBase) for Reset/Cancel; closing here is a
 // plain dismiss — use esWBPickDone / esWBPickCancel to keep or discard the

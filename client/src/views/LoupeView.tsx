@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Segmented } from '@/components/ui/segmented';
 import { ChipSpinner } from '@/components/ui/task-chip';
+import { PyramidImage } from '@/components/PyramidImage';
 import { cn } from '@/lib/utils';
 import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
 import {
@@ -1071,7 +1072,7 @@ export function NavigatorMap({
       }}
       onPointerCancel={() => setDragging(false)}
     >
-      <img src={imgUrl(photo, '256')} alt="" draggable={false} className="block w-full" />
+      <PyramidImage src={imgUrl(photo, '256')} className="block w-full" />
       {zoomed && (
         <div
           className="pointer-events-none absolute rounded-[2px] border-[1.5px] border-white"

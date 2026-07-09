@@ -3,6 +3,7 @@ import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { gapLabel, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
+import { PyramidImage } from '@/components/PyramidImage';
 import { useUIStore } from '@/stores/uiStore';
 
 /**
@@ -167,10 +168,8 @@ function StripThumb({
       onClick={(e) => onFocus(photo.id, { extend: e.shiftKey, toggle: e.ctrlKey || e.metaKey })}
       title={photo.fileName}
     >
-      <img
+      <PyramidImage
         src={imgUrl(photo, '256')}
-        alt=""
-        draggable={false}
         loading="lazy"
         className={cn('size-full object-cover', photo.flag === 'exclude' && 'opacity-40')}
       />
