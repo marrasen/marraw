@@ -6,8 +6,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -45,6 +47,12 @@ func main() {
 		}
 		*dataDir = filepath.Join(base, "marraw")
 	}
+
+	if logFile := setupLogging(*dataDir); logFile != nil {
+		defer logFile.Close()
+	}
+	log.Printf("marrawd starting (pid %d, data: %s)", os.Getpid(), *dataDir)
+
 	token := os.Getenv("MARRAW_TOKEN")
 	if token == "" && !*dev {
 		log.Fatal("MARRAW_TOKEN must be set (or run with --dev)")
@@ -94,6 +102,18 @@ func main() {
 		StreamChunking: &aprot.StreamChunking{},
 	})
 	deps.SetServer(server)
+	// Log every handler error (except normal client cancellations) so a
+	// failure that only flashed past in the UI — e.g. a WB pick on too-dark a
+	// patch — is recoverable from the log file afterward.
+	server.Use(func(next aprot.Handler) aprot.Handler {
+		return func(ctx context.Context, req *aprot.Request) (any, error) {
+			res, err := next(ctx, req)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("rpc %s failed: %v", req.Method, err)
+			}
+			return res, err
+		}
+	})
 	scanner.OnPhotosChanged = func(folderID int64) {
 		server.TriggerRefresh(fmt.Sprintf("photos:%d", folderID))
 	}
@@ -164,6 +184,32 @@ func main() {
 	defer cancel()
 	server.Stop(shutdownCtx)
 	httpServer.Shutdown(shutdownCtx)
+}
+
+// setupLogging tees the daemon's log output to a file under <dataDir>/logs so
+// an error that only flashed past in the UI can still be found afterward.
+// Output still goes to stderr, which the Electron shell forwards to its own
+// console. The log rotates once at startup past ~5 MiB (one .1 backup kept),
+// so it never grows without bound. Returns the open file to close on exit, or
+// nil when the file couldn't be opened (then logging stays on stderr only).
+func setupLogging(dataDir string) *os.File {
+	dir := filepath.Join(dataDir, "logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("logging: cannot create %s: %v (stderr only)", dir, err)
+		return nil
+	}
+	path := filepath.Join(dir, "marrawd.log")
+	if fi, err := os.Stat(path); err == nil && fi.Size() > 5<<20 {
+		_ = os.Rename(path, path+".1")
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		log.Printf("logging: cannot open %s: %v (stderr only)", path, err)
+		return nil
+	}
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	log.SetOutput(io.MultiWriter(os.Stderr, f))
+	return f
 }
 
 // cors allows the Vite dev origin to fetch /img during browser development.

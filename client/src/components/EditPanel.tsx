@@ -30,6 +30,7 @@ import {
   esSetWBPicking,
   esUndo,
   esUpdate,
+  esWBPickDone,
   useEditSession,
   NEUTRAL,
   type ControlId,
@@ -494,11 +495,11 @@ function DevelopPanel({
             variant={wbPicking || draft.wbMode === 'custom' ? 'default' : 'outline'}
             className={cn(wbPicking && 'ring-2 ring-ring ring-offset-1 ring-offset-background')}
             title={
-              draft.wbMode === 'custom'
-                ? 'Picked white balance — click to pick a new neutral gray'
-                : 'Pick white balance: click a neutral gray in the image'
+              wbPicking
+                ? 'Keep white balance (Enter)'
+                : 'Pick white balance (W): click a neutral gray in the image'
             }
-            onClick={() => esSetWBPicking(!wbPicking)}
+            onClick={() => (wbPicking ? esWBPickDone(client) : esSetWBPicking(true))}
           >
             <Pipette />
           </Button>

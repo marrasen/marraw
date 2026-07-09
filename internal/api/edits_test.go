@@ -2,10 +2,45 @@ package api
 
 import (
 	"image"
+	"math"
 	"testing"
 
 	"github.com/marrasen/marraw/internal/edit"
 )
+
+// TestFoldParamsForUnitScales guards the fold's WB ratio against a
+// normalization-unit mismatch: a picked custom WBMul is normalized to green=1,
+// while the reference cam_mul is in raw units (green ~1024 on many cameras).
+// Without normalizing both to green the ratio collapses to ~1/1000 and the
+// preview goes black — the regression this test pins down.
+func TestFoldParamsForUnitScales(t *testing.T) {
+	// Raw-units as-shot WB, green ~1024 (typical Sony cam_mul).
+	refMul := [4]float64{2400, 1024, 1500, 1024}
+	// A picked custom WB near as-shot, normalized to green=1.
+	ep := &edit.Params{
+		WBMode: edit.WBCustom,
+		WBMul:  [4]float64{2400.0 / 1024, 1, 1500.0 / 1024, 1},
+	}
+	fp := foldParamsFor(ep, refMul, [4][3]float64{})
+
+	// Same chromaticity as as-shot ⇒ all gains ≈ 1, none crushed toward black.
+	for c, k := range fp.K {
+		if k < 0.5 || k > 2 {
+			t.Errorf("K[%d] = %.4g, want ≈1 (unit mismatch would give ~0.001)", c, k)
+		}
+	}
+	if g := fp.K[1]; math.Abs(g-1) > 1e-9 {
+		t.Errorf("green gain = %.6f, want 1 (WB must not change luminance)", g)
+	}
+
+	// A warmer custom pick (more red, less blue) must raise red and lower blue
+	// relative to green, still without collapsing.
+	ep.WBMul = [4]float64{3000.0 / 1024, 1, 1100.0 / 1024, 1}
+	fp = foldParamsFor(ep, refMul, [4][3]float64{})
+	if !(fp.K[0] > fp.K[1] && fp.K[1] > fp.K[2]) {
+		t.Errorf("warm pick gains not ordered R>G>B: %v", fp.K)
+	}
+}
 
 // TestApproxDecodeExposureReuse: a decode stored at one exposure is reused for
 // the same photo when only exposure differs, reporting the baked-in ExpEV so

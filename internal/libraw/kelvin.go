@@ -12,18 +12,46 @@ func (p *Processor) KelvinMul(kelvin float64) [4]float64 {
 	return kelvinMulOf(p.h, kelvin)
 }
 
+// CamXYZ returns the camera's XYZ→camera-space matrix (all-zero for files
+// without one). Valid after Open. Callers cache this to resolve Kelvin white
+// balance in Go without holding the C handle — see KelvinMulFromMatrix.
+func (p *Processor) CamXYZ() [4][3]float64 {
+	var cam [4][3]float64
+	for c := range 4 {
+		for j := range 3 {
+			cam[c][j] = float64(p.h.color.cam_xyz[c][j])
+		}
+	}
+	return cam
+}
+
+// KelvinMulFromMatrix is KelvinMul computed from a previously read camera
+// matrix (see CamXYZ) rather than a live handle, so the interactive fold path
+// can resolve Kelvin WB with no cgo call.
+func KelvinMulFromMatrix(camXYZ [4][3]float64, kelvin float64) [4]float64 {
+	return kelvinMulFromCam(camXYZ, kelvin)
+}
+
 // kelvinMulOf computes multipliers from the illuminant's XYZ through the
 // camera matrix: cam_xyz maps XYZ to camera-space response, so the response
 // to the illuminant is cam_xyz·XYZ(T) and the neutralizing multiplier is its
 // reciprocal, normalized to G=1.
 func kelvinMulOf(h *C.libraw_data_t, kelvin float64) [4]float64 {
-	x, y, z := kelvinXYZ(kelvin)
-
 	var cam [4][3]float64
-	hasCam := false
 	for c := range 4 {
 		for j := range 3 {
 			cam[c][j] = float64(h.color.cam_xyz[c][j])
+		}
+	}
+	return kelvinMulFromCam(cam, kelvin)
+}
+
+func kelvinMulFromCam(cam [4][3]float64, kelvin float64) [4]float64 {
+	x, y, z := kelvinXYZ(kelvin)
+
+	hasCam := false
+	for c := range 4 {
+		for j := range 3 {
 			if cam[c][j] != 0 {
 				hasCam = true
 			}

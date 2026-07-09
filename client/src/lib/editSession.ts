@@ -104,6 +104,9 @@ interface EditSessionState {
   rendering: number; // in-flight preview renders (task tray indicator)
   preview: Preview | null;
   wbPicking: boolean;
+  // Draft snapshot from when the WB eyedropper opened: the revert target for
+  // Reset/Cancel. Null when the picker is closed.
+  wbPickBase: Params | null;
   cropping: boolean; // crop overlay active: loupe shows the uncropped frame
 }
 
@@ -118,6 +121,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   rendering: 0,
   preview: null,
   wbPicking: false,
+  wbPickBase: null,
   cropping: false,
 }));
 
@@ -139,7 +143,7 @@ let commitTimer = 0;
 // the full-res settle by SETTLE_MS so rapid toggling (Ctrl+1..9, Ctrl+U) only
 // renders cheap 1024 frames — the 2048 lands once the user stops.
 let settleTimer = 0;
-const SETTLE_MS = 400;
+const SETTLE_MS = 200;
 // True while a deferred full-res settle is armed (or its render is queued): the
 // low-res blob currently on screen is NOT the final state, so esPreviewSettled
 // must report unsettled and the loupe must not evict the preview yet — else at
@@ -237,6 +241,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     lastDraft: s.draft ?? s.lastDraft,
     loading: true,
     wbPicking: false,
+    wbPickBase: null,
     cropping: false,
   }));
   const params = await getEditParams(client, photoId).catch(() => null);
@@ -268,8 +273,14 @@ export function esSetActive(client: ApiClient, control: ControlId | null) {
   setState({ activeControl: control });
 }
 
+// esSetWBPicking opens/closes the WB eyedropper. Opening snapshots the current
+// draft as the revert target (wbPickBase) for Reset/Cancel; closing here is a
+// plain dismiss — use esWBPickDone / esWBPickCancel to keep or discard the
+// previewed value.
 export function esSetWBPicking(on: boolean) {
-  setState({ wbPicking: on });
+  const s = useEditSession.getState();
+  if (on && !s.draft) return;
+  setState(on ? { wbPicking: true, wbPickBase: s.draft } : { wbPicking: false, wbPickBase: null });
 }
 
 // esSetCropping toggles the crop overlay. Entering re-renders the preview
@@ -437,9 +448,18 @@ function esApplyParamsPreview(client: ApiClient, params: Params, label: string) 
   pushHistory(s.photoId, params, label);
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
   persist(client, params, ids);
+  previewThenSettle(client);
+}
+
+// previewThenSettle paints an instant low-res frame and defers the sharp 2048
+// by SETTLE_MS, so rapid re-triggers (preset toggles, WB picks) only render
+// cheap frames until the user stops. settlePending keeps the loupe on the
+// low-res blob until the 2048 lands. Does NOT touch the draft, history, or
+// persistence — callers own that.
+function previewThenSettle(client: ApiClient) {
   schedulePreview(client, false); // instant low-res
   window.clearTimeout(settleTimer);
-  settlePending = true; // keep the loupe on the low-res blob until the 2048 lands
+  settlePending = true;
   settleTimer = window.setTimeout(() => {
     settlePending = false;
     schedulePreview(client, true);
@@ -626,16 +646,83 @@ export async function computePresetParams(
   return out;
 }
 
-// esPickWB asks the backend to compute custom multipliers that neutralize
-// the clicked spot (relative coordinates in the displayed image).
+// esPickWB samples the clicked spot and PREVIEWS the resulting custom WB — the
+// draft updates but nothing is committed until Done. The backend reads the
+// camera's scene-linear colour, so the same pixel always yields the same
+// balance; the preview folds off the cached decode (no re-demosaic). The
+// eyedropper stays open for repeated sampling; Done keeps the value, Reset /
+// Cancel restore the pre-picker draft.
 export async function esPickWB(client: ApiClient, x: number, y: number) {
   const s = useEditSession.getState();
   if (s.photoId == null || !s.draft) return;
-  setState({ wbPicking: false });
   try {
     const params = await pickWhiteBalance(client, s.photoId, s.draft, x, y);
-    esApplyParams(client, params, { label: 'White balance' });
+    const cur = useEditSession.getState();
+    if (cur.photoId !== s.photoId || !cur.wbPicking) return; // superseded / closed
+    setState({ draft: params });
+    // Low-res only, no deferred 2048 settle: the fast fold and the exact 2048
+    // render WB slightly differently, so settling on every click flashed the
+    // balance twice and made picks impossible to compare. Each click now shows
+    // one consistent fold frame; Done renders the exact 2048 once.
+    window.clearTimeout(settleTimer);
+    settlePending = false;
+    schedulePreview(client, false);
   } catch (err) {
     toast.error(`White balance pick failed: ${(err as Error).message}`);
   }
+}
+
+// esWBPickDone commits the previewed WB as a single history entry and closes
+// the picker. A pick that changed nothing from the base just closes.
+export function esWBPickDone(client: ApiClient) {
+  const s = useEditSession.getState();
+  const base = s.wbPickBase;
+  setState({ wbPicking: false, wbPickBase: null });
+  if (s.photoId == null || !s.draft) return;
+  if (base && sameParams(base, s.draft)) {
+    window.clearTimeout(settleTimer);
+    settlePending = false;
+    schedulePreview(client, true); // land a sharp frame, no history churn
+    return;
+  }
+  esApplyParams(client, s.draft, { label: 'White balance' }); // clears the settle timer itself
+}
+
+// esWBPickCancel restores the pre-picker draft and closes the picker.
+export function esWBPickCancel(client: ApiClient) {
+  const s = useEditSession.getState();
+  const base = s.wbPickBase;
+  setState({ wbPicking: false, wbPickBase: null });
+  window.clearTimeout(settleTimer); // drop any pending pick settle
+  settlePending = false;
+  if (base && s.draft && !sameParams(base, s.draft)) {
+    setState({ draft: base });
+    schedulePreview(client, true);
+  }
+}
+
+// esWBPickReset restores the pre-picker draft but keeps the eyedropper open.
+export function esWBPickReset(client: ApiClient) {
+  const s = useEditSession.getState();
+  const base = s.wbPickBase;
+  if (!base || !s.draft || sameParams(base, s.draft)) return;
+  setState({ draft: base });
+  previewThenSettle(client);
+}
+
+// esWBPickAsShot / esWBPickAuto set the draft's WB to the camera as-shot or
+// auto value, previewed with the eyedropper still open (not committed).
+export function esWBPickAsShot(client: ApiClient) {
+  wbPickSetMode(client, 'camera');
+}
+export function esWBPickAuto(client: ApiClient) {
+  wbPickSetMode(client, 'auto');
+}
+function wbPickSetMode(client: ApiClient, wbMode: Params['wbMode']) {
+  const s = useEditSession.getState();
+  if (!s.draft) return;
+  setState({
+    draft: { ...s.draft, wbMode, wbMul: NEUTRAL.wbMul, wbTemp: 0, wbTint: 0, wbKelvin: 0 },
+  });
+  previewThenSettle(client);
 }

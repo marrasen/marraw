@@ -249,6 +249,33 @@ func (e *Params) librawInputs() Params {
 	}
 }
 
+// LinearInputsHash hashes only the fields that change the scene-linear
+// reference decode — the genuinely pre-demosaic controls (highlight recovery,
+// noise reduction, demosaic algorithm, chromatic aberration). White balance,
+// exposure, brightness and gamma are folded post-decode on the interactive
+// path (see pyramid.RenderPreviewLinear), so they do NOT invalidate the
+// reference and dragging them never re-demosaics. Always a fixed-width hash.
+func (e *Params) LinearInputsHash() string {
+	l := e.linearInputs()
+	l.Normalize()
+	b, _ := json.Marshal(&l)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// linearInputs returns the subset of params that change the linear reference
+// decode: everything upstream of demosaic that the fold pass cannot reproduce.
+func (e *Params) linearInputs() Params {
+	if e == nil {
+		return Params{}
+	}
+	return Params{
+		Highlight: e.Highlight, NRThreshold: e.NRThreshold,
+		FBDDNoiseRd: e.FBDDNoiseRd, MedPasses: e.MedPasses,
+		Demosaic: e.Demosaic, CARed: e.CARed, CABlue: e.CABlue,
+	}
+}
+
 // Parse decodes stored edit-params JSON.
 func Parse(paramsJSON string) (*Params, error) {
 	var e Params
@@ -317,6 +344,26 @@ func (e *Params) LibrawParams(halfSize bool) libraw.Params {
 	if e.CABlue != 0 {
 		p.CABlue = 1 + e.CABlue*caScale
 	}
+	return p
+}
+
+// LinearRefLibrawParams maps the edit onto LibRaw params for the scene-linear
+// reference decode: the pre-demosaic controls (demosaic algorithm, CA, NR,
+// highlight recovery) are honored, but white balance, exposure, brightness and
+// gamma are neutralized — 16-bit linear output at the camera's as-shot WB —
+// because the interactive fold reproduces those afterward as a cheap per-pixel
+// pass. Half-size, matching the preview decode. A nil receiver is treated as
+// neutral (the reference still decodes deterministically, no auto-brighten).
+func (e *Params) LinearRefLibrawParams() libraw.Params {
+	p := e.LibrawParams(true) // reuse the pre-demosaic mapping (demosaic, CA, NR, highlight)
+	p.OutputBPS = 16
+	p.Gamma = [2]float64{1, 1} // linear output, no encoding
+	p.ExpShift, p.ExpPreserve = 0, 0
+	p.Bright = 0 // apply() reads 0 as the neutral 1.0
+	p.UseCameraWB, p.UseAutoWB = true, false
+	p.UserMul = [4]float64{}
+	p.WBTemp, p.WBTint, p.WBKelvin = 0, 0, 0
+	p.NoAutoBright = true
 	return p
 }
 

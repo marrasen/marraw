@@ -16,6 +16,8 @@ import {
   esSetWBPicking,
   esStep,
   esUndo,
+  esWBPickCancel,
+  esWBPickDone,
   useEditSession,
   type ControlId,
 } from '@/lib/editSession';
@@ -25,7 +27,6 @@ import {
 const CONTROL_KEYS: Record<string, ControlId> = {
   e: 'expEV',
   b: 'bright',
-  w: 'wbMode',
   t: 'wbTemp',
   i: 'wbTint',
   k: 'wbKelvin',
@@ -47,7 +48,8 @@ const CONTROL_KEYS: Record<string, ControlId> = {
 //   1-5 / 0       set / clear rating
 //   P / X / U     pick / exclude / unflag
 //   Enter · Esc   forward / back a mode: Library ⇄ Cull ⇄ Develop
-//   E B W T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
+//   E B T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
+//   W             toggle the white-balance eyedropper (Enter keep · Esc cancel)
 //   Ctrl+↑/↓      focus the previous/next develop control (alias of plain ↑/↓)
 //   +/- / Z / Space   zoom (loupe, no control focused; Z/Space toggle 1:1↔fit)
 //   Ctrl+A/C/V    select all, copy/paste edit settings
@@ -204,6 +206,16 @@ export function useKeyboard() {
         return;
       }
 
+      // W toggles the white-balance eyedropper (like R for crop): opening it
+      // starts a pick session, pressing W again keeps the previewed value.
+      // Enter/Esc keep/cancel too (see the switch below).
+      if (key === 'w' && es.draft && s.mode !== 'cull') {
+        e.preventDefault();
+        if (es.wbPicking) esWBPickDone(client);
+        else esSetWBPicking(true);
+        return;
+      }
+
       if (CONTROL_KEYS[key] && es.draft && s.mode !== 'cull') {
         e.preventDefault();
         s.setDevelopTab('develop'); // reveal the slider if on the Presets/Info tab
@@ -266,8 +278,9 @@ export function useKeyboard() {
           applyFlag('none');
           break;
         case 'Enter':
-          // In crop mode, Enter applies the crop rather than switching mode.
+          // In crop / WB-pick mode, Enter applies rather than switching mode.
           if (es.cropping) esSetCropping(client, false);
+          else if (es.wbPicking) esWBPickDone(client);
           else if (s.contactSheet) s.setContactSheet(false);
           else if (s.mode === 'cull') s.setMode('develop');
           else if (s.mode === 'develop') s.setMode('cull');
@@ -281,7 +294,7 @@ export function useKeyboard() {
           } else if (es.cropping) {
             esSetCropping(client, false);
           } else if (es.wbPicking) {
-            esSetWBPicking(false);
+            esWBPickCancel(client); // revert to the pre-picker draft
           } else if (es.activeControl != null) {
             esSetActive(client, null);
           } else if (s.contactSheet) {

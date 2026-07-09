@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"image"
 	"image/jpeg"
+	"log"
 	"math"
 	"os"
 	"sync"
@@ -32,6 +33,14 @@ type Edits struct {
 	// LibRaw state; it is replaced when either changes.
 	decodeMu    sync.Mutex
 	decodeEntry *decodeCache
+
+	// linEntry holds the most recent scene-linear reference decode for the
+	// fold path, keyed by photo + the pre-demosaic inputs only. WB, exposure,
+	// brightness and gamma fold onto it post-decode, so dragging any of them
+	// reuses this and skips the ~400 ms demosaic entirely. One hot entry,
+	// replaced when the photo or a pre-demosaic control changes.
+	linMu    sync.Mutex
+	linEntry *linCache
 }
 
 type decodeCache struct {
@@ -40,6 +49,14 @@ type decodeCache struct {
 	noExpKey string      // LibrawInputsHashNoExp: matches across exposure-only changes
 	expEV    float64     // the ExpEV baked into rgba (via LibRaw exp_shift)
 	rgba     *image.RGBA // never mutated in place once cached
+}
+
+type linCache struct {
+	photoID int64
+	key     string        // LinearInputsHash: pre-demosaic inputs only
+	refMul  [4]float64    // as-shot WB the reference was decoded at
+	camXYZ  [4][3]float64 // camera matrix, for resolving Kelvin WB in Go
+	lin     *image.RGBA64 // scene-linear reference; never mutated once cached
 }
 
 // GetEditParams returns the stored edit state. An untouched photo returns
@@ -105,12 +122,26 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 	if !params.IsNeutral() {
 		ep = &params
 	}
-	// Reuse a warm decode that differs only in exposure — the common case right
-	// after an auto/preset, which moves exposure but leaves the rest of the
-	// LibRaw inputs alone — and fold the difference in post-decode. This paints
-	// the transient low-res frame with no demosaic; the deferred 2048 settle
-	// re-decodes at the exact exposure for the accurate render. A full miss
-	// falls through to the demosaic path with no fold.
+	gamma := photo.LookGamma
+	if gamma == 0 {
+		gamma = pyramid.FallbackLookGamma
+	}
+
+	// Fold path: a deterministic edit whose WB is fold-able decodes ONCE to a
+	// scene-linear reference; WB, exposure, brightness and gamma then fold in
+	// as a cheap per-pixel pass, so dragging any of them never re-demosaics.
+	// Auto WB (computed inside dcraw) and the base look (scene-dependent
+	// auto-brighten) aren't reproducible by the fold and take the exact path.
+	if img, ok, err := e.previewLinear(ctx, photoID, photo, ep, longEdge, gamma); err != nil {
+		return nil, err
+	} else if ok {
+		return jpegBlob(img)
+	}
+
+	// Fallback: exact decode, reusing a warm decode that differs only in
+	// exposure (the common case right after an auto/preset) and folding the
+	// difference in post-decode; a full miss runs the demosaic. The deferred
+	// 2048 settle re-decodes exactly for the accurate render.
 	var rgba *image.RGBA
 	var expDelta float64
 	if reused, baked, ok := e.approxDecode(photoID, ep); ok {
@@ -124,14 +155,14 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 			return nil, err
 		}
 	}
-	gamma := photo.LookGamma
-	if gamma == 0 {
-		gamma = pyramid.FallbackLookGamma
-	}
-	img := pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta)
+	return jpegBlob(pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta))
+}
+
+// jpegBlob encodes a transient preview frame. The quality is slightly below
+// the cached rendition's: the frame is fleeting and a smaller blob keeps the
+// WebSocket drag stream snappy.
+func jpegBlob(img *image.RGBA) (*aprot.Blob, error) {
 	var buf bytes.Buffer
-	// Slightly lower quality than the cached rendition: the frame is
-	// transient and a smaller blob keeps the WebSocket stream snappy.
 	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 75}); err != nil {
 		return nil, err
 	}
@@ -246,11 +277,154 @@ func (e *Edits) storeDecode(photoID int64, key, noExpKey string, expEV float64, 
 	e.decodeEntry = &decodeCache{photoID: photoID, key: key, noExpKey: noExpKey, expEV: expEV, rgba: rgba}
 }
 
-// PickWhiteBalance samples the current rendition at the given relative
-// coordinates (0..1 in the displayed, orientation-corrected image) and
-// returns the edit state that makes that spot neutral: wbMode=custom with
-// computed multipliers. The inverse of the display curve is approximate, so
-// a second pick refines the result.
+// foldable reports whether the fold path can render ep: it needs a
+// deterministic edit (the base look's auto-brighten isn't reproducible) whose
+// white balance isn't auto (auto WB is computed inside dcraw from the pixels).
+func foldable(ep *edit.Params) bool {
+	return ep != nil && ep.WBMode != edit.WBAuto
+}
+
+// previewLinear renders a transient frame off the scene-linear reference,
+// folding WB/exposure/brightness/gamma in Go. Returns ok=false (no error) when
+// the edit isn't fold-able, so the caller takes the exact decode path.
+func (e *Edits) previewLinear(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params, longEdge int, gamma float64) (*image.RGBA, bool, error) {
+	if !foldable(ep) {
+		return nil, false, nil
+	}
+	entry, err := e.linearMaster(ctx, photoID, photo, ep)
+	if err != nil {
+		return nil, false, err
+	}
+	fp := foldParamsFor(ep, entry.refMul, entry.camXYZ)
+	return pyramid.RenderPreviewLinear(entry.lin, longEdge, fp, gamma, ep), true, nil
+}
+
+// linearMaster returns the cached scene-linear reference for the photo at ep's
+// pre-demosaic state, decoding it (one demosaic) and caching it on a miss.
+// Because only the pre-demosaic inputs key the cache, WB/exposure/brightness/
+// gamma edits all reuse it without decoding.
+func (e *Edits) linearMaster(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params) (*linCache, error) {
+	key := ep.LinearInputsHash()
+	if c := e.cachedLinear(photoID, key); c != nil {
+		return c, nil
+	}
+	proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
+	if err != nil {
+		return nil, err
+	}
+	if ctx.Err() != nil {
+		release()
+		return nil, ctx.Err() // superseded while waiting for the handle
+	}
+	refMul := proc.CamMul()
+	camXYZ := proc.CamXYZ()
+	img, err := proc.Process(ep.LinearRefLibrawParams())
+	release()
+	if err != nil {
+		return nil, err
+	}
+	lin, err := pyramid.FromLibrawLinear(img)
+	if err != nil {
+		return nil, err
+	}
+	c := &linCache{photoID: photoID, key: key, refMul: refMul, camXYZ: camXYZ, lin: lin}
+	e.storeLinear(c)
+	return c, nil
+}
+
+// cachedLinear returns the cached linear reference for (photoID, key), or nil.
+func (e *Edits) cachedLinear(photoID int64, key string) *linCache {
+	e.linMu.Lock()
+	defer e.linMu.Unlock()
+	if e.linEntry != nil && e.linEntry.photoID == photoID && e.linEntry.key == key {
+		return e.linEntry
+	}
+	return nil
+}
+
+// storeLinear replaces the single-entry linear-reference cache.
+func (e *Edits) storeLinear(c *linCache) {
+	e.linMu.Lock()
+	defer e.linMu.Unlock()
+	e.linEntry = c
+}
+
+// foldParamsFor turns an edit into the raw-stage fold: the per-channel linear
+// gain (WB ratio from the reference's as-shot WB × 2^EV × brightness) and the
+// output-gamma power/toe. Temp/tint fold exactly (the as-shot WB cancels in the
+// ratio); custom/Kelvin picks are approximate in output space, which the 2048
+// settle corrects.
+//
+// Both multipliers are normalized to green before the ratio: the target may be
+// in a different unit scale than the reference — a picked/custom WBMul is
+// normalized to green=1, while cam_mul is in raw units (green ~1024 on many
+// cameras) — so the raw ratio would be ~1/1000 and paint the frame black. With
+// green=1 on both, the ratio is unit-independent and green (luminance) is
+// preserved, so WB shifts only tint, not exposure.
+func foldParamsFor(ep *edit.Params, refMul [4]float64, camXYZ [4][3]float64) pyramid.FoldParams {
+	target := targetWBMul(ep, refMul, camXYZ)
+	exp := math.Exp2(ep.ExpEV)
+	bright := ep.Bright
+	if bright <= 0 {
+		bright = 1
+	}
+	tG := target[1]
+	if tG <= 0 {
+		tG = 1
+	}
+	rG := refMul[1]
+	if rG <= 0 {
+		rG = 1
+	}
+	var k [3]float64
+	for c := range 3 {
+		rc := refMul[c] / rG
+		if rc <= 0 {
+			rc = 1
+		}
+		k[c] = (target[c] / tG) / rc * exp * bright
+	}
+	g := ep.Gamma
+	if g <= 0 {
+		g = 2.222
+	}
+	s := ep.Shadow
+	if s <= 0 {
+		s = 4.5
+	}
+	return pyramid.FoldParams{K: k, Pwr: 1 / g, Ts: s}
+}
+
+// targetWBMul resolves the effective WB multipliers for ep, mirroring
+// edit.LibrawParams + libraw's apply so the folded frame matches the exact
+// decode. refMul is the reference's as-shot WB; camXYZ resolves Kelvin.
+func targetWBMul(ep *edit.Params, refMul [4]float64, camXYZ [4][3]float64) [4]float64 {
+	switch ep.WBMode {
+	case edit.WBKelvin:
+		if ep.WBKelvin > 0 {
+			return libraw.AdjustWB(libraw.KelvinMulFromMatrix(camXYZ, ep.WBKelvin), 0, ep.WBTint)
+		}
+	case edit.WBCustom:
+		base := ep.WBMul
+		if base == ([4]float64{}) {
+			base = refMul
+		}
+		return libraw.AdjustWB(base, ep.WBTemp, ep.WBTint)
+	default: // camera (as-shot) base, optionally warmed/tinted
+		if ep.WBTemp != 0 || ep.WBTint != 0 {
+			return libraw.AdjustWB(refMul, ep.WBTemp, ep.WBTint)
+		}
+	}
+	return refMul
+}
+
+// PickWhiteBalance returns the edit state that neutralizes the surface at the
+// given relative coordinates (0..1 in the displayed, orientation-corrected
+// image): wbMode=custom with multipliers computed from the scene-linear camera
+// values. Because it reads the demosaiced sensor colour (not the developed
+// preview) the result depends only on the pixel — one click lands the neutral
+// instead of needing to converge over several, and clicking the same spot
+// always yields the same balance regardless of the current draft's WB.
 func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params edit.Params, x, y float64) (*edit.Params, error) {
 	if x < 0 || x > 1 || y < 0 || y > 1 {
 		return nil, aprot.ErrInvalidParams("pick coordinates must be within 0..1")
@@ -259,62 +433,47 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params edit
 	if err != nil {
 		return nil, err
 	}
-	path, err := e.ensurePreview(ctx, photoID, params)
+	var ep *edit.Params
+	if !params.IsNeutral() {
+		ep = &params
+	}
+	// Sample the scene-linear reference (demosaiced, at the camera's as-shot
+	// WB, no gamma/look) — the same buffer the fold preview uses — so no
+	// display-curve inversion is needed and the sampled colour is the camera's.
+	entry, err := e.linearMaster(ctx, photoID, photo, ep)
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+	// The click is relative to the displayed (possibly cropped) frame while the
+	// reference is the full oriented frame, so map through the crop rectangle.
+	// A straighten angle is ignored — a WB patch spans enough pixels that a few
+	// degrees don't move the sampled colour.
+	fx, fy := x, y
+	if params.HasCrop() {
+		fx = params.CropX + x*params.CropW
+		fy = params.CropY + y*params.CropH
 	}
-	img, err := jpeg.Decode(f)
-	f.Close()
-	if err != nil {
-		return nil, err
-	}
-
-	lookGamma := photo.LookGamma
-	if lookGamma == 0 {
-		lookGamma = pyramid.FallbackLookGamma
-	}
-	// The look's saturation boost scales with the edit's Saturation; the
-	// floor keeps a near-grayscale edit from exploding the inversion.
-	satFactor := math.Max(0.2, 1.15*(1+params.Saturation))
-	rl, gl, bl := samplePatchLinear(img, x, y, lookGamma, satFactor)
-	if gl < 1e-4 || rl < 1e-4 || bl < 1e-4 {
+	rl, gl, bl := samplePatchLinearRef(entry.lin, fx, fy)
+	if rl < 8 || gl < 8 || bl < 8 { // 16-bit linear; a neutral gray is thousands
+		log.Printf("wb pick: too-dark patch at (%.3f,%.3f)->(%.3f,%.3f) linear rl=%.4g gl=%.4g bl=%.4g on %dx%d reference",
+			x, y, fx, fy, rl, gl, bl, entry.lin.Bounds().Dx(), entry.lin.Bounds().Dy())
 		return nil, aprot.ErrInvalidParams("picked area is too dark — pick a brighter neutral area")
 	}
 
-	// The effective multipliers the sampled rendition was produced with.
-	base := params.WBMul
-	temp := params.WBTemp
-	if params.WBMode == edit.WBKelvin && params.WBKelvin > 0 {
-		proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
-		if err != nil {
-			return nil, err
-		}
-		base = proc.KelvinMul(params.WBKelvin)
-		release()
-		temp = 0
-	} else if params.WBMode != edit.WBCustom || base == ([4]float64{}) {
-		proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
-		if err != nil {
-			return nil, err
-		}
-		base = proc.CamMul()
-		release()
+	// Neutralizing custom multipliers, normalized to green. The reference
+	// already carries the as-shot WB (cam), so to make the picked surface
+	// neutral each channel is scaled by the as-shot ratio times 1/its-value:
+	// m[c] = (cam[c]/cam[G]) · (lin[G]/lin[c]).
+	cam := entry.refMul
+	cg := cam[1]
+	if cg <= 0 {
+		cg = 1
 	}
-	eff := libraw.AdjustWB(base, temp, params.WBTint)
-
-	// Scale so the sampled patch comes out neutral, then normalize G to 1.
-	mul := eff
-	mul[0] *= gl / rl
-	mul[2] *= gl / bl
-	if mul[3] > 0 {
-		mul[3] = mul[1]
-	}
-	for i := range mul {
-		mul[i] /= eff[1]
+	mul := [4]float64{
+		cam[0] / cg * (gl / rl),
+		1,
+		cam[2] / cg * (gl / bl),
+		1,
 	}
 
 	out := params
@@ -324,35 +483,24 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params edit
 	return &out, nil
 }
 
-// samplePatchLinear averages a small patch around (x,y) in approximately
-// linear light: the display look (BT.709 gamma × calibrated lift) is
-// inverted with a single combined power, and the look's saturation boost
-// (satFactor) is undone around luma. The edit's tone-curve adjustments are
-// not inverted — the pick is approximate by design and a second pick
-// refines it.
-func samplePatchLinear(img image.Image, x, y, lookGamma, satFactor float64) (r, g, b float64) {
+// samplePatchLinearRef averages a small patch of the scene-linear reference
+// around the given relative coordinates. Samples are 16-bit linear (0..65535);
+// only their per-channel ratios matter to white balance.
+func samplePatchLinearRef(img *image.RGBA64, x, y float64) (r, g, b float64) {
 	bnd := img.Bounds()
 	cx := bnd.Min.X + int(x*float64(bnd.Dx()-1))
 	cy := bnd.Min.Y + int(y*float64(bnd.Dy()-1))
 	const rad = 3
-	decodePow := 2.222 / lookGamma
-
 	var n float64
 	for py := cy - rad; py <= cy+rad; py++ {
 		for px := cx - rad; px <= cx+rad; px++ {
 			if px < bnd.Min.X || px >= bnd.Max.X || py < bnd.Min.Y || py >= bnd.Max.Y {
 				continue
 			}
-			pr, pg, pb, _ := img.At(px, py).RGBA() // 16-bit
-			fr, fg, fb := float64(pr)/65535, float64(pg)/65535, float64(pb)/65535
-			// Undo the look's saturation boost around Rec.601 luma.
-			luma := 0.299*fr + 0.587*fg + 0.114*fb
-			fr = luma + (fr-luma)/satFactor
-			fg = luma + (fg-luma)/satFactor
-			fb = luma + (fb-luma)/satFactor
-			r += math.Pow(math.Max(0, fr), decodePow)
-			g += math.Pow(math.Max(0, fg), decodePow)
-			b += math.Pow(math.Max(0, fb), decodePow)
+			o := img.PixOffset(px, py)
+			r += float64(uint32(img.Pix[o])<<8 | uint32(img.Pix[o+1]))
+			g += float64(uint32(img.Pix[o+2])<<8 | uint32(img.Pix[o+3]))
+			b += float64(uint32(img.Pix[o+4])<<8 | uint32(img.Pix[o+5]))
 			n++
 		}
 	}

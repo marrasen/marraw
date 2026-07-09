@@ -8,7 +8,20 @@ import { Segmented } from '@/components/ui/segmented';
 import { ChipSpinner } from '@/components/ui/task-chip';
 import { cn } from '@/lib/utils';
 import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
-import { esClearPreview, esCommit, esPickWB, esPreviewSettled, esSetCropping, esUpdate, useEditSession } from '@/lib/editSession';
+import {
+  esClearPreview,
+  esCommit,
+  esPickWB,
+  esPreviewSettled,
+  esSetCropping,
+  esUpdate,
+  esWBPickAsShot,
+  esWBPickAuto,
+  esWBPickCancel,
+  esWBPickDone,
+  esWBPickReset,
+  useEditSession,
+} from '@/lib/editSession';
 import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
@@ -89,6 +102,38 @@ function CropBar({
         Reset
       </Button>
       <Button size="sm" onClick={() => esSetCropping(client, false)} title="Apply crop (Enter or R)">
+        Done
+      </Button>
+    </div>
+  );
+}
+
+// WBBar is the white-balance eyedropper toolbar, laid out like CropBar: a hint,
+// the value-source shortcuts (As shot / Auto / Reset), then Cancel / Done.
+// Clicking a neutral gray in the image previews a balance; Done keeps it as one
+// history entry, Cancel/Reset restore the draft from when the picker opened.
+function WBBar({ client }: { client: ApiClient }) {
+  return (
+    <div className="glass absolute bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3.5 rounded-[13px] px-4 py-2.5">
+      <div className="flex items-center gap-2">
+        <Pipette className="size-[15px] text-accent-text" strokeWidth={1.5} />
+        <span className="text-[11.5px] text-muted-foreground">Click a neutral gray</span>
+      </div>
+      <div className="h-[26px] w-px bg-white/15" />
+      <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => esWBPickAsShot(client)} title="Camera as-shot white balance">
+        As shot
+      </Button>
+      <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => esWBPickAuto(client)} title="Auto white balance">
+        Auto
+      </Button>
+      <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => esWBPickReset(client)} title="Revert to the value before picking">
+        Reset
+      </Button>
+      <div className="h-[26px] w-px bg-white/15" />
+      <Button size="sm" variant="ghost" onClick={() => esWBPickCancel(client)} title="Discard and exit (Esc)">
+        Cancel
+      </Button>
+      <Button size="sm" onClick={() => esWBPickDone(client)} title="Keep white balance (Enter)">
         Done
       </Button>
     </div>
@@ -733,7 +778,7 @@ export function CinemaImage({
             onContextMenu={(e) => {
               if (wbPicking) {
                 e.preventDefault();
-                useEditSession.setState({ wbPicking: false });
+                esWBPickReset(client); // revert picks, stay in the picker
               }
             }}
           >
@@ -848,17 +893,8 @@ export function CinemaImage({
         </div>
       )}
 
-      {/* WB eyedropper hint bar. */}
-      {wbPicking && (
-        <div className="glass absolute bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl px-4 py-2.5 text-[12.5px]">
-          <Pipette className="size-[15px] text-accent-text" strokeWidth={1.5} />
-          <span className="text-secondary-foreground">Click a neutral gray to set white balance</span>
-          <span className="h-4 w-px bg-white/15" />
-          <span className="text-muted-foreground">
-            Right-click resets · <span className="font-mono text-secondary-foreground">Esc</span> cancels
-          </span>
-        </div>
-      )}
+      {/* WB eyedropper toolbar (mirrors CropBar). */}
+      {wbPicking && <WBBar client={client} />}
 
       {cropping ? (
         <CropBar
