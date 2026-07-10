@@ -681,24 +681,54 @@ try {
     await sleep(100);
     R.loupeSpaceToggle = spaceToFit && ui().loupeZoom === 1 ? true : `fit=${spaceToFit}, then ${ui().loupeZoom}`;
 
-    ui().setLoupeZoom('fit');
-
-    // --- re-clicking the active Fit button recenters a panned photo -------
-    await sleep(400); // zoom tween + pan-ratio restore settle
+    // --- every return to fit recenters a panned photo ---------------------
+    // Regression: centering was wired only to re-clicking an ALREADY active
+    // Fit, so the first click (coming from 1:1) and the Space toggle left the
+    // photo wherever it had been panned. Entering fit now bumps the center
+    // tick in setLoupeZoom, so all three paths land centered.
     const centered = () =>
       Math.abs(pane.scrollLeft - (pane.scrollWidth - pane.clientWidth) / 2) <= 1 &&
       Math.abs(pane.scrollTop - (pane.scrollHeight - pane.clientHeight) / 2) <= 1;
-    pt('pointerdown', 400, 300);
-    pt('pointermove', 250, 200);
-    pt('pointerup', 250, 200);
-    await sleep(100);
-    const offCenter = !centered();
-    buttons().find((b) => b.textContent.trim() === 'Fit')?.click();
-    await sleep(150);
-    R.fitReclickCenters =
-      offCenter && centered()
+    const panAway = async () => {
+      pt('pointerdown', 400, 300);
+      pt('pointermove', 250, 200);
+      pt('pointerup', 250, 200);
+      await sleep(100);
+      return !centered();
+    };
+    const clickFit = () => buttons().find((b) => b.textContent.trim() === 'Fit')?.click();
+    const settle = () => sleep(400); // 160ms zoom tween + pan-ratio restore
+
+    // The FIRST click of Fit, arriving from 1:1, centers.
+    ui().setLoupeZoom(1);
+    await settle();
+    const offBeforeClick = await panAway();
+    clickFit();
+    await settle();
+    R.fitFirstClickCenters =
+      offBeforeClick && centered()
         ? true
-        : `offCenter=${offCenter} scroll=${pane.scrollLeft},${pane.scrollTop}`;
+        : `offCenter=${offBeforeClick} scroll=${pane.scrollLeft},${pane.scrollTop}`;
+
+    // Space back to fit centers too.
+    ui().setLoupeZoom(1);
+    await settle();
+    const offBeforeSpace = await panAway();
+    key(' ');
+    await settle();
+    R.spaceToFitCenters =
+      offBeforeSpace && ui().loupeZoom === 'fit' && centered()
+        ? true
+        : `offCenter=${offBeforeSpace} zoom=${ui().loupeZoom} scroll=${pane.scrollLeft},${pane.scrollTop}`;
+
+    // Re-clicking the already-active Fit still recenters (the old behavior).
+    const offBeforeReclick = await panAway();
+    clickFit();
+    await settle();
+    R.fitReclickCenters =
+      offBeforeReclick && centered()
+        ? true
+        : `offCenter=${offBeforeReclick} scroll=${pane.scrollLeft},${pane.scrollTop}`;
   } catch (err) {
     R.loupe11Bridge = R.loupe11Bridge ?? String(err);
     R.loupe11Prefetch = R.loupe11Prefetch ?? String(err);
@@ -707,6 +737,8 @@ try {
     R.loupe11TileScale = R.loupe11TileScale ?? String(err);
     R.loupeSpaceToggle = R.loupeSpaceToggle ?? String(err);
     R.loupeNoScrollbar = R.loupeNoScrollbar ?? String(err);
+    R.fitFirstClickCenters = R.fitFirstClickCenters ?? String(err);
+    R.spaceToFitCenters = R.spaceToFitCenters ?? String(err);
     R.fitReclickCenters = R.fitReclickCenters ?? String(err);
   }
   for (let i = 0; i < 3 && ui().view !== 'grid'; i++) {

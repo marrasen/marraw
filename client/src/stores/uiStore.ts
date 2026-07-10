@@ -144,7 +144,7 @@ interface UIState {
   // Loupe zoom: 'fit' or a scale factor (1 = 100%). Deliberately survives
   // photo navigation so a series can be compared at the same crop.
   loupeZoom: 'fit' | number;
-  // Bumped to re-center the loupe pan (clicking Fit while already at fit).
+  // Bumped to re-center the loupe pan (any return to fit).
   loupeCenterTick: number;
   // The loupe's actual fit scale, mirrored out so keyboard zoom steps can
   // start from it while loupeZoom is 'fit'.
@@ -180,7 +180,6 @@ interface UIState {
   setSettingsOpen: (open: boolean) => void;
   setCellSize: (px: number) => void;
   setLoupeZoom: (z: 'fit' | number) => void;
-  centerLoupe: () => void;
   setLoupeFitScale: (scale: number) => void;
   nudgeLoupePan: (dx: number, dy: number) => void;
 }
@@ -348,9 +347,16 @@ export const useUIStore = create<UIState>((set, get) => ({
   setExportOpen: (open) => set({ exportOpen: open }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setCellSize: (px) => set({ cellSize: Math.min(400, Math.max(120, px)) }),
+  // Entering fit always recenters — a photo panned away at 1:1 must not come
+  // back off-center. Bumping the tick here (not at the call sites) covers the
+  // Fit button, Space/Z, and double-click alike; re-selecting an already-active
+  // Fit still recenters, since the tick moves even when loupeZoom doesn't.
   setLoupeZoom: (z) =>
-    set({ loupeZoom: z === 'fit' ? z : Math.min(4, Math.max(0.05, z)) }),
-  centerLoupe: () => set((s) => ({ loupeCenterTick: s.loupeCenterTick + 1 })),
+    set((s) =>
+      z === 'fit'
+        ? { loupeZoom: 'fit', loupeCenterTick: s.loupeCenterTick + 1 }
+        : { loupeZoom: Math.min(4, Math.max(0.05, z)) },
+    ),
   setLoupeFitScale: (scale) => set({ loupeFitScale: scale }),
   nudgeLoupePan: (dx, dy) =>
     set((s) => ({ loupePan: [s.loupePan[0] + dx, s.loupePan[1] + dy] })),

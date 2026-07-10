@@ -479,8 +479,8 @@ export function CinemaImage({
     el.scrollTop = panRatio.current[1] * Math.max(0, el.scrollHeight - el.clientHeight);
   }, [photo.id, boxW, boxH, slackX, slackY, container]);
 
-  // Clicking Fit while already at fit recenters: reset the persisted pan
-  // ratio and snap the scroll back to the middle of the slack range.
+  // Any return to fit recenters: reset the persisted pan ratio and snap the
+  // scroll back to the middle of the slack range.
   const centerTick = useUIStore((s) => s.loupeCenterTick);
   const lastCenterTick = useRef(centerTick);
   useLayoutEffect(() => {
