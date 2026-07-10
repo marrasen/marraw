@@ -127,9 +127,7 @@ export default function App() {
         ) : isLoading ? null : empty ? (
           <EmptyLibrary />
         ) : (
-          <main className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Pick a shoot on the left to get started.
-          </main>
+          <Welcome />
         )}
       </div>
       <AddFolderDialog />
@@ -207,6 +205,25 @@ function EmptyLibrary() {
             Add folder
           </Button>
           <span className="text-xs text-faint">or drop a folder anywhere in this window</span>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+// The library has shoots but none is open: the mark, the build you're running,
+// and where to click next.
+function Welcome() {
+  return (
+    <main className="flex flex-1 items-center justify-center p-10">
+      <div className="flex flex-col items-center gap-5 text-center">
+        {/* Relative URL: the packaged shell loads index.html over file://. */}
+        <img src="./icon.svg" alt="" className="size-[112px]" />
+        <div className="flex flex-col gap-2">
+          <h2 className="text-[23px] font-semibold tracking-[-.02em]">
+            Welcome to marraw v{__APP_VERSION__}
+          </h2>
+          <p className="text-sm text-muted-foreground">Pick a shoot on the left to get started.</p>
         </div>
       </div>
     </main>
