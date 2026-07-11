@@ -37,6 +37,22 @@ const (
 
 func ThumbFitValues() []ThumbFit { return []ThumbFit{ThumbFitCrop, ThumbFitFit, ThumbFitNatural} }
 
+// LibrarySort is the photo ordering in the library, cull, and develop views.
+// capture* is capture-time order (untimed frames last, file name breaking
+// ties — the order ListPhotos serves); name* is file-name order alone.
+type LibrarySort string
+
+const (
+	LibrarySortCaptureAsc  LibrarySort = "captureAsc"
+	LibrarySortCaptureDesc LibrarySort = "captureDesc"
+	LibrarySortNameAsc     LibrarySort = "nameAsc"
+	LibrarySortNameDesc    LibrarySort = "nameDesc"
+)
+
+func LibrarySortValues() []LibrarySort {
+	return []LibrarySort{LibrarySortCaptureAsc, LibrarySortCaptureDesc, LibrarySortNameAsc, LibrarySortNameDesc}
+}
+
 // AutoPreset is a creative auto preset: named auto sections plus style
 // offsets layered on top. The client sanitizes sections/offset keys on read,
 // so unknown values from older/newer clients survive as stored.
@@ -125,6 +141,9 @@ type UISettings struct {
 	PrerenderFullres bool `json:"prerenderFullres"`
 	// ThumbFit is how thumbnails are framed in the grids (default fit).
 	ThumbFit ThumbFit `json:"thumbFit"`
+	// LibrarySort is the photo ordering in the grids and filmstrips
+	// (default captureAsc).
+	LibrarySort LibrarySort `json:"librarySort"`
 }
 
 // Settings serves the persisted client preferences. Everything lives in the
@@ -154,6 +173,7 @@ const (
 	settingUIRailWidth     = "ui:railWidth"
 	settingUIPrerenderFull = "ui:prerenderFullres"
 	settingUIThumbFit      = "ui:thumbFit"
+	settingUILibrarySort   = "ui:librarySort"
 )
 
 // Library rail width bounds; the default matches the design handoff.
@@ -209,6 +229,14 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		}
 	}
 
+	// Capture order unless an explicit, recognized value is stored.
+	librarySort := LibrarySortCaptureAsc
+	if raw, _ := db.GetSetting(ctx, settingUILibrarySort); raw != "" {
+		if v := LibrarySort(raw); enumValid(v, LibrarySortValues()) {
+			librarySort = v
+		}
+	}
+
 	return &UISettings{
 		Theme:            theme,
 		GapMinutes:       gap,
@@ -224,6 +252,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		RailWidth:        railWidth,
 		PrerenderFullres: prerenderFullRaw == "true",
 		ThumbFit:         thumbFit,
+		LibrarySort:      librarySort,
 	}, nil
 }
 
@@ -419,6 +448,14 @@ func (u *Settings) SetThumbFit(ctx context.Context, fit ThumbFit) error {
 		return aprot.ErrInvalidParams(fmt.Sprintf("unknown thumbFit %q", fit))
 	}
 	return u.save(ctx, settingUIThumbFit, string(fit))
+}
+
+// SetLibrarySort persists the photo ordering in the grids and filmstrips.
+func (u *Settings) SetLibrarySort(ctx context.Context, sort LibrarySort) error {
+	if !enumValid(sort, LibrarySortValues()) {
+		return aprot.ErrInvalidParams(fmt.Sprintf("unknown librarySort %q", sort))
+	}
+	return u.save(ctx, settingUILibrarySort, string(sort))
 }
 
 // save writes one row and pushes the fresh snapshot to every window.

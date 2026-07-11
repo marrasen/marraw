@@ -492,6 +492,34 @@ try {
   R.selectionEscClears = ui().selection.size <= 1;
   ui().focus(ids0[0]);
 
+  // --- library sort control --------------------------------------------------
+  // Newest-first must run the capture times non-increasing over the same
+  // frames (untimed ones stay last); a name sort turns time-gap grouping off
+  // (one flat, headerless grid); oldest-first restores the server order.
+  const sortPick = async (label) => {
+    document.querySelector('[aria-label="Sort order"]')?.click();
+    await until(() => document.querySelectorAll('[role="menuitemradio"]').length > 0, 5000, 'sort menu');
+    [...document.querySelectorAll('[role="menuitemradio"]')].find((b) => b.textContent.trim() === label)?.click();
+    await sleep(300);
+  };
+  const idsAsc = ui().visibleIds.slice();
+  R.sortHeadersInCaptureOrder = !!document.querySelector('[data-testid="grid-group-header"]');
+  await sortPick('Capture time · newest first');
+  {
+    const t = ui().visibleTakenAt;
+    const timed = t.filter((v) => v > 0);
+    R.sortNewestFirst =
+      ui().visibleIds.length === idsAsc.length &&
+      timed.every((v, i) => i === 0 || v <= timed[i - 1]) &&
+      t.slice(timed.length).every((v) => v === 0)
+        ? true
+        : 'not newest-first';
+  }
+  await sortPick('File name · A to Z');
+  R.sortNameFlattensGroups = !document.querySelector('[data-testid="grid-group-header"]');
+  await sortPick('Capture time · oldest first');
+  R.sortRestored = ui().visibleIds.join() === idsAsc.join() ? true : 'order not restored';
+
   // --- export dialog: segmented labels + default dir ------------------------
   key('e', { ctrlKey: true });
   await until(() => document.querySelector('input[placeholder*="Destination"]'), 5000, 'export dialog');

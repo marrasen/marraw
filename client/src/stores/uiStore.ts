@@ -8,6 +8,8 @@ import { sanitizeAutoPresets, type AutoPreset } from '@/lib/autoPresets';
 export type Theme = 'dark' | 'light' | 'system';
 // How thumbnails are framed in the grids. Mirrors the Go ThumbFit enum.
 export type ThumbFit = 'crop' | 'fit' | 'natural';
+// Photo ordering in the grids and filmstrips. Mirrors the Go LibrarySort enum.
+export type LibrarySort = 'captureAsc' | 'captureDesc' | 'nameAsc' | 'nameDesc';
 
 export type View = 'grid' | 'loupe';
 export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
@@ -42,6 +44,20 @@ export function clampRailWidth(px: number): number {
 function sanitizeThumbFit(v: string | undefined): ThumbFit {
   return v === 'crop' || v === 'natural' ? v : 'fit';
 }
+
+// A librarySort from an older/newer server blob falls back to capture order.
+function sanitizeLibrarySort(v: string | undefined): LibrarySort {
+  return v === 'captureDesc' || v === 'nameAsc' || v === 'nameDesc' ? v : 'captureAsc';
+}
+
+// Effective time-gap threshold: gaps are computed between neighboring frames,
+// so they only mean something while the list runs in capture order (either
+// direction). Name-sorted lists get one flat group.
+export const selectGapMinutes = (s: {
+  gapMinutes: number | null;
+  librarySort: LibrarySort;
+}): number | null =>
+  s.librarySort === 'nameAsc' || s.librarySort === 'nameDesc' ? null : s.gapMinutes;
 
 // Mirrors the server's normalizeExportOptions: missing or invalid fields
 // from older blobs fall back to the dialog defaults.
@@ -111,6 +127,9 @@ interface UIState {
   // How thumbnails are framed in the grids (crop 3:2 / fit square / natural
   // justified rows). Default fit — the whole frame is visible.
   thumbFit: ThumbFit;
+  // Photo ordering in the grids and filmstrips (default captureAsc). Read
+  // the gap threshold through selectGapMinutes — name order has no gaps.
+  librarySort: LibrarySort;
   // Edit-panel group id -> open (absent = open).
   editGroups: Record<string, boolean>;
   // Library-group display aliases / rail collapse state, keyed by the
@@ -221,6 +240,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   developTab: 'develop',
   prerenderFullres: false,
   thumbFit: 'fit',
+  librarySort: 'captureAsc',
   editGroups: {},
   groupAliases: {},
   railGroups: {},
@@ -271,6 +291,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       exportOptions: sanitizeExportOptions(s.exportOptions),
       prerenderFullres: s.prerenderFullres,
       thumbFit: sanitizeThumbFit(s.thumbFit),
+      librarySort: sanitizeLibrarySort(s.librarySort),
       editGroups: s.editGroups,
       groupAliases: s.groupAliases,
       railGroups: s.railGroups,

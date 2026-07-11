@@ -30,6 +30,9 @@ export function ContactSheet({ photos, groups }: { photos: Photo[]; groups: Time
   const setContactSheet = useUIStore((s) => s.setContactSheet);
   const folderPath = useUIStore((s) => s.folderPath);
   const thumbFit = useUIStore((s) => s.thumbFit);
+  // Newest-first: the dead time at a section boundary sits chronologically
+  // after that section's frames (see GridView's GroupHeaderRow).
+  const gapSide = useUIStore((s) => (s.librarySort === 'captureDesc' ? 'after' : 'before'));
   const { roots } = useLibraryRoots();
   const current = folderPath ? roots.find((r) => samePath(r.path, folderPath)) : undefined;
   const picked = photos.filter((p) => p.flag === 'pick').length;
@@ -187,7 +190,7 @@ export function ContactSheet({ photos, groups }: { photos: Photo[]; groups: Time
               <div className="flex-1" />
               {g.gapBeforeMin != null && g.gapBeforeMin > 0 && (
                 <span className="rounded-md border border-primary/30 bg-primary/15 px-2 py-[3px] font-mono text-[11px] text-[#aab0ff]">
-                  {gapLabel(g.gapBeforeMin)} before
+                  {gapLabel(g.gapBeforeMin)} {gapSide}
                 </span>
               )}
             </div>

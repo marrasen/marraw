@@ -9,6 +9,14 @@ import type {
 } from './client';
 import type { ColorSpaceType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
 
+export const LibrarySort = {
+    CaptureAsc: "captureAsc",
+    CaptureDesc: "captureDesc",
+    NameAsc: "nameAsc",
+    NameDesc: "nameDesc",
+} as const;
+export type LibrarySortType = typeof LibrarySort[keyof typeof LibrarySort];
+
 export const Theme = {
     Dark: "dark",
     Light: "light",
@@ -55,6 +63,7 @@ export interface UISettings {
     railWidth: number;
     prerenderFullres: boolean;
     thumbFit: ThumbFitType;
+    librarySort: LibrarySortType;
 }
 
 
@@ -172,6 +181,19 @@ setGroupAlias.method = 'Settings.SetGroupAlias' as const;
 
 export function subscribeSetGroupAlias(client: ApiClient, parentPath: string, alias: string, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetGroupAlias', [parentPath, alias], callback, onError, options);
+}
+
+
+export function setLibrarySort(client: ApiClient, sort: LibrarySortType, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetLibrarySort', [sort], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setLibrarySort.method = 'Settings.SetLibrarySort' as const;
+
+export function subscribeSetLibrarySort(client: ApiClient, sort: LibrarySortType, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetLibrarySort', [sort], callback, onError, options);
 }
 
 
@@ -386,6 +408,21 @@ export function useSetGroupAlias(parentPath: string, alias: string, options?: Us
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [parentPath, alias], _subscribe: { method: 'Settings.SetGroupAlias', params: [parentPath, alias] } });
+}
+
+/**
+ * Subscribes to `Settings.SetLibrarySort` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetLibrarySort(sort: LibrarySortType, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, sort: LibrarySortType) => setLibrarySort(client, sort, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [sort], _subscribe: { method: 'Settings.SetLibrarySort', params: [sort] } });
 }
 
 /**

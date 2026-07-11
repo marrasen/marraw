@@ -15,7 +15,7 @@ import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
 import { groupByGap } from '@/lib/timeGaps';
 import { useIdle } from '@/lib/useIdle';
 import { cn } from '@/lib/utils';
-import { useUIStore } from '@/stores/uiStore';
+import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
 
 /**
  * Develop mode: the maximal darkroom canvas. The photo fills the window;
@@ -26,7 +26,7 @@ import { useUIStore } from '@/stores/uiStore';
  */
 export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) {
   const focusId = useUIStore((s) => s.focusId);
-  const gapMinutes = useUIStore((s) => s.gapMinutes);
+  const gapMinutes = useUIStore(selectGapMinutes);
   const cropping = useEditSession((s) => s.cropping);
   const wbPicking = useEditSession((s) => s.wbPicking);
   const keyAdjust = useEditSession((s) => s.keyAdjust);

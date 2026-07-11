@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutGrid, PanelRight, Star, Trash2 } from 'lucide-react';
+import { ArrowUpDown, LayoutGrid, PanelRight, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePhotos } from '@/api/library';
 import { resetEdits } from '@/api/edits';
@@ -10,6 +10,8 @@ import { Slider } from '@/components/ui/slider';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -24,7 +26,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { applyFlag, applyRating } from '@/lib/actions';
 import { esApplyParams } from '@/lib/editSession';
-import { useUIStore, type FlagFilter } from '@/stores/uiStore';
+import { updateLibrarySort } from '@/lib/uiSettings';
+import { useUIStore, type FlagFilter, type LibrarySort } from '@/stores/uiStore';
 
 const FLAG_ITEMS: { value: FlagFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -33,8 +36,17 @@ const FLAG_ITEMS: { value: FlagFilter; label: string }[] = [
   { value: 'exclude', label: 'Excluded' },
 ];
 
+const SORT_ITEMS: { value: LibrarySort; label: string }[] = [
+  { value: 'captureAsc', label: 'Capture time · oldest first' },
+  { value: 'captureDesc', label: 'Capture time · newest first' },
+  { value: 'nameAsc', label: 'File name · A to Z' },
+  { value: 'nameDesc', label: 'File name · Z to A' },
+];
+
 export function FilterBar() {
+  const client = useApiClient();
   const minRating = useUIStore((s) => s.minRating);
+  const librarySort = useUIStore((s) => s.librarySort);
   const flagFilter = useUIStore((s) => s.flagFilter);
   const setFilters = useUIStore((s) => s.setFilters);
   const view = useUIStore((s) => s.view);
@@ -159,6 +171,35 @@ export function FilterBar() {
           </div>
         </>
       )}
+
+      {/* Sort order applies to every view (the loupe filmstrip and Cull deck
+          follow the same list), so it lives outside the grid-only cluster. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(
+            'flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-secondary hover:text-foreground',
+            librarySort === 'captureAsc' ? 'text-muted-foreground' : 'text-foreground',
+          )}
+          title="Sort order"
+          aria-label="Sort order"
+        >
+          <ArrowUpDown className="size-[15px]" strokeWidth={1.5} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-[218px]">
+          <DropdownMenuRadioGroup
+            value={librarySort}
+            onValueChange={(v) => updateLibrarySort(client, v as LibrarySort)}
+          >
+            {SORT_ITEMS.map((it) => (
+              <DropdownMenuRadioItem key={it.value} value={it.value}>
+                {it.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <div className="h-5 w-px bg-border" />
 
       <button
         onClick={toggleEditPanel}

@@ -11,7 +11,7 @@ import { ZoomCluster } from '@/components/cinema/ZoomCluster';
 import { esLoad, esSetApplyIds, useEditSession } from '@/lib/editSession';
 import { groupByGap, timeLabel } from '@/lib/timeGaps';
 import { useIdle } from '@/lib/useIdle';
-import { useUIStore } from '@/stores/uiStore';
+import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
 
 /**
  * Cull mode: the cinema confirm loupe with the time-gap scrubber deck. The
@@ -22,7 +22,7 @@ export function CullView({ photos }: { photos: Photo[] }) {
   const client = useApiClient();
   const focusId = useUIStore((s) => s.focusId);
   const contactSheet = useUIStore((s) => s.contactSheet);
-  const gapMinutes = useUIStore((s) => s.gapMinutes);
+  const gapMinutes = useUIStore(selectGapMinutes);
   const cropping = useEditSession((s) => s.cropping);
   const wbPicking = useEditSession((s) => s.wbPicking);
   const idle = useIdle();

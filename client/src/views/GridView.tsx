@@ -8,7 +8,7 @@ import { imgUrl } from '@/lib/backend';
 import { dayLabel, gapLabel, groupByGap, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { PyramidImage } from '@/components/PyramidImage';
 import { rowLayout } from '@/lib/justify';
-import { useUIStore } from '@/stores/uiStore';
+import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
 
 const CELL_GAP = 12;
 const HEADER_H = 40;
@@ -54,7 +54,7 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
   const naturalTarget = Math.max(48, Math.floor((cellTarget * 2) / 3));
   const fitClass = thumbFit === 'fit' ? 'object-contain' : 'object-cover';
 
-  const gapMinutes = useUIStore((s) => s.gapMinutes);
+  const gapMinutes = useUIStore(selectGapMinutes);
   const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
   const grouped = gapMinutes != null && photos.length > 0;
 
@@ -223,6 +223,9 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
 // scaled down to the library toolbar type ramp.
 function GroupHeaderRow({ group, multiDay, top }: { group: TimeGroup; multiDay: boolean; top: number }) {
   const n = group.photos.length;
+  // Newest-first: the dead time at this boundary is chronologically after
+  // this group's frames, so the badge must not claim "before".
+  const gapSide = useUIStore((s) => (s.librarySort === 'captureDesc' ? 'after' : 'before'));
   return (
     <div
       data-testid="grid-group-header"
@@ -243,7 +246,7 @@ function GroupHeaderRow({ group, multiDay, top }: { group: TimeGroup; multiDay: 
         <div className="flex-1" />
         {group.gapBeforeMin != null && group.gapBeforeMin > 0 && (
           <span className="rounded-md border border-primary/30 bg-primary/15 px-2 py-[2px] font-mono text-[10.5px] text-[#aab0ff]">
-            {gapLabel(group.gapBeforeMin)} before
+            {gapLabel(group.gapBeforeMin)} {gapSide}
           </span>
         )}
       </div>

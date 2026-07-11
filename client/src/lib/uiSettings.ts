@@ -13,6 +13,7 @@ import {
   setExportOptions,
   setGapMinutes,
   setGroupAlias,
+  setLibrarySort,
   setPrerenderFullres,
   setQuickDials,
   setRailGroupOpen,
@@ -26,7 +27,7 @@ import {
 import type { ApiClient } from '@/api/client';
 import type { AutoPreset } from '@/lib/autoPresets';
 import type { DialKey } from '@/lib/dials';
-import { clampRailWidth, useUIStore, type Theme, type ThumbFit } from '@/stores/uiStore';
+import { clampRailWidth, useUIStore, type LibrarySort, type Theme, type ThumbFit } from '@/stores/uiStore';
 
 // Mirrors every uiSettings snapshot into the store. Render once, above
 // everything that reads settings.
@@ -83,6 +84,11 @@ export function updatePrerenderFullres(client: ApiClient, enabled: boolean) {
 export function updateThumbFit(client: ApiClient, fit: ThumbFit) {
   useUIStore.setState({ thumbFit: fit });
   setThumbFit(client, fit).catch(swallow);
+}
+
+export function updateLibrarySort(client: ApiClient, sort: LibrarySort) {
+  useUIStore.setState({ librarySort: sort });
+  setLibrarySort(client, sort).catch(swallow);
 }
 
 export function updateEditGroupOpen(client: ApiClient, id: string, open: boolean) {

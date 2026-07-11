@@ -181,8 +181,6 @@ them is load-bearing for your work, marraw is not ready for you yet.
   **not** round-trip with Lightroom, darktable or Capture One.
 - ❌ **No photo search, keywords, or collections.** You filter by rating and
   flag within a folder. That's it.
-- ❌ **No sort control.** Photos are always ordered by capture time, falling
-  back to filename for frames whose EXIF carries no date.
 - ❌ **No presets library** beyond auto-presets, and no DCP camera profiles.
 
 **Export & output**

@@ -13,9 +13,10 @@ export interface TimeGroup {
 /**
  * gapGroupStarts returns the index of each group's first photo: a new group
  * starts when the gap between consecutive frames exceeds thresholdMin minutes.
- * Photos keep their list order (file-name order tracks capture order); frames
- * without a capture time never open a gap. thresholdMin null/0 = one flat
- * group, i.e. `[0]`.
+ * Photos keep their list order; the gap is |Δt| so both capture-time sort
+ * directions group identically (name order is not time-monotonic — callers
+ * pass null there, see selectGapMinutes). Frames without a capture time never
+ * open a gap. thresholdMin null/0 = one flat group, i.e. `[0]`.
  *
  * This is the boundary logic shared by everything that lays out groups — the
  * grid, the contact sheet, and keyboard row navigation. They must agree on
@@ -28,7 +29,7 @@ export function gapGroupStarts(takenAt: readonly number[], thresholdMin: number 
   let lastTaken = 0;
   for (let i = 0; i < takenAt.length; i++) {
     const t = takenAt[i];
-    const gapSec = t > 0 && lastTaken > 0 ? t - lastTaken : 0;
+    const gapSec = t > 0 && lastTaken > 0 ? Math.abs(t - lastTaken) : 0;
     if (starts.length === 0 || gapSec > thresholdMin * 60) starts.push(i);
     if (t > 0) lastTaken = t;
   }
@@ -50,7 +51,10 @@ export function groupByGap(photos: Photo[], thresholdMin: number | null): TimeGr
     const to = g + 1 < starts.length ? starts[g + 1] : photos.length;
     const slice = photos.slice(starts[g], to);
     const first = slice[0];
-    const gapSec = first.takenAt > 0 && lastTaken > 0 ? first.takenAt - lastTaken : 0;
+    // |Δt| like gapGroupStarts: in newest-first order the dead time sits
+    // chronologically after this group, but it is still the gap at the
+    // boundary displayed above it.
+    const gapSec = first.takenAt > 0 && lastTaken > 0 ? Math.abs(first.takenAt - lastTaken) : 0;
     const cur: TimeGroup = {
       photos: slice,
       start: first.takenAt,
