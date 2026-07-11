@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Check, Clock } from 'lucide-react';
 import { setVisible, type Photo } from '@/api/library';
@@ -31,7 +31,10 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
   scrollRef.current = scrollEl;
   const [width, setWidth] = useState(0);
 
-  useEffect(() => {
+  // Layout effect: the synchronous first measurement re-renders before paint,
+  // so the justified natural layout never paints (or publishes a nav model
+  // for) the degenerate one-frame-per-row shape it produces at width 0.
+  useLayoutEffect(() => {
     if (!scrollEl) return;
     const ro = new ResizeObserver(() => setWidth(scrollEl.clientWidth));
     ro.observe(scrollEl);
@@ -151,12 +154,31 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
     return idx < 0 ? null : (photoRow[idx] ?? null);
   }, [photos, focusId, photoRow]);
   useEffect(() => {
-    // align 'auto' only scrolls when the focused row is off-screen, so a
-    // background metadata snapshot reflowing the natural layout re-anchors on
-    // the focus without yanking the view while it stays visible.
     if (focusRow != null) virtualizer.scrollToIndex(focusRow, { align: 'auto' });
+    // Keyed on focusId, not focusRow: a layout reflow can renumber the focused
+    // row without the focus moving, and that case belongs to the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusRow, rows]);
+  }, [focusId]);
+
+  // A row-model change (a background metadata snapshot reflowing the natural
+  // layout, a rating patch, a resize) re-anchors on the focus only when it was
+  // on-screen before the reflow — never yanking back a view the user has
+  // scrolled away from. focusVisible is written by the tracker effect below,
+  // so when rows change it still holds the pre-reflow state here.
+  const focusVisible = useRef(false);
+  useEffect(() => {
+    if (focusRow != null && focusVisible.current) {
+      virtualizer.scrollToIndex(focusRow, { align: 'auto' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+  useEffect(() => {
+    const el = scrollRef.current;
+    const it = focusRow == null ? undefined : items.find((v) => v.index === focusRow);
+    focusVisible.current =
+      el != null && it != null && it.end > el.scrollTop && it.start < el.scrollTop + el.clientHeight;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleKey, focusRow, rows]);
 
   return (
     <div className="relative min-h-0 flex-1">

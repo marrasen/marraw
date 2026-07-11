@@ -204,10 +204,8 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 	// Whole-frame fit unless an explicit, recognized value is stored.
 	thumbFit := ThumbFitFit
 	if raw, _ := db.GetSetting(ctx, settingUIThumbFit); raw != "" {
-		for _, f := range ThumbFitValues() {
-			if raw == string(f) {
-				thumbFit = f
-			}
+		if v := ThumbFit(raw); enumValid(v, ThumbFitValues()) {
+			thumbFit = v
 		}
 	}
 
@@ -231,13 +229,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 
 // SetTheme persists the colour scheme.
 func (u *Settings) SetTheme(ctx context.Context, theme Theme) error {
-	valid := false
-	for _, t := range ThemeValues() {
-		if theme == t {
-			valid = true
-		}
-	}
-	if !valid {
+	if !enumValid(theme, ThemeValues()) {
 		return aprot.ErrInvalidParams(fmt.Sprintf("unknown theme %q", theme))
 	}
 	return u.save(ctx, settingUITheme, string(theme))
@@ -423,13 +415,7 @@ func (u *Settings) SetPrerenderFullres(ctx context.Context, enabled bool) error 
 
 // SetThumbFit persists how thumbnails are framed in the grids.
 func (u *Settings) SetThumbFit(ctx context.Context, fit ThumbFit) error {
-	valid := false
-	for _, f := range ThumbFitValues() {
-		if fit == f {
-			valid = true
-		}
-	}
-	if !valid {
+	if !enumValid(fit, ThumbFitValues()) {
 		return aprot.ErrInvalidParams(fmt.Sprintf("unknown thumbFit %q", fit))
 	}
 	return u.save(ctx, settingUIThumbFit, string(fit))

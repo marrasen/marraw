@@ -12,8 +12,7 @@ export interface JustifiedRow {
 }
 
 export interface RowLayout {
-  rowStarts: number[]; // flat index where each row begins (ascending, first = 0)
-  rows: JustifiedRow[];
+  rows: JustifiedRow[]; // each row's flat start index, count, and height
   widths: number[]; // per-photo pixel width, parallel to `photos`
   centersX: number[]; // per-photo normalized x-center (0..1 of container width)
 }
@@ -30,9 +29,6 @@ export interface LayoutOpts {
   width: number;
   gap: number;
   targetHeight: number;
-  // Flat indices where a time-gap group begins; each forces a new row so a
-  // group's frames never share a row with the next group's.
-  groupStarts?: readonly number[];
 }
 
 export function rowLayout(photos: Photo[], opts: LayoutOpts): RowLayout {
@@ -42,21 +38,17 @@ export function rowLayout(photos: Photo[], opts: LayoutOpts): RowLayout {
   const widths = new Array<number>(n);
   const centersX = new Array<number>(n);
   const rows: JustifiedRow[] = [];
-  const rowStarts: number[] = [];
-  const groupStart = new Set(opts.groupStarts ?? []);
 
   let i = 0;
   while (i < n) {
     // Accumulate frames (each at targetHeight) until the row's natural width
-    // reaches the container, or the next group boundary intervenes. The frame
-    // that crosses the width is INCLUDED, so a full row's natural width is
-    // always >= W and stretching only ever shrinks it — a lone frame never
-    // blows up to fill the width.
+    // reaches the container. The frame that crosses the width is INCLUDED, so
+    // a full row's natural width is always >= W and stretching only ever
+    // shrinks it — a lone frame never blows up to fill the width.
     let sumAr = 0;
     let count = 0;
     let j = i;
     while (j < n) {
-      if (j > i && groupStart.has(j)) break; // group boundary starts a new row
       sumAr += aspectOf(photos[j]);
       count++;
       j++;
@@ -64,8 +56,7 @@ export function rowLayout(photos: Photo[], opts: LayoutOpts): RowLayout {
     }
 
     // A full row (natural width >= W) stretches to fill W exactly; a short row
-    // that ran into a group boundary or the end of the list stays at
-    // targetHeight, left-aligned.
+    // that ran into the end of the list stays at targetHeight, left-aligned.
     const gaps = gap * (count - 1);
     const filled = targetHeight * sumAr + gaps >= W;
     const rowH = filled ? (W - gaps) / sumAr : targetHeight;
@@ -78,9 +69,8 @@ export function rowLayout(photos: Photo[], opts: LayoutOpts): RowLayout {
       x += w + gap;
     }
     rows.push({ start: i, count, height: Math.round(rowH) });
-    rowStarts.push(i);
     i = j;
   }
 
-  return { rowStarts, rows, widths, centersX };
+  return { rows, widths, centersX };
 }

@@ -1,17 +1,17 @@
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { gapLabel, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { aspectOf } from '@/lib/justify';
 import { PyramidImage } from '@/components/PyramidImage';
-import { useUIStore } from '@/stores/uiStore';
+import { useUIStore, type ThumbFit } from '@/stores/uiStore';
 
 // Filmstrip thumbnails are 40px tall. crop keeps the fixed 60px slot; fit and
 // natural size the width to the frame's aspect (fallback 60 = 40×1.5, so an
 // unscanned frame doesn't reflow when its dimensions arrive).
 const STRIP_H = 40;
-function stripWidth(photo: Photo, fit: string): number {
+function stripWidth(photo: Photo, fit: ThumbFit): number {
   if (fit === 'crop') return 60;
   return Math.max(1, Math.round(STRIP_H * aspectOf(photo)));
 }
@@ -38,6 +38,16 @@ export function ScrubberDeck({
   const scrollRef = useRef<HTMLDivElement>(null);
   const centeredOnce = useRef(false);
   const anim = useRef(0);
+
+  // Per-photo strip widths, memoized so a keystroke doesn't recompute the
+  // whole roll. widthsKey fingerprints the values: the centering effect keys
+  // on it so real reflow (metadata streaming in, a thumbFit switch) re-centers
+  // the focus, while a rating patch (new identities, same geometry) doesn't.
+  const stripWidths = useMemo(
+    () => groups.map((g) => g.photos.map((p) => stripWidth(p, thumbFit))),
+    [groups, thumbFit],
+  );
+  const widthsKey = useMemo(() => stripWidths.flat().join(','), [stripWidths]);
 
   // Manual scrolling takes over from an in-flight centering animation.
   useEffect(() => {
@@ -101,7 +111,7 @@ export function ScrubberDeck({
       anim.current = requestAnimationFrame(step);
     };
     anim.current = requestAnimationFrame(step);
-  }, [focusId]);
+  }, [focusId, widthsKey]);
 
   return (
     <div
@@ -144,13 +154,13 @@ export function ScrubberDeck({
                 <span className="text-[9px] text-muted-foreground">{g.photos.length}</span>
               </div>
               <div className="flex gap-1">
-                {g.photos.map((p) => (
+                {g.photos.map((p, j) => (
                   <StripThumb
                     key={p.id}
                     photo={p}
                     focused={p.id === focusId}
                     onFocus={focus}
-                    width={stripWidth(p, thumbFit)}
+                    width={stripWidths[i][j]}
                   />
                 ))}
               </div>
@@ -164,7 +174,9 @@ export function ScrubberDeck({
   );
 }
 
-function StripThumb({
+// Memoized: a keystroke re-renders the deck, and only the two thumbs whose
+// focus state changed need to reconcile out of a potentially huge roll.
+const StripThumb = memo(function StripThumb({
   photo,
   focused,
   onFocus,
@@ -213,4 +225,4 @@ function StripThumb({
       {focused && <span className="absolute inset-0 rounded-[3px] border-2 border-primary" />}
     </button>
   );
-}
+});

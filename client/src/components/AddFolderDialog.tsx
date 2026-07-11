@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronLeft, Folder, HardDrive, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -17,6 +17,12 @@ import { openRoot, parentPath, samePath, saveRoots, useLibraryRoots } from '@/li
 import { useUIStore } from '@/stores/uiStore';
 
 type ImportMode = 'shoot' | 'library';
+
+// A bare drive ("C:\") is never addable: importing a whole drive is always a
+// misclick, and even counting its RAWs means walking the entire filesystem.
+function isDriveRoot(path: string): boolean {
+  return /^[a-zA-Z]:[\\/]?$/.test(path);
+}
 
 // Breadcrumb segments with cumulative paths ("C:\Users\Marcus" → C: · Users · Marcus).
 function crumbs(path: string): { name: string; path: string }[] {
@@ -58,6 +64,32 @@ function PickerBody({ onClose }: { onClose: () => void }) {
   const isLibrary = mode === 'library';
   const recursive = isLibrary || subfolders;
   const already = location != null && roots.some((r) => samePath(r.path, location));
+  const atDriveRoot = location != null && isDriveRoot(location);
+
+  // Recursive RAW total for the folder Add would import, debounced and keyed
+  // by (path, recursive) so a stale response never shows against a changed
+  // target. Aborting on cleanup also cancels the daemon-side walk, so browsing
+  // through large ancestors doesn't stack abandoned filesystem scans.
+  const [count, setCount] = useState<{ key: string; files: number } | null>(null);
+  const countKey = location ? `${location.toLowerCase()}|${recursive}` : '';
+  useEffect(() => {
+    if (!location || already || atDriveRoot) return;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => {
+      countRaws(client, [location], recursive, { signal: ctrl.signal })
+        .then((res) => setCount({ key: countKey, files: res.files }))
+        .catch(() => {});
+    }, 250);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [countKey, location, recursive, already, atDriveRoot, client]);
+  const files = count?.key === countKey ? count.files : null;
+
+  // A shoot needs RAWs to import; a library parent may legitimately be empty
+  // today (it is watched for shoots that land later).
+  const nothingToImport = !isLibrary && files === 0;
 
   const add = async () => {
     if (!location || already) return;
@@ -182,11 +214,21 @@ function PickerBody({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="flex items-center gap-4 border-t px-[22px] py-3">
-          <FooterInfo location={location} recursive={recursive} already={already} />
+          <FooterInfo
+            location={location}
+            already={already}
+            atDriveRoot={atDriveRoot}
+            files={files}
+            shoot={!isLibrary}
+          />
           <Button variant="outline" size="lg" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="lg" disabled={!location || already} onClick={() => void add()}>
+          <Button
+            size="lg"
+            disabled={!location || already || atDriveRoot || nothingToImport}
+            onClick={() => void add()}
+          >
             {isLibrary ? 'Add as library folder' : 'Add to library'}
           </Button>
         </div>
@@ -283,40 +325,24 @@ function FolderList({
   );
 }
 
-// Names the folder that Add will import and, unless it is already a root, its
-// recursive RAW total. The count comes from the daemon, debounced and keyed by
-// (path, recursive) so a stale response never shows against a changed target.
+// Names the folder that Add would import and why it can or cannot be added:
+// its recursive RAW total, or the reason the Add button is disabled.
 function FooterInfo({
   location,
-  recursive,
   already,
+  atDriveRoot,
+  files,
+  shoot,
 }: {
   location: string | null;
-  recursive: boolean;
   already: boolean;
+  atDriveRoot: boolean;
+  files: number | null;
+  shoot: boolean;
 }) {
-  const client = useApiClient();
-  const [total, setTotal] = useState<{ key: string; files: number } | null>(null);
-  const reqId = useRef(0);
-  const key = location ? `${location.toLowerCase()}|${recursive}` : '';
-
-  useEffect(() => {
-    if (!location || already) return;
-    const id = ++reqId.current;
-    const t = setTimeout(() => {
-      countRaws(client, [location], recursive)
-        .then((res) => {
-          if (reqId.current === id) setTotal({ key, files: res.files });
-        })
-        .catch(() => {});
-    }, 250);
-    return () => clearTimeout(t);
-  }, [key, location, recursive, already, client]);
-
   if (!location) return <div className="flex-1" />;
 
   const name = location.replace(/[\\/]+$/, '').split(/[\\/]+/).pop() || location;
-  const files = total?.key === key ? total.files : null;
 
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5" title={location}>
@@ -327,9 +353,13 @@ function FooterInfo({
       <span className="truncate font-mono text-[11px] text-muted-foreground">
         {already
           ? 'Already in your library'
-          : files == null
-            ? 'Counting RAW files…'
-            : `${files.toLocaleString()} RAW file${files === 1 ? '' : 's'}`}
+          : atDriveRoot
+            ? 'Open a folder on this drive to add it'
+            : files == null
+              ? 'Counting RAW files…'
+              : files === 0 && shoot
+                ? 'No RAW files in this folder'
+                : `${files.toLocaleString()} RAW file${files === 1 ? '' : 's'}`}
       </span>
     </div>
   );

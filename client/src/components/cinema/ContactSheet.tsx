@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Clock } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { rowLayout } from '@/lib/justify';
+import { uniformRowStarts } from '@/lib/gridNav';
 import { gapLabel, rangeLabel, timeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { GapControl } from '@/components/cinema/GapControl';
 import { PyramidImage } from '@/components/PyramidImage';
@@ -35,14 +36,20 @@ export function ContactSheet({ photos, groups }: { photos: Photo[]; groups: Time
   const scrollRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
 
-  useEffect(() => {
+  // Only the justified natural layout needs the measured width (crop/fit is a
+  // pure CSS grid), so don't pay a full re-render of the unvirtualized sheet
+  // per resize frame in the other modes. Layout effect: the synchronous first
+  // measurement re-renders before paint, so natural never paints (or publishes
+  // a nav model for) the degenerate one-frame-per-row shape it has at width 0.
+  useLayoutEffect(() => {
+    if (thumbFit !== 'natural') return;
     const el = scrollRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => setWidth(el.clientWidth));
     ro.observe(el);
     setWidth(el.clientWidth);
     return () => ro.disconnect();
-  }, []);
+  }, [thumbFit]);
 
   const contentW = Math.max(1, width - SHEET_PAD * 2);
   // Natural row height tracks the crop cell so the frames don't jump size
@@ -51,30 +58,39 @@ export function ContactSheet({ photos, groups }: { photos: Photo[]; groups: Time
 
   // Row model for keyboard nav, plus the justified rows for natural rendering.
   const { groupRows, rowStarts, centersX } = useMemo(() => {
+    const groupStarts: number[] = [];
+    let base = 0;
+    for (const g of groups) {
+      groupStarts.push(base);
+      base += g.photos.length;
+    }
+    if (thumbFit !== 'natural') {
+      // crop/fit: a uniform SHEET_COLS-wide grid, rows restarting per group.
+      return {
+        groupRows: [] as { start: number; count: number; height: number; widths: number[] }[][],
+        rowStarts: uniformRowStarts(base, SHEET_COLS, groupStarts),
+        centersX: [] as number[],
+      };
+    }
     const rowStarts: number[] = [];
     const centersX: number[] = [];
     const groupRows: { start: number; count: number; height: number; widths: number[] }[][] = [];
-    const natural = thumbFit === 'natural';
-    let base = 0;
-    for (const g of groups) {
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      const b = groupStarts[i];
       const rowsForGroup: { start: number; count: number; height: number; widths: number[] }[] = [];
-      if (natural) {
-        const gl = rowLayout(g.photos, { width: contentW, gap: SHEET_GAP, targetHeight: naturalTarget });
-        for (const r of gl.rows) {
-          rowStarts.push(base + r.start);
-          rowsForGroup.push({
-            start: base + r.start,
-            count: r.count,
-            height: r.height,
-            widths: gl.widths.slice(r.start, r.start + r.count),
-          });
-        }
-        for (let k = 0; k < g.photos.length; k++) centersX[base + k] = gl.centersX[k];
-      } else {
-        for (let i = 0; i < g.photos.length; i += SHEET_COLS) rowStarts.push(base + i);
+      const gl = rowLayout(g.photos, { width: contentW, gap: SHEET_GAP, targetHeight: naturalTarget });
+      for (const r of gl.rows) {
+        rowStarts.push(b + r.start);
+        rowsForGroup.push({
+          start: b + r.start,
+          count: r.count,
+          height: r.height,
+          widths: gl.widths.slice(r.start, r.start + r.count),
+        });
       }
+      for (let k = 0; k < g.photos.length; k++) centersX[b + k] = gl.centersX[k];
       groupRows.push(rowsForGroup);
-      base += g.photos.length;
     }
     return { groupRows, rowStarts, centersX };
   }, [groups, thumbFit, contentW, naturalTarget]);
@@ -85,11 +101,50 @@ export function ContactSheet({ photos, groups }: { photos: Photo[]; groups: Time
   }, [rowStarts, centersX, thumbFit, setNavRowModel]);
   useEffect(() => () => setNavRowModel([], null), [setNavRowModel]);
 
+  // Whether the focused cell is on-screen, tracked on scroll and after every
+  // programmatic anchor, so a layout reflow can decide from the pre-reflow
+  // state whether re-anchoring is a courtesy or a yank.
+  const focusVisible = useRef(false);
+  const updateFocusVisible = useCallback(() => {
+    const box = scrollRef.current;
+    const el = box?.querySelector<HTMLElement>(`[data-sheet-id="${focusId}"]`);
+    if (!box || !el) {
+      focusVisible.current = false;
+      return;
+    }
+    const b = box.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    focusVisible.current = r.bottom > b.top && r.top < b.bottom;
+  }, [focusId]);
+
+  // A row-model change (metadata streaming in re-justifies the natural rows)
+  // re-anchors on the focus only when it was on-screen before the reflow —
+  // never yanking back a view the user has scrolled away from. Declared before
+  // the tracker effects below so it reads the pre-reflow value.
+  useEffect(() => {
+    if (focusId != null && focusVisible.current) {
+      scrollRef.current
+        ?.querySelector<HTMLElement>(`[data-sheet-id="${focusId}"]`)
+        ?.scrollIntoView({ block: 'nearest' });
+    }
+    updateFocusVisible();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowStarts, groupRows]);
+
   useEffect(() => {
     if (focusId == null) return;
     const el = scrollRef.current?.querySelector<HTMLElement>(`[data-sheet-id="${focusId}"]`);
     el?.scrollIntoView({ block: 'nearest' });
-  }, [focusId]);
+    updateFocusVisible();
+  }, [focusId, updateFocusVisible]);
+
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (!box) return;
+    updateFocusVisible();
+    box.addEventListener('scroll', updateFocusVisible, { passive: true });
+    return () => box.removeEventListener('scroll', updateFocusVisible);
+  }, [updateFocusVisible]);
 
   const cellFit = thumbFit === 'fit' ? 'object-contain' : 'object-cover';
   const aspectClass = thumbFit === 'fit' ? 'aspect-square' : 'aspect-[3/2]';
