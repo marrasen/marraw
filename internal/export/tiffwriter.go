@@ -20,6 +20,7 @@ import (
 	"errors"
 	"image"
 	"io"
+	"time"
 )
 
 // TIFF tags, in the ascending order an IFD must list them.
@@ -68,8 +69,10 @@ type ifdEntry struct {
 
 // encodeTIFF8 writes img as an 8-bit RGB TIFF. The alpha channel is dropped
 // (export renders are opaque). A nil icc leaves the file untagged, which is
-// the right thing for sRGB.
-func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte) error {
+// the right thing for sRGB. The catalog metadata rides along as the same
+// EXIF tags the JPEG/PNG exports carry: camera strings and DateTime in the
+// main IFD, the photographic fields in an Exif sub-IFD.
+func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte, meta exifMeta) error {
 	b := img.Bounds()
 	width, height := b.Dx(), b.Dy()
 	if width <= 0 || height <= 0 {
@@ -79,6 +82,21 @@ func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte) error {
 	strip, err := deflateRGB(img)
 	if err != nil {
 		return err
+	}
+
+	// The out-of-line metadata strings (NUL-terminated, may be absent).
+	type asciiField struct {
+		tag uint16
+		val string
+		off uint32
+	}
+	strs := []*asciiField{
+		{tag: tagMake, val: meta.Make},
+		{tag: tagModel, val: meta.Model},
+		{tag: tagSoftware, val: "marraw"},
+	}
+	if meta.TakenAt > 0 {
+		strs = append(strs, &asciiField{tag: tagDateTime, val: time.Unix(meta.TakenAt, 0).Format(exifDateFormat)})
 	}
 
 	// Everything but the IFD is laid out first, so entry offsets are known by
@@ -94,6 +112,16 @@ func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte) error {
 	pos += 8 // one RATIONAL
 	yresOff := pos
 	pos += 8
+	for _, s := range strs {
+		if s.val == "" {
+			continue
+		}
+		s.off = pos
+		pos = even(pos + uint32(len(s.val)) + 1)
+	}
+	exifEntriesList := exifIFDEntries(meta)
+	exifOff := pos
+	pos = even(pos + ifdSize(exifEntriesList))
 	var iccOff uint32
 	if len(icc) > 0 {
 		iccOff = pos
@@ -107,16 +135,30 @@ func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte) error {
 		{tagBitsPerSample, typShort, 3, bpsOff},
 		{tagCompression, typShort, 1, compressionDeflate},
 		{tagPhotometric, typShort, 1, photometricRGB},
-		{tagStripOffsets, typLong, 1, stripOff},
-		{tagSamplesPerPixel, typShort, 1, 3},
-		{tagRowsPerStrip, typLong, 1, uint32(height)},
-		{tagStripByteCounts, typLong, 1, uint32(len(strip))},
-		{tagXResolution, typRational, 1, xresOff},
-		{tagYResolution, typRational, 1, yresOff},
-		{tagPlanarConfig, typShort, 1, planarChunky},
-		{tagResolutionUnit, typShort, 1, resolutionUnitInch},
-		{tagPredictor, typShort, 1, predictorHorizontal},
 	}
+	for _, s := range strs[:2] { // Make, Model — tags 271/272 sort here
+		if s.val != "" {
+			entries = append(entries, ifdEntry{s.tag, typASCII, uint32(len(s.val)) + 1, s.off})
+		}
+	}
+	entries = append(entries,
+		ifdEntry{tagStripOffsets, typLong, 1, stripOff},
+		ifdEntry{tagOrientation, typShort, 1, 1},
+		ifdEntry{tagSamplesPerPixel, typShort, 1, 3},
+		ifdEntry{tagRowsPerStrip, typLong, 1, uint32(height)},
+		ifdEntry{tagStripByteCounts, typLong, 1, uint32(len(strip))},
+		ifdEntry{tagXResolution, typRational, 1, xresOff},
+		ifdEntry{tagYResolution, typRational, 1, yresOff},
+		ifdEntry{tagPlanarConfig, typShort, 1, planarChunky},
+		ifdEntry{tagResolutionUnit, typShort, 1, resolutionUnitInch},
+	)
+	for _, s := range strs[2:] { // Software, DateTime — tags 305/306
+		if s.val != "" {
+			entries = append(entries, ifdEntry{s.tag, typASCII, uint32(len(s.val)) + 1, s.off})
+		}
+	}
+	entries = append(entries, ifdEntry{tagPredictor, typShort, 1, predictorHorizontal})
+	entries = append(entries, ifdEntry{tagExifIFD, typLong, 1, exifOff})
 	if len(icc) > 0 {
 		entries = append(entries, ifdEntry{tagICCProfile, typUndefined, uint32(len(icc)), iccOff})
 	}
@@ -139,6 +181,16 @@ func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte) error {
 	padTo(buf, yresOff)
 	writeU32(buf, le, 72)
 	writeU32(buf, le, 1)
+	for _, s := range strs {
+		if s.val == "" {
+			continue
+		}
+		padTo(buf, s.off)
+		buf.WriteString(s.val)
+		buf.WriteByte(0)
+	}
+	padTo(buf, exifOff)
+	writeIFD(buf, exifEntriesList, exifOff)
 	if len(icc) > 0 {
 		padTo(buf, iccOff)
 		buf.Write(icc)

@@ -136,8 +136,9 @@ compression artifacts at all. All three render exactly what the loupe showed you
 crop, look, detail — with optional long-edge resize, sRGB / Adobe RGB /
 ProPhoto with an embedded ICC profile, and output sharpening tuned for screen,
 matte or glossy paper. Output files take a name template — `{name}`, `{seq}`,
-`{date}`, `{time}`. Runs in the background across all cores at full AHD
-demosaic quality.
+`{date}`, `{time}` — and carry the camera's EXIF (body, exposure triangle,
+focal length, capture time) in all three formats. Runs in the background
+across all cores at full AHD demosaic quality.
 
 If you want to finish a photo in another editor, open the RAW there rather than
 exporting an intermediate — nothing marraw can write carries more information
@@ -185,9 +186,9 @@ them is load-bearing for your work, marraw is not ready for you yet.
 
 **Export & output**
 
-- ❌ **No metadata writing.** Exported files carry pixels and an ICC profile,
-  not the RAW's EXIF.
 - ❌ **No WebP or DNG output**, no watermarking.
+- ❌ **No keyword/IPTC metadata in exports** — the basic camera EXIF (body,
+  exposure, capture time) is written, but there are no keywords to carry.
 
 **Platform & workflow**
 

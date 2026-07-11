@@ -29,7 +29,7 @@ func TestEncodeTIFF8RoundTrip(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := encodeTIFF8(&buf, src, nil); err != nil {
+	if err := encodeTIFF8(&buf, src, nil, exifMeta{}); err != nil {
 		t.Fatalf("encodeTIFF8: %v", err)
 	}
 
@@ -60,7 +60,7 @@ func TestEncodeTIFF8Fields(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := encodeTIFF8(&buf, src, icc); err != nil {
+	if err := encodeTIFF8(&buf, src, icc, exifMeta{}); err != nil {
 		t.Fatalf("encodeTIFF8: %v", err)
 	}
 	raw := buf.Bytes()
@@ -122,7 +122,7 @@ func TestEncodeTIFF8Fields(t *testing.T) {
 func TestEncodeTIFF8SRGBUntagged(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 2, 2))
 	var buf bytes.Buffer
-	if err := encodeTIFF8(&buf, src, ICCFor("srgb")); err != nil {
+	if err := encodeTIFF8(&buf, src, ICCFor("srgb"), exifMeta{}); err != nil {
 		t.Fatalf("encodeTIFF8: %v", err)
 	}
 	if _, ok := parseIFD(t, buf.Bytes())[tagICCProfile]; ok {

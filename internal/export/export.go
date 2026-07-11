@@ -133,13 +133,14 @@ func exportOne(photo store.Photo, outPath string, req Request) error {
 		return err
 	}
 	icc := ICCFor(req.ColorSpace)
+	meta := exifFromPhoto(photo, rendered.Bounds().Dx(), rendered.Bounds().Dy(), req.ColorSpace)
 	switch req.Format {
 	case "tiff8":
-		err = encodeTIFF8(f, rendered, icc)
+		err = encodeTIFF8(f, rendered, icc, meta)
 	case "png":
-		err = encodePNG(f, rendered, icc)
+		err = encodePNG(f, rendered, icc, meta)
 	default:
-		err = encodeJPEG(f, rendered, req.JpegQuality, icc)
+		err = encodeJPEG(f, rendered, req.JpegQuality, icc, meta)
 	}
 	if err != nil {
 		f.Close()
@@ -176,29 +177,32 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, req 
 	return out, nil
 }
 
-func encodeJPEG(f *os.File, img *image.RGBA, quality int, icc []byte) error {
-	if icc == nil {
-		return jpeg.Encode(f, img, &jpeg.Options{Quality: quality})
-	}
-	// Wide gamut: encode to memory, then splice the ICC profile in.
+func encodeJPEG(f *os.File, img *image.RGBA, quality int, icc []byte, meta exifMeta) error {
+	// Encode to memory, then splice the metadata segments in: ICC first so
+	// the EXIF APP1 lands directly after SOI, where readers expect it.
 	buf := &bytes.Buffer{}
 	if err := jpeg.Encode(buf, img, &jpeg.Options{Quality: quality}); err != nil {
 		return err
 	}
-	_, err := f.Write(embedICCJPEG(buf.Bytes(), icc))
+	out := buf.Bytes()
+	if icc != nil {
+		out = embedICCJPEG(out, icc)
+	}
+	_, err := f.Write(embedExifJPEG(out, meta))
 	return err
 }
 
-func encodePNG(f *os.File, img *image.RGBA, icc []byte) error {
-	if icc == nil {
-		return png.Encode(f, img)
-	}
-	// Wide gamut: encode to memory, then splice the ICC profile in.
+func encodePNG(f *os.File, img *image.RGBA, icc []byte, meta exifMeta) error {
+	// Encode to memory, then splice the iCCP and eXIf chunks in after IHDR.
 	buf := &bytes.Buffer{}
 	if err := png.Encode(buf, img); err != nil {
 		return err
 	}
-	_, err := f.Write(embedICCPNG(buf.Bytes(), icc))
+	out := buf.Bytes()
+	if icc != nil {
+		out = embedICCPNG(out, icc)
+	}
+	_, err := f.Write(embedExifPNG(out, meta))
 	return err
 }
 
