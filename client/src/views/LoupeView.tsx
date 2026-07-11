@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Crop as CropIcon, Pipette, RotateCcwSquare, RotateCwSquare } from 'lucide-react';
+import { Crop as CropIcon, FlipHorizontal2, FlipVertical2, Pipette, RotateCcwSquare, RotateCwSquare } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,7 @@ import {
 } from '@/lib/editSession';
 import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
-import { displayDims as fullDisplayDims, renderedDims, rotatedDims, rotateCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
+import { displayDims as fullDisplayDims, renderedDims, rotatedDims, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
 import type { Params } from '@/api/edits';
 
@@ -125,12 +125,42 @@ function CropBar({
       >
         <RotateCwSquare />
       </Button>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        className="text-muted-foreground"
+        title="Flip horizontal"
+        aria-label="Flip horizontal"
+        onClick={() => {
+          const d = useEditSession.getState().draft;
+          if (!d) return;
+          esUpdate(client, flipCropPatch(d, 'h'));
+          esCommit(client);
+        }}
+      >
+        <FlipHorizontal2 />
+      </Button>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        className="text-muted-foreground"
+        title="Flip vertical"
+        aria-label="Flip vertical"
+        onClick={() => {
+          const d = useEditSession.getState().draft;
+          if (!d) return;
+          esUpdate(client, flipCropPatch(d, 'v'));
+          esCommit(client);
+        }}
+      >
+        <FlipVertical2 />
+      </Button>
       <div className="h-[26px] w-px bg-white/15" />
       <Button
         size="sm"
         variant="ghost"
         className="text-muted-foreground"
-        onClick={() => esUpdate(client, { rotate: 0, cropX: 0, cropY: 0, cropW: 1, cropH: 1, cropAngle: 0 })}
+        onClick={() => esUpdate(client, { rotate: 0, flipH: false, cropX: 0, cropY: 0, cropW: 1, cropH: 1, cropAngle: 0 })}
         title="Reset to the full, unrotated frame"
       >
         Reset

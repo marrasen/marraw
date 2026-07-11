@@ -113,7 +113,8 @@ control, any preset.
 
 ### Editing tools
 
-- **Crop & straighten** — interactive overlay, ±15° straighten.
+- **Crop & straighten** — interactive overlay, ±15° straighten, 90° rotation
+  and mirroring.
 - **Tone** — exposure, preserve highlights, brightness, gamma, shadow slope,
   contrast, whites, blacks, shadows, highlights.
 - **Presence** — clarity, texture, dehaze.
@@ -171,8 +172,6 @@ them is load-bearing for your work, marraw is not ready for you yet.
   automatic defringe — only a manual CA slider and a creative vignette.
 - ❌ **No modern denoise.** You get LibRaw's wavelet/FBDD/median, not
   ML-assisted luminance and color NR.
-- ❌ **No flip / mirror.** 90° rotation and straighten both work; mirroring
-  does not exist yet.
 - ❌ **No HDR editing or output**, and no wide-gamut working space. The look
   math is sRGB-ish and highlights clip rather than grade.
 

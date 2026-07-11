@@ -75,6 +75,7 @@ export interface Params {
     caRed: number;
     caBlue: number;
     rotate: number;
+    flipH: boolean;
     cropX: number;
     cropY: number;
     cropW: number;

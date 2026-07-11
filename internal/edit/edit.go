@@ -113,13 +113,16 @@ type Params struct {
 
 	// Crop + straighten, applied as a post-decode geometry stage in display
 	// (orientation-corrected) space. Rotate turns the frame in quarter turns
-	// clockwise (0..3) BEFORE the crop, so the crop rectangle and straighten
-	// angle live in the rotated frame. CropW/CropH == 0 means "no crop" (the
-	// full frame); when set they are the rectangle size as a fraction of the
-	// frame, with CropX/CropY its top-left, all in [0,1]. CropAngle levels
-	// the horizon in degrees: the frame is rotated about its center and the
-	// axis-aligned crop rectangle is taken from the rotated result.
+	// clockwise (0..3) and FlipH then mirrors it about the vertical axis,
+	// both BEFORE the crop — so the crop rectangle and straighten angle live
+	// in the rotated-and-mirrored frame (a vertical flip is FlipH plus two
+	// turns). CropW/CropH == 0 means "no crop" (the full frame); when set
+	// they are the rectangle size as a fraction of the frame, with
+	// CropX/CropY its top-left, all in [0,1]. CropAngle levels the horizon in
+	// degrees: the frame is rotated about its center and the axis-aligned
+	// crop rectangle is taken from the rotated result.
 	Rotate    int     `json:"rotate" validate:"gte=0,lte=3"`
+	FlipH     bool    `json:"flipH"`
 	CropX     float64 `json:"cropX" validate:"gte=0,lte=1"`
 	CropY     float64 `json:"cropY" validate:"gte=0,lte=1"`
 	CropW     float64 `json:"cropW" validate:"gte=0,lte=1"`

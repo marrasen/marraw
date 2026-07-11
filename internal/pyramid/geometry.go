@@ -13,10 +13,11 @@ import (
 // a straighten angle is set. Fractions are resolution-independent, so this
 // runs identically on a half-size level render and a full-resolution decode.
 //
-// Model: the frame first turns by Rotate quarter turns clockwise, then is
-// rotated about its center by CropAngle, then the axis-aligned crop
-// rectangle (fractions of the quarter-rotated frame) is taken from the
-// result. Output size is edit.OutputDims — the angle never changes it.
+// Model: the frame first turns by Rotate quarter turns clockwise and is
+// mirrored about the vertical axis when FlipH is set, then is rotated about
+// its center by CropAngle, then the axis-aligned crop rectangle (fractions
+// of the quarter-rotated, mirrored frame) is taken from the result. Output
+// size is edit.OutputDims — neither the mirror nor the angle changes it.
 // Samples that fall outside the source read as opaque black, which is what
 // the crop overlay's angle guides keep the user's rectangle clear of.
 func ApplyGeometry(src *image.RGBA, e *edit.Params) *image.RGBA {
@@ -26,6 +27,9 @@ func ApplyGeometry(src *image.RGBA, e *edit.Params) *image.RGBA {
 	origW, origH := src.Bounds().Dx(), src.Bounds().Dy()
 	if code := rotateFlipCode(e.RotateTurns()); code != 0 {
 		src = rotateFlip(src, code)
+	}
+	if e.FlipH {
+		src = flipHorizontal(src)
 	}
 	if !e.HasCrop() && e.CropAngle == 0 {
 		return src
@@ -125,6 +129,19 @@ func sampleBilinear(src *image.RGBA, x, y float64) (r, g, b, a uint8) {
 
 func clampInt(v, lo, hi int) int {
 	return min(max(v, lo), hi)
+}
+
+// flipHorizontal mirrors the image about its vertical axis.
+func flipHorizontal(src *image.RGBA) *image.RGBA {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			dst.SetRGBA(w-1-x, y, src.RGBAAt(b.Min.X+x, b.Min.Y+y))
+		}
+	}
+	return dst
 }
 
 // rotateFlipCode maps canonical quarter turns clockwise onto the EXIF flip

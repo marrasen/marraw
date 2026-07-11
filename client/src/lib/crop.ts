@@ -40,13 +40,18 @@ export function renderedDims(fullW: number, fullH: number, p: Params | null | un
   return [Math.max(1, Math.round(p!.cropW * fullW)), Math.max(1, Math.round(p!.cropH * fullH))];
 }
 
-// rotateCropPatch returns the params patch for one more quarter turn in the
-// given direction, remapping an existing crop rectangle so the same pixels
-// stay selected in the new frame (a 90° CW image turn maps a point (x,y) to
-// (1-y, x), so the rect follows its corners). The straighten angle turns with
-// the frame and needs no change.
+// rotateCropPatch returns the params patch for one more quarter turn of the
+// DISPLAYED image in the given direction. The stored transform is
+// flip∘rotate, so under a mirror the stored turn runs the opposite way
+// (mirror∘R_cw = R_ccw∘mirror). An existing crop rectangle is remapped in
+// display space so the same pixels stay selected (a 90° CW display turn maps
+// a point (x,y) to (1-y, x), so the rect follows its corners). The straighten
+// angle turns with the frame and needs no change.
 export function rotateCropPatch(p: Params, dir: 'cw' | 'ccw'): Partial<Params> {
-  const patch: Partial<Params> = { rotate: (rotateTurns(p) + (dir === 'cw' ? 1 : 3)) % 4 };
+  const cwTurn = p.flipH ? 3 : 1;
+  const patch: Partial<Params> = {
+    rotate: (rotateTurns(p) + (dir === 'cw' ? cwTurn : 4 - cwTurn)) % 4,
+  };
   if (hasCrop(p)) {
     if (dir === 'cw') {
       patch.cropX = 1 - (p.cropY + p.cropH);
@@ -58,6 +63,21 @@ export function rotateCropPatch(p: Params, dir: 'cw' | 'ccw'): Partial<Params> {
     patch.cropW = p.cropH;
     patch.cropH = p.cropW;
   }
+  return patch;
+}
+
+// flipCropPatch mirrors the displayed image about the given axis. Both axes
+// toggle FlipH — a vertical mirror is the horizontal one plus a half turn —
+// and an existing crop rectangle reflects along the mirrored axis while the
+// straighten angle negates (a tilt reads the other way in a mirror).
+export function flipCropPatch(p: Params, axis: 'h' | 'v'): Partial<Params> {
+  const patch: Partial<Params> = { flipH: !p.flipH };
+  if (axis === 'v') patch.rotate = (rotateTurns(p) + 2) % 4;
+  if (hasCrop(p)) {
+    if (axis === 'h') patch.cropX = 1 - (p.cropX + p.cropW);
+    else patch.cropY = 1 - (p.cropY + p.cropH);
+  }
+  if (p.cropAngle !== 0) patch.cropAngle = -p.cropAngle;
   return patch;
 }
 

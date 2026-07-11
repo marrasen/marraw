@@ -136,6 +136,47 @@ func TestApplyGeometryRotateThenCrop(t *testing.T) {
 	}
 }
 
+func TestApplyGeometryFlipH(t *testing.T) {
+	img := gradient(100, 80)
+	out := ApplyGeometry(img, &edit.Params{FlipH: true})
+	if out.Bounds().Dx() != 100 || out.Bounds().Dy() != 80 {
+		t.Fatalf("flip size = %v, want 100x80", out.Bounds())
+	}
+	// Source top-left lands at the top-right.
+	so := img.PixOffset(0, 0)
+	do := out.PixOffset(99, 0)
+	if out.Pix[do] != img.Pix[so] || out.Pix[do+1] != img.Pix[so+1] {
+		t.Error("flip pixel mapping wrong")
+	}
+	// The mirror composes AFTER the quarter turn: source top-right goes
+	// through rotate 90° CW to (79, 99), then mirrors to (0, 99).
+	out = ApplyGeometry(img, &edit.Params{Rotate: 1, FlipH: true})
+	if out.Bounds().Dx() != 80 || out.Bounds().Dy() != 100 {
+		t.Fatalf("rotate+flip size = %v, want 80x100", out.Bounds())
+	}
+	so = img.PixOffset(99, 0)
+	do = out.PixOffset(0, 99)
+	if out.Pix[do] != img.Pix[so] || out.Pix[do+1] != img.Pix[so+1] {
+		t.Error("rotate+flip pixel mapping wrong")
+	}
+}
+
+func TestApplyGeometryFlipCrop(t *testing.T) {
+	// The crop rectangle lives in the mirrored frame: its top-left quarter
+	// reads the source's top-RIGHT pixel at the origin.
+	img := gradient(100, 80)
+	e := &edit.Params{FlipH: true, CropW: 0.5, CropH: 0.5}
+	out := ApplyGeometry(img, e)
+	if out.Bounds().Dx() != 50 || out.Bounds().Dy() != 40 {
+		t.Fatalf("flipped crop size = %v, want 50x40", out.Bounds())
+	}
+	so := img.PixOffset(99, 0)
+	do := out.PixOffset(0, 0)
+	if out.Pix[do] != img.Pix[so] || out.Pix[do+1] != img.Pix[so+1] {
+		t.Errorf("flipped crop origin: got %v want %v", out.Pix[do:do+3], img.Pix[so:so+3])
+	}
+}
+
 func TestOutputDimsRotate(t *testing.T) {
 	e := &edit.Params{Rotate: 1}
 	if w, h := e.OutputDims(4000, 3000); w != 3000 || h != 4000 {

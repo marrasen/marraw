@@ -444,15 +444,20 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params edit
 	if err != nil {
 		return nil, err
 	}
-	// The click is relative to the displayed (rotated, possibly cropped) frame
-	// while the reference is the full oriented frame, so map through the crop
-	// rectangle (fractions of the rotated frame) and then undo the quarter
-	// turns. A straighten angle is ignored — a WB patch spans enough pixels
-	// that a few degrees don't move the sampled colour.
+	// The click is relative to the displayed (rotated, mirrored, possibly
+	// cropped) frame while the reference is the full oriented frame, so map
+	// through the crop rectangle (fractions of the displayed frame), then
+	// undo the mirror, then the quarter turns — the display transform is
+	// flip∘rotate, so its inverse runs in that order. A straighten angle is
+	// ignored — a WB patch spans enough pixels that a few degrees don't move
+	// the sampled colour.
 	fx, fy := x, y
 	if params.HasCrop() {
 		fx = params.CropX + x*params.CropW
 		fy = params.CropY + y*params.CropH
+	}
+	if params.FlipH {
+		fx = 1 - fx
 	}
 	switch params.RotateTurns() {
 	case 1: // displayed = oriented turned 90° CW: (x,y) → (1-y, x)

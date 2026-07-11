@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw, RotateCcwSquare, RotateCwSquare, Image as ImageIcon } from 'lucide-react';
-import { rotateCropPatch } from '@/lib/crop';
+import { Pipette, Undo2, Redo2, Crop, ChevronRight, FlipHorizontal2, FlipVertical2, Info, RotateCcw, RotateCcwSquare, RotateCwSquare, Image as ImageIcon } from 'lucide-react';
+import { flipCropPatch, rotateCropPatch } from '@/lib/crop';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
@@ -281,7 +281,7 @@ function DevelopPanel({
   };
 
   const changed = {
-    crop: groupChanged(draft, ['rotate', 'cropX', 'cropY', 'cropW', 'cropH', 'cropAngle']),
+    crop: groupChanged(draft, ['rotate', 'flipH', 'cropX', 'cropY', 'cropW', 'cropH', 'cropAngle']),
     tone: groupChanged(draft, [
       'expEV', 'expPreserve', 'bright', 'gamma', 'shadow',
       'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
@@ -368,6 +368,30 @@ function DevelopPanel({
           >
             <RotateCwSquare data-icon="inline-start" />
             Rotate right
+          </Button>
+        </div>
+        {/* Mirroring: both axes toggle flipH (vertical = horizontal + 180°);
+            the rect reflects and the straighten angle negates with it. */}
+        <div className="flex gap-[7px]">
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-1"
+            onClick={() => clear(flipCropPatch(draft, 'h'))}
+            title="Flip horizontal"
+          >
+            <FlipHorizontal2 data-icon="inline-start" />
+            Flip horizontal
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-1"
+            onClick={() => clear(flipCropPatch(draft, 'v'))}
+            title="Flip vertical"
+          >
+            <FlipVertical2 data-icon="inline-start" />
+            Flip vertical
           </Button>
         </div>
         <EditSlider

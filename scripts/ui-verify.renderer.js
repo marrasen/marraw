@@ -432,6 +432,25 @@ try {
       ? true
       : JSON.stringify({ x: es().draft.cropX, y: es().draft.cropY });
 
+  // --- mirror: a horizontal flip reflects the rect and negates the angle;
+  // flipping again restores everything.
+  const preFlip = { ...es().draft };
+  buttons().find((b) => b.title === 'Flip horizontal')?.click();
+  await until(() => es().draft.flipH === true, 5000, 'flip applied');
+  await sleep(200);
+  R.flipRemapsCrop =
+    Math.abs(es().draft.cropX - (1 - (preFlip.cropX + preFlip.cropW))) < 1e-9 &&
+    es().draft.cropAngle === -preFlip.cropAngle
+      ? true
+      : JSON.stringify({ x: es().draft.cropX, angle: es().draft.cropAngle });
+  buttons().find((b) => b.title === 'Flip horizontal')?.click();
+  await until(() => es().draft.flipH === false, 5000, 'flip undone');
+  await sleep(200);
+  R.flipRoundTrips =
+    Math.abs(es().draft.cropX - preFlip.cropX) < 1e-9 && es().draft.cropAngle === preFlip.cropAngle
+      ? true
+      : JSON.stringify({ x: es().draft.cropX, angle: es().draft.cropAngle });
+
   key('Escape'); // exit crop (commits; Reset below cleans everything)
   await until(() => !es().cropping, 5000, 'crop exited');
   ui().setLoupeZoom('fit');
