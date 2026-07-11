@@ -120,7 +120,8 @@ control, any preset.
 - **Presence** — clarity, texture, dehaze.
 - **White balance** — as shot / auto / Kelvin, temperature, tint, and an
   eyedropper (`W`).
-- **Color** — saturation, vibrance, split toning (shadow + highlight tint).
+- **Color** — saturation, vibrance, split toning (shadow + highlight tint),
+  and an 8-band HSL color mixer (per-band hue / saturation / luminance).
 - **Effects** — creative vignette.
 - **Detail** — sharpen, highlight recovery (clip/unclip/blend/rebuild), noise
   reduction, FBDD denoise, median passes, demosaic algorithm (VNG/PPG/AHD/DHT),
@@ -166,8 +167,6 @@ them is load-bearing for your work, marraw is not ready for you yet.
 - ❌ **No tone curve.** Contrast and the whites/blacks/shadows/highlights
   sliders drive a fixed parametric curve. There is no point curve and no
   per-channel R/G/B curves.
-- ❌ **No HSL / color mixer.** Only global saturation, vibrance and split
-  toning.
 - ❌ **No healing, cloning or spot removal.** Dust gets fixed elsewhere.
 - ❌ **No lens profile corrections.** No distortion or vignetting profiles, no
   automatic defringe — only a manual CA slider and a creative vignette.

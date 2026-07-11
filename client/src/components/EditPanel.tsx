@@ -291,6 +291,7 @@ function DevelopPanel({
     color: groupChanged(draft, [
       'saturation', 'vibrance',
       'splitShadowHue', 'splitShadowAmt', 'splitHighlightHue', 'splitHighlightAmt',
+      'hslHue', 'hslSat', 'hslLum',
     ]),
     effects: groupChanged(draft, ['vignette']),
     detail: groupChanged(draft, [
@@ -619,6 +620,7 @@ function DevelopPanel({
         <AmtSlider label="Shadow tint amount" field="splitShadowAmt" draft={draft} update={update} commit={commit} {...num('splitShadowAmt')} />
         <HueSlider label="Highlight tint" field="splitHighlightHue" draft={draft} update={update} commit={commit} {...num('splitHighlightHue')} />
         <AmtSlider label="Highlight tint amount" field="splitHighlightAmt" draft={draft} update={update} commit={commit} {...num('splitHighlightAmt')} />
+        <ColorMixer draft={draft} update={update} commit={commit} clear={clear} />
       </Group>
 
       <Group id="effects" title="Effects" changed={changed.effects}>
@@ -737,8 +739,9 @@ function isDefault(draft: Params, key: keyof Params, seedExpEV = 0): boolean {
   // untouched seeded photo reads as unchanged (no group dot).
   if (key === 'expEV') return Math.abs(draft.expEV - seedExpEV) <= 1e-9;
   if (key === 'wbMode') return (v as string) === '' || v === 'camera';
-  if (key === 'wbMul') return (v as number[]).every((m) => m === 0);
   if (key === 'demosaic') return (v as string) === '';
+  // Array-valued params (wbMul, the hsl mixer bands) default to all-zero.
+  if (Array.isArray(v)) return v.every((m) => m === 0);
   return v === NEUTRAL[key];
 }
 
@@ -951,6 +954,112 @@ function AmtSlider({
       active={active}
       onFocusControl={onFocusControl}
     />
+  );
+}
+
+// The HSL color mixer: eight fixed hue bands (mirroring pyramid.HSLBandCenters
+// on the Go side, chip order = band order), a chip row to pick the band, and
+// Hue/Saturation/Luminance sliders for the picked band. A dot on a chip marks
+// a band carrying an adjustment.
+const MIXER_BANDS = [
+  { name: 'Red', color: '#e5484d' },
+  { name: 'Orange', color: '#f76b15' },
+  { name: 'Yellow', color: '#d9c400' },
+  { name: 'Green', color: '#46a758' },
+  { name: 'Aqua', color: '#12a594' },
+  { name: 'Blue', color: '#3d7dff' },
+  { name: 'Purple', color: '#8e4ec6' },
+  { name: 'Magenta', color: '#d6409f' },
+];
+type MixerKey = 'hslHue' | 'hslSat' | 'hslLum';
+
+function ColorMixer({
+  draft,
+  update,
+  commit,
+  clear,
+}: {
+  draft: Params;
+  update: (patch: Partial<Params>) => void;
+  commit: (patch?: Partial<Params>) => void;
+  clear: (patch: Partial<Params>) => void;
+}) {
+  const [band, setBand] = useState(0);
+  const bandPatch = (key: MixerKey, v: number): Partial<Params> => {
+    const next = [...draft[key]] as Params[MixerKey];
+    next[band] = v;
+    return { [key]: next };
+  };
+  const val = (key: MixerKey) => draft[key][band] ?? 0;
+  const bandChanged = (i: number) =>
+    draft.hslHue[i] !== 0 || draft.hslSat[i] !== 0 || draft.hslLum[i] !== 0;
+
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center gap-2 pt-2 pb-1" role="group" aria-label="Color mixer band">
+        <span className="text-[11px] text-muted-foreground">Mixer</span>
+        <div className="flex flex-1 items-center justify-end gap-[7px]">
+          {MIXER_BANDS.map((b, i) => (
+            <button
+              key={b.name}
+              onClick={() => setBand(i)}
+              title={`${b.name} band`}
+              aria-label={`${b.name} band`}
+              aria-pressed={band === i}
+              className={cn(
+                'relative size-[16px] rounded-full transition-opacity',
+                band === i
+                  ? 'ring-2 ring-ring ring-offset-1 ring-offset-background'
+                  : 'opacity-70 hover:opacity-100',
+              )}
+              style={{ backgroundColor: b.color }}
+            >
+              {bandChanged(i) && (
+                <span className="absolute -top-[3px] -right-[3px] size-[6px] rounded-full border border-background bg-primary" />
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+      <EditSlider
+        label={`${MIXER_BANDS[band].name} hue`}
+        value={val('hslHue') * 100}
+        display={
+          val('hslHue') === 0 ? '0°' : `${val('hslHue') > 0 ? '+' : ''}${Math.round(val('hslHue') * 30)}°`
+        }
+        min={-100}
+        max={100}
+        step={2}
+        neutral={0}
+        onChange={(v) => update(bandPatch('hslHue', v / 100))}
+        onCommit={(v) => commit(bandPatch('hslHue', v / 100))}
+        onClear={() => clear(bandPatch('hslHue', 0))}
+      />
+      <EditSlider
+        label={`${MIXER_BANDS[band].name} saturation`}
+        value={val('hslSat') * 100}
+        display={pct(val('hslSat'))}
+        min={-100}
+        max={100}
+        step={2}
+        neutral={0}
+        onChange={(v) => update(bandPatch('hslSat', v / 100))}
+        onCommit={(v) => commit(bandPatch('hslSat', v / 100))}
+        onClear={() => clear(bandPatch('hslSat', 0))}
+      />
+      <EditSlider
+        label={`${MIXER_BANDS[band].name} luminance`}
+        value={val('hslLum') * 100}
+        display={pct(val('hslLum'))}
+        min={-100}
+        max={100}
+        step={2}
+        neutral={0}
+        onChange={(v) => update(bandPatch('hslLum', v / 100))}
+        onCommit={(v) => commit(bandPatch('hslLum', v / 100))}
+        onClear={() => clear(bandPatch('hslLum', 0))}
+      />
+    </div>
   );
 }
 

@@ -93,6 +93,16 @@ type Params struct {
 	SplitHighlightHue float64 `json:"splitHighlightHue" validate:"gte=0,lt=360"`
 	SplitHighlightAmt float64 `json:"splitHighlightAmt" validate:"gte=0,lte=1"`
 
+	// HSL color mixer, also in the look stage: per-band hue shift, chroma
+	// scale, and luminance scale, each ±1 with 0 neutral. Bands run red,
+	// orange, yellow, green, aqua, blue, purple, magenta (centers at
+	// 0/30/60/120/180/240/280/320° — see pyramid.HSLBandCenters). Hue shifts
+	// up to ±30°, Sat scales chroma toward 0..2×, Lum darkens or brightens
+	// the band's pixels. Normalize clamps out-of-range stored values.
+	HSLHue [8]float64 `json:"hslHue"`
+	HSLSat [8]float64 `json:"hslSat"`
+	HSLLum [8]float64 `json:"hslLum"`
+
 	// Vignette darkens (>0) or brightens (<0) toward the corners.
 	Vignette float64 `json:"vignette" validate:"gte=-1,lte=1"`
 
@@ -137,6 +147,19 @@ func (e *Params) RotateTurns() int {
 		return 0
 	}
 	return ((e.Rotate % 4) + 4) % 4
+}
+
+// HasHSL reports whether any color-mixer band carries an adjustment.
+func (e *Params) HasHSL() bool {
+	if e == nil {
+		return false
+	}
+	for i := range e.HSLHue {
+		if e.HSLHue[i] != 0 || e.HSLSat[i] != 0 || e.HSLLum[i] != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // HasCrop reports whether a crop rectangle is set (a straighten angle alone
@@ -200,6 +223,13 @@ func (e *Params) Normalize() {
 	}
 	// Full turns are neutral; canonicalize so 4 hashes like 0.
 	e.Rotate = e.RotateTurns()
+	// Mixer bands are unvalidated arrays (the wire validator doesn't dive
+	// into them), so clamp here instead.
+	for i := range e.HSLHue {
+		e.HSLHue[i] = clamp(e.HSLHue[i], -1, 1)
+		e.HSLSat[i] = clamp(e.HSLSat[i], -1, 1)
+		e.HSLLum[i] = clamp(e.HSLLum[i], -1, 1)
+	}
 }
 
 // IsNeutral reports whether the edit changes nothing; neutral edits are

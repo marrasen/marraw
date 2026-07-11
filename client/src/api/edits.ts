@@ -66,6 +66,9 @@ export interface Params {
     splitShadowAmt: number;
     splitHighlightHue: number;
     splitHighlightAmt: number;
+    hslHue: [number, number, number, number, number, number, number, number];
+    hslSat: [number, number, number, number, number, number, number, number];
+    hslLum: [number, number, number, number, number, number, number, number];
     vignette: number;
     texture: number;
     clarity: number;

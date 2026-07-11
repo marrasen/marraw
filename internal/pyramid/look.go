@@ -109,9 +109,14 @@ func ApplyLook(img *image.RGBA, gamma float64, e *edit.Params) {
 	// toning and vignette need per-pixel position or chroma math.
 	if e == nil || (e.Vibrance == 0 && e.SplitShadowAmt == 0 && e.SplitHighlightAmt == 0 && e.Vignette == 0) {
 		applyLookSimple(img, &lut, satQ)
-		return
+	} else {
+		applyLookFull(img, &lut, satQ, e)
 	}
-	applyLookFull(img, &lut, satQ, e)
+	// The HSL mixer runs last, over the developed color: gated so neutral
+	// mixers cost nothing and existing renders stay bit-identical.
+	if e.HasHSL() {
+		applyHSL(img, e)
+	}
 }
 
 func applyLookSimple(img *image.RGBA, lut *[256]uint8, satQ int32) {
