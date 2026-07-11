@@ -187,9 +187,6 @@ them is load-bearing for your work, marraw is not ready for you yet.
 
 **Export & output**
 
-- ❌ **No 16-bit output.** TIFF export is 8-bit. If you intend to push tones
-  hard in another editor, edit its RAW there instead of round-tripping a
-  render through marraw.
 - ❌ **No custom filename templates**, sequence numbering or metadata writing.
 - ❌ **No PNG, WebP or DNG output**, no watermarking.
 
