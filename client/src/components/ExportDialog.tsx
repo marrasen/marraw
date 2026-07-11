@@ -22,6 +22,7 @@ import '@/lib/electron';
 const FORMAT_ITEMS: { value: ExportFormatType; label: string }[] = [
   { value: 'jpeg', label: 'JPEG' },
   { value: 'tiff8', label: 'TIFF' },
+  { value: 'png', label: 'PNG' },
 ];
 const COLOR_ITEMS: { value: ColorSpaceType; label: string }[] = [
   { value: 'srgb', label: 'sRGB' },
@@ -133,7 +134,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
 
   const summary = [
     `${ids.length} file${ids.length === 1 ? '' : 's'}`,
-    format === 'jpeg' ? `JPEG q${quality}` : 'TIFF lossless',
+    format === 'jpeg' ? `JPEG q${quality}` : format === 'png' ? 'PNG lossless' : 'TIFF lossless',
     resize === 'edge' ? `${edgePx}px` : 'full res',
     ...(colorSpace !== 'srgb' ? [COLOR_ITEMS.find((c) => c.value === colorSpace)!.label] : []),
     ...(sharpenTarget !== 'off' ? [`sharpen ${sharpenTarget}`] : []),

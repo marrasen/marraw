@@ -104,7 +104,7 @@ control, any preset.
 | **Library** | Virtualized grid, adjustable thumbnail size, time-gap grouping, multi-select, rating/flag badges. |
 | **Cull** | Full-bleed cinema loupe, scrubber deck, pick/reject bar, contact sheet (`G`). |
 | **Develop** | Darkroom canvas, pinnable panel, floating quick-dials you choose, crop and white-balance overlays. |
-| **Export** | JPEG or lossless TIFF, batched across every core. |
+| **Export** | JPEG, or lossless TIFF / PNG, batched across every core. |
 
 ![Develop mode: the photo on a darkroom canvas, a floating quick-dial strip beneath it, and a right-hand panel with an RGB histogram over crop, tone, presence and white-balance sliders](screenshots/marraw_develop.jpg)
 
@@ -130,8 +130,8 @@ Every slider has a letter shortcut: press it, then `+`/`-` to adjust
 
 ### Export
 
-JPEG (quality 1–100) or lossless 8-bit RGB TIFF, for when you want no
-compression artifacts at all. Both render exactly what the loupe showed you —
+JPEG (quality 1–100), or lossless TIFF or PNG for when you want no
+compression artifacts at all. All three render exactly what the loupe showed you —
 crop, look, detail — with optional long-edge resize, sRGB / Adobe RGB /
 ProPhoto with an embedded ICC profile, and output sharpening tuned for screen,
 matte or glossy paper. Runs in the background across all cores at full AHD
@@ -188,7 +188,7 @@ them is load-bearing for your work, marraw is not ready for you yet.
 **Export & output**
 
 - ❌ **No custom filename templates**, sequence numbering or metadata writing.
-- ❌ **No PNG, WebP or DNG output**, no watermarking.
+- ❌ **No WebP or DNG output**, no watermarking.
 
 **Platform & workflow**
 

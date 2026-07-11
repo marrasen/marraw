@@ -26,8 +26,8 @@ import (
 type Request struct {
 	PhotoIDs    []int64
 	DestDir     string
-	Format      string // "jpeg" or "tiff8"
-	JpegQuality int    // 0 = 90; ignored by tiff8
+	Format      string // "jpeg", "tiff8", or "png"
+	JpegQuality int    // 0 = 90; ignored by tiff8/png
 	LongEdge    int    // 0 = full resolution
 	// ColorSpace selects the output primaries: "srgb" (default),
 	// "adobergb", or "prophoto". LibRaw converts during decode; both encoders

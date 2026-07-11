@@ -497,15 +497,16 @@ try {
   await until(() => document.querySelector('input[placeholder*="Destination"]'), 5000, 'export dialog');
   const segTexts = [...document.querySelectorAll('[role="radio"]')].map((b) => b.textContent.trim());
   R.exportSelectLabels =
-    ['JPEG', '16-bit TIFF', 'Full res', 'Long edge', 'sRGB', 'Adobe RGB', 'ProPhoto'].every((t) => segTexts.includes(t))
+    ['JPEG', 'TIFF', 'PNG', 'Full res', 'Long edge', 'sRGB', 'Adobe RGB', 'ProPhoto'].every((t) => segTexts.includes(t))
       ? true
       : segTexts;
   const destInput = document.querySelector('input[placeholder*="Destination"]');
   R.exportDefaultDir = destInput ? destInput.value : 'input missing';
 
   // --- export dialog: output sharpening rows ---------------------------------
-  // JPEG-only; the Amount row only shows while a target is selected. The
-  // dialog opens with the persisted last-used options, so force JPEG first.
+  // Sharpening is a property of the final render, so the row shows for every
+  // format; the Amount row only shows while a target is selected. The dialog
+  // opens with the persisted last-used options, so force JPEG first.
   const segRadio = (group, label) =>
     [...(document.querySelector(`[role="radiogroup"][aria-label="${group}"]`)?.querySelectorAll('[role="radio"]') ?? [])]
       .find((b) => b.textContent.trim() === label);
@@ -522,9 +523,9 @@ try {
   segRadio('Sharpen for', 'Screen')?.click();
   await sleep(150);
   R.exportSharpenAmountShows = !!document.querySelector('[aria-label="Sharpen amount"]');
-  segRadio('Format', '16-bit TIFF')?.click();
+  segRadio('Format', 'TIFF')?.click();
   await sleep(150);
-  R.exportSharpenTiffHides = !sharpenSeg() && !document.querySelector('[aria-label="Sharpen amount"]');
+  R.exportSharpenTiffStays = !!sharpenSeg() && !!document.querySelector('[aria-label="Sharpen amount"]');
   segRadio('Format', 'JPEG')?.click();
   await sleep(100);
   segRadio('Sharpen for', 'Off')?.click();
