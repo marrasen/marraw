@@ -10,6 +10,7 @@ import (
 
 	"github.com/marrasen/aprot"
 
+	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/store"
 )
 
@@ -62,6 +63,16 @@ type AutoPreset struct {
 	Name     string             `json:"name"`
 	Sections []string           `json:"sections"`
 	Offsets  map[string]float64 `json:"offsets"`
+}
+
+// UserPreset is one saved develop look: an absolute Params snapshot taken
+// from the current draft (geometry stripped by the client — a preset is a
+// look, not a crop). Unmarshalling through edit.Params means presets stored
+// by older builds gain new fields as neutral zeros on read.
+type UserPreset struct {
+	ID     string      `json:"id"`
+	Name   string      `json:"name"`
+	Params edit.Params `json:"params"`
 }
 
 // ExportOptions is the last-used state of the export dialog, persisted as
@@ -129,6 +140,8 @@ type UISettings struct {
 	CullDials   []string     `json:"cullDials"`
 	QuickDials  []string     `json:"quickDials"`
 	AutoPresets []AutoPreset `json:"autoPresets"`
+	// UserPresets are saved develop looks (Presets tab → Save current look).
+	UserPresets []UserPreset `json:"userPresets"`
 	ExportDir   string       `json:"exportDir"`
 	// ExportOptions is the export dialog's last-used state.
 	ExportOptions ExportOptions `json:"exportOptions"`
@@ -171,6 +184,7 @@ const (
 	settingUICullDials     = "ui:cullDials"
 	settingUIQuickDials    = "ui:quickDials"
 	settingUIAutoPresets   = "ui:autoPresets"
+	settingUIUserPresets   = "ui:userPresets"
 	settingUIExportDir     = "ui:exportDir"
 	settingUIExportOptions = "ui:exportOptions"
 	settingUIDevelopPinned = "ui:developPinned"
@@ -250,6 +264,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		CullDials:        jsonSetting(ctx, db, settingUICullDials, []string{}),
 		QuickDials:       jsonSetting(ctx, db, settingUIQuickDials, []string{}),
 		AutoPresets:      autoPresetsOrDefault(ctx, db),
+		UserPresets:      jsonSetting(ctx, db, settingUIUserPresets, []UserPreset{}),
 		ExportDir:        exportDir,
 		ExportOptions:    normalizeExportOptions(jsonSetting(ctx, db, settingUIExportOptions, ExportOptions{})),
 		DevelopPinned:    pinned,
@@ -296,6 +311,21 @@ func (u *Settings) SetAutoPresets(ctx context.Context, presets []AutoPreset) err
 		presets = []AutoPreset{}
 	}
 	return u.saveJSON(ctx, settingUIAutoPresets, presets)
+}
+
+// SetUserPresets replaces the saved develop looks (add, remove, and rename
+// are all "send the new list", like the auto presets).
+func (u *Settings) SetUserPresets(ctx context.Context, presets []UserPreset) error {
+	if presets == nil {
+		presets = []UserPreset{}
+	}
+	for i := range presets {
+		if presets[i].ID == "" || presets[i].Name == "" {
+			return aprot.ErrInvalidParams("user presets need an id and a name")
+		}
+		presets[i].Params.Normalize()
+	}
+	return u.saveJSON(ctx, settingUIUserPresets, presets)
 }
 
 // autoPresetsOrDefault reads the stored creative-auto presets, seeding the

@@ -8,6 +8,7 @@ import type {
     UseQueryResult,
 } from './client';
 import type { ColorSpaceType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
+import type { Params } from './edit';
 
 export const LibrarySort = {
     CaptureAsc: "captureAsc",
@@ -55,6 +56,7 @@ export interface UISettings {
     cullDials: string[];
     quickDials: string[];
     autoPresets: AutoPreset[];
+    userPresets: UserPreset[];
     exportDir: string;
     exportOptions: ExportOptions;
     developPinned: boolean;
@@ -65,6 +67,12 @@ export interface UISettings {
     prerenderFullres: boolean;
     thumbFit: ThumbFitType;
     librarySort: LibrarySortType;
+}
+
+export interface UserPreset {
+    id: string;
+    name: string;
+    params: Params;
 }
 
 
@@ -273,6 +281,19 @@ setThumbFit.method = 'Settings.SetThumbFit' as const;
 
 export function subscribeSetThumbFit(client: ApiClient, fit: ThumbFitType, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetThumbFit', [fit], callback, onError, options);
+}
+
+
+export function setUserPresets(client: ApiClient, presets: UserPreset[], options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetUserPresets', [presets], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setUserPresets.method = 'Settings.SetUserPresets' as const;
+
+export function subscribeSetUserPresets(client: ApiClient, presets: UserPreset[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetUserPresets', [presets], callback, onError, options);
 }
 
 // React Hooks for Settings
@@ -514,4 +535,19 @@ export function useSetThumbFit(fit: ThumbFitType, options?: UseQueryOptions<void
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [fit], _subscribe: { method: 'Settings.SetThumbFit', params: [fit] } });
+}
+
+/**
+ * Subscribes to `Settings.SetUserPresets` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetUserPresets(presets: UserPreset[], options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, presets: UserPreset[]) => setUserPresets(client, presets, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [presets], _subscribe: { method: 'Settings.SetUserPresets', params: [presets] } });
 }

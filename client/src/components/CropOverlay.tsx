@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Params } from '@/api/edits';
+import type { Params } from '@/api/edit';
 import { cn } from '@/lib/utils';
 import { fitCropToRotation, maxCoveredT, rectCornersCovered, slideMoveRect } from '@/lib/crop';
 

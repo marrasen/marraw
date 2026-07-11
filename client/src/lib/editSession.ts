@@ -16,8 +16,8 @@ import {
   previewEdit,
   resetEdits,
   setEditParams,
-  type Params,
 } from '@/api/edits';
+import type { Params } from '@/api/edit';
 import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPresets';
 import { CONTROL_ORDER, CONTROL_SPECS, NEUTRAL, paramLabel, type ControlId } from '@/lib/controlSpecs';
 import { updateEditGroupOpen } from '@/lib/uiSettings';

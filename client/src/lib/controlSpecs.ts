@@ -4,7 +4,7 @@
 // mode). A leaf module — editSession (keyboard stepping) and dials (toolbar
 // mini dials) both build on it, and it must import nothing that could pull
 // them back in.
-import type { Params } from '@/api/edits';
+import type { Params } from '@/api/edit';
 
 export const NEUTRAL: Params = {
   expEV: 0,

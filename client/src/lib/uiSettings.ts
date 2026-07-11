@@ -20,9 +20,11 @@ import {
   setRailWidth,
   setTheme,
   setThumbFit,
+  setUserPresets,
   useGetUISettings,
   type AutoPreset as WireAutoPreset,
   type ExportOptions,
+  type UserPreset,
 } from '@/api/settings';
 import type { ApiClient } from '@/api/client';
 import type { AutoPreset } from '@/lib/autoPresets';
@@ -64,6 +66,11 @@ export function updateQuickDials(client: ApiClient, dials: DialKey[]) {
 export function updateAutoPresets(client: ApiClient, presets: AutoPreset[]) {
   useUIStore.setState({ autoPresets: presets });
   setAutoPresets(client, presets.map(presetToWire)).catch(swallow);
+}
+
+export function updateUserPresets(client: ApiClient, presets: UserPreset[]) {
+  useUIStore.setState({ userPresets: presets });
+  setUserPresets(client, presets).catch(swallow);
 }
 
 export function updateExportDir(client: ApiClient, dir: string) {

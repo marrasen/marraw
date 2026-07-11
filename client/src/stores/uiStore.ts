@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { FlagType, Photo, PhotoPatch } from '@/api/library';
-import type { ExportOptions, UISettings } from '@/api/settings';
-import type { Params } from '@/api/edits';
+import type { ExportOptions, UISettings, UserPreset } from '@/api/settings';
+import type { Params } from '@/api/edit';
 import { sanitizeDialKeys, type DialKey } from '@/lib/dials';
 import { sanitizeAutoPresets, type AutoPreset } from '@/lib/autoPresets';
 
@@ -115,6 +115,8 @@ interface UIState {
   quickDials: DialKey[];
   // Creative auto presets (Settings → Auto presets).
   autoPresets: AutoPreset[];
+  // Saved develop looks (Presets tab → Save current look).
+  userPresets: UserPreset[];
   theme: Theme;
   // Last export destination directory ('' = none yet).
   exportDir: string;
@@ -236,6 +238,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   cullDials: [],
   quickDials: [],
   autoPresets: [],
+  userPresets: [],
   theme: 'dark',
   exportDir: '',
   exportOptions: DEFAULT_EXPORT_OPTIONS,
@@ -289,6 +292,9 @@ export const useUIStore = create<UIState>((set, get) => ({
       cullDials: sanitizeDialKeys(s.cullDials),
       quickDials: sanitizeDialKeys(s.quickDials),
       autoPresets: sanitizeAutoPresets(s.autoPresets),
+      // The server re-marshals presets through edit.Params, so params arrive
+      // complete; only entries missing identity are dropped.
+      userPresets: (s.userPresets ?? []).filter((p) => p.id && p.name && p.params),
       exportDir: s.exportDir,
       exportOptions: sanitizeExportOptions(s.exportOptions),
       prerenderFullres: s.prerenderFullres,

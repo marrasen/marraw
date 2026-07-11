@@ -5,13 +5,16 @@
 // the keyboard and command palette do — nothing here holds edit state itself.
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Copy, ClipboardPaste, RotateCcw } from 'lucide-react';
+import { Copy, ClipboardPaste, Plus, RotateCcw, X } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { previewEdit } from '@/api/edits';
+import type { Params } from '@/api/edit';
+import type { UserPreset } from '@/api/settings';
 import type { ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { AutoPreset } from '@/lib/autoPresets';
+import { updateUserPresets } from '@/lib/uiSettings';
 import {
   computePresetParams,
   esApplyAutoPreset,
@@ -62,6 +65,8 @@ export function PresetsPanel({
           </Button>
         </div>
       </Section>
+
+      <UserPresetsSection client={client} photo={photo} draft={draft} />
 
       <Section title="Creative presets">
         {presets.length === 0 ? (
@@ -122,6 +127,164 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       {children}
     </div>
   );
+}
+
+// UserPresetsSection is the saved-looks library: saving snapshots the current
+// draft minus geometry (a preset is a look, not a crop), applying lays the
+// look over the photo while keeping its own rotation/flip/crop/straighten.
+// Cards carry a live low-res render of the look on the focused photo.
+function UserPresetsSection({
+  client,
+  photo,
+  draft,
+}: {
+  client: ApiClient;
+  photo?: Photo;
+  draft: Params | null;
+}) {
+  const presets = useUIStore((s) => s.userPresets);
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState('');
+  const thumbs = useUserPresetThumbs(client, photo, presets);
+
+  const save = () => {
+    const trimmed = name.trim();
+    if (!draft || !trimmed) return;
+    const params: Params = {
+      ...draft,
+      rotate: 0,
+      flipH: false,
+      cropX: 0,
+      cropY: 0,
+      cropW: 0,
+      cropH: 0,
+      cropAngle: 0,
+    };
+    updateUserPresets(client, [...presets, { id: crypto.randomUUID(), name: trimmed, params }]);
+    setNaming(false);
+    setName('');
+    toast.success(`Saved preset “${trimmed}”`);
+  };
+
+  const apply = (p: UserPreset) => {
+    if (!draft) return;
+    esApplyParams(
+      client,
+      {
+        ...p.params,
+        rotate: draft.rotate,
+        flipH: draft.flipH,
+        cropX: draft.cropX,
+        cropY: draft.cropY,
+        cropW: draft.cropW,
+        cropH: draft.cropH,
+        cropAngle: draft.cropAngle,
+      },
+      { label: p.name },
+    );
+  };
+
+  const remove = (p: UserPreset) => {
+    updateUserPresets(client, presets.filter((x) => x.id !== p.id));
+    toast.success(`Removed preset “${p.name}”`);
+  };
+
+  return (
+    <Section title="My presets">
+      {presets.length > 0 && (
+        <div className="grid grid-cols-2 gap-2">
+          {presets.map((p) => (
+            <div key={p.id} className="group relative">
+              <button
+                className="flex w-full flex-col overflow-hidden rounded-lg border bg-inset text-left transition-colors hover:border-primary/50"
+                onClick={() => apply(p)}
+                title={`Apply ${p.name} (keeps the photo's crop)`}
+              >
+                <div className="aspect-[3/2] w-full overflow-hidden bg-black/40">
+                  {thumbs[p.id] ? (
+                    <img src={thumbs[p.id]} alt="" draggable={false} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="h-full w-full animate-pulse bg-white/5" />
+                  )}
+                </div>
+                <span className="truncate px-2 py-1.5 text-[12px] group-hover:text-foreground">{p.name}</span>
+              </button>
+              <button
+                className="absolute top-1 right-1 hidden size-5 items-center justify-center rounded-md bg-black/60 text-white/80 group-hover:flex hover:bg-black/80 hover:text-white"
+                onClick={() => remove(p)}
+                title={`Delete preset ${p.name}`}
+                aria-label={`Delete preset ${p.name}`}
+              >
+                <X className="size-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {naming ? (
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus
+            className="h-[30px] min-w-0 flex-1 rounded-lg border border-input bg-secondary px-2.5 text-xs text-secondary-foreground outline-none focus:border-ring dark:bg-white/5"
+            placeholder="Preset name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            // Stop the global keyboard map from rating/flagging while typing.
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') save();
+              if (e.key === 'Escape') setNaming(false);
+            }}
+            aria-label="Preset name"
+          />
+          <Button size="sm" onClick={save} disabled={!name.trim()}>
+            Save
+          </Button>
+        </div>
+      ) : (
+        <Button size="sm" variant="outline" className="w-fit" disabled={!draft} onClick={() => setNaming(true)}>
+          <Plus data-icon="inline-start" />
+          Save current look
+        </Button>
+      )}
+    </Section>
+  );
+}
+
+// useUserPresetThumbs renders a small preview of each saved look applied to
+// the focused photo. Same lifecycle rules as usePresetThumbs, minus the
+// autoAdjust round trip — the params are already absolute.
+function useUserPresetThumbs(client: ApiClient, photo: Photo | undefined, presets: UserPreset[]) {
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const presetsKey = JSON.stringify(presets.map((p) => p.id));
+  const photoId = photo?.id;
+
+  useEffect(() => {
+    if (!photo || presets.length === 0) return;
+    let alive = true;
+    const urls: string[] = [];
+    setThumbs({});
+    (async () => {
+      for (const p of presets) {
+        try {
+          const blob = await previewEdit(client, photo.id, p.params, THUMB_PX);
+          if (!alive) return;
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          setThumbs((t) => ({ ...t, [p.id]: url }));
+        } catch {
+          /* a failed thumbnail just stays a placeholder */
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+      urls.forEach((u) => URL.revokeObjectURL(u));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, photoId, presetsKey]);
+
+  return thumbs;
 }
 
 // PresetGrid renders each creative-auto preset as a card with a live low-res

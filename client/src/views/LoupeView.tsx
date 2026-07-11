@@ -27,7 +27,7 @@ import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, rotatedDims, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
-import type { Params } from '@/api/edits';
+import type { Params } from '@/api/edit';
 
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
 // fraction space (crop-width-fraction / crop-height-fraction), accounting for

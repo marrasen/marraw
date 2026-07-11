@@ -1,4 +1,4 @@
-import type { Params } from '@/api/edits';
+import type { Params } from '@/api/edit';
 import { CONTROL_ORDER, CONTROL_SPECS, NEUTRAL, type ControlId } from '@/lib/controlSpecs';
 
 // The develop dials a user can pin to the Cull confirm bar and the Develop

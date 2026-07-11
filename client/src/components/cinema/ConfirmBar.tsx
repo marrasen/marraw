@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import type { Photo } from '@/api/library';
-import type { Params } from '@/api/edits';
+import type { Params } from '@/api/edit';
 import { useApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { applyFlag, applyRating } from '@/lib/actions';

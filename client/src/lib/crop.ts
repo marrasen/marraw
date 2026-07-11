@@ -2,7 +2,7 @@
 // overlay. Mirrors internal/edit/edit.go (OutputDims) and internal/pyramid/
 // geometry.go so the client sizes the rendered image identically to what the
 // backend produced — no round trip needed.
-import type { Params } from '@/api/edits';
+import type { Params } from '@/api/edit';
 import type { Photo } from '@/api/library';
 
 // displayDims is the on-screen, orientation-corrected size of the full frame:

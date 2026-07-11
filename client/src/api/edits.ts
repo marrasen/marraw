@@ -7,22 +7,7 @@ import type {
     UseQueryOptions,
     UseQueryResult,
 } from './client';
-
-export const Demosaic = {
-    Vng: "vng",
-    Ppg: "ppg",
-    Ahd: "ahd",
-    Dht: "dht",
-} as const;
-export type DemosaicType = typeof Demosaic[keyof typeof Demosaic];
-
-export const WBMode = {
-    Camera: "camera",
-    Auto: "auto",
-    Custom: "custom",
-    Kelvin: "kelvin",
-} as const;
-export type WBModeType = typeof WBMode[keyof typeof WBMode];
+import type { Params } from './edit';
 
 export interface Delta {
     expEV: number | null;
@@ -38,52 +23,6 @@ export interface Delta {
     toneHighlights: number | null;
     saturation: number | null;
     vibrance: number | null;
-}
-
-export interface Params {
-    expEV: number;
-    expPreserve: number;
-    wbMode: WBModeType;
-    wbMul: [number, number, number, number];
-    wbTemp: number;
-    wbTint: number;
-    wbKelvin: number;
-    bright: number;
-    gamma: number;
-    shadow: number;
-    highlight: number;
-    nrThreshold: number;
-    fbddNoiseRd: number;
-    medPasses: number;
-    contrast: number;
-    whites: number;
-    blacks: number;
-    toneShadows: number;
-    toneHighlights: number;
-    saturation: number;
-    vibrance: number;
-    splitShadowHue: number;
-    splitShadowAmt: number;
-    splitHighlightHue: number;
-    splitHighlightAmt: number;
-    hslHue: [number, number, number, number, number, number, number, number];
-    hslSat: [number, number, number, number, number, number, number, number];
-    hslLum: [number, number, number, number, number, number, number, number];
-    vignette: number;
-    texture: number;
-    clarity: number;
-    dehaze: number;
-    sharpen: number;
-    demosaic: DemosaicType;
-    caRed: number;
-    caBlue: number;
-    rotate: number;
-    flipH: boolean;
-    cropX: number;
-    cropY: number;
-    cropW: number;
-    cropH: number;
-    cropAngle: number;
 }
 
 

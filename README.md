@@ -88,7 +88,8 @@ There is no catalog to import into and nothing to migrate out of.
 Select ten frames and apply *relative* adjustments — "+0.5 EV on all of these"
 — rather than stamping one absolute value over ten different exposures. Copy
 and paste edit settings with `Ctrl+C`/`Ctrl+V`. `Ctrl+U` auto-tones; `Ctrl+1`–`9`
-apply your own saved creative auto-presets.
+apply your own saved creative auto-presets, and any look can be saved as a
+named preset and applied from the Presets tab (the photo keeps its own crop).
 
 **`Ctrl+K` jumps to anything** — any mode, any panel, any single develop
 control, any preset.
@@ -181,7 +182,7 @@ them is load-bearing for your work, marraw is not ready for you yet.
   **not** round-trip with Lightroom, darktable or Capture One.
 - ❌ **No photo search, keywords, or collections.** You filter by rating and
   flag within a folder. That's it.
-- ❌ **No presets library** beyond auto-presets, and no DCP camera profiles.
+- ❌ **No DCP camera profiles.**
 
 **Export & output**
 
