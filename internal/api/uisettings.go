@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/marrasen/aprot"
@@ -74,6 +75,8 @@ type ExportOptions struct {
 	ColorSpace    ColorSpace    `json:"colorSpace"`
 	SharpenTarget SharpenTarget `json:"sharpenTarget"`
 	SharpenAmount SharpenAmount `json:"sharpenAmount"`
+	// FileNameTemplate names the output files; empty = "{name}".
+	FileNameTemplate string `json:"fileNameTemplate"`
 }
 
 // normalizeExportOptions maps missing or invalid fields (older/partial blobs
@@ -99,6 +102,10 @@ func normalizeExportOptions(o ExportOptions) ExportOptions {
 	}
 	if !enumValid(o.SharpenAmount, SharpenAmountValues()) {
 		o.SharpenAmount = SharpenAmountStandard
+	}
+	o.FileNameTemplate = strings.TrimSpace(o.FileNameTemplate)
+	if len(o.FileNameTemplate) > 120 {
+		o.FileNameTemplate = o.FileNameTemplate[:120]
 	}
 	return o
 }

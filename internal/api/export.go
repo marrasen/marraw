@@ -32,6 +32,9 @@ type ExportRequest struct {
 	SharpenTarget SharpenTarget `json:"sharpenTarget" validate:"omitempty,oneof=off screen matte glossy"`
 	// SharpenAmount scales the sharpening; empty = standard.
 	SharpenAmount SharpenAmount `json:"sharpenAmount" validate:"omitempty,oneof=low standard high"`
+	// FileNameTemplate names the output files; empty = "{name}". Tokens:
+	// {name}, {seq}, {date}, {time} (see export.namer).
+	FileNameTemplate string `json:"fileNameTemplate" validate:"omitempty,max=120"`
 	// CreateDir creates DestDir if missing (the client asks the user first).
 	CreateDir bool `json:"createDir"`
 }
@@ -86,14 +89,15 @@ func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.Tas
 		var mu sync.Mutex
 		done, failed := 0, 0
 		err := export.Run(tctx, x.deps.DB, export.Request{
-			PhotoIDs:      req.PhotoIDs,
-			DestDir:       req.DestDir,
-			Format:        format,
-			JpegQuality:   req.JpegQuality,
-			LongEdge:      req.LongEdge,
-			ColorSpace:    string(req.ColorSpace),
-			SharpenTarget: string(req.SharpenTarget),
-			SharpenAmount: string(req.SharpenAmount),
+			PhotoIDs:         req.PhotoIDs,
+			DestDir:          req.DestDir,
+			Format:           format,
+			JpegQuality:      req.JpegQuality,
+			LongEdge:         req.LongEdge,
+			ColorSpace:       string(req.ColorSpace),
+			SharpenTarget:    string(req.SharpenTarget),
+			SharpenAmount:    string(req.SharpenAmount),
+			FileNameTemplate: req.FileNameTemplate,
 		}, func(it export.Item) {
 			mu.Lock()
 			done++

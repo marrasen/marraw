@@ -28,6 +28,7 @@ export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   colorSpace: 'srgb',
   sharpenTarget: 'off',
   sharpenAmount: 'standard',
+  fileNameTemplate: '',
 };
 
 // Library rail width bounds — mirror the server's SetRailWidth validation.
@@ -83,6 +84,7 @@ function sanitizeExportOptions(o: Partial<ExportOptions> | undefined): ExportOpt
         : 'off',
     sharpenAmount:
       o?.sharpenAmount === 'low' || o?.sharpenAmount === 'high' ? o.sharpenAmount : 'standard',
+    fileNameTemplate: typeof o?.fileNameTemplate === 'string' ? o.fileNameTemplate.trim() : '',
   };
 }
 

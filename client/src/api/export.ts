@@ -22,6 +22,7 @@ export interface ExportRequest {
     colorSpace: ColorSpaceType;
     sharpenTarget: SharpenTargetType;
     sharpenAmount: SharpenAmountType;
+    fileNameTemplate: string;
     createDir: boolean;
 }
 

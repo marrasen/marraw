@@ -12,7 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/sync/errgroup"
@@ -38,6 +40,9 @@ type Request struct {
 	// "low"/"standard"/"high" ("" = off / standard).
 	SharpenTarget string
 	SharpenAmount string
+	// FileNameTemplate names the output files (no extension); "" = "{name}".
+	// See namer.claim for the tokens.
+	FileNameTemplate string
 }
 
 type Item struct {
@@ -58,8 +63,8 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 	}
 
 	// Claim output names up front (sequentially) so concurrent workers
-	// can't collide on duplicates.
-	names := newNamer(req.DestDir)
+	// can't collide on duplicates, and so {seq} follows the request order.
+	names := newNamer(req.DestDir, req.FileNameTemplate, len(req.PhotoIDs))
 
 	g, gctx := errgroup.WithContext(ctx)
 	// Export is a deliberate foreground action with its own LibRaw handles
@@ -72,7 +77,7 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 			onItem(Item{PhotoID: id, Err: err})
 			continue
 		}
-		outName := names.claim(photo.FileName, req.Format)
+		outName := names.claim(photo.FileName, photo.TakenAt, req.Format)
 		g.Go(func() error {
 			if gctx.Err() != nil {
 				return gctx.Err()
@@ -215,17 +220,29 @@ func fitLongEdge(w, h, longEdge int) (int, int) {
 	return max(1, w*longEdge/h), longEdge
 }
 
-// namer assigns collision-free output file names.
+// namer assigns collision-free output file names from the user's template.
 type namer struct {
-	destDir string
-	used    map[string]bool
+	destDir  string
+	template string
+	total    int
+	seq      int
+	used     map[string]bool
 }
 
-func newNamer(destDir string) *namer {
-	return &namer{destDir: destDir, used: map[string]bool{}}
+func newNamer(destDir, template string, total int) *namer {
+	if strings.TrimSpace(template) == "" {
+		template = "{name}"
+	}
+	return &namer{destDir: destDir, template: template, total: total, used: map[string]bool{}}
 }
 
-func (n *namer) claim(srcName, format string) string {
+// claim expands the template for one photo and de-duplicates the result.
+// Tokens: {name} = source file name without extension, {seq} = position in
+// the batch (zero-padded to the batch size, at least 3 digits), {date} and
+// {time} = capture stamp as YYYYMMDD / HHMMSS (empty when EXIF carries no
+// date). Unknown {tokens} stay literal. A template that expands to nothing
+// falls back to the source name, so a file always has a real name.
+func (n *namer) claim(srcName string, takenAt int64, format string) string {
 	ext := ".jpg"
 	switch format {
 	case "tiff8":
@@ -233,13 +250,47 @@ func (n *namer) claim(srcName, format string) string {
 	case "png":
 		ext = ".png"
 	}
-	base := strings.TrimSuffix(srcName, filepath.Ext(srcName))
+	n.seq++
+	src := strings.TrimSuffix(srcName, filepath.Ext(srcName))
+	base := sanitizeFileName(expandTemplate(n.template, src, takenAt, n.seq, n.total))
+	if base == "" {
+		base = src
+	}
 	name := base + ext
 	for i := 2; n.used[strings.ToLower(name)] || exists(filepath.Join(n.destDir, name)); i++ {
 		name = fmt.Sprintf("%s-%d%s", base, i, ext)
 	}
 	n.used[strings.ToLower(name)] = true
 	return name
+}
+
+func expandTemplate(template, name string, takenAt int64, seq, total int) string {
+	width := max(3, len(strconv.Itoa(total)))
+	var date, clock string
+	if takenAt > 0 {
+		t := time.Unix(takenAt, 0)
+		date = t.Format("20060102")
+		clock = t.Format("150405")
+	}
+	return strings.NewReplacer(
+		"{name}", name,
+		"{seq}", fmt.Sprintf("%0*d", width, seq),
+		"{date}", date,
+		"{time}", clock,
+	).Replace(template)
+}
+
+// sanitizeFileName replaces the characters Windows forbids in file names
+// (which also keeps the expansion from escaping destDir) and trims the
+// trailing dots/spaces Explorer refuses.
+func sanitizeFileName(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return '-'
+		}
+		return r
+	}, s)
+	return strings.TrimRight(s, ". ")
 }
 
 func exists(path string) bool {

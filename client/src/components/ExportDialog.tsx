@@ -41,6 +41,35 @@ const SHARPEN_AMOUNT_ITEMS: { value: SharpenAmountType; label: string }[] = [
   { value: 'high', label: 'High' },
 ];
 
+// Mirrors the backend's namer (internal/export): {name} source file name,
+// {seq} batch position, {date}/{time} capture stamp — for the live example
+// only; the backend expansion is the authority.
+function exampleFileName(
+  template: string,
+  photo: Photo | undefined,
+  total: number,
+  format: ExportFormatType,
+): string {
+  const name = photo ? photo.fileName.replace(/\.[^.]+$/, '') : 'DSC00001';
+  const pad = (n: number, w: number) => String(n).padStart(w, '0');
+  let date = '';
+  let time = '';
+  if (photo && photo.takenAt > 0) {
+    const d = new Date(photo.takenAt * 1000);
+    date = `${d.getFullYear()}${pad(d.getMonth() + 1, 2)}${pad(d.getDate(), 2)}`;
+    time = `${pad(d.getHours(), 2)}${pad(d.getMinutes(), 2)}${pad(d.getSeconds(), 2)}`;
+  }
+  const base = (template.trim() || '{name}')
+    .replaceAll('{name}', name)
+    .replaceAll('{seq}', pad(1, Math.max(3, String(total).length)))
+    .replaceAll('{date}', date)
+    .replaceAll('{time}', time)
+    .replace(/[<>:"/\\|?*]/g, '-')
+    .replace(/[. ]+$/, '');
+  const ext = format === 'png' ? '.png' : format === 'tiff8' ? '.tif' : '.jpg';
+  return (base || name) + ext;
+}
+
 /**
  * Export dialog (handoff plate "EXPORT"): destination, format, quality,
  * resize, and color space. Export starts a background task and hands you
@@ -55,6 +84,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   const { roots } = useLibraryRoots();
 
   const [destDir, setDestDir] = useState('');
+  const [fileTemplate, setFileTemplate] = useState('');
   const [format, setFormat] = useState<ExportFormatType>('jpeg');
   const [quality, setQuality] = useState(90);
   const [resize, setResize] = useState<'full' | 'edge'>('full');
@@ -75,6 +105,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
     // user is editing while the dialog is open.
     const { exportDir, exportOptions } = useUIStore.getState();
     setDestDir(exportDir || (folderPath ? `${folderPath}\\Exports` : ''));
+    setFileTemplate(exportOptions.fileNameTemplate);
     setFormat(exportOptions.format);
     setQuality(exportOptions.jpegQuality);
     setResize(exportOptions.resizeMode === 'edge' ? 'edge' : 'full');
@@ -112,6 +143,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
         colorSpace,
         sharpenTarget,
         sharpenAmount,
+        fileNameTemplate: fileTemplate.trim(),
         createDir,
       });
       updateExportDir(client, destDir);
@@ -123,6 +155,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
         colorSpace,
         sharpenTarget,
         sharpenAmount,
+        fileNameTemplate: fileTemplate.trim(),
       });
       setOpen(false); // progress lives in the top-bar task chip
     } catch (err) {
@@ -200,6 +233,22 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
                 </Button>
               )}
             </>,
+          )}
+          {row(
+            'File name',
+            <div className="flex min-w-0 flex-1 flex-col gap-[5px]">
+              <input
+                className="flex h-[34px] items-center rounded-lg border border-input bg-secondary px-2.5 font-mono text-xs text-secondary-foreground outline-none focus:border-ring dark:bg-white/5"
+                placeholder="{name}"
+                value={fileTemplate}
+                onChange={(e) => setFileTemplate(e.target.value)}
+                aria-label="File name template"
+              />
+              <span className="font-mono text-[10.5px] text-muted-foreground">
+                {'{name}'} source · {'{seq}'} number · {'{date}'} {'{time}'} captured — e.g.{' '}
+                {exampleFileName(fileTemplate, photos.find((p) => p.id === ids[0]), ids.length, format)}
+              </span>
+            </div>,
           )}
           {row(
             'Format',

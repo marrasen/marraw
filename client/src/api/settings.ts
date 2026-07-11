@@ -46,6 +46,7 @@ export interface ExportOptions {
     colorSpace: ColorSpaceType;
     sharpenTarget: SharpenTargetType;
     sharpenAmount: SharpenAmountType;
+    fileNameTemplate: string;
 }
 
 export interface UISettings {

@@ -10,6 +10,7 @@ export const ExportRequestSchema = z.object({
     colorSpace: z.union([z.literal(""), z.enum(["srgb", "adobergb", "prophoto"])]),
     sharpenTarget: z.union([z.literal(""), z.enum(["off", "screen", "matte", "glossy"])]),
     sharpenAmount: z.union([z.literal(""), z.enum(["low", "standard", "high"])]),
+    fileNameTemplate: z.union([z.literal(""), z.string().max(120)]),
     createDir: z.boolean(),
 });
 
