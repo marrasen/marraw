@@ -2,6 +2,7 @@ package export
 
 import (
 	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"math"
 
@@ -197,4 +198,63 @@ func embedICCJPEG(jpg, icc []byte) []byte {
 	out = append(out, icc...)
 	out = append(out, jpg[2:]...)
 	return out
+}
+
+// embedICCPNG splices an iCCP chunk into a PNG right after the IHDR chunk.
+// PNG requires the profile to be zlib-compressed.
+func embedICCPNG(pngData, icc []byte) []byte {
+	if icc == nil || len(pngData) < 8 {
+		return pngData
+	}
+
+	// Compress the ICC profile
+	buf := &bytes.Buffer{}
+	zw := zlib.NewWriter(buf)
+	zw.Write(icc)
+	zw.Close()
+	compressed := buf.Bytes()
+
+	// Find the end of IHDR chunk (8 bytes PNG signature + 25 byte IHDR chunk)
+	const ihdrSize = 25
+	if len(pngData) < 8+ihdrSize {
+		return pngData
+	}
+
+	// Build iCCP chunk: "iCCP" keyword, null terminator, compression method (0), compressed ICC profile
+	chunkData := append([]byte("marraw\x00\x00"), compressed...)
+
+	// Calculate chunk length (keyword + null + method + profile)
+	chunkLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(chunkLen, uint32(len(chunkData)))
+
+	// Calculate CRC (covers chunk type + data)
+	crcData := append([]byte("iCCP"), chunkData...)
+	crc := crc32PNG(crcData)
+	crcBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(crcBytes, crc)
+
+	// Insert iCCP chunk after IHDR
+	out := make([]byte, 0, len(pngData)+len(chunkLen)+4+len(chunkData)+4)
+	out = append(out, pngData[:8+ihdrSize]...)
+	out = append(out, chunkLen...)
+	out = append(out, crcData...)
+	out = append(out, crcBytes...)
+	out = append(out, pngData[8+ihdrSize:]...)
+	return out
+}
+
+// crc32PNG computes the PNG CRC using polynomial 0xEDB88320 (bit-reversed).
+func crc32PNG(data []byte) uint32 {
+	crc := uint32(0xffffffff)
+	for _, b := range data {
+		crc ^= uint32(b)
+		for i := 0; i < 8; i++ {
+			if crc&1 != 0 {
+				crc = (crc >> 1) ^ 0xedb88320
+			} else {
+				crc >>= 1
+			}
+		}
+	}
+	return crc ^ 0xffffffff
 }

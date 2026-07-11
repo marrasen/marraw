@@ -34,16 +34,17 @@ func FlagFromInt(i int) Flag {
 	}
 }
 
-// ExportFormat selects the export encoder. Both render the same pixels; TIFF
-// is the lossless option (8-bit RGB, Deflate), JPEG the compact one.
+// ExportFormat selects the export encoder. All render the same pixels; TIFF
+// and PNG are the lossless options (8-bit RGB), JPEG the compact one.
 type ExportFormat string
 
 const (
 	ExportJPEG  ExportFormat = "jpeg"
 	ExportTIFF8 ExportFormat = "tiff8"
+	ExportPNG   ExportFormat = "png"
 )
 
-func ExportFormatValues() []ExportFormat { return []ExportFormat{ExportJPEG, ExportTIFF8} }
+func ExportFormatValues() []ExportFormat { return []ExportFormat{ExportJPEG, ExportTIFF8, ExportPNG} }
 
 // ColorSpace selects the export output primaries.
 type ColorSpace string

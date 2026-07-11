@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -130,6 +131,8 @@ func exportOne(photo store.Photo, outPath string, req Request) error {
 	switch req.Format {
 	case "tiff8":
 		err = encodeTIFF8(f, rendered, icc)
+	case "png":
+		err = encodePNG(f, rendered, icc)
 	default:
 		err = encodeJPEG(f, rendered, req.JpegQuality, icc)
 	}
@@ -181,6 +184,19 @@ func encodeJPEG(f *os.File, img *image.RGBA, quality int, icc []byte) error {
 	return err
 }
 
+func encodePNG(f *os.File, img *image.RGBA, icc []byte) error {
+	if icc == nil {
+		return png.Encode(f, img)
+	}
+	// Wide gamut: encode to memory, then splice the ICC profile in.
+	buf := &bytes.Buffer{}
+	if err := png.Encode(buf, img); err != nil {
+		return err
+	}
+	_, err := f.Write(embedICCPNG(buf.Bytes(), icc))
+	return err
+}
+
 func resizeRGBA(src *image.RGBA, longEdge int) *image.RGBA {
 	b := src.Bounds()
 	if longEdge <= 0 || max(b.Dx(), b.Dy()) <= longEdge {
@@ -211,8 +227,11 @@ func newNamer(destDir string) *namer {
 
 func (n *namer) claim(srcName, format string) string {
 	ext := ".jpg"
-	if format == "tiff8" {
+	switch format {
+	case "tiff8":
 		ext = ".tif"
+	case "png":
+		ext = ".png"
 	}
 	base := strings.TrimSuffix(srcName, filepath.Ext(srcName))
 	name := base + ext
