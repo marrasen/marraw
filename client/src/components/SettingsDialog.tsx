@@ -28,6 +28,7 @@ import {
   updateCullDials,
   updatePrerenderFullres,
   updateQuickDials,
+  updateThumbFit,
 } from '@/lib/uiSettings';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
@@ -125,6 +126,8 @@ function SettingRow({
 
 function GeneralSection() {
   const { theme, setTheme } = useTheme();
+  const client = useApiClient();
+  const thumbFit = useUIStore((s) => s.thumbFit);
   return (
     <div className="flex flex-col">
       <SettingRow
@@ -141,6 +144,23 @@ function GeneralSection() {
             ]}
             value={theme}
             onValueChange={(v) => setTheme(v)}
+          />
+        }
+      />
+      <SettingRow
+        title="Thumbnails"
+        description="Crop fills a uniform 3:2 cell (portraits lose their top and bottom). Fit shows the whole frame in a square cell. Natural sizes each frame to its own aspect ratio in justified rows."
+        control={
+          <Segmented
+            aria-label="Thumbnail framing"
+            size="sm"
+            items={[
+              { value: 'crop', label: 'Crop' },
+              { value: 'fit', label: 'Fit' },
+              { value: 'natural', label: 'Natural' },
+            ]}
+            value={thumbFit}
+            onValueChange={(v) => updateThumbFit(client, v as 'crop' | 'fit' | 'natural')}
           />
         }
       />

@@ -3,8 +3,18 @@ import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { gapLabel, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
+import { aspectOf } from '@/lib/justify';
 import { PyramidImage } from '@/components/PyramidImage';
 import { useUIStore } from '@/stores/uiStore';
+
+// Filmstrip thumbnails are 40px tall. crop keeps the fixed 60px slot; fit and
+// natural size the width to the frame's aspect (fallback 60 = 40×1.5, so an
+// unscanned frame doesn't reflow when its dimensions arrive).
+const STRIP_H = 40;
+function stripWidth(photo: Photo, fit: string): number {
+  if (fit === 'crop') return 60;
+  return Math.max(1, Math.round(STRIP_H * aspectOf(photo)));
+}
 
 /**
  * The Cull scrubber deck: the shoot as a horizontal glass strip of 60×40
@@ -24,6 +34,7 @@ export function ScrubberDeck({
   shifted?: boolean;
 }) {
   const focus = useUIStore((s) => s.focus);
+  const thumbFit = useUIStore((s) => s.thumbFit);
   const scrollRef = useRef<HTMLDivElement>(null);
   const centeredOnce = useRef(false);
   const anim = useRef(0);
@@ -134,7 +145,13 @@ export function ScrubberDeck({
               </div>
               <div className="flex gap-1">
                 {g.photos.map((p) => (
-                  <StripThumb key={p.id} photo={p} focused={p.id === focusId} onFocus={focus} />
+                  <StripThumb
+                    key={p.id}
+                    photo={p}
+                    focused={p.id === focusId}
+                    onFocus={focus}
+                    width={stripWidth(p, thumbFit)}
+                  />
                 ))}
               </div>
             </div>
@@ -151,10 +168,12 @@ function StripThumb({
   photo,
   focused,
   onFocus,
+  width,
 }: {
   photo: Photo;
   focused: boolean;
   onFocus: (id: number, opts?: { extend?: boolean; toggle?: boolean }) => void;
+  width: number;
 }) {
   return (
     <button
@@ -162,9 +181,10 @@ function StripThumb({
       // The focused frame pops like a dock icon: a transform (layout-free, so
       // neighbors and the centering scroll math stay put) with a lift shadow.
       className={cn(
-        'relative h-10 w-[60px] shrink-0 overflow-hidden rounded-[3px] bg-inset transition-transform duration-150',
+        'relative h-10 shrink-0 overflow-hidden rounded-[3px] bg-inset transition-transform duration-150',
         focused && 'z-10 scale-[1.22] shadow-[0_5px_16px_rgba(0,0,0,.5)]',
       )}
+      style={{ width }}
       onClick={(e) => onFocus(photo.id, { extend: e.shiftKey, toggle: e.ctrlKey || e.metaKey })}
       title={photo.fileName}
     >

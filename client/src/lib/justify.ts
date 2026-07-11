@@ -1,0 +1,86 @@
+// Justified-row layout for the `natural` thumbFit: every frame keeps its own
+// aspect ratio, a row shares one height, and each full row is stretched to fill
+// the container width exactly (Flickr/Lightroom style). Pure and testable — the
+// grids feed it their measured width and turn the result into cells.
+import type { Photo } from '@/api/library';
+import { displayDims } from '@/lib/crop';
+
+export interface JustifiedRow {
+  start: number; // flat index of the row's first frame
+  count: number;
+  height: number; // px
+}
+
+export interface RowLayout {
+  rowStarts: number[]; // flat index where each row begins (ascending, first = 0)
+  rows: JustifiedRow[];
+  widths: number[]; // per-photo pixel width, parallel to `photos`
+  centersX: number[]; // per-photo normalized x-center (0..1 of container width)
+}
+
+// aspectOf is the on-screen width/height ratio of a frame. Falls back to 3:2
+// (today's crop cell) while width/height are still 0 — metadata not yet
+// scanned — so a cold folder renders near-uniform and settles as it streams in.
+export function aspectOf(photo: Photo): number {
+  const [w, h] = displayDims(photo);
+  return w > 0 && h > 0 ? w / h : 3 / 2;
+}
+
+export interface LayoutOpts {
+  width: number;
+  gap: number;
+  targetHeight: number;
+  // Flat indices where a time-gap group begins; each forces a new row so a
+  // group's frames never share a row with the next group's.
+  groupStarts?: readonly number[];
+}
+
+export function rowLayout(photos: Photo[], opts: LayoutOpts): RowLayout {
+  const { gap, targetHeight } = opts;
+  const W = Math.max(1, opts.width);
+  const n = photos.length;
+  const widths = new Array<number>(n);
+  const centersX = new Array<number>(n);
+  const rows: JustifiedRow[] = [];
+  const rowStarts: number[] = [];
+  const groupStart = new Set(opts.groupStarts ?? []);
+
+  let i = 0;
+  while (i < n) {
+    // Accumulate frames (each at targetHeight) until the row's natural width
+    // reaches the container, or the next group boundary intervenes. The frame
+    // that crosses the width is INCLUDED, so a full row's natural width is
+    // always >= W and stretching only ever shrinks it — a lone frame never
+    // blows up to fill the width.
+    let sumAr = 0;
+    let count = 0;
+    let j = i;
+    while (j < n) {
+      if (j > i && groupStart.has(j)) break; // group boundary starts a new row
+      sumAr += aspectOf(photos[j]);
+      count++;
+      j++;
+      if (targetHeight * sumAr + gap * (count - 1) >= W) break; // row is full
+    }
+
+    // A full row (natural width >= W) stretches to fill W exactly; a short row
+    // that ran into a group boundary or the end of the list stays at
+    // targetHeight, left-aligned.
+    const gaps = gap * (count - 1);
+    const filled = targetHeight * sumAr + gaps >= W;
+    const rowH = filled ? (W - gaps) / sumAr : targetHeight;
+
+    let x = 0;
+    for (let k = i; k < j; k++) {
+      const w = Math.max(1, Math.round(rowH * aspectOf(photos[k])));
+      widths[k] = w;
+      centersX[k] = (x + w / 2) / W;
+      x += w + gap;
+    }
+    rows.push({ start: i, count, height: Math.round(rowH) });
+    rowStarts.push(i);
+    i = j;
+  }
+
+  return { rowStarts, rows, widths, centersX };
+}

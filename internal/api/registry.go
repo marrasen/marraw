@@ -134,6 +134,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 
 	registry.RegisterEnumFor(library, FlagValues())
 	registry.RegisterEnumFor(settings, ThemeValues())
+	registry.RegisterEnumFor(settings, ThumbFitValues())
 	registry.RegisterEnumFor(edits, edit.WBModeValues())
 	registry.RegisterEnumFor(edits, edit.DemosaicValues())
 	registry.RegisterEnumFor(export, ExportFormatValues())

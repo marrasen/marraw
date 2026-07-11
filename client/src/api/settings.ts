@@ -16,6 +16,13 @@ export const Theme = {
 } as const;
 export type ThemeType = typeof Theme[keyof typeof Theme];
 
+export const ThumbFit = {
+    Crop: "crop",
+    Fit: "fit",
+    Natural: "natural",
+} as const;
+export type ThumbFitType = typeof ThumbFit[keyof typeof ThumbFit];
+
 export interface AutoPreset {
     id: string;
     name: string;
@@ -47,6 +54,7 @@ export interface UISettings {
     railGroups: Record<string, boolean>;
     railWidth: number;
     prerenderFullres: boolean;
+    thumbFit: ThumbFitType;
 }
 
 
@@ -229,6 +237,19 @@ setTheme.method = 'Settings.SetTheme' as const;
 
 export function subscribeSetTheme(client: ApiClient, theme: ThemeType, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetTheme', [theme], callback, onError, options);
+}
+
+
+export function setThumbFit(client: ApiClient, fit: ThumbFitType, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetThumbFit', [fit], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setThumbFit.method = 'Settings.SetThumbFit' as const;
+
+export function subscribeSetThumbFit(client: ApiClient, fit: ThumbFitType, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetThumbFit', [fit], callback, onError, options);
 }
 
 // React Hooks for Settings
@@ -440,4 +461,19 @@ export function useSetTheme(theme: ThemeType, options?: UseQueryOptions<void>): 
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [theme], _subscribe: { method: 'Settings.SetTheme', params: [theme] } });
+}
+
+/**
+ * Subscribes to `Settings.SetThumbFit` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetThumbFit(fit: ThumbFitType, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, fit: ThumbFitType) => setThumbFit(client, fit, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [fit], _subscribe: { method: 'Settings.SetThumbFit', params: [fit] } });
 }

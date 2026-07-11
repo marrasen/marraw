@@ -23,6 +23,20 @@ const (
 
 func ThemeValues() []Theme { return []Theme{ThemeDark, ThemeLight, ThemeSystem} }
 
+// ThumbFit is how photo thumbnails are framed in the grids. crop fills a
+// uniform 3:2 cell (center-crop); fit shows the whole frame in a uniform
+// square cell (letterbox); natural sizes each frame to its own aspect ratio
+// in justified rows.
+type ThumbFit string
+
+const (
+	ThumbFitCrop    ThumbFit = "crop"
+	ThumbFitFit     ThumbFit = "fit"
+	ThumbFitNatural ThumbFit = "natural"
+)
+
+func ThumbFitValues() []ThumbFit { return []ThumbFit{ThumbFitCrop, ThumbFitFit, ThumbFitNatural} }
+
 // AutoPreset is a creative auto preset: named auto sections plus style
 // offsets layered on top. The client sanitizes sections/offset keys on read,
 // so unknown values from older/newer clients survive as stored.
@@ -109,6 +123,8 @@ type UISettings struct {
 	// after the calibrate and pre-render passes. Off by default — full-res
 	// tiles are large, so it can push the preview cache past its cap.
 	PrerenderFullres bool `json:"prerenderFullres"`
+	// ThumbFit is how thumbnails are framed in the grids (default fit).
+	ThumbFit ThumbFit `json:"thumbFit"`
 }
 
 // Settings serves the persisted client preferences. Everything lives in the
@@ -137,6 +153,7 @@ const (
 	settingUIRailGroups    = "ui:railGroups"
 	settingUIRailWidth     = "ui:railWidth"
 	settingUIPrerenderFull = "ui:prerenderFullres"
+	settingUIThumbFit      = "ui:thumbFit"
 )
 
 // Library rail width bounds; the default matches the design handoff.
@@ -184,6 +201,16 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 	pinnedRaw, _ := db.GetSetting(ctx, settingUIDevelopPinned)
 	pinned := pinnedRaw != "false"
 
+	// Whole-frame fit unless an explicit, recognized value is stored.
+	thumbFit := ThumbFitFit
+	if raw, _ := db.GetSetting(ctx, settingUIThumbFit); raw != "" {
+		for _, f := range ThumbFitValues() {
+			if raw == string(f) {
+				thumbFit = f
+			}
+		}
+	}
+
 	return &UISettings{
 		Theme:            theme,
 		GapMinutes:       gap,
@@ -198,6 +225,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		RailGroups:       jsonSetting(ctx, db, settingUIRailGroups, map[string]bool{}),
 		RailWidth:        railWidth,
 		PrerenderFullres: prerenderFullRaw == "true",
+		ThumbFit:         thumbFit,
 	}, nil
 }
 
@@ -391,6 +419,20 @@ func (u *Settings) SetPrerenderFullres(ctx context.Context, enabled bool) error 
 		v = "true"
 	}
 	return u.save(ctx, settingUIPrerenderFull, v)
+}
+
+// SetThumbFit persists how thumbnails are framed in the grids.
+func (u *Settings) SetThumbFit(ctx context.Context, fit ThumbFit) error {
+	valid := false
+	for _, f := range ThumbFitValues() {
+		if fit == f {
+			valid = true
+		}
+	}
+	if !valid {
+		return aprot.ErrInvalidParams(fmt.Sprintf("unknown thumbFit %q", fit))
+	}
+	return u.save(ctx, settingUIThumbFit, string(fit))
 }
 
 // save writes one row and pushes the fresh snapshot to every window.

@@ -18,6 +18,7 @@ import {
   setRailGroupOpen,
   setRailWidth,
   setTheme,
+  setThumbFit,
   useGetUISettings,
   type AutoPreset as WireAutoPreset,
   type ExportOptions,
@@ -25,7 +26,7 @@ import {
 import type { ApiClient } from '@/api/client';
 import type { AutoPreset } from '@/lib/autoPresets';
 import type { DialKey } from '@/lib/dials';
-import { clampRailWidth, useUIStore, type Theme } from '@/stores/uiStore';
+import { clampRailWidth, useUIStore, type Theme, type ThumbFit } from '@/stores/uiStore';
 
 // Mirrors every uiSettings snapshot into the store. Render once, above
 // everything that reads settings.
@@ -77,6 +78,11 @@ export function updateExportOptions(client: ApiClient, opts: ExportOptions) {
 export function updatePrerenderFullres(client: ApiClient, enabled: boolean) {
   useUIStore.setState({ prerenderFullres: enabled });
   setPrerenderFullres(client, enabled).catch(swallow);
+}
+
+export function updateThumbFit(client: ApiClient, fit: ThumbFit) {
+  useUIStore.setState({ thumbFit: fit });
+  setThumbFit(client, fit).catch(swallow);
 }
 
 export function updateEditGroupOpen(client: ApiClient, id: string, open: boolean) {

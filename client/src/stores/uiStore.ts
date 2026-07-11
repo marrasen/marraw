@@ -6,6 +6,8 @@ import { sanitizeDialKeys, type DialKey } from '@/lib/dials';
 import { sanitizeAutoPresets, type AutoPreset } from '@/lib/autoPresets';
 
 export type Theme = 'dark' | 'light' | 'system';
+// How thumbnails are framed in the grids. Mirrors the Go ThumbFit enum.
+export type ThumbFit = 'crop' | 'fit' | 'natural';
 
 export type View = 'grid' | 'loupe';
 export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
@@ -34,6 +36,11 @@ export const RAIL_WIDTH_MAX = 440;
 export function clampRailWidth(px: number): number {
   if (!Number.isFinite(px)) return RAIL_WIDTH_DEFAULT;
   return Math.min(RAIL_WIDTH_MAX, Math.max(RAIL_WIDTH_MIN, Math.round(px)));
+}
+
+// A thumbFit from an older/newer server blob falls back to fit.
+function sanitizeThumbFit(v: string | undefined): ThumbFit {
+  return v === 'crop' || v === 'natural' ? v : 'fit';
 }
 
 // Mirrors the server's normalizeExportOptions: missing or invalid fields
@@ -101,6 +108,9 @@ interface UIState {
   // Pre-render 1:1 full-resolution tiles for opened folders (off by default;
   // large on disk).
   prerenderFullres: boolean;
+  // How thumbnails are framed in the grids (crop 3:2 / fit square / natural
+  // justified rows). Default fit — the whole frame is visible.
+  thumbFit: ThumbFit;
   // Edit-panel group id -> open (absent = open).
   editGroups: Record<string, boolean>;
   // Library-group display aliases / rail collapse state, keyed by the
@@ -125,8 +135,14 @@ interface UIState {
   // truth arrives through subscription patches into the query cache.
   overrides: Map<number, Partial<Photo>>;
 
-  // Grid geometry + currently visible list, for keyboard navigation.
-  gridCols: number;
+  // Row model of the mounted grid, for keyboard navigation. navRowStarts is
+  // the ascending flat index where each visual row begins ([] = a 1D surface
+  // like the loupe/filmstrip, so ↑/↓ falls back to a flat ±1 step). Whichever
+  // grid is mounted publishes this and clears it on unmount. navColCenters (if
+  // set) is the per-photo normalized x-center, for x-column ↑/↓ in the
+  // variable-width natural layout.
+  navRowStarts: number[];
+  navColCenters: number[] | null;
   visibleIds: number[];
   // Capture times parallel to visibleIds. Row navigation needs the same
   // time-gap group boundaries the grid draws headers at.
@@ -172,7 +188,7 @@ interface UIState {
   setFilters: (f: { minRating?: number; flagFilter?: FlagFilter }) => void;
   applyPatches: (patches: PhotoPatch[]) => void;
   applyLocal: (ids: number[], patch: Partial<Photo>) => void;
-  setGrid: (cols: number) => void;
+  setNavRowModel: (rowStarts: number[], colCenters?: number[] | null) => void;
   setVisibleIds: (ids: number[], takenAt: number[]) => void;
   setPhotoFlags: (flags: Map<number, FlagType>) => void;
   setClipboard: (p: Params | null) => void;
@@ -204,6 +220,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   exportOptions: DEFAULT_EXPORT_OPTIONS,
   developTab: 'develop',
   prerenderFullres: false,
+  thumbFit: 'fit',
   editGroups: {},
   groupAliases: {},
   railGroups: {},
@@ -215,7 +232,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   minRating: 0,
   flagFilter: 'all',
   overrides: new Map(),
-  gridCols: 4,
+  navRowStarts: [],
+  navColCenters: null,
   visibleIds: [],
   visibleTakenAt: [],
   photoFlags: new Map<number, FlagType>(),
@@ -252,6 +270,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       exportDir: s.exportDir,
       exportOptions: sanitizeExportOptions(s.exportOptions),
       prerenderFullres: s.prerenderFullres,
+      thumbFit: sanitizeThumbFit(s.thumbFit),
       editGroups: s.editGroups,
       groupAliases: s.groupAliases,
       railGroups: s.railGroups,
@@ -322,7 +341,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       return { overrides };
     }),
 
-  setGrid: (cols) => set({ gridCols: cols }),
+  setNavRowModel: (rowStarts, colCenters) =>
+    set({ navRowStarts: rowStarts, navColCenters: colCenters ?? null }),
 
   setVisibleIds: (ids, takenAt) =>
     set((s) => {
