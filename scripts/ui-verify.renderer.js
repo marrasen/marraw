@@ -410,6 +410,28 @@ try {
   const w1 = parseFloat(rectEl.style.width);
   R.cropResizeSlides = w1 > w0 + 5 ? true : `w ${w0}% -> ${w1}%`;
 
+  // --- coarse rotation: a CW turn remaps the rect so the same pixels stay
+  // selected ((x,y,w,h) -> (1-(y+h), x, h, w)); the opposite turn restores it.
+  const preRot = { ...es().draft };
+  buttons().find((b) => b.title === 'Rotate 90° clockwise')?.click();
+  await until(() => es().draft.rotate === 1, 5000, 'rotate applied');
+  await sleep(200);
+  R.rotateRemapsCrop =
+    Math.abs(es().draft.cropX - (1 - (preRot.cropY + preRot.cropH))) < 1e-9 &&
+    es().draft.cropW === preRot.cropH &&
+    es().draft.cropH === preRot.cropW
+      ? true
+      : JSON.stringify({ rot: es().draft.rotate, x: es().draft.cropX, w: es().draft.cropW });
+  buttons().find((b) => b.title === 'Rotate 90° counter-clockwise')?.click();
+  await until(() => es().draft.rotate === 0, 5000, 'rotate undone');
+  await sleep(200);
+  R.rotateRoundTrips =
+    Math.abs(es().draft.cropX - preRot.cropX) < 1e-9 &&
+    Math.abs(es().draft.cropY - preRot.cropY) < 1e-9 &&
+    es().draft.cropW === preRot.cropW
+      ? true
+      : JSON.stringify({ x: es().draft.cropX, y: es().draft.cropY });
+
   key('Escape'); // exit crop (commits; Reset below cleans everything)
   await until(() => !es().cropping, 5000, 'crop exited');
   ui().setLoupeZoom('fit');

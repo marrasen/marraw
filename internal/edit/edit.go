@@ -112,16 +112,28 @@ type Params struct {
 	CABlue   float64  `json:"caBlue" validate:"gte=-1,lte=1"`
 
 	// Crop + straighten, applied as a post-decode geometry stage in display
-	// (orientation-corrected) space. CropW/CropH == 0 means "no crop" (the
+	// (orientation-corrected) space. Rotate turns the frame in quarter turns
+	// clockwise (0..3) BEFORE the crop, so the crop rectangle and straighten
+	// angle live in the rotated frame. CropW/CropH == 0 means "no crop" (the
 	// full frame); when set they are the rectangle size as a fraction of the
 	// frame, with CropX/CropY its top-left, all in [0,1]. CropAngle levels
 	// the horizon in degrees: the frame is rotated about its center and the
 	// axis-aligned crop rectangle is taken from the rotated result.
+	Rotate    int     `json:"rotate" validate:"gte=0,lte=3"`
 	CropX     float64 `json:"cropX" validate:"gte=0,lte=1"`
 	CropY     float64 `json:"cropY" validate:"gte=0,lte=1"`
 	CropW     float64 `json:"cropW" validate:"gte=0,lte=1"`
 	CropH     float64 `json:"cropH" validate:"gte=0,lte=1"`
 	CropAngle float64 `json:"cropAngle" validate:"gte=-15,lte=15"`
+}
+
+// RotateTurns returns the coarse rotation as canonical quarter turns
+// clockwise in 0..3 (nil-safe; stored values outside the range wrap).
+func (e *Params) RotateTurns() int {
+	if e == nil {
+		return 0
+	}
+	return ((e.Rotate % 4) + 4) % 4
 }
 
 // HasCrop reports whether a crop rectangle is set (a straighten angle alone
@@ -132,13 +144,16 @@ func (e *Params) HasCrop() bool {
 }
 
 // OutputDims maps the full display-space dimensions (fullW×fullH, already
-// orientation-corrected) to the rendered dimensions after crop. The
-// straighten angle rotates within the frame and does not change the output
-// size, so only the crop rectangle matters. A nil or un-cropped edit returns
-// the input unchanged. Both sides of the wire compute this identically
-// (mirrored in client/src/lib/crop.ts) so the loupe box, tile grid and
-// dimension-healing all agree without a round trip.
+// orientation-corrected) to the rendered dimensions after the coarse
+// rotation and crop. An odd Rotate swaps the axes; the straighten angle
+// rotates within the frame and does not change the output size. A nil or
+// neutral-geometry edit returns the input unchanged. Both sides of the wire
+// compute this identically (mirrored in client/src/lib/crop.ts) so the loupe
+// box, tile grid and dimension-healing all agree without a round trip.
 func (e *Params) OutputDims(fullW, fullH int) (w, h int) {
+	if e.RotateTurns()%2 != 0 {
+		fullW, fullH = fullH, fullW
+	}
 	if !e.HasCrop() {
 		return fullW, fullH
 	}
@@ -180,6 +195,8 @@ func (e *Params) Normalize() {
 	if !e.HasCrop() || (e.CropX == 0 && e.CropY == 0 && e.CropW >= 1 && e.CropH >= 1) {
 		e.CropX, e.CropY, e.CropW, e.CropH = 0, 0, 0, 0
 	}
+	// Full turns are neutral; canonicalize so 4 hashes like 0.
+	e.Rotate = e.RotateTurns()
 }
 
 // IsNeutral reports whether the edit changes nothing; neutral edits are

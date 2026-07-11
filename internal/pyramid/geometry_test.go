@@ -90,3 +90,63 @@ func TestApplyGeometryStraightenPreservesContentSize(t *testing.T) {
 		t.Errorf("straighten-only changed size to %v", out.Bounds())
 	}
 }
+
+func TestApplyGeometryRotate(t *testing.T) {
+	img := gradient(100, 80)
+	// 90° CW: (x,y) → (h-1-y, x); the source's top-right lands at the
+	// output's bottom-right.
+	out := ApplyGeometry(img, &edit.Params{Rotate: 1})
+	if out.Bounds().Dx() != 80 || out.Bounds().Dy() != 100 {
+		t.Fatalf("rotate 90 size = %v, want 80x100", out.Bounds())
+	}
+	so := img.PixOffset(99, 0) // source top-right
+	do := out.PixOffset(79, 99)
+	if out.Pix[do] != img.Pix[so] || out.Pix[do+1] != img.Pix[so+1] {
+		t.Errorf("rotate 90 pixel mapping: got %v want %v", out.Pix[do:do+3], img.Pix[so:so+3])
+	}
+	// 180°: top-left lands at bottom-right, size unchanged.
+	out = ApplyGeometry(img, &edit.Params{Rotate: 2})
+	if out.Bounds().Dx() != 100 || out.Bounds().Dy() != 80 {
+		t.Fatalf("rotate 180 size = %v, want 100x80", out.Bounds())
+	}
+	so = img.PixOffset(0, 0)
+	do = out.PixOffset(99, 79)
+	if out.Pix[do] != img.Pix[so] || out.Pix[do+1] != img.Pix[so+1] {
+		t.Error("rotate 180 pixel mapping wrong")
+	}
+}
+
+func TestApplyGeometryRotateThenCrop(t *testing.T) {
+	// The crop rectangle lives in the rotated frame: cropping the top-left
+	// quarter of a 90° CW turn must read the source's bottom-left region.
+	img := gradient(100, 80)
+	e := &edit.Params{Rotate: 1, CropW: 0.5, CropH: 0.5}
+	out := ApplyGeometry(img, e)
+	if w, h := e.OutputDims(100, 80); out.Bounds().Dx() != w || out.Bounds().Dy() != h {
+		t.Fatalf("render %v != OutputDims %dx%d", out.Bounds(), w, h)
+	}
+	if out.Bounds().Dx() != 40 || out.Bounds().Dy() != 50 {
+		t.Fatalf("rotated crop size = %v, want 40x50", out.Bounds())
+	}
+	// Output (0,0) is the rotated frame's top-left = source bottom-left (0,79).
+	so := img.PixOffset(0, 79)
+	do := out.PixOffset(0, 0)
+	if out.Pix[do] != img.Pix[so] || out.Pix[do+1] != img.Pix[so+1] {
+		t.Errorf("rotated crop origin: got %v want %v", out.Pix[do:do+3], img.Pix[so:so+3])
+	}
+}
+
+func TestOutputDimsRotate(t *testing.T) {
+	e := &edit.Params{Rotate: 1}
+	if w, h := e.OutputDims(4000, 3000); w != 3000 || h != 4000 {
+		t.Errorf("rotate-only OutputDims = %dx%d, want 3000x4000", w, h)
+	}
+	e = &edit.Params{Rotate: 3, CropW: 0.5, CropH: 0.5}
+	if w, h := e.OutputDims(4000, 3000); w != 1500 || h != 2000 {
+		t.Errorf("rotate+crop OutputDims = %dx%d, want 1500x2000", w, h)
+	}
+	e = &edit.Params{Rotate: 2, CropW: 0.5, CropH: 0.5}
+	if w, h := e.OutputDims(4000, 3000); w != 2000 || h != 1500 {
+		t.Errorf("180+crop OutputDims = %dx%d, want 2000x1500", w, h)
+	}
+}

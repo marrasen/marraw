@@ -7,31 +7,40 @@ import (
 	"github.com/marrasen/marraw/internal/edit"
 )
 
-// ApplyGeometry crops and straightens a display-space render in place-ish:
-// it returns src unchanged when the edit sets no crop and no angle, a cheap
+// ApplyGeometry rotates, crops and straightens a display-space render in
+// place-ish: it returns src unchanged for a neutral geometry, a cheap
 // sub-image copy for an axis-aligned crop, and a bilinear rotate-sample when
 // a straighten angle is set. Fractions are resolution-independent, so this
 // runs identically on a half-size level render and a full-resolution decode.
 //
-// Model: the frame is rotated about its center by CropAngle, then the
-// axis-aligned crop rectangle (fractions of the frame) is taken from the
-// rotated result. Output size is edit.OutputDims — the angle never changes
-// it. Samples that fall outside the source read as opaque black, which is
-// what the crop overlay's angle guides keep the user's rectangle clear of.
+// Model: the frame first turns by Rotate quarter turns clockwise, then is
+// rotated about its center by CropAngle, then the axis-aligned crop
+// rectangle (fractions of the quarter-rotated frame) is taken from the
+// result. Output size is edit.OutputDims — the angle never changes it.
+// Samples that fall outside the source read as opaque black, which is what
+// the crop overlay's angle guides keep the user's rectangle clear of.
 func ApplyGeometry(src *image.RGBA, e *edit.Params) *image.RGBA {
-	if e == nil || (!e.HasCrop() && e.CropAngle == 0) {
+	if e == nil {
+		return src
+	}
+	origW, origH := src.Bounds().Dx(), src.Bounds().Dy()
+	if code := rotateFlipCode(e.RotateTurns()); code != 0 {
+		src = rotateFlip(src, code)
+	}
+	if !e.HasCrop() && e.CropAngle == 0 {
 		return src
 	}
 	b := src.Bounds()
 	fullW, fullH := b.Dx(), b.Dy()
 
 	// Crop rectangle in source pixels (full frame when only straightening).
+	// OutputDims takes the pre-rotation dims — it applies the axis swap itself.
 	cx0, cy0 := 0.0, 0.0
 	cropW, cropH := fullW, fullH
 	if e.HasCrop() {
 		cx0 = e.CropX * float64(fullW)
 		cy0 = e.CropY * float64(fullH)
-		cropW, cropH = e.OutputDims(fullW, fullH)
+		cropW, cropH = e.OutputDims(origW, origH)
 	}
 
 	// Fast path: a pure axis-aligned crop is a clamped sub-image copy.
@@ -116,4 +125,18 @@ func sampleBilinear(src *image.RGBA, x, y float64) (r, g, b, a uint8) {
 
 func clampInt(v, lo, hi int) int {
 	return min(max(v, lo), hi)
+}
+
+// rotateFlipCode maps canonical quarter turns clockwise onto the EXIF flip
+// codes rotateFlip implements: 1 → 6 (90° CW), 2 → 3 (180°), 3 → 5 (90° CCW).
+func rotateFlipCode(turns int) int {
+	switch turns {
+	case 1:
+		return 6
+	case 2:
+		return 3
+	case 3:
+		return 5
+	}
+	return 0
 }

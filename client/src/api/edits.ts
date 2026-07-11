@@ -74,6 +74,7 @@ export interface Params {
     demosaic: DemosaicType;
     caRed: number;
     caBlue: number;
+    rotate: number;
     cropX: number;
     cropY: number;
     cropW: number;

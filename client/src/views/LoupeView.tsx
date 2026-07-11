@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Crop as CropIcon, Pipette } from 'lucide-react';
+import { Crop as CropIcon, Pipette, RotateCcwSquare, RotateCwSquare } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,7 @@ import {
 } from '@/lib/editSession';
 import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
-import { displayDims as fullDisplayDims, renderedDims, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
+import { displayDims as fullDisplayDims, renderedDims, rotatedDims, rotateCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
 import type { Params } from '@/api/edits';
 
@@ -93,12 +93,45 @@ function CropBar({
         </span>
       </div>
       <div className="h-[26px] w-px bg-white/15" />
+      {/* Coarse rotation: remaps the rect so the same pixels stay selected;
+          the flat frame re-renders through the ordinary preview path. */}
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        className="text-muted-foreground"
+        title="Rotate 90° counter-clockwise"
+        aria-label="Rotate 90° counter-clockwise"
+        onClick={() => {
+          const d = useEditSession.getState().draft;
+          if (!d) return;
+          esUpdate(client, rotateCropPatch(d, 'ccw'));
+          esCommit(client);
+        }}
+      >
+        <RotateCcwSquare />
+      </Button>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        className="text-muted-foreground"
+        title="Rotate 90° clockwise"
+        aria-label="Rotate 90° clockwise"
+        onClick={() => {
+          const d = useEditSession.getState().draft;
+          if (!d) return;
+          esUpdate(client, rotateCropPatch(d, 'cw'));
+          esCommit(client);
+        }}
+      >
+        <RotateCwSquare />
+      </Button>
+      <div className="h-[26px] w-px bg-white/15" />
       <Button
         size="sm"
         variant="ghost"
         className="text-muted-foreground"
-        onClick={() => esUpdate(client, { cropX: 0, cropY: 0, cropW: 1, cropH: 1, cropAngle: 0 })}
-        title="Reset crop to the full frame"
+        onClick={() => esUpdate(client, { rotate: 0, cropX: 0, cropY: 0, cropW: 1, cropH: 1, cropAngle: 0 })}
+        title="Reset to the full, unrotated frame"
       >
         Reset
       </Button>
@@ -317,9 +350,13 @@ export function CinemaImage({
   }, []);
 
   const [fdw, fdh] = fullDisplayDims(photo);
-  // Once the flat frame is up we display the full frame; otherwise the
-  // cropped render.
-  const [dw, dh] = cropUI ? [fdw, fdh] : renderedDims(fdw, fdh, activeCrop);
+  // The flat frame the crop overlay works against keeps the coarse rotation
+  // (only the rect and straighten angle are stripped), so its box uses the
+  // rotated dims.
+  const [rfw, rfh] = rotatedDims(fdw, fdh, activeCrop);
+  // Once the flat frame is up we display the full (rotated) frame; otherwise
+  // the cropped render.
+  const [dw, dh] = cropUI ? [rfw, rfh] : renderedDims(fdw, fdh, activeCrop);
   const haveDims = dw > 0 && dh > 0 && container[0] > 0;
   const fitScale = haveDims ? Math.min(container[0] / dw, container[1] / dh) : 1;
   const scale = zoom === 'fit' ? fitScale : zoom;
@@ -646,7 +683,7 @@ export function CinemaImage({
   // later handle drags.
   const applyAspect = (key: string) => {
     setAspectKey(key);
-    const rf = aspectRatioFrac(key, fdw, fdh);
+    const rf = aspectRatioFrac(key, rfw, rfh);
     if (!rf) return;
     let w = 1;
     let h = 1 / rf;
@@ -658,7 +695,7 @@ export function CinemaImage({
     const fitted = fitCropToRotation(
       { x: (1 - w) / 2, y: (1 - h) / 2, w, h },
       draft?.cropAngle ?? 0,
-      fdw / fdh,
+      rfw / rfh,
     );
     esUpdate(client, { cropX: fitted.x, cropY: fitted.y, cropW: fitted.w, cropH: fitted.h });
     esCommit(client);
@@ -835,9 +872,9 @@ export function CinemaImage({
             {cropUI && draft && (
               <CropOverlay
                 draft={draft}
-                ratioFrac={aspectRatioFrac(aspectKey, fdw, fdh)}
-                frameAspect={fdw / fdh}
-                pxDims={[fdw, fdh]}
+                ratioFrac={aspectRatioFrac(aspectKey, rfw, rfh)}
+                frameAspect={rfw / rfh}
+                pxDims={[rfw, rfh]}
                 onChange={(patch) => esUpdate(client, patch)}
                 onCommit={() => esCommit(client)}
               />

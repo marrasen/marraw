@@ -35,6 +35,7 @@ export const ParamsSchema = z.object({
     demosaic: z.union([z.literal(""), z.enum(["vng", "ppg", "ahd", "dht"])]),
     caRed: z.number().min(-1).max(1),
     caBlue: z.number().min(-1).max(1),
+    rotate: z.number().int().min(0).max(3),
     cropX: z.number().min(0).max(1),
     cropY: z.number().min(0).max(1),
     cropW: z.number().min(0).max(1),

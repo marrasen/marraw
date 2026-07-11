@@ -18,12 +18,47 @@ export function hasCrop(p: Params | null | undefined): boolean {
   return !!p && p.cropW > 0 && p.cropH > 0;
 }
 
+// rotateTurns is the coarse rotation as canonical quarter turns clockwise in
+// 0..3. Matches edit.Params.RotateTurns on the Go side.
+export function rotateTurns(p: Params | null | undefined): number {
+  return p ? ((p.rotate % 4) + 4) % 4 : 0;
+}
+
+// rotatedDims applies the coarse 90° rotation to the full display dims. The
+// crop rectangle and straighten angle live in this rotated space, so it is
+// the flat-frame size the crop overlay works against.
+export function rotatedDims(fullW: number, fullH: number, p: Params | null | undefined): [number, number] {
+  return rotateTurns(p) % 2 !== 0 ? [fullH, fullW] : [fullW, fullH];
+}
+
 // renderedDims maps the full display dimensions to the rendered size after the
-// crop. The straighten angle does not change the output size. Matches
-// edit.Params.OutputDims on the Go side.
+// coarse rotation and crop. The straighten angle does not change the output
+// size. Matches edit.Params.OutputDims on the Go side.
 export function renderedDims(fullW: number, fullH: number, p: Params | null | undefined): [number, number] {
+  [fullW, fullH] = rotatedDims(fullW, fullH, p);
   if (!hasCrop(p)) return [fullW, fullH];
   return [Math.max(1, Math.round(p!.cropW * fullW)), Math.max(1, Math.round(p!.cropH * fullH))];
+}
+
+// rotateCropPatch returns the params patch for one more quarter turn in the
+// given direction, remapping an existing crop rectangle so the same pixels
+// stay selected in the new frame (a 90° CW image turn maps a point (x,y) to
+// (1-y, x), so the rect follows its corners). The straighten angle turns with
+// the frame and needs no change.
+export function rotateCropPatch(p: Params, dir: 'cw' | 'ccw'): Partial<Params> {
+  const patch: Partial<Params> = { rotate: (rotateTurns(p) + (dir === 'cw' ? 1 : 3)) % 4 };
+  if (hasCrop(p)) {
+    if (dir === 'cw') {
+      patch.cropX = 1 - (p.cropY + p.cropH);
+      patch.cropY = p.cropX;
+    } else {
+      patch.cropX = p.cropY;
+      patch.cropY = 1 - (p.cropX + p.cropW);
+    }
+    patch.cropW = p.cropH;
+    patch.cropH = p.cropW;
+  }
+  return patch;
 }
 
 // A neutral (full-frame, unrotated) crop rectangle.

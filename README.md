@@ -171,8 +171,8 @@ them is load-bearing for your work, marraw is not ready for you yet.
   automatic defringe — only a manual CA slider and a creative vignette.
 - ❌ **No modern denoise.** You get LibRaw's wavelet/FBDD/median, not
   ML-assisted luminance and color NR.
-- ❌ **No 90°/180° rotation or flip.** Straighten works; coarse rotation does
-  not exist yet.
+- ❌ **No flip / mirror.** 90° rotation and straighten both work; mirroring
+  does not exist yet.
 - ❌ **No HDR editing or output**, and no wide-gamut working space. The look
   math is sRGB-ish and highlights clip rather than grade.
 

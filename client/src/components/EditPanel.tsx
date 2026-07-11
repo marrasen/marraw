@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw, Image as ImageIcon } from 'lucide-react';
+import { Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw, RotateCcwSquare, RotateCwSquare, Image as ImageIcon } from 'lucide-react';
+import { rotateCropPatch } from '@/lib/crop';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
@@ -280,7 +281,7 @@ function DevelopPanel({
   };
 
   const changed = {
-    crop: groupChanged(draft, ['cropX', 'cropY', 'cropW', 'cropH', 'cropAngle']),
+    crop: groupChanged(draft, ['rotate', 'cropX', 'cropY', 'cropW', 'cropH', 'cropAngle']),
     tone: groupChanged(draft, [
       'expEV', 'expPreserve', 'bright', 'gamma', 'shadow',
       'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
@@ -337,7 +338,7 @@ function DevelopPanel({
             {changed.crop && !cropping && (
               <span
                 className="rounded-[4px] bg-primary/18 px-1 py-px text-[9px] font-semibold tracking-[.05em] text-accent-text uppercase"
-                title="A crop or straighten is applied"
+                title="A crop, rotation or straighten is applied"
               >
                 on
               </span>
@@ -345,6 +346,30 @@ function DevelopPanel({
             <kbd className="text-[10px] opacity-60">R</kbd>
           </span>
         </Button>
+        {/* Coarse rotation: one history entry per turn; an existing crop
+            rectangle is remapped so the same pixels stay selected. */}
+        <div className="flex gap-[7px]">
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-1"
+            onClick={() => clear(rotateCropPatch(draft, 'ccw'))}
+            title="Rotate 90° counter-clockwise"
+          >
+            <RotateCcwSquare data-icon="inline-start" />
+            Rotate left
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-1"
+            onClick={() => clear(rotateCropPatch(draft, 'cw'))}
+            title="Rotate 90° clockwise"
+          >
+            <RotateCwSquare data-icon="inline-start" />
+            Rotate right
+          </Button>
+        </div>
         <EditSlider
           label="Straighten"
           value={draft.cropAngle}
