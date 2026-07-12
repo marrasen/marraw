@@ -13,6 +13,7 @@ import {
   setExportOptions,
   setGapMinutes,
   setGroupAlias,
+  setLastSeenVersion,
   setLibrarySort,
   setPrerenderFullres,
   setQuickDials,
@@ -151,6 +152,11 @@ export function updateRailGroupOpen(client: ApiClient, parentPath: string, open:
   else next[key] = false;
   useUIStore.setState({ railGroups: next });
   setRailGroupOpen(client, key, open).catch(swallow);
+}
+
+export function updateLastSeenVersion(client: ApiClient, version: string) {
+  useUIStore.setState({ lastSeenVersion: version });
+  setLastSeenVersion(client, version).catch(swallow);
 }
 
 export function updateRailWidth(client: ApiClient, px: number) {

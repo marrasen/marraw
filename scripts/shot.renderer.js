@@ -207,6 +207,38 @@ if (shot === 'cull') {
     p2FramesKB: sizes,
     settled: mw.esPreviewSettled(),
   };
+} else if (shot === 'welcome') {
+  // The landing page (library has shoots, none open). The harness's opened
+  // folder guarantees a root exists; stepping out of it lands on Welcome.
+  // Seed lastSeenVersion HERE, after the auto-open folder settled — a
+  // transient Welcome mount during startup (openFolder still in flight)
+  // consumes any earlier seed and marks the current version seen. Pass an
+  // old version via ?seedLastSeen= to show the "What's new" card, or skip
+  // the param to shoot whatever state the daemon holds.
+  const seed = new URLSearchParams(location.search).get('seedLastSeen');
+  let afterSeed = null;
+  if (seed != null) {
+    mw.setLastSeenVersion(seed);
+    afterSeed = ui().lastSeenVersion;
+    await sleep(300);
+  }
+  const beforeMount = ui().lastSeenVersion;
+  mw.useUIStore.setState({ folderId: null, folderPath: null });
+  await sleep(600);
+  const card = [...document.querySelectorAll('h3')].find((h) =>
+    /What's new/.test(h.textContent ?? ''),
+  );
+  window.__welcomeProbe = {
+    cardShown: !!card,
+    bullets: card ? card.parentElement.querySelectorAll('li').length : 0,
+    lastSeen: ui().lastSeenVersion,
+    afterSeed,
+    beforeMount,
+    welcomeMounted: [...document.querySelectorAll('h2')].some((h) =>
+      /Welcome to marraw/.test(h.textContent ?? ''),
+    ),
+    entries: mw.changelog ? mw.changelog.parseChangelog().length : 'no bridge',
+  };
 } else if (shot === 'watermark' || shot === 'watermark-portrait') {
   // Drive the editor like a user — create, rename, type — so every step
   // exercises the live-write path. React inputs need the native setter.
@@ -255,5 +287,10 @@ if (shot === 'cull') {
 await sleep(3600);
 window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
 await sleep(400);
-const probe = window.__wmProbe ?? window.__cropProbe ?? window.__renderProbe ?? window.__settleProbe;
+const probe =
+  window.__wmProbe ??
+  window.__cropProbe ??
+  window.__renderProbe ??
+  window.__settleProbe ??
+  window.__welcomeProbe;
 return probe ? { shot, ...probe } : shot;

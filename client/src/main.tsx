@@ -21,7 +21,8 @@ if (import.meta.env.DEV) {
     import('@/lib/editSession'),
     import('@/lib/uiSettings'),
     import('@/api/export'),
-  ]).then(([ui, es, us, ex]) => {
+    import('@/lib/changelog'),
+  ]).then(([ui, es, us, ex, cl]) => {
     (window as unknown as Record<string, unknown>).__marraw = {
       useUIStore: ui.useUIStore,
       useEditSession: es.useEditSession,
@@ -36,6 +37,9 @@ if (import.meta.env.DEV) {
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),
       setGapMinutes: (min: number | null) => us.updateGapMinutes(client, min),
+      setLastSeenVersion: (v: string) => us.updateLastSeenVersion(client, v),
+      // The changelog parser, probed by the `welcome` shot surface.
+      changelog: cl,
       startExport: (req: unknown) => ex.startExport(client, req as never),
     };
   });

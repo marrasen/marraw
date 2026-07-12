@@ -227,6 +227,9 @@ type UISettings struct {
 	ShootSort ShootSort `json:"shootSort"`
 	// ShootGroup is the rail's time bucketing of folders (default none).
 	ShootGroup ShootGroup `json:"shootGroup"`
+	// LastSeenVersion is the app version whose changelog the Welcome page
+	// last showed ("" = never — a fresh install baselines silently).
+	LastSeenVersion string `json:"lastSeenVersion"`
 }
 
 // Settings serves the persisted client preferences. Everything lives in the
@@ -261,6 +264,7 @@ const (
 	settingUILibrarySort   = "ui:librarySort"
 	settingUIShootSort     = "ui:shootSort"
 	settingUIShootGroup    = "ui:shootGroup"
+	settingUILastSeen      = "ui:lastSeenVersion"
 )
 
 // Library rail width bounds; the default matches the design handoff.
@@ -293,6 +297,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 	}
 
 	exportDir, _ := db.GetSetting(ctx, settingUIExportDir)
+	lastSeen, _ := db.GetSetting(ctx, settingUILastSeen)
 
 	railWidth := railWidthDefault
 	if raw, _ := db.GetSetting(ctx, settingUIRailWidth); raw != "" {
@@ -360,6 +365,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		LibrarySort:      librarySort,
 		ShootSort:        shootSort,
 		ShootGroup:       shootGroup,
+		LastSeenVersion:  lastSeen,
 	}, nil
 }
 
@@ -507,6 +513,15 @@ func defaultAutoPresets() []AutoPreset {
 // SetExportDir persists the last export destination.
 func (u *Settings) SetExportDir(ctx context.Context, dir string) error {
 	return u.save(ctx, settingUIExportDir, dir)
+}
+
+// SetLastSeenVersion persists the app version whose changelog the Welcome
+// page has shown. "" is allowed — it resets to the fresh-install state.
+func (u *Settings) SetLastSeenVersion(ctx context.Context, version string) error {
+	if len(version) > 32 {
+		return aprot.ErrInvalidParams("version too long")
+	}
+	return u.save(ctx, settingUILastSeen, version)
 }
 
 // SetExportOptions persists the export dialog's last-used state.

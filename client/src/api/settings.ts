@@ -118,6 +118,7 @@ export interface UISettings {
     librarySort: LibrarySortType;
     shootSort: ShootSortType;
     shootGroup: ShootGroupType;
+    lastSeenVersion: string;
 }
 
 export interface UserPreset {
@@ -281,6 +282,19 @@ setGroupAlias.method = 'Settings.SetGroupAlias' as const;
 
 export function subscribeSetGroupAlias(client: ApiClient, parentPath: string, alias: string, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetGroupAlias', [parentPath, alias], callback, onError, options);
+}
+
+
+export function setLastSeenVersion(client: ApiClient, version: string, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetLastSeenVersion', [version], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setLastSeenVersion.method = 'Settings.SetLastSeenVersion' as const;
+
+export function subscribeSetLastSeenVersion(client: ApiClient, version: string, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetLastSeenVersion', [version], callback, onError, options);
 }
 
 
@@ -575,6 +589,21 @@ export function useSetGroupAlias(parentPath: string, alias: string, options?: Us
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [parentPath, alias], _subscribe: { method: 'Settings.SetGroupAlias', params: [parentPath, alias] } });
+}
+
+/**
+ * Subscribes to `Settings.SetLastSeenVersion` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetLastSeenVersion(version: string, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, version: string) => setLastSeenVersion(client, version, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [version], _subscribe: { method: 'Settings.SetLastSeenVersion', params: [version] } });
 }
 
 /**

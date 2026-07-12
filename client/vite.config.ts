@@ -14,6 +14,10 @@ export default defineConfig({
   base: './',
   define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [react(), tailwindcss()],
+  // CHANGELOG.md lives at the repo root (imported ?raw by lib/changelog.ts);
+  // dev mode serves it via /@fs/, which needs the parent dir allowed. Builds
+  // inline the text regardless.
+  server: { fs: { allow: [path.resolve(__dirname, "..")] } },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

@@ -173,6 +173,8 @@ interface UIState {
   railGroups: Record<string, boolean>;
   // Library rail width in px (drag its right edge; RAIL_WIDTH_* bounds).
   railWidth: number;
+  // App version whose changelog the Welcome page last showed ('' = never).
+  lastSeenVersion: string;
   // True once the first uiSettings snapshot has arrived.
   settingsLoaded: boolean;
   // ---- end server-persisted mirror
@@ -293,6 +295,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   groupAliases: {},
   railGroups: {},
   railWidth: RAIL_WIDTH_DEFAULT,
+  lastSeenVersion: '',
   settingsLoaded: false,
   focusId: null,
   anchorId: null,
@@ -351,6 +354,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       groupAliases: s.groupAliases,
       railGroups: s.railGroups,
       railWidth: clampRailWidth(s.railWidth),
+      lastSeenVersion: s.lastSeenVersion ?? '',
       settingsLoaded: true,
     }),
 

@@ -231,6 +231,10 @@ async function createWindow(opts = {}) {
     if (process.env.MARRAW_OPEN_FOLDER && !query.openFolder) query.openFolder = process.env.MARRAW_OPEN_FOLDER;
     if (process.env.MARRAW_LOUPE) query.loupe = '1';
     if (process.env.MARRAW_SHOT) query.shot = process.env.MARRAW_SHOT; // scripts/shot.mjs
+    // Seed for the `welcome` shot: an old version makes the "What's new"
+    // card render ("" = fresh-install state).
+    if (process.env.MARRAW_SEED_LAST_SEEN != null)
+      query.seedLastSeen = process.env.MARRAW_SEED_LAST_SEEN;
   }
 
   if (DEV && !PREVIEW) {
