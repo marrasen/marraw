@@ -105,7 +105,7 @@ control, any preset.
 | **Library** | Virtualized grid, adjustable thumbnail size, time-gap grouping, multi-select, rating/flag badges. |
 | **Cull** | Full-bleed cinema loupe, scrubber deck, pick/reject bar, contact sheet (`G`). |
 | **Develop** | Darkroom canvas, pinnable panel, floating quick-dials you choose, crop and white-balance overlays. |
-| **Export** | JPEG, or lossless TIFF / PNG, batched across every core. |
+| **Export** | JPEG, lossless TIFF / PNG, or RAW + XMP handoff — batched across every core. |
 
 ![Develop mode: the photo on a darkroom canvas, a floating quick-dial strip beneath it, and a right-hand panel with an RGB histogram over crop, tone, presence and white-balance sliders](screenshots/marraw_develop.jpg)
 
@@ -136,15 +136,23 @@ Every slider has a letter shortcut: press it, then `+`/`-` to adjust
 JPEG (quality 1–100), or lossless TIFF or PNG for when you want no
 compression artifacts at all. All three render exactly what the loupe showed you —
 crop, look, detail — with optional long-edge resize, sRGB / Adobe RGB /
-ProPhoto with an embedded ICC profile, and output sharpening tuned for screen,
-matte or glossy paper. Output files take a name template — `{name}`, `{seq}`,
-`{date}`, `{time}` — and carry the camera's EXIF (body, exposure triangle,
-focal length, capture time) in all three formats. Runs in the background
-across all cores at full AHD demosaic quality.
+ProPhoto with an embedded ICC profile, output sharpening tuned for screen,
+matte or glossy paper, and an optional watermark — any stack of text and image
+elements, sized relative to the export so it reads the same at full resolution
+and at web sizes. Output files take a name template — `{name}`, `{seq}`,
+`{date}`, `{time}` — and you choose what metadata they carry: everything the
+RAW knew (body, exposure triangle, lens, capture time, GPS), copyright only,
+or nothing, with persisted artist/copyright credit fields and a one-switch
+location strip. Runs in the background across all cores at full AHD demosaic
+quality.
 
-If you want to finish a photo in another editor, open the RAW there rather than
-exporting an intermediate — nothing marraw can write carries more information
-than the file your camera already made.
+If you want to finish a photo in another editor, don't export an intermediate
+— nothing marraw can render carries more information than the file your camera
+already made. Instead, **RAW + XMP** export copies the original RAWs untouched
+and writes Adobe-compatible `.xmp` sidecars next to them: rating, flag, and
+your develop settings translated to Camera Raw's own tags (intent-level —
+close, not pixel-identical), ready for Lightroom to pick up. It can also write
+just the sidecars in place, next to the originals.
 
 ### Supported files
 
@@ -178,17 +186,18 @@ them is load-bearing for your work, marraw is not ready for you yet.
 
 **Library**
 
-- ❌ **No XMP interop.** Sidecars are marraw's own `.marraw.json`. Edits will
-  **not** round-trip with Lightroom, darktable or Capture One.
+- ❌ **No XMP round-trip.** Working sidecars are marraw's own `.marraw.json`,
+  and marraw never *reads* XMP. Export can write Adobe-compatible `.xmp`
+  sidecars (see RAW + XMP above), but that is a one-way handoff, not sync.
 - ❌ **No photo search, keywords, or collections.** You filter by rating and
   flag within a folder. That's it.
 - ❌ **No DCP camera profiles.**
 
 **Export & output**
 
-- ❌ **No WebP or DNG output**, no watermarking.
-- ❌ **No keyword/IPTC metadata in exports** — the basic camera EXIF (body,
-  exposure, capture time) is written, but there are no keywords to carry.
+- ❌ **No keyword or IPTC metadata in exports.** EXIF (camera, exposure, lens,
+  GPS) and your copyright credit are written, but the library has no keywords
+  to carry.
 
 **Platform & workflow**
 
