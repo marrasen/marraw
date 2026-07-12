@@ -86,7 +86,7 @@ func TestExportOutputSharpenE2E(t *testing.T) {
 	for i, c := range cases {
 		r := req
 		r.SharpenTarget, r.SharpenAmount = c.target, c.amount
-		if err := exportOne(photo, filepath.Join(dir, c.name), r); err != nil {
+		if err := exportOne(t.Context(), photo, filepath.Join(dir, c.name), r); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		img := decode(c.name)

@@ -222,7 +222,11 @@ func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Ph
 		release()
 		return nil, ctx.Err() // superseded while waiting for the handle
 	}
-	img, err := proc.Process(ep.LibrawParams(true))
+	// Deliberately NOT ctx: a cancelled Process leaves the handle recycled
+	// (file closed, unpacked data freed), which would silently break the
+	// HandleCache entry every later acquire reuses. Half-size decodes are
+	// short; the check above bounds the superseded case.
+	img, err := proc.Process(context.Background(), ep.LibrawParams(true))
 	release()
 	if err != nil {
 		return nil, err
@@ -318,7 +322,9 @@ func (e *Edits) linearMaster(ctx context.Context, photoID int64, photo store.Pho
 	}
 	refMul := proc.CamMul()
 	camXYZ := proc.CamXYZ()
-	img, err := proc.Process(ep.LinearRefLibrawParams())
+	// Background, not ctx — same HandleCache-preservation reason as
+	// previewDecode.
+	img, err := proc.Process(context.Background(), ep.LinearRefLibrawParams())
 	release()
 	if err != nil {
 		return nil, err

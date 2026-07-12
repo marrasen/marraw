@@ -83,7 +83,7 @@ func TestProcessHalfAndReprocess(t *testing.T) {
 	params.UserQual = DemosaicLinear
 
 	start = time.Now()
-	img, err := p.Process(params)
+	img, err := p.Process(t.Context(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestProcessHalfAndReprocess(t *testing.T) {
 	// brighter image.
 	params.ExpShift = 2.0
 	start = time.Now()
-	img2, err := p.Process(params)
+	img2, err := p.Process(t.Context(), params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestRecycleResetsParams(t *testing.T) {
 	// Decode at half size, as pyramid.MeasureAutoBrightEV does.
 	params := DefaultParams()
 	params.HalfSize = true
-	if _, err := p.Process(params); err != nil {
+	if _, err := p.Process(t.Context(), params); err != nil {
 		t.Fatal(err)
 	}
 	p.Recycle()

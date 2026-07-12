@@ -114,6 +114,28 @@ if (shot === 'cull') {
   const ids = ui().visibleIds;
   ui().focus(ids[2]);
   for (const id of ids.slice(3, 14)) ui().focus(id, { toggle: true });
+} else if (shot === 'render-progress') {
+  // 1:1 on a photo whose tile grid is cold → the decoding indicator must
+  // upgrade from indeterminate to a live percent (RenderProgressEvent), and
+  // the render must eventually land. Focus the LAST photo: verify scripts
+  // tend to warm the first one.
+  ui().setMode('develop');
+  ui().focus(ui().visibleIds[ui().visibleIds.length - 1]);
+  await sleep(800);
+  ui().setLoupeZoom(1);
+  const badgeText = () =>
+    [...document.querySelectorAll('span')].map((s) => s.textContent).find((t) => /1:1 tile/.test(t ?? ''));
+  let sawPercent = null;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 20000) {
+    const t = badgeText();
+    const m = t && t.match(/1:1 tile · (\d+)%/);
+    if (m) sawPercent = Number(m[1]);
+    // Rendered: the tile badge left and we saw progress — done probing.
+    if (sawPercent != null && !t) break;
+    await sleep(80);
+  }
+  window.__renderProbe = { sawPercent, badgeGone: !badgeText() };
 } else if (shot === 'watermark' || shot === 'watermark-portrait') {
   // Drive the editor like a user — create, rename, type — so every step
   // exercises the live-write path. React inputs need the native setter.
@@ -162,5 +184,5 @@ if (shot === 'cull') {
 await sleep(3600);
 window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
 await sleep(400);
-const probe = window.__wmProbe ?? window.__cropProbe;
+const probe = window.__wmProbe ?? window.__cropProbe ?? window.__renderProbe;
 return probe ? { shot, ...probe } : shot;

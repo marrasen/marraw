@@ -18,7 +18,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/sync/errgroup"
@@ -74,6 +76,11 @@ type Cache struct {
 	// OnPhotoChanged, when set, is called after the cache corrects a photo
 	// row (dimension healing) so folder subscribers can refresh.
 	OnPhotoChanged func(folderID int64)
+	// Progress, when set, receives coarse 0..1 progress for full-resolution
+	// (1:1 tile) renders so the loupe's decoding indicator can show a percent.
+	// Fixed-level renders stay silent — they are fast, and mostly background
+	// prerender work nobody is staring at.
+	Progress func(photoID int64, editHash string, frac float64)
 }
 
 func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
@@ -250,9 +257,11 @@ func editsForHash(photo store.Photo, editHash string) (*edit.Params, error) {
 
 // generate renders the requested level and, opportunistically, the smaller
 // levels that fall out of the same decode for free. ctx is checked before
-// the expensive stages so an abandoned render stops early; once the decode
-// has been paid for, the write-out always completes — the cache files stay
-// useful for the next visit.
+// the expensive stages, and cancellation also aborts the LibRaw decode
+// itself mid-flight (Process returns ctx.Err() at LibRaw's next progress
+// checkpoint); once the decode has been paid for, the write-out always
+// completes — the cache files stay useful for the next visit, and tile (0,0)
+// is never written without its siblings (it is the grid-complete sentinel).
 func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo store.Photo, level, editHash string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -286,7 +295,26 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	if level == "full" && (edits == nil || edits.Demosaic == "") {
 		params.UserQual = libraw.DemosaicPPG
 	}
-	img, err := proc.Process(params)
+	// Fraction budget across the whole render: decode 0–0.70, look/detail
+	// 0.70–0.90, tile write-out 0.90–1. Throttled here (not per source) so
+	// the parallel tile writers share one clock; the final 1 always goes out.
+	report := func(float64) {}
+	if level == "full" && c.Progress != nil {
+		var mu sync.Mutex
+		var lastSent time.Time
+		report = func(frac float64) {
+			mu.Lock()
+			defer mu.Unlock()
+			if frac < 1 && time.Since(lastSent) < 100*time.Millisecond {
+				return
+			}
+			lastSent = time.Now()
+			c.Progress(photo.ID, editHash, frac)
+		}
+		proc.OnProgress(func(frac float64) { report(0.7 * frac) })
+		defer proc.OnProgress(nil)
+	}
+	img, err := proc.Process(ctx, params)
 	if err != nil {
 		return err
 	}
@@ -302,12 +330,22 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
 	rgba = ApplyGeometry(rgba, edits)
 	if level == "full" {
+		report(0.72)
 		ApplyLook(rgba, gamma, edits)
+		report(0.80)
 		ApplyDetail(rgba, edits)
-		if err := c.writeTiles(rgba, photo.CacheKey, editHash); err != nil {
+		report(0.90)
+		if err := c.writeTiles(rgba, photo.CacheKey, editHash, func(done, total int) {
+			// The downscale chain after the tiles claims the last 2 %.
+			report(0.90 + 0.08*float64(done)/float64(total))
+		}); err != nil {
 			return err
 		}
-		return c.WriteLevels(rgba, photo.CacheKey, editHash, 2048, 1024, 512, 256)
+		if err := c.WriteLevels(rgba, photo.CacheKey, editHash, 2048, 1024, 512, 256); err != nil {
+			return err
+		}
+		report(1)
+		return nil
 	}
 	// Downscale before applying the look: 4x fewer pixels, same result at
 	// these sizes.
@@ -510,8 +548,14 @@ func (c *Cache) WriteLevels(src *image.RGBA, cacheKey, editHash string, levels .
 // writeTiles cuts the full-resolution render into TileSize tiles and encodes
 // them in parallel — Go's JPEG encoder is single-threaded, so tiling also
 // makes the full render markedly faster than one monolithic encode was.
-func (c *Cache) writeTiles(src *image.RGBA, cacheKey, editHash string) error {
+// onTile, when non-nil, is called after each tile lands (from the encoder
+// goroutines — it must be safe for concurrent use).
+func (c *Cache) writeTiles(src *image.RGBA, cacheKey, editHash string, onTile func(done, total int)) error {
 	b := src.Bounds()
+	cols := (b.Dx() + TileSize - 1) / TileSize
+	rows := (b.Dy() + TileSize - 1) / TileSize
+	total := cols * rows
+	var done atomic.Int32
 	var g errgroup.Group
 	g.SetLimit(runtime.NumCPU())
 	for ty := 0; ty*TileSize < b.Dy(); ty++ {
@@ -522,7 +566,13 @@ func (c *Cache) writeTiles(src *image.RGBA, cacheKey, editHash string) error {
 			)
 			path := c.PathForTile(cacheKey, tx, ty, editHash)
 			g.Go(func() error {
-				return writeJPEGFile(path, src.SubImage(r), 90)
+				if err := writeJPEGFile(path, src.SubImage(r), 90); err != nil {
+					return err
+				}
+				if onTile != nil {
+					onTile(int(done.Add(1)), total)
+				}
+				return nil
 			})
 		}
 	}

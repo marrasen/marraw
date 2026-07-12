@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Crop as CropIcon, FlipHorizontal2, FlipVertical2, Pipette, RotateCcwSquare, RotateCwSquare } from 'lucide-react';
-import type { Photo } from '@/api/library';
+import { onRenderProgressEvent, type Photo } from '@/api/library';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -293,6 +293,24 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: 
     // visible priority and the pool dedups against any run still going.
     return () => ac.abort();
   }, [photos, photo, active, tiles]);
+}
+
+// useRenderProgress reports the backend's live 1:1 render progress for the
+// focused photo as a 0..1 fraction, or null before the first event — the
+// decode's unpack phase reports nothing, so the indicator stays indeterminate
+// until LibRaw's pipeline starts checkpointing. Subscribed only while the
+// rendering indicator is up; events for other photos (background tile
+// prefetch of neighbours) are ignored.
+function useRenderProgress(client: ApiClient, photoId: number, active: boolean): number | null {
+  const [frac, setFrac] = useState<number | null>(null);
+  useEffect(() => {
+    setFrac(null);
+    if (!active) return;
+    return onRenderProgressEvent(client, (ev) => {
+      if (ev.photoId === photoId) setFrac(ev.fraction);
+    });
+  }, [client, photoId, active]);
+  return frac;
 }
 
 // CinemaImage is the shared photo engine of every cinema surface: the
@@ -765,6 +783,7 @@ export function CinemaImage({
 
   // Rendering indicator: tiles mounted but not decoded yet.
   const rendering = wantTiles && pendingTiles[0] > 0;
+  const renderFrac = useRenderProgress(client, photo.id, rendering);
 
   // Photo-switch indicator: the shown pixels still belong to another photo.
   // Rapid culling outruns the decode pipeline and the double buffer keeps the
@@ -955,7 +974,15 @@ export function CinemaImage({
           busy ? 'opacity-100 delay-150' : 'opacity-0 delay-0',
         )}
       >
-        <div className="animate-chip-indeterminate absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-primary to-[#aab0ff]/0" />
+        {rendering && renderFrac != null ? (
+          // Determinate: the backend streams 1:1 render progress.
+          <div
+            className="absolute inset-y-0 left-0 bg-gradient-to-r from-primary/50 to-primary transition-[width] duration-150 ease-linear"
+            style={{ width: `${Math.round(renderFrac * 100)}%` }}
+          />
+        ) : (
+          <div className="animate-chip-indeterminate absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-primary to-[#aab0ff]/0" />
+        )}
       </div>
       <div
         className={cn(
@@ -970,7 +997,11 @@ export function CinemaImage({
             {loadingPhoto ? 'Loading photo' : 'Rendering full resolution'}
           </span>
           <span className="font-mono text-[11px] text-muted-foreground">
-            {loadingPhoto ? 'decoding RAW preview' : '1:1 tile · decoding RAW'}
+            {loadingPhoto
+              ? 'decoding RAW preview'
+              : renderFrac != null
+                ? `1:1 tile · ${Math.round(renderFrac * 100)}%`
+                : '1:1 tile · decoding RAW'}
           </span>
         </div>
       </div>
@@ -1410,13 +1441,14 @@ export function DecodedImage({
 // a 404 — it never kicks a blocking RAW decode just because the user browsed
 // onto the photo. A hit shows the sharp rendition instantly; a miss renders
 // nothing (returns null) and the always-warm 512 underlay behind shows through,
-// so a fast scan across not-yet-pre-rendered frames never stalls and there is
-// no render to cancel. On a miss it then, after a short settle, kicks ONE
-// render for THIS photo so a frame paused on sharpens, and re-requests the warm
-// file when that lands — cheap when the background pre-render pass has already
-// covered it, and the settle means skimming past fires nothing. The parent keys
-// this by photo, so a switch remounts fresh (no lingering frame, and unmount
-// aborts any in-flight kick — the pool cancels it at the next checkpoint).
+// so a fast scan across not-yet-pre-rendered frames never stalls. On a miss it
+// immediately kicks ONE render for THIS photo so a frame paused on sharpens,
+// and re-requests the warm file when that lands — cheap when the background
+// pre-render pass has already covered it. Skimming past is safe without a
+// settle delay: the parent keys this by photo, so a switch remounts fresh (no
+// lingering frame) and unmount aborts the in-flight kick, which cancels the
+// RAW decode itself mid-flight — a skimmed frame costs at most the
+// uncancellable unpack, not a full render.
 function FitImage({
   photo,
   level,
@@ -1438,20 +1470,17 @@ function FitImage({
     if (!missed) return;
     const img = new Image();
     let alive = true;
-    const t = window.setTimeout(() => {
-      img.src = imgUrl(photo, level); // render-allowed: one render for this photo
-      img
-        .decode()
-        .then(() => {
-          if (!alive) return;
-          setMissed(false);
-          setWarmed((n) => n + 1);
-        })
-        .catch(() => {});
-    }, 140);
+    img.src = imgUrl(photo, level); // render-allowed: one render for this photo
+    img
+      .decode()
+      .then(() => {
+        if (!alive) return;
+        setMissed(false);
+        setWarmed((n) => n + 1);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
-      window.clearTimeout(t);
       if (!img.complete) img.src = '';
     };
   }, [missed, photo, level]);

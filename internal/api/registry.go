@@ -72,6 +72,17 @@ func (d *Deps) SetServer(s *aprot.Server) {
 	d.mu.Unlock()
 }
 
+// BroadcastRenderProgress pushes 1:1 render progress to every connected
+// window; the loupe filters on the photo it is showing.
+func (d *Deps) BroadcastRenderProgress(photoID int64, editHash string, frac float64) {
+	d.mu.RLock()
+	s := d.server
+	d.mu.RUnlock()
+	if s != nil {
+		s.Broadcast(RenderProgressEvent{PhotoID: photoID, EditHash: editHash, Fraction: frac})
+	}
+}
+
 // TriggerRefresh fires subscription refresh keys from background goroutines.
 func (d *Deps) TriggerRefresh(keys ...string) {
 	d.mu.RLock()
@@ -155,6 +166,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	// payload of subscription patches — but registering it keeps the
 	// TypeScript types generated for the client-side patch reducer.
 	registry.RegisterPushEventFor(library, PhotoPatchEvent{})
+	registry.RegisterPushEventFor(library, RenderProgressEvent{})
 
 	// marraw is single-user localhost: any window may cancel any task. This
 	// also restores cancel rights after a reconnect, which the default

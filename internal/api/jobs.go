@@ -178,7 +178,7 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 					if err := proc.Open(p.Path()); err != nil {
 						return err
 					}
-					ev, err := pyramid.MeasureAutoBrightEV(proc)
+					ev, err := pyramid.MeasureAutoBrightEV(jctx, proc)
 					if err != nil {
 						return err
 					}

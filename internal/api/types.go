@@ -252,3 +252,14 @@ type PhotoPatch struct {
 type PhotoPatchEvent struct {
 	Patches []PhotoPatch `json:"patches"`
 }
+
+// RenderProgressEvent is broadcast while a full-resolution (1:1 tile) render
+// runs, so the loupe's decoding indicator can show a percent instead of an
+// indeterminate spinner. Fraction is 0..1 across the whole render (decode,
+// look, tile write-out); the final 1 always fires. Rate-limited at the
+// source (pyramid.Cache.Progress) to ~10 events/s per render.
+type RenderProgressEvent struct {
+	PhotoID  int64   `json:"photoId"`
+	EditHash string  `json:"editHash"`
+	Fraction float64 `json:"fraction"`
+}

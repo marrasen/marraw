@@ -104,6 +104,12 @@ export interface RenameResult {
     path: string;
 }
 
+export interface RenderProgressEvent {
+    photoId: number;
+    editHash: string;
+    fraction: number;
+}
+
 export interface RootStatus {
     path: string;
     online: boolean;
@@ -379,6 +385,10 @@ export function subscribeSetVisible(client: ApiClient, folderID: number, ids: nu
 
 export function onPhotoPatchEvent(client: ApiClient, handler: PushHandler<PhotoPatchEvent>): () => void {
     return client.onPush<PhotoPatchEvent>('PhotoPatchEvent', handler);
+}
+
+export function onRenderProgressEvent(client: ApiClient, handler: PushHandler<RenderProgressEvent>): () => void {
+    return client.onPush<RenderProgressEvent>('RenderProgressEvent', handler);
 }
 
 // React Hooks for Library
@@ -680,4 +690,8 @@ export function useSetVisible(folderID: number, ids: number[], options?: UseQuer
 
 export function usePhotoPatchEvent(options?: { maxEvents?: number }): UsePushResult<PhotoPatchEvent> {
     return usePushEvent(onPhotoPatchEvent, options);
+}
+
+export function useRenderProgressEvent(options?: { maxEvents?: number }): UsePushResult<RenderProgressEvent> {
+    return usePushEvent(onRenderProgressEvent, options);
 }

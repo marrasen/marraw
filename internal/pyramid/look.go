@@ -1,6 +1,7 @@
 package pyramid
 
 import (
+	"context"
 	"image"
 	"math"
 
@@ -31,16 +32,16 @@ func ComputeLookGamma(rawMean, cameraMean float64) float64 {
 // to a deterministic ExpShift = 2^expEV. Seeding the exposure dial with this
 // EV makes that switch invisible — the mimic compensation shows in the dial
 // instead of silently vanishing on the first adjustment.
-func MeasureAutoBrightEV(proc *libraw.Processor) (float64, error) {
+func MeasureAutoBrightEV(ctx context.Context, proc *libraw.Processor) (float64, error) {
 	p := libraw.DefaultParams()
 	p.HalfSize = true // no demosaic — only the mean luma matters
-	bright, err := proc.Process(p)
+	bright, err := proc.Process(ctx, p)
 	if err != nil {
 		return 0, err
 	}
 	mb := meanLumaPacked(bright)
 	p.NoAutoBright = true
-	flat, err := proc.Process(p)
+	flat, err := proc.Process(ctx, p)
 	if err != nil {
 		return 0, err
 	}

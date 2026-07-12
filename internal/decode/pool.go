@@ -57,8 +57,9 @@ func NewPool(workers int) *Pool {
 // key is already queued or running, Do waits for that job instead (raising
 // its priority if prio is higher). When every waiter's ctx is canceled the
 // job is abandoned: dropped from the queue if it hasn't started, or its fn
-// ctx canceled if it has — so scanning quickly past photos doesn't leave a
-// backlog of full renders grinding the CPU.
+// ctx canceled if it has — and the LibRaw decode itself aborts at its next
+// progress checkpoint (see libraw.Processor.Process), so scanning quickly
+// past photos doesn't leave a backlog of full renders grinding the CPU.
 func (p *Pool) Do(ctx context.Context, key string, prio Priority, fn func(ctx context.Context, proc *libraw.Processor) error) error {
 retry:
 	p.mu.Lock()

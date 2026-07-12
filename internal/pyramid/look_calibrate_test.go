@@ -54,7 +54,7 @@ func TestCalibrateLook(t *testing.T) {
 
 		params := libraw.DefaultParams()
 		params.HalfSize = true
-		img, err := proc.Process(params)
+		img, err := proc.Process(t.Context(), params)
 		if err != nil {
 			proc.Close()
 			t.Fatalf("%s: %v", path, err)

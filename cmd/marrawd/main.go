@@ -124,6 +124,8 @@ func main() {
 		server.TriggerRefresh(fmt.Sprintf("photos:%d", folderID))
 	}
 	cache.OnPhotoChanged = scanner.OnPhotosChanged
+	// 1:1 render progress → the loupe's decoding indicator.
+	cache.Progress = deps.BroadcastRenderProgress
 
 	// After SetServer, so the watcher's refresh pushes reach subscribers. A
 	// watcher that will not start is not fatal — folders keep their manual

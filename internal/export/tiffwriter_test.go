@@ -145,7 +145,7 @@ func TestExportTIFF8E2E(t *testing.T) {
 	// wide-gamut image that every other editor reads as sRGB.
 	req := Request{Format: "tiff8", LongEdge: 800, ColorSpace: "prophoto", SharpenTarget: "off"}
 	out := filepath.Join(dir, "e2e.tif")
-	if err := exportOne(photo, out, req); err != nil {
+	if err := exportOne(t.Context(), photo, out, req); err != nil {
 		t.Fatalf("exportOne: %v", err)
 	}
 

@@ -118,7 +118,7 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 			if gctx.Err() != nil {
 				return gctx.Err()
 			}
-			err := exportOne(photo, filepath.Join(req.DestDir, outName), req)
+			err := exportOne(gctx, photo, filepath.Join(req.DestDir, outName), req)
 			onItem(Item{PhotoID: photo.ID, FileName: outName, Err: err})
 			return nil
 		})
@@ -126,7 +126,7 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 	return g.Wait()
 }
 
-func exportOne(photo store.Photo, outPath string, req Request) error {
+func exportOne(ctx context.Context, photo store.Photo, outPath string, req Request) error {
 	proc, err := libraw.New()
 	if err != nil {
 		return err
@@ -148,7 +148,9 @@ func exportOne(photo store.Photo, outPath string, req Request) error {
 	}
 	lp.OutputColor = ColorSpaceOutput(req.ColorSpace)
 
-	img, err := proc.Process(lp)
+	// The handle is per-file and closed on return, so a cancelled export
+	// (recycle-on-cancel) costs nothing extra — it just stops burning a core.
+	img, err := proc.Process(ctx, lp)
 	if err != nil {
 		return err
 	}

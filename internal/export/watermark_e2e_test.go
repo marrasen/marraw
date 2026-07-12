@@ -38,7 +38,7 @@ func TestExportWatermarkE2E(t *testing.T) {
 	f.Close()
 
 	req := Request{Format: "jpeg", JpegQuality: 95, LongEdge: 1024, ColorSpace: "srgb"}
-	if err := exportOne(photo, filepath.Join(dir, "clean.jpg"), req); err != nil {
+	if err := exportOne(t.Context(), photo, filepath.Join(dir, "clean.jpg"), req); err != nil {
 		t.Fatalf("clean: %v", err)
 	}
 	req.Watermark = &watermark.Spec{Elements: []watermark.Element{
@@ -52,7 +52,7 @@ func TestExportWatermarkE2E(t *testing.T) {
 			Anchor: watermark.AnchorTopLeft, SizePct: 10, MarginPct: 3, Opacity: 0.8,
 		},
 	}}
-	if err := exportOne(photo, filepath.Join(dir, "marked.jpg"), req); err != nil {
+	if err := exportOne(t.Context(), photo, filepath.Join(dir, "marked.jpg"), req); err != nil {
 		t.Fatalf("marked: %v", err)
 	}
 

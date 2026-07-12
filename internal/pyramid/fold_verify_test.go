@@ -45,7 +45,7 @@ func TestFoldMatchesExactDecode(t *testing.T) {
 	exactP := libraw.DefaultParams()
 	exactP.HalfSize = true
 	exactP.NoAutoBright = true
-	exactImg, err := proc.Process(exactP)
+	exactImg, err := proc.Process(t.Context(), exactP)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestFoldMatchesExactDecode(t *testing.T) {
 	linP := exactP
 	linP.OutputBPS = 16
 	linP.Gamma = [2]float64{1, 1}
-	linImg, err := proc.Process(linP)
+	linImg, err := proc.Process(t.Context(), linP)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestFoldWBApproximation(t *testing.T) {
 	exactP.NoAutoBright = true
 	exactP.UseCameraWB = false
 	exactP.WBTemp = temp
-	exactImg, err := proc.Process(exactP)
+	exactImg, err := proc.Process(t.Context(), exactP)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestFoldWBApproximation(t *testing.T) {
 	linP.NoAutoBright = true
 	linP.OutputBPS = 16
 	linP.Gamma = [2]float64{1, 1}
-	linImg, err := proc.Process(linP)
+	linImg, err := proc.Process(t.Context(), linP)
 	if err != nil {
 		t.Fatal(err)
 	}

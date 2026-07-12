@@ -87,6 +87,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if path, err = h.Cache.Ensure(r.Context(), photo, level, editHash, decode.PriorityVisible); err != nil {
+			// The client walked away (navigation aborts the fetch, which
+			// cancels the render): nobody reads the response, don't log a 500.
+			if r.Context().Err() != nil {
+				return
+			}
 			http.Error(w, "render failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -118,6 +123,10 @@ func (h *Handler) ServeTile(w http.ResponseWriter, r *http.Request) {
 		if path, err = h.Cache.EnsureTile(r.Context(), photo, tx, ty, editHash, decode.PriorityVisible); err != nil {
 			if os.IsNotExist(err) {
 				http.Error(w, "tile outside image", http.StatusNotFound)
+				return
+			}
+			// Aborted request ⇒ cancelled render; the response is unread.
+			if r.Context().Err() != nil {
 				return
 			}
 			http.Error(w, "render failed: "+err.Error(), http.StatusInternalServerError)
