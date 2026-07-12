@@ -114,8 +114,8 @@ control, any preset.
 
 ### Editing tools
 
-- **Crop & straighten** — interactive overlay, ±15° straighten, 90° rotation
-  and mirroring.
+- **Geometry** — crop & straighten via an interactive overlay (±15°), 90°
+  rotation and mirroring from the overlay toolbar.
 - **Tone** — exposure, preserve highlights, brightness, gamma, shadow slope,
   contrast, whites, blacks, shadows, highlights.
 - **Presence** — clarity, texture, dehaze.

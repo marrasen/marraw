@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Pipette, Undo2, Redo2, Crop, ChevronRight, FlipHorizontal2, FlipVertical2, Info, RotateCcw, RotateCcwSquare, RotateCwSquare, Image as ImageIcon } from 'lucide-react';
-import { flipCropPatch, rotateCropPatch } from '@/lib/crop';
+import { Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw, Image as ImageIcon } from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
@@ -321,7 +320,7 @@ function DevelopPanel({
         </span>
       </div>
 
-      <Group id="crop" title="Crop & straighten" changed={changed.crop}>
+      <Group id="crop" title="Geometry" changed={changed.crop}>
         <Button
           size="sm"
           variant={cropping ? 'default' : 'outline'}
@@ -340,7 +339,7 @@ function DevelopPanel({
             {changed.crop && !cropping && (
               <span
                 className="rounded-[4px] bg-primary/18 px-1 py-px text-[9px] font-semibold tracking-[.05em] text-accent-text uppercase"
-                title="A crop, rotation or straighten is applied"
+                title="A crop, rotation, flip or straighten is applied"
               >
                 on
               </span>
@@ -348,54 +347,6 @@ function DevelopPanel({
             <kbd className="text-[10px] opacity-60">R</kbd>
           </span>
         </Button>
-        {/* Coarse rotation: one history entry per turn; an existing crop
-            rectangle is remapped so the same pixels stay selected. */}
-        <div className="flex gap-[7px]">
-          <Button
-            size="sm"
-            variant="outline"
-            className="flex-1"
-            onClick={() => clear(rotateCropPatch(draft, 'ccw'))}
-            title="Rotate 90° counter-clockwise"
-          >
-            <RotateCcwSquare data-icon="inline-start" />
-            Rotate left
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="flex-1"
-            onClick={() => clear(rotateCropPatch(draft, 'cw'))}
-            title="Rotate 90° clockwise"
-          >
-            <RotateCwSquare data-icon="inline-start" />
-            Rotate right
-          </Button>
-        </div>
-        {/* Mirroring: both axes toggle flipH (vertical = horizontal + 180°);
-            the rect reflects and the straighten angle negates with it. */}
-        <div className="flex gap-[7px]">
-          <Button
-            size="sm"
-            variant="outline"
-            className="flex-1"
-            onClick={() => clear(flipCropPatch(draft, 'h'))}
-            title="Flip horizontal"
-          >
-            <FlipHorizontal2 data-icon="inline-start" />
-            Flip horizontal
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="flex-1"
-            onClick={() => clear(flipCropPatch(draft, 'v'))}
-            title="Flip vertical"
-          >
-            <FlipVertical2 data-icon="inline-start" />
-            Flip vertical
-          </Button>
-        </div>
         <EditSlider
           label="Straighten"
           value={draft.cropAngle}
