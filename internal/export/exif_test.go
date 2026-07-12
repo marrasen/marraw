@@ -109,6 +109,200 @@ func TestBuildExifPayload(t *testing.T) {
 	checkExifFields(t, buildExifPayload(sampleMeta()), 0)
 }
 
+// richMeta is sampleMeta plus the fields added for the metadata option:
+// lens, a southern/western GPS fix below sea level, and the user credit.
+func richMeta() exifMeta {
+	m := sampleMeta()
+	m.Lens = "FE 70-200mm F2.8 GM"
+	m.HasGPS = true
+	m.Lat, m.Lon = -33.8688, -70.6693
+	m.HasAlt = true
+	m.Alt = -2.5
+	m.Artist = "Jane Doe"
+	m.Copyright = "© 2026 Jane Doe"
+	return m
+}
+
+// readIFDAt walks one IFD at offset off inside the block at raw[base:],
+// asserting ascending tag order like parseExifIn does.
+func readIFDAt(t *testing.T, raw []byte, base, off uint32) map[uint16]ifdField {
+	t.Helper()
+	le := binary.LittleEndian
+	n := le.Uint16(raw[base+off:])
+	fields := make(map[uint16]ifdField, n)
+	var prev uint16
+	for i := range int(n) {
+		e := raw[base+off+2+uint32(12*i):]
+		tag := le.Uint16(e)
+		if i > 0 && tag <= prev {
+			t.Fatalf("IFD entries out of order: tag %d after %d", tag, prev)
+		}
+		prev = tag
+		fields[tag] = ifdField{typ: le.Uint16(e[2:]), count: le.Uint32(e[4:]), value: le.Uint32(e[8:])}
+	}
+	return fields
+}
+
+// asciiVal reads an ASCII field wherever it lives: strings of up to four
+// bytes (like the GPS "S\x00" refs) sit inline in the value word, longer
+// ones out-of-line at the offset asciiAt expects.
+func asciiVal(raw []byte, base uint32, f ifdField) string {
+	if f.count <= 4 {
+		var b [4]byte
+		binary.LittleEndian.PutUint32(b[:], f.value)
+		return string(bytes.TrimRight(b[:f.count], "\x00"))
+	}
+	return asciiAt(raw, base, f)
+}
+
+func rationalsAt(raw []byte, base uint32, f ifdField, n int) [][2]uint32 {
+	le := binary.LittleEndian
+	out := make([][2]uint32, n)
+	for i := range n {
+		out[i] = [2]uint32{
+			le.Uint32(raw[base+f.value+uint32(8*i):]),
+			le.Uint32(raw[base+f.value+uint32(8*i)+4:]),
+		}
+	}
+	return out
+}
+
+func checkGPSIFD(t *testing.T, raw []byte, base uint32, ifd0 map[uint16]ifdField) {
+	t.Helper()
+	ptr, ok := ifd0[tagGPSIFD]
+	if !ok {
+		t.Fatal("no GPS IFD pointer in IFD0")
+	}
+	gps := readIFDAt(t, raw, base, ptr.value)
+	// 4 inline BYTEs {2,3,0,0}, little-endian = 0x00000302.
+	if gps[gpsTagVersionID].value != 0x302 {
+		t.Errorf("GPSVersionID = %#x, want 0x302", gps[gpsTagVersionID].value)
+	}
+	if got := asciiVal(raw, base, gps[gpsTagLatitudeRef]); got != "S" {
+		t.Errorf("GPSLatitudeRef = %q, want S", got)
+	}
+	if got := asciiVal(raw, base, gps[gpsTagLongitudeRef]); got != "W" {
+		t.Errorf("GPSLongitudeRef = %q, want W", got)
+	}
+	// |-33.8688| = 33° 52′ 7.68″; |-70.6693| = 70° 40′ 9.48″.
+	wantLat := [][2]uint32{{33, 1}, {52, 1}, {76800, 10000}}
+	if got := rationalsAt(raw, base, gps[gpsTagLatitude], 3); got[0] != wantLat[0] || got[1] != wantLat[1] || got[2] != wantLat[2] {
+		t.Errorf("GPSLatitude = %v, want %v", got, wantLat)
+	}
+	wantLon := [][2]uint32{{70, 1}, {40, 1}, {94800, 10000}}
+	if got := rationalsAt(raw, base, gps[gpsTagLongitude], 3); got[0] != wantLon[0] || got[1] != wantLon[1] || got[2] != wantLon[2] {
+		t.Errorf("GPSLongitude = %v, want %v", got, wantLon)
+	}
+	if gps[gpsTagAltitudeRef].value != 1 {
+		t.Errorf("GPSAltitudeRef = %d, want 1 (below sea level)", gps[gpsTagAltitudeRef].value)
+	}
+	if num, den := rationalAt(raw, base, gps[gpsTagAltitude]); num != 250 || den != 100 {
+		t.Errorf("GPSAltitude = %d/%d, want 250/100", num, den)
+	}
+}
+
+func TestExifPayloadFullMeta(t *testing.T) {
+	m := richMeta()
+	payload := buildExifPayload(m)
+	checkExifFields(t, payload, 0) // the base fields still hold with GPS added
+	ifd0, exif := parseExifIn(t, payload, 0)
+	if got := asciiAt(payload, 0, ifd0[tagArtist]); got != m.Artist {
+		t.Errorf("Artist = %q, want %q", got, m.Artist)
+	}
+	if got := asciiAt(payload, 0, ifd0[tagCopyright]); got != m.Copyright {
+		t.Errorf("Copyright = %q, want %q", got, m.Copyright)
+	}
+	if got := asciiAt(payload, 0, exif[tagLensModel]); got != m.Lens {
+		t.Errorf("LensModel = %q, want %q", got, m.Lens)
+	}
+	checkGPSIFD(t, payload, 0, ifd0)
+}
+
+func TestApplyPolicyCopyright(t *testing.T) {
+	m := richMeta().applyPolicy(Request{
+		ExifMode: "copyright", Artist: "Jane Doe", Copyright: "© 2026 Jane Doe",
+	})
+	payload := buildExifPayload(m)
+	ifd0, exif := parseExifIn(t, payload, 0)
+	for tag, name := range map[uint16]string{
+		tagMake: "Make", tagModel: "Model", tagDateTime: "DateTime", tagGPSIFD: "GPS IFD",
+	} {
+		if _, ok := ifd0[tag]; ok {
+			t.Errorf("copyright mode must strip %s", name)
+		}
+	}
+	for tag, name := range map[uint16]string{
+		tagExposureTime: "ExposureTime", tagISO: "ISO", tagDateTimeOriginal: "DateTimeOriginal",
+		tagFocalLength: "FocalLength", tagLensModel: "LensModel",
+	} {
+		if _, ok := exif[tag]; ok {
+			t.Errorf("copyright mode must strip %s", name)
+		}
+	}
+	if got := asciiAt(payload, 0, ifd0[tagArtist]); got != "Jane Doe" {
+		t.Errorf("Artist = %q", got)
+	}
+	if got := asciiAt(payload, 0, ifd0[tagCopyright]); got != "© 2026 Jane Doe" {
+		t.Errorf("Copyright = %q", got)
+	}
+	if exif[tagPixelXDimension].value != 1024 || exif[tagColorSpaceExif].value != 1 {
+		t.Error("structural tags must survive copyright mode")
+	}
+}
+
+func TestApplyPolicyRemoveLocation(t *testing.T) {
+	m := richMeta().applyPolicy(Request{ExifMode: "all", RemoveLocation: true})
+	payload := buildExifPayload(m)
+	ifd0, exif := parseExifIn(t, payload, 0)
+	if _, ok := ifd0[tagGPSIFD]; ok {
+		t.Error("removeLocation must strip the GPS IFD")
+	}
+	if got := asciiAt(payload, 0, ifd0[tagMake]); got != "SONY" {
+		t.Error("removeLocation must keep the camera fields")
+	}
+	if got := asciiAt(payload, 0, exif[tagLensModel]); got != m.Lens {
+		t.Error("removeLocation must keep the lens")
+	}
+}
+
+func TestApplyPolicyNone(t *testing.T) {
+	m := richMeta().applyPolicy(Request{ExifMode: "none"})
+	if !m.Disabled {
+		t.Fatal("none mode must set Disabled")
+	}
+
+	jbuf := &bytes.Buffer{}
+	if err := jpeg.Encode(jbuf, image.NewRGBA(image.Rect(0, 0, 8, 8)), nil); err != nil {
+		t.Fatal(err)
+	}
+	if out := embedExifJPEG(jbuf.Bytes(), m); !bytes.Equal(out, jbuf.Bytes()) {
+		t.Error("none mode must leave the JPEG byte-identical (no APP1)")
+	}
+
+	pbuf := &bytes.Buffer{}
+	if err := png.Encode(pbuf, image.NewRGBA(image.Rect(0, 0, 8, 8))); err != nil {
+		t.Fatal(err)
+	}
+	if out := embedExifPNG(pbuf.Bytes(), m); !bytes.Equal(out, pbuf.Bytes()) {
+		t.Error("none mode must leave the PNG byte-identical (no eXIf)")
+	}
+}
+
+func TestDMSRationalsCascade(t *testing.T) {
+	// A value whose seconds round to exactly 60.0000 must cascade into the
+	// minutes (and degrees) instead of emitting 600000/10000.
+	got := dmsRationals(29.99999999999)
+	want := [3][2]uint32{{30, 1}, {0, 1}, {0, 10000}}
+	if got != want {
+		t.Errorf("dmsRationals(29.99999999999) = %v, want %v", got, want)
+	}
+	got = dmsRationals(33.8688)
+	want = [3][2]uint32{{33, 1}, {52, 1}, {76800, 10000}}
+	if got != want {
+		t.Errorf("dmsRationals(33.8688) = %v, want %v", got, want)
+	}
+}
+
 func TestExifPayloadSparseMeta(t *testing.T) {
 	// A photo with no scanned metadata still yields a valid block with just
 	// the always-present fields.
@@ -215,5 +409,64 @@ func TestEncodeTIFF8Metadata(t *testing.T) {
 	// Still a decodable baseline TIFF for readers that ignore the extras.
 	if _, err := tiff.Decode(bytes.NewReader(raw)); err != nil {
 		t.Fatalf("decode with metadata: %v", err)
+	}
+}
+
+func TestEncodeTIFF8FullMeta(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 4, 3))
+	var buf bytes.Buffer
+	m := richMeta()
+	if err := encodeTIFF8(&buf, src, ICCFor("adobergb"), m); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	// parseIFD asserts ascending tag order, which is the trap here: the GPS
+	// pointer (34853) must land after the ICC profile (34675).
+	fields := parseIFD(t, raw)
+	if got := asciiAt(raw, 0, fields[tagArtist]); got != m.Artist {
+		t.Errorf("TIFF Artist = %q, want %q", got, m.Artist)
+	}
+	if got := asciiAt(raw, 0, fields[tagCopyright]); got != m.Copyright {
+		t.Errorf("TIFF Copyright = %q, want %q", got, m.Copyright)
+	}
+	if _, ok := fields[tagICCProfile]; !ok {
+		t.Fatal("TIFF has no ICC profile")
+	}
+	checkGPSIFD(t, raw, 0, fields)
+	exif := readIFDAt(t, raw, 0, fields[tagExifIFD].value)
+	if got := asciiAt(raw, 0, exif[tagLensModel]); got != m.Lens {
+		t.Errorf("TIFF LensModel = %q, want %q", got, m.Lens)
+	}
+	if _, err := tiff.Decode(bytes.NewReader(raw)); err != nil {
+		t.Fatalf("decode with full metadata: %v", err)
+	}
+}
+
+func TestEncodeTIFF8Disabled(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 4, 3))
+	var buf bytes.Buffer
+	m := richMeta().applyPolicy(Request{ExifMode: "none"})
+	if err := encodeTIFF8(&buf, src, ICCFor("adobergb"), m); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	fields := parseIFD(t, raw)
+	for tag, name := range map[uint16]string{
+		tagMake: "Make", tagModel: "Model", tagSoftware: "Software", tagDateTime: "DateTime",
+		tagArtist: "Artist", tagCopyright: "Copyright", tagExifIFD: "Exif IFD", tagGPSIFD: "GPS IFD",
+	} {
+		if _, ok := fields[tag]; ok {
+			t.Errorf("disabled metadata must drop %s from the TIFF", name)
+		}
+	}
+	// The structural tags and the ICC profile describe the pixels and stay.
+	if fields[tagImageWidth].value != 4 || fields[tagImageLength].value != 3 {
+		t.Error("structural dimensions missing")
+	}
+	if _, ok := fields[tagICCProfile]; !ok {
+		t.Error("ICC profile must survive disabled metadata")
+	}
+	if _, err := tiff.Decode(bytes.NewReader(raw)); err != nil {
+		t.Fatalf("decode without metadata: %v", err)
 	}
 }

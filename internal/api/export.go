@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/marrasen/aprot"
@@ -35,6 +36,13 @@ type ExportRequest struct {
 	// FileNameTemplate names the output files; empty = "{name}". Tokens:
 	// {name}, {seq}, {date}, {time} (see export.namer).
 	FileNameTemplate string `json:"fileNameTemplate" validate:"omitempty,max=120"`
+	// ExifMode selects the exported metadata; empty = all (full catalog set).
+	ExifMode ExifMode `json:"exifMode" validate:"omitempty,oneof=all copyright none"`
+	// RemoveLocation strips GPS while keeping the rest (meaningful with all).
+	RemoveLocation bool `json:"removeLocation"`
+	// Artist and Copyright are written as EXIF tags 315/33432 when non-empty.
+	Artist    string `json:"artist" validate:"omitempty,max=120"`
+	Copyright string `json:"copyright" validate:"omitempty,max=120"`
 	// CreateDir creates DestDir if missing (the client asks the user first).
 	CreateDir bool `json:"createDir"`
 }
@@ -98,6 +106,10 @@ func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.Tas
 			SharpenTarget:    string(req.SharpenTarget),
 			SharpenAmount:    string(req.SharpenAmount),
 			FileNameTemplate: req.FileNameTemplate,
+			ExifMode:         string(req.ExifMode),
+			RemoveLocation:   req.RemoveLocation,
+			Artist:           strings.TrimSpace(req.Artist),
+			Copyright:        strings.TrimSpace(req.Copyright),
 		}, func(it export.Item) {
 			mu.Lock()
 			done++

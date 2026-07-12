@@ -11,6 +11,10 @@ export const ExportRequestSchema = z.object({
     sharpenTarget: z.union([z.literal(""), z.enum(["off", "screen", "matte", "glossy"])]),
     sharpenAmount: z.union([z.literal(""), z.enum(["low", "standard", "high"])]),
     fileNameTemplate: z.union([z.literal(""), z.string().max(120)]),
+    exifMode: z.union([z.literal(""), z.enum(["all", "copyright", "none"])]),
+    removeLocation: z.boolean(),
+    artist: z.union([z.literal(""), z.string().max(120)]),
+    copyright: z.union([z.literal(""), z.string().max(120)]),
     createDir: z.boolean(),
 });
 

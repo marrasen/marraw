@@ -33,6 +33,10 @@ export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   sharpenTarget: 'off',
   sharpenAmount: 'standard',
   fileNameTemplate: '',
+  exifMode: 'all',
+  removeLocation: false,
+  artist: '',
+  copyright: '',
 };
 
 // Library rail width bounds — mirror the server's SetRailWidth validation.
@@ -100,6 +104,10 @@ function sanitizeExportOptions(o: Partial<ExportOptions> | undefined): ExportOpt
     sharpenAmount:
       o?.sharpenAmount === 'low' || o?.sharpenAmount === 'high' ? o.sharpenAmount : 'standard',
     fileNameTemplate: typeof o?.fileNameTemplate === 'string' ? o.fileNameTemplate.trim() : '',
+    exifMode: o?.exifMode === 'copyright' || o?.exifMode === 'none' ? o.exifMode : 'all',
+    removeLocation: o?.removeLocation === true,
+    artist: typeof o?.artist === 'string' ? o.artist.trim() : '',
+    copyright: typeof o?.copyright === 'string' ? o.copyright.trim() : '',
   };
 }
 

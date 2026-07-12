@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   type ColorSpaceType,
+  type ExifModeType,
   type ExportFormatType,
   type SharpenAmountType,
   type SharpenTargetType,
@@ -13,6 +14,7 @@ import type { Photo } from '@/api/library';
 import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
 import { updateExportDir, updateExportOptions } from '@/lib/uiSettings';
@@ -40,6 +42,11 @@ const SHARPEN_AMOUNT_ITEMS: { value: SharpenAmountType; label: string }[] = [
   { value: 'low', label: 'Low' },
   { value: 'standard', label: 'Standard' },
   { value: 'high', label: 'High' },
+];
+const METADATA_ITEMS: { value: ExifModeType; label: string }[] = [
+  { value: 'all', label: 'All metadata' },
+  { value: 'copyright', label: 'Copyright only' },
+  { value: 'none', label: 'None' },
 ];
 
 // Mirrors the backend's namer (internal/export): {name} source file name,
@@ -101,6 +108,10 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   const [colorSpace, setColorSpace] = useState<ColorSpaceType>('srgb');
   const [sharpenTarget, setSharpenTarget] = useState<SharpenTargetType>('off');
   const [sharpenAmount, setSharpenAmount] = useState<SharpenAmountType>('standard');
+  const [exifMode, setExifMode] = useState<ExifModeType>('all');
+  const [removeLocation, setRemoveLocation] = useState(false);
+  const [artist, setArtist] = useState('');
+  const [copyright, setCopyright] = useState('');
   const [starting, setStarting] = useState(false);
   const [needsCreate, setNeedsCreate] = useState(false);
 
@@ -122,6 +133,10 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
     setColorSpace(exportOptions.colorSpace);
     setSharpenTarget(exportOptions.sharpenTarget);
     setSharpenAmount(exportOptions.sharpenAmount);
+    setExifMode(exportOptions.exifMode);
+    setRemoveLocation(exportOptions.removeLocation);
+    setArtist(exportOptions.artist);
+    setCopyright(exportOptions.copyright);
   }, [open, folderPath]);
 
   const ids = selection.size > 0 ? [...selection] : photos.map((p) => p.id);
@@ -159,6 +174,10 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
         sharpenTarget,
         sharpenAmount,
         fileNameTemplate: fileTemplate.trim(),
+        exifMode,
+        removeLocation: exifMode === 'all' ? removeLocation : false,
+        artist: artist.trim(),
+        copyright: copyright.trim(),
         createDir,
       });
       updateExportDir(client, destDir);
@@ -171,6 +190,11 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
         sharpenTarget,
         sharpenAmount,
         fileNameTemplate: fileTemplate.trim(),
+        exifMode,
+        // Remembered as toggled even when another mode hides it.
+        removeLocation,
+        artist: artist.trim(),
+        copyright: copyright.trim(),
       });
       setOpen(false); // progress lives in the top-bar task chip
     } catch (err) {
@@ -195,6 +219,13 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
             ? [COLOR_ITEMS.find((c) => c.value === colorSpace)!.label]
             : []),
           ...(sharpenTarget !== 'off' ? [`sharpen ${sharpenTarget}`] : []),
+          ...(exifMode === 'none'
+            ? ['no metadata']
+            : exifMode === 'copyright'
+              ? ['© only']
+              : removeLocation
+                ? ['no location']
+                : []),
         ]),
     'runs in the background',
   ].join(' · ');
@@ -390,6 +421,51 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
                 onValueChange={setSharpenAmount}
                 className="border-0 bg-secondary dark:bg-white/5"
               />,
+            )}
+          {/* RAW + XMP copies the source file, whose own EXIF rides along
+              untouched — the metadata options only apply to rendered files. */}
+          {!isRaw &&
+            row(
+              'Metadata',
+              <>
+                <Segmented
+                  aria-label="Metadata"
+                  size="sm"
+                  items={METADATA_ITEMS}
+                  value={exifMode}
+                  onValueChange={setExifMode}
+                  className="border-0 bg-secondary dark:bg-white/5"
+                />
+                {exifMode === 'all' && (
+                  <label className="flex w-fit cursor-pointer items-center gap-2.5 text-[12.5px] text-secondary-foreground">
+                    <Switch checked={removeLocation} onCheckedChange={setRemoveLocation} />
+                    Remove location info
+                  </label>
+                )}
+              </>,
+            )}
+          {!isRaw &&
+            exifMode !== 'none' &&
+            row(
+              'Credit',
+              <>
+                <input
+                  className="flex h-[34px] min-w-0 flex-1 items-center rounded-lg border border-input bg-secondary px-2.5 font-mono text-xs text-secondary-foreground outline-none focus:border-ring dark:bg-white/5"
+                  placeholder="Artist, e.g. Jane Doe"
+                  value={artist}
+                  onChange={(e) => setArtist(e.target.value)}
+                  maxLength={120}
+                  aria-label="Artist"
+                />
+                <input
+                  className="flex h-[34px] min-w-0 flex-1 items-center rounded-lg border border-input bg-secondary px-2.5 font-mono text-xs text-secondary-foreground outline-none focus:border-ring dark:bg-white/5"
+                  placeholder="Copyright, e.g. © 2026 Jane Doe"
+                  value={copyright}
+                  onChange={(e) => setCopyright(e.target.value)}
+                  maxLength={120}
+                  aria-label="Copyright"
+                />
+              </>,
             )}
           {needsCreate && (
             <div className="rounded-lg border border-rating/40 bg-rating/10 p-2.5 text-xs">

@@ -144,6 +144,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.RegisterEnumFor(export, ColorSpaceValues())
 	registry.RegisterEnumFor(export, SharpenTargetValues())
 	registry.RegisterEnumFor(export, SharpenAmountValues())
+	registry.RegisterEnumFor(export, ExifModeValues())
 	// PhotoPatchEvent is no longer broadcast as a push event — it is the
 	// payload of subscription patches — but registering it keeps the
 	// TypeScript types generated for the client-side patch reducer.

@@ -8,6 +8,13 @@ export const ColorSpace = {
 } as const;
 export type ColorSpaceType = typeof ColorSpace[keyof typeof ColorSpace];
 
+export const ExifMode = {
+    All: "all",
+    Copyright: "copyright",
+    None: "none",
+} as const;
+export type ExifModeType = typeof ExifMode[keyof typeof ExifMode];
+
 export const ExportFormat = {
     Jpeg: "jpeg",
     Tiff8: "tiff8",

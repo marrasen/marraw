@@ -7,7 +7,7 @@ import type {
     UseQueryOptions,
     UseQueryResult,
 } from './client';
-import type { ColorSpaceType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
+import type { ColorSpaceType, ExifModeType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
 
 export interface DestInfo {
     exists: boolean;
@@ -23,6 +23,10 @@ export interface ExportRequest {
     sharpenTarget: SharpenTargetType;
     sharpenAmount: SharpenAmountType;
     fileNameTemplate: string;
+    exifMode: ExifModeType;
+    removeLocation: boolean;
+    artist: string;
+    copyright: string;
     createDir: boolean;
 }
 

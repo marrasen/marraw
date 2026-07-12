@@ -44,6 +44,15 @@ type Request struct {
 	// FileNameTemplate names the output files (no extension); "" = "{name}".
 	// See namer.claim for the tokens.
 	FileNameTemplate string
+	// ExifMode selects the exported metadata: "all" (or "", the full catalog
+	// set), "copyright" (only the credit below), or "none" (no EXIF at all).
+	ExifMode string
+	// RemoveLocation strips GPS from "all" exports.
+	RemoveLocation bool
+	// Artist and Copyright are the user's credit, written as EXIF tags
+	// 315/33432 when non-empty (modes all and copyright).
+	Artist    string
+	Copyright string
 }
 
 type Item struct {
@@ -156,7 +165,7 @@ func exportOne(photo store.Photo, outPath string, req Request) error {
 		return err
 	}
 	icc := ICCFor(req.ColorSpace)
-	meta := exifFromPhoto(photo, rendered.Bounds().Dx(), rendered.Bounds().Dy(), req.ColorSpace)
+	meta := exifFromPhoto(photo, rendered.Bounds().Dx(), rendered.Bounds().Dy(), req.ColorSpace).applyPolicy(req)
 	switch req.Format {
 	case "tiff8":
 		err = encodeTIFF8(f, rendered, icc, meta)

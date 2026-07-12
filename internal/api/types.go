@@ -92,6 +92,20 @@ func SharpenAmountValues() []SharpenAmount {
 	return []SharpenAmount{SharpenAmountLow, SharpenAmountStandard, SharpenAmountHigh}
 }
 
+// ExifMode selects what metadata an export carries: everything the catalog
+// has, only the artist/copyright credit, or a bare file with no EXIF at all.
+type ExifMode string
+
+const (
+	ExifModeAll       ExifMode = "all"
+	ExifModeCopyright ExifMode = "copyright"
+	ExifModeNone      ExifMode = "none"
+)
+
+func ExifModeValues() []ExifMode {
+	return []ExifMode{ExifModeAll, ExifModeCopyright, ExifModeNone}
+}
+
 // Photo is the client-facing photo record.
 type Photo struct {
 	ID         int64  `json:"id"`

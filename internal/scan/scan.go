@@ -4,6 +4,7 @@ package scan
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log"
 	"os"
@@ -364,6 +365,10 @@ func (s *Scanner) Backfill(ctx context.Context, folderID int64, onProgress func(
 				Make: md.Make, Model: md.Model,
 				ISO: md.ISO, Shutter: md.Shutter, Aperture: md.Aperture,
 				FocalLen: md.FocalLen, TakenAt: md.TakenAt.Unix(),
+				Lens:   md.Lens,
+				GPSLat: sql.NullFloat64{Float64: md.Latitude, Valid: md.GPSValid},
+				GPSLon: sql.NullFloat64{Float64: md.Longitude, Valid: md.GPSValid},
+				GPSAlt: sql.NullFloat64{Float64: md.Altitude, Valid: md.AltValid},
 			})
 		})
 		if err != nil {

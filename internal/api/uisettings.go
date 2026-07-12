@@ -119,6 +119,14 @@ type ExportOptions struct {
 	SharpenAmount SharpenAmount `json:"sharpenAmount"`
 	// FileNameTemplate names the output files; empty = "{name}".
 	FileNameTemplate string `json:"fileNameTemplate"`
+	// ExifMode selects the exported metadata (default all).
+	ExifMode ExifMode `json:"exifMode"`
+	// RemoveLocation strips GPS from "all" exports; remembered across mode
+	// changes.
+	RemoveLocation bool `json:"removeLocation"`
+	// Artist and Copyright are the credit written into exports (tags 315/33432).
+	Artist    string `json:"artist"`
+	Copyright string `json:"copyright"`
 }
 
 // normalizeExportOptions maps missing or invalid fields (older/partial blobs
@@ -149,7 +157,20 @@ func normalizeExportOptions(o ExportOptions) ExportOptions {
 	if len(o.FileNameTemplate) > 120 {
 		o.FileNameTemplate = o.FileNameTemplate[:120]
 	}
+	if !enumValid(o.ExifMode, ExifModeValues()) {
+		o.ExifMode = ExifModeAll
+	}
+	o.Artist = clampText(o.Artist, 120)
+	o.Copyright = clampText(o.Copyright, 120)
 	return o
+}
+
+func clampText(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) > max {
+		s = s[:max]
+	}
+	return s
 }
 
 func enumValid[T comparable](v T, values []T) bool {

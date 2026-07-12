@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 6
+const schemaVersion = 7
 
 type DB struct {
 	*sql.DB
@@ -103,6 +103,22 @@ func (db *DB) migrate(ctx context.Context) error {
 			// is metadata-only — no pixel decode — and runs in the background.
 			if _, err := tx.ExecContext(ctx, `UPDATE photos SET meta_loaded = 0`); err != nil {
 				return fmt.Errorf("store: migrate v6: %w", err)
+			}
+		}
+		if v < 7 {
+			// Lens model and GPS, newly read by the metadata pass for export
+			// EXIF. NULL gps = no fix recorded. Resetting meta_loaded backfills
+			// existing rows lazily on the next folder open (the v3/v6 pattern).
+			for _, stmt := range []string{
+				`ALTER TABLE photos ADD COLUMN lens TEXT NOT NULL DEFAULT ''`,
+				`ALTER TABLE photos ADD COLUMN gps_lat REAL`,
+				`ALTER TABLE photos ADD COLUMN gps_lon REAL`,
+				`ALTER TABLE photos ADD COLUMN gps_alt REAL`,
+				`UPDATE photos SET meta_loaded = 0`,
+			} {
+				if _, err := tx.ExecContext(ctx, stmt); err != nil {
+					return fmt.Errorf("store: migrate v7: %w", err)
+				}
 			}
 		}
 	}

@@ -2,10 +2,11 @@ package export
 
 // Minimal EXIF for exports. The RAW's own maker-note-laden EXIF block never
 // leaves LibRaw, so exports carry a small, clean block built from the catalog
-// metadata instead: camera make/model, capture time, exposure triangle, focal
-// length, the rendered pixel dimensions, and the color-space flag. JPEG gets
-// it as an APP1 segment, PNG as an eXIf chunk, and TIFF folds the same tags
-// into its own IFD (see tiffwriter.go).
+// metadata instead: camera make/model, lens, capture time, exposure triangle,
+// focal length, GPS, the rendered pixel dimensions, and the color-space flag
+// — narrowed by the export's ExifMode (applyPolicy). JPEG gets it as an APP1
+// segment, PNG as an eXIf chunk, and TIFF folds the same tags into its own
+// IFD (see tiffwriter.go).
 
 import (
 	"bytes"
@@ -23,7 +24,10 @@ const (
 	tagOrientation      = 274
 	tagSoftware         = 305
 	tagDateTime         = 306
+	tagArtist           = 315
+	tagCopyright        = 33432
 	tagExifIFD          = 34665
+	tagGPSIFD           = 34853
 	tagExposureTime     = 33434
 	tagFNumber          = 33437
 	tagISO              = 34855
@@ -34,31 +38,87 @@ const (
 	tagColorSpaceExif   = 40961
 	tagPixelXDimension  = 40962
 	tagPixelYDimension  = 40963
+	tagLensModel        = 42036
 )
 
-const typASCII = 2
+// GPS sub-IFD tags (tag numbering restarts inside the GPS IFD).
+const (
+	gpsTagVersionID    = 0
+	gpsTagLatitudeRef  = 1
+	gpsTagLatitude     = 2
+	gpsTagLongitudeRef = 3
+	gpsTagLongitude    = 4
+	gpsTagAltitudeRef  = 5
+	gpsTagAltitude     = 6
+)
+
+const (
+	typByte  = 1
+	typASCII = 2
+)
 
 const exifDateFormat = "2006:01:02 15:04:05"
 
 // exifMeta is the catalog subset an export writes back out.
 type exifMeta struct {
 	Make, Model   string
+	Lens          string
 	TakenAt       int64   // unix seconds, 0 = unknown
 	ISO           float64 // 0 = unknown, same for the rest
 	Shutter       float64 // seconds
 	Aperture      float64
 	FocalLen      float64
+	HasGPS        bool
+	Lat, Lon      float64 // signed decimal degrees, S/W negative
+	HasAlt        bool
+	Alt           float64 // meters, negative = below sea level
+	Artist        string  // user-entered credit (export dialog)
+	Copyright     string
 	Width, Height int // rendered output pixels
 	SRGB          bool
+	// Disabled means "write no EXIF at all": JPEG/PNG skip the block, TIFF
+	// keeps only its structural main-IFD tags.
+	Disabled bool
 }
 
 func exifFromPhoto(p store.Photo, outW, outH int, colorSpace string) exifMeta {
-	return exifMeta{
-		Make: p.Make, Model: p.Model,
+	m := exifMeta{
+		Make: p.Make, Model: p.Model, Lens: p.Lens,
 		TakenAt: p.TakenAt,
 		ISO:     p.ISO, Shutter: p.Shutter, Aperture: p.Aperture, FocalLen: p.FocalLen,
 		Width: outW, Height: outH,
 		SRGB: colorSpace != "adobergb" && colorSpace != "prophoto",
+	}
+	if p.GPSLat.Valid && p.GPSLon.Valid {
+		m.HasGPS = true
+		m.Lat, m.Lon = p.GPSLat.Float64, p.GPSLon.Float64
+		if p.GPSAlt.Valid {
+			m.HasAlt, m.Alt = true, p.GPSAlt.Float64
+		}
+	}
+	return m
+}
+
+// applyPolicy narrows the metadata to what req.ExifMode allows. The entry
+// builders already treat zero values as absent, so stripping is zeroing;
+// Width/Height/SRGB always survive — they describe the rendered pixels, not
+// the shoot.
+func (m exifMeta) applyPolicy(req Request) exifMeta {
+	switch req.ExifMode {
+	case "none":
+		return exifMeta{Width: m.Width, Height: m.Height, SRGB: m.SRGB, Disabled: true}
+	case "copyright":
+		return exifMeta{
+			Width: m.Width, Height: m.Height, SRGB: m.SRGB,
+			Artist: req.Artist, Copyright: req.Copyright,
+		}
+	default: // "all", or empty from an older client
+		m.Artist, m.Copyright = req.Artist, req.Copyright
+		if req.RemoveLocation {
+			m.HasGPS, m.HasAlt = false, false
+			m.Lat, m.Lon, m.Alt = 0, 0, 0
+		}
+		return m
 	}
 }
 
@@ -102,6 +162,20 @@ func rationalEntry(tag uint16, num, den uint32) exifEntry {
 
 func undefinedEntry(tag uint16, v [4]byte) exifEntry {
 	return exifEntry{tag: tag, typ: typUndefined, count: 4, inline: binary.LittleEndian.Uint32(v[:])}
+}
+
+// byteEntry is count BYTEs, inline (count <= 4 everywhere it's used).
+func byteEntry(tag uint16, v [4]byte, count uint32) exifEntry {
+	return exifEntry{tag: tag, typ: typByte, count: count, inline: binary.LittleEndian.Uint32(v[:])}
+}
+
+func rationals3Entry(tag uint16, vals [3][2]uint32) exifEntry {
+	b := make([]byte, 24)
+	for i, v := range vals {
+		binary.LittleEndian.PutUint32(b[i*8:], v[0])
+		binary.LittleEndian.PutUint32(b[i*8+4:], v[1])
+	}
+	return exifEntry{tag: tag, typ: typRational, count: 3, data: b}
 }
 
 // ifdSize is the serialized size of an IFD block: entry table, next-IFD
@@ -176,12 +250,66 @@ func exifIFDEntries(m exifMeta) []exifEntry {
 		longEntry(tagPixelXDimension, uint32(m.Width)),
 		longEntry(tagPixelYDimension, uint32(m.Height)),
 	)
+	if m.Lens != "" {
+		out = append(out, asciiEntry(tagLensModel, m.Lens))
+	}
 	return out
 }
 
+// gpsIFDEntries builds the GPS sub-IFD, ascending by tag. Coordinates are
+// stored as signed decimal degrees and written back as the spec's
+// hemisphere-letter + deg/min/sec rational form.
+func gpsIFDEntries(m exifMeta) []exifEntry {
+	latRef, lat := "N", m.Lat
+	if lat < 0 {
+		latRef, lat = "S", -lat
+	}
+	lonRef, lon := "E", m.Lon
+	if lon < 0 {
+		lonRef, lon = "W", -lon
+	}
+	out := []exifEntry{
+		byteEntry(gpsTagVersionID, [4]byte{2, 3, 0, 0}, 4),
+		asciiEntry(gpsTagLatitudeRef, latRef),
+		rationals3Entry(gpsTagLatitude, dmsRationals(lat)),
+		asciiEntry(gpsTagLongitudeRef, lonRef),
+		rationals3Entry(gpsTagLongitude, dmsRationals(lon)),
+	}
+	if m.HasAlt {
+		altRef, alt := byte(0), m.Alt
+		if alt < 0 {
+			altRef, alt = 1, -alt // 1 = below sea level
+		}
+		out = append(out,
+			byteEntry(gpsTagAltitudeRef, [4]byte{altRef}, 1),
+			rationalEntry(gpsTagAltitude, uint32(math.Round(alt*100)), 100),
+		)
+	}
+	return out
+}
+
+// dmsRationals splits |degrees| into deg/min/sec rationals; seconds carry
+// four decimals (~3 mm at the equator). Rounding can tip seconds to exactly
+// 60, which cascades up rather than emitting an out-of-range component.
+func dmsRationals(v float64) [3][2]uint32 {
+	deg := math.Floor(v)
+	rem := (v - deg) * 60
+	minutes := math.Floor(rem)
+	sec := math.Round((rem - minutes) * 60 * 10000)
+	if sec >= 600000 {
+		sec = 0
+		if minutes++; minutes >= 60 {
+			minutes = 0
+			deg++
+		}
+	}
+	return [3][2]uint32{{uint32(deg), 1}, {uint32(minutes), 1}, {uint32(sec), 10000}}
+}
+
 // ifd0Entries builds the top-level camera/file fields, ascending by tag.
-// exifPtr is the absolute offset of the Exif sub-IFD.
-func ifd0Entries(m exifMeta, exifPtr uint32) []exifEntry {
+// exifPtr and gpsPtr are the absolute offsets of the sub-IFDs; gpsPtr 0 means
+// no GPS IFD.
+func ifd0Entries(m exifMeta, exifPtr, gpsPtr uint32) []exifEntry {
 	var out []exifEntry
 	if m.Make != "" {
 		out = append(out, asciiEntry(tagMake, m.Make))
@@ -195,21 +323,44 @@ func ifd0Entries(m exifMeta, exifPtr uint32) []exifEntry {
 	if m.TakenAt > 0 {
 		out = append(out, asciiEntry(tagDateTime, time.Unix(m.TakenAt, 0).Format(exifDateFormat)))
 	}
+	if m.Artist != "" {
+		out = append(out, asciiEntry(tagArtist, m.Artist))
+	}
+	if m.Copyright != "" {
+		out = append(out, asciiEntry(tagCopyright, m.Copyright))
+	}
 	out = append(out, longEntry(tagExifIFD, exifPtr))
+	if gpsPtr != 0 {
+		out = append(out, longEntry(tagGPSIFD, gpsPtr))
+	}
 	return out
 }
 
 // buildExifPayload assembles a standalone TIFF-format EXIF block ("II"
-// header, IFD0, Exif IFD) — the payload of a JPEG APP1 segment (after the
-// "Exif\0\0" identifier) or a PNG eXIf chunk (as is).
+// header, IFD0, Exif IFD, GPS IFD when there's a fix) — the payload of a JPEG
+// APP1 segment (after the "Exif\0\0" identifier) or a PNG eXIf chunk (as is).
 func buildExifPayload(m exifMeta) []byte {
 	const headerLen = 8
 	exifEntriesList := exifIFDEntries(m)
+	var gpsList []exifEntry
+	if m.HasGPS {
+		gpsList = gpsIFDEntries(m)
+	}
 	// IFD0's size depends only on entry count and data lengths, so build it
-	// once with a placeholder pointer to learn where the Exif IFD lands.
-	ifd0 := ifd0Entries(m, 0)
+	// once with placeholder pointers to learn where the sub-IFDs land. The GPS
+	// placeholder must be nonzero when a GPS IFD exists, or the sizing pass
+	// misses its pointer entry and every offset lands 12 bytes short.
+	gpsPlaceholder := uint32(0)
+	if m.HasGPS {
+		gpsPlaceholder = 1
+	}
+	ifd0 := ifd0Entries(m, 0, gpsPlaceholder)
 	exifPtr := headerLen + ifdSize(ifd0)
-	ifd0 = ifd0Entries(m, exifPtr)
+	gpsPtr := uint32(0)
+	if m.HasGPS {
+		gpsPtr = exifPtr + ifdSize(exifEntriesList)
+	}
+	ifd0 = ifd0Entries(m, exifPtr, gpsPtr)
 
 	buf := &bytes.Buffer{}
 	le := binary.LittleEndian
@@ -219,6 +370,10 @@ func buildExifPayload(m exifMeta) []byte {
 	writeIFD(buf, ifd0, headerLen)
 	padTo(buf, exifPtr)
 	writeIFD(buf, exifEntriesList, exifPtr)
+	if m.HasGPS {
+		padTo(buf, gpsPtr)
+		writeIFD(buf, gpsList, gpsPtr)
+	}
 	return buf.Bytes()
 }
 
@@ -226,7 +381,7 @@ func buildExifPayload(m exifMeta) []byte {
 // Call it after the ICC splice so APP1 ends up first, the order EXIF-aware
 // readers expect.
 func embedExifJPEG(jpg []byte, m exifMeta) []byte {
-	if len(jpg) < 2 || jpg[0] != 0xFF || jpg[1] != 0xD8 {
+	if m.Disabled || len(jpg) < 2 || jpg[0] != 0xFF || jpg[1] != 0xD8 {
 		return jpg
 	}
 	payload := buildExifPayload(m)
@@ -244,7 +399,7 @@ func embedExifJPEG(jpg []byte, m exifMeta) []byte {
 // TIFF-format block directly — no JPEG-style identifier, per the PNG spec.
 func embedExifPNG(pngData []byte, m exifMeta) []byte {
 	const ihdrEnd = 8 + 25
-	if len(pngData) < ihdrEnd {
+	if m.Disabled || len(pngData) < ihdrEnd {
 		return pngData
 	}
 	payload := buildExifPayload(m)

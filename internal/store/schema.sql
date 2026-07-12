@@ -29,6 +29,10 @@ CREATE TABLE photos (
     look_gamma  REAL    NOT NULL DEFAULT 0,
     base_exp_ev REAL,
     updated_at  INTEGER,
+    lens        TEXT    NOT NULL DEFAULT '',
+    gps_lat     REAL,
+    gps_lon     REAL,
+    gps_alt     REAL,
     UNIQUE(folder_id, file_name)
 );
 CREATE INDEX idx_photos_folder ON photos(folder_id, file_name);

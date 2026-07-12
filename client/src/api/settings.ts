@@ -7,7 +7,7 @@ import type {
     UseQueryOptions,
     UseQueryResult,
 } from './client';
-import type { ColorSpaceType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
+import type { ColorSpaceType, ExifModeType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
 import type { Params } from './edit';
 
 export const LibrarySort = {
@@ -64,6 +64,10 @@ export interface ExportOptions {
     sharpenTarget: SharpenTargetType;
     sharpenAmount: SharpenAmountType;
     fileNameTemplate: string;
+    exifMode: ExifModeType;
+    removeLocation: boolean;
+    artist: string;
+    copyright: string;
 }
 
 export interface UISettings {

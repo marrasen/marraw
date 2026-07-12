@@ -46,6 +46,13 @@ type Photo struct {
 	// (rating, flag, or edit), used to reconcile against portable sidecars by
 	// last-writer-wins. Invalid = never touched.
 	UpdatedAt sql.NullInt64
+	// Lens is the lens model string, "" = unknown.
+	Lens string
+	// GPS position in signed decimal degrees (S/W negative), altitude in
+	// meters. Invalid = the RAW carried no fix (or no altitude).
+	GPSLat sql.NullFloat64
+	GPSLon sql.NullFloat64
+	GPSAlt sql.NullFloat64
 }
 
 // Path returns the absolute file path of the photo.
@@ -249,14 +256,14 @@ func (db *DB) SyncFolder(ctx context.Context, folderID int64, folderPath string,
 const photoCols = `p.id, p.folder_id, f.path, p.file_name, p.file_size, p.mtime_ns, p.cache_key,
 	p.meta_loaded, p.width, p.height, p.orientation, p.make, p.model,
 	p.iso, p.shutter, p.aperture, p.focal_len, p.taken_at, p.rating, p.flag, p.edit_params, p.edit_hash,
-	p.look_gamma, p.base_exp_ev, p.updated_at`
+	p.look_gamma, p.base_exp_ev, p.updated_at, p.lens, p.gps_lat, p.gps_lon, p.gps_alt`
 
 func scanPhoto(row interface{ Scan(...any) error }) (Photo, error) {
 	var p Photo
 	err := row.Scan(&p.ID, &p.FolderID, &p.FolderPath, &p.FileName, &p.FileSize, &p.MtimeNs, &p.CacheKey,
 		&p.MetaLoaded, &p.Width, &p.Height, &p.Orientation, &p.Make, &p.Model,
 		&p.ISO, &p.Shutter, &p.Aperture, &p.FocalLen, &p.TakenAt, &p.Rating, &p.Flag, &p.EditParams, &p.EditHash,
-		&p.LookGamma, &p.BaseExpEV, &p.UpdatedAt)
+		&p.LookGamma, &p.BaseExpEV, &p.UpdatedAt, &p.Lens, &p.GPSLat, &p.GPSLon, &p.GPSAlt)
 	return p, err
 }
 
@@ -357,14 +364,18 @@ type PhotoMeta struct {
 	ISO, Shutter, Aperture     float64
 	FocalLen                   float64
 	TakenAt                    int64
+	Lens                       string
+	GPSLat, GPSLon, GPSAlt     sql.NullFloat64
 }
 
 func (db *DB) SetMeta(ctx context.Context, id int64, m PhotoMeta) error {
 	_, err := db.ExecContext(ctx, `
 		UPDATE photos SET meta_loaded = 1, width = ?, height = ?, orientation = ?,
-			make = ?, model = ?, iso = ?, shutter = ?, aperture = ?, focal_len = ?, taken_at = ?
+			make = ?, model = ?, iso = ?, shutter = ?, aperture = ?, focal_len = ?, taken_at = ?,
+			lens = ?, gps_lat = ?, gps_lon = ?, gps_alt = ?
 		WHERE id = ?`,
-		m.Width, m.Height, m.Orientation, m.Make, m.Model, m.ISO, m.Shutter, m.Aperture, m.FocalLen, m.TakenAt, id)
+		m.Width, m.Height, m.Orientation, m.Make, m.Model, m.ISO, m.Shutter, m.Aperture, m.FocalLen, m.TakenAt,
+		m.Lens, m.GPSLat, m.GPSLon, m.GPSAlt, id)
 	return err
 }
 

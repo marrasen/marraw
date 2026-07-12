@@ -16,6 +16,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"math"
 	"syscall"
 	"time"
 	"unsafe"
@@ -73,13 +74,19 @@ type Metadata struct {
 	TakenAt      time.Time
 	Width        int // visible processed size (pre-flip)
 	Height       int
-	Orientation  int // EXIF-style flip: 0 none, 3=180, 5=90ccw, 6=90cw
+	Orientation  int    // EXIF-style flip: 0 none, 3=180, 5=90ccw, 6=90cw
+	Lens         string // lens model, "" = unknown
+	GPSValid     bool   // Latitude/Longitude hold a real fix
+	Latitude     float64
+	Longitude    float64 // signed decimal degrees, S/W negative
+	AltValid     bool
+	Altitude     float64 // meters, negative = below sea level
 }
 
 func (p *Processor) Metadata() Metadata {
 	ip := C.libraw_get_iparams(p.h)
 	other := C.libraw_get_imgother(p.h)
-	return Metadata{
+	md := Metadata{
 		Make:        C.GoString(&ip.make[0]),
 		Model:       C.GoString(&ip.model[0]),
 		ISO:         float64(other.iso_speed),
@@ -90,6 +97,52 @@ func (p *Processor) Metadata() Metadata {
 		Width:       int(C.libraw_get_iwidth(p.h)),
 		Height:      int(C.libraw_get_iheight(p.h)),
 		Orientation: int(p.h.sizes.flip),
+		Lens:        lensOf(p.h),
+	}
+	md.readGPS(other.parsed_gps)
+	return md
+}
+
+// lensOf reads the lens model, preferring the normalized EXIF string and
+// falling back to the maker-note one (some mounts fill only the latter).
+func lensOf(h *C.libraw_data_t) string {
+	li := C.libraw_get_lensinfo(h)
+	if s := C.GoString(&li.Lens[0]); s != "" {
+		return s
+	}
+	return C.GoString(&li.makernotes.Lens[0])
+}
+
+// readGPS converts LibRaw's parsed GPS block to signed decimal degrees.
+// gpsparsed alone is not proof of a fix: some bodies write an all-zero GPS
+// block, which parses "successfully" — real hemisphere letters are required
+// too. Altitude has no validity flag at all, so an exact 0 m reading is
+// indistinguishable from "no altitude tag" and is dropped.
+func (md *Metadata) readGPS(g C.libraw_gps_info_t) {
+	if g.gpsparsed == 0 ||
+		(g.latref != 'N' && g.latref != 'S') ||
+		(g.longref != 'E' && g.longref != 'W') {
+		return
+	}
+	lat := float64(g.latitude[0]) + float64(g.latitude[1])/60 + float64(g.latitude[2])/3600
+	lon := float64(g.longitude[0]) + float64(g.longitude[1])/60 + float64(g.longitude[2])/3600
+	if g.latref == 'S' {
+		lat = -lat
+	}
+	if g.longref == 'W' {
+		lon = -lon
+	}
+	if math.IsNaN(lat) || math.IsNaN(lon) || math.Abs(lat) > 90 || math.Abs(lon) > 180 {
+		return
+	}
+	md.GPSValid = true
+	md.Latitude, md.Longitude = lat, lon
+	if alt := float64(g.altitude); alt != 0 {
+		if g.altref != 0 {
+			alt = -math.Abs(alt)
+		}
+		md.AltValid = true
+		md.Altitude = alt
 	}
 }
 

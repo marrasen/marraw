@@ -84,20 +84,35 @@ func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte, meta exifMeta) error 
 		return err
 	}
 
-	// The out-of-line metadata strings (NUL-terminated, may be absent).
+	// The out-of-line metadata strings (NUL-terminated, may be absent), split
+	// by where their tags sort in the main IFD: Make/Model (271/272) before
+	// StripOffsets (273); Software/DateTime/Artist (305/306/315) between
+	// ResolutionUnit (296) and Predictor (317); Copyright (33432) between
+	// Predictor and the Exif IFD pointer (34665). Disabled mode drops them
+	// all — the main IFD keeps only what describes the pixels.
 	type asciiField struct {
 		tag uint16
 		val string
 		off uint32
 	}
-	strs := []*asciiField{
-		{tag: tagMake, val: meta.Make},
-		{tag: tagModel, val: meta.Model},
-		{tag: tagSoftware, val: "marraw"},
+	var preStrip, postRes []*asciiField
+	if !meta.Disabled {
+		preStrip = []*asciiField{
+			{tag: tagMake, val: meta.Make},
+			{tag: tagModel, val: meta.Model},
+		}
+		postRes = []*asciiField{{tag: tagSoftware, val: "marraw"}}
+		if meta.TakenAt > 0 {
+			postRes = append(postRes, &asciiField{tag: tagDateTime, val: time.Unix(meta.TakenAt, 0).Format(exifDateFormat)})
+		}
+		if meta.Artist != "" {
+			postRes = append(postRes, &asciiField{tag: tagArtist, val: meta.Artist})
+		}
+		if meta.Copyright != "" {
+			postRes = append(postRes, &asciiField{tag: tagCopyright, val: meta.Copyright})
+		}
 	}
-	if meta.TakenAt > 0 {
-		strs = append(strs, &asciiField{tag: tagDateTime, val: time.Unix(meta.TakenAt, 0).Format(exifDateFormat)})
-	}
+	strs := append(append([]*asciiField{}, preStrip...), postRes...)
 
 	// Everything but the IFD is laid out first, so entry offsets are known by
 	// the time the entries are written. Field data must start on a word
@@ -119,9 +134,18 @@ func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte, meta exifMeta) error 
 		s.off = pos
 		pos = even(pos + uint32(len(s.val)) + 1)
 	}
-	exifEntriesList := exifIFDEntries(meta)
-	exifOff := pos
-	pos = even(pos + ifdSize(exifEntriesList))
+	var exifEntriesList, gpsList []exifEntry
+	var exifOff, gpsOff uint32
+	if !meta.Disabled {
+		exifEntriesList = exifIFDEntries(meta)
+		exifOff = pos
+		pos = even(pos + ifdSize(exifEntriesList))
+		if meta.HasGPS {
+			gpsList = gpsIFDEntries(meta)
+			gpsOff = pos
+			pos = even(pos + ifdSize(gpsList))
+		}
+	}
 	var iccOff uint32
 	if len(icc) > 0 {
 		iccOff = pos
@@ -129,6 +153,9 @@ func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte, meta exifMeta) error 
 	}
 	ifdOff := pos
 
+	strEntry := func(s *asciiField) ifdEntry {
+		return ifdEntry{s.tag, typASCII, uint32(len(s.val)) + 1, s.off}
+	}
 	entries := []ifdEntry{
 		{tagImageWidth, typLong, 1, uint32(width)},
 		{tagImageLength, typLong, 1, uint32(height)},
@@ -136,9 +163,9 @@ func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte, meta exifMeta) error 
 		{tagCompression, typShort, 1, compressionDeflate},
 		{tagPhotometric, typShort, 1, photometricRGB},
 	}
-	for _, s := range strs[:2] { // Make, Model — tags 271/272 sort here
+	for _, s := range preStrip {
 		if s.val != "" {
-			entries = append(entries, ifdEntry{s.tag, typASCII, uint32(len(s.val)) + 1, s.off})
+			entries = append(entries, strEntry(s))
 		}
 	}
 	entries = append(entries,
@@ -152,15 +179,27 @@ func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte, meta exifMeta) error 
 		ifdEntry{tagPlanarConfig, typShort, 1, planarChunky},
 		ifdEntry{tagResolutionUnit, typShort, 1, resolutionUnitInch},
 	)
-	for _, s := range strs[2:] { // Software, DateTime — tags 305/306
-		if s.val != "" {
-			entries = append(entries, ifdEntry{s.tag, typASCII, uint32(len(s.val)) + 1, s.off})
+	for _, s := range postRes {
+		if s.val != "" && s.tag != tagCopyright {
+			entries = append(entries, strEntry(s))
 		}
 	}
 	entries = append(entries, ifdEntry{tagPredictor, typShort, 1, predictorHorizontal})
-	entries = append(entries, ifdEntry{tagExifIFD, typLong, 1, exifOff})
+	for _, s := range postRes {
+		if s.val != "" && s.tag == tagCopyright {
+			entries = append(entries, strEntry(s))
+		}
+	}
+	if !meta.Disabled {
+		entries = append(entries, ifdEntry{tagExifIFD, typLong, 1, exifOff})
+	}
 	if len(icc) > 0 {
 		entries = append(entries, ifdEntry{tagICCProfile, typUndefined, uint32(len(icc)), iccOff})
+	}
+	// The GPS pointer (34853) sorts after the ICC profile (34675), so it is
+	// the last entry — counterintuitive but required for ascending tag order.
+	if gpsOff != 0 {
+		entries = append(entries, ifdEntry{tagGPSIFD, typLong, 1, gpsOff})
 	}
 
 	le := binary.LittleEndian
@@ -189,8 +228,14 @@ func encodeTIFF8(w io.Writer, img *image.RGBA, icc []byte, meta exifMeta) error 
 		buf.WriteString(s.val)
 		buf.WriteByte(0)
 	}
-	padTo(buf, exifOff)
-	writeIFD(buf, exifEntriesList, exifOff)
+	if !meta.Disabled {
+		padTo(buf, exifOff)
+		writeIFD(buf, exifEntriesList, exifOff)
+		if gpsOff != 0 {
+			padTo(buf, gpsOff)
+			writeIFD(buf, gpsList, gpsOff)
+		}
+	}
 	if len(icc) > 0 {
 		padTo(buf, iccOff)
 		buf.Write(icc)
