@@ -23,6 +23,7 @@ const FORMAT_ITEMS: { value: ExportFormatType; label: string }[] = [
   { value: 'jpeg', label: 'JPEG' },
   { value: 'tiff8', label: 'TIFF' },
   { value: 'png', label: 'PNG' },
+  { value: 'rawXmp', label: 'RAW + XMP' },
 ];
 const COLOR_ITEMS: { value: ColorSpaceType; label: string }[] = [
   { value: 'srgb', label: 'sRGB' },
@@ -66,7 +67,15 @@ function exampleFileName(
     .replaceAll('{time}', time)
     .replace(/[<>:"/\\|?*]/g, '-')
     .replace(/[. ]+$/, '');
-  const ext = format === 'png' ? '.png' : format === 'tiff8' ? '.tif' : '.jpg';
+  // RAW + XMP copies keep the source's own extension.
+  const ext =
+    format === 'rawXmp'
+      ? (photo?.fileName.match(/\.[^.]+$/)?.[0] ?? '.ARW')
+      : format === 'png'
+        ? '.png'
+        : format === 'tiff8'
+          ? '.tif'
+          : '.jpg';
   return (base || name) + ext;
 }
 
@@ -119,6 +128,12 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   const current = folderPath ? roots.find((r) => samePath(r.path, folderPath)) : undefined;
   const shootName = current ? rootName(current) : folderPath;
   const longEdge = resize === 'edge' ? edgePx : 0;
+  // RAW + XMP copies the source files and writes .xmp sidecars — nothing
+  // renders, so the pixel options (resize, color space, sharpen) hide. Into
+  // the photos' own folder, the backend skips the copy and only writes the
+  // sidecars next to the originals.
+  const isRaw = format === 'rawXmp';
+  const inPlace = isRaw && !!folderPath && samePath(destDir, folderPath);
 
   const start = async (createDir: boolean) => {
     if (!destDir) {
@@ -167,10 +182,20 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
 
   const summary = [
     `${ids.length} file${ids.length === 1 ? '' : 's'}`,
-    format === 'jpeg' ? `JPEG q${quality}` : format === 'png' ? 'PNG lossless' : 'TIFF lossless',
-    resize === 'edge' ? `${edgePx}px` : 'full res',
-    ...(colorSpace !== 'srgb' ? [COLOR_ITEMS.find((c) => c.value === colorSpace)!.label] : []),
-    ...(sharpenTarget !== 'off' ? [`sharpen ${sharpenTarget}`] : []),
+    ...(isRaw
+      ? [inPlace ? 'XMP sidecars next to the originals' : 'RAW copies + XMP sidecars']
+      : [
+          format === 'jpeg'
+            ? `JPEG q${quality}`
+            : format === 'png'
+              ? 'PNG lossless'
+              : 'TIFF lossless',
+          resize === 'edge' ? `${edgePx}px` : 'full res',
+          ...(colorSpace !== 'srgb'
+            ? [COLOR_ITEMS.find((c) => c.value === colorSpace)!.label]
+            : []),
+          ...(sharpenTarget !== 'off' ? [`sharpen ${sharpenTarget}`] : []),
+        ]),
     'runs in the background',
   ].join(' · ');
 
@@ -232,7 +257,25 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
                   Choose…
                 </Button>
               )}
+              {isRaw && folderPath && !inPlace && (
+                <Button
+                  variant="outline"
+                  className="h-[34px]"
+                  onClick={() => {
+                    setDestDir(folderPath);
+                    setNeedsCreate(false);
+                  }}
+                >
+                  Use current folder
+                </Button>
+              )}
             </>,
+          )}
+          {inPlace && (
+            <div className="rounded-lg border bg-secondary/50 p-2.5 text-xs text-muted-foreground dark:bg-white/5">
+              Destination is the photos&apos; own folder: XMP sidecars are written next to the
+              originals and nothing is copied.
+            </div>
           )}
           {row(
             'File name',
@@ -247,6 +290,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
               <span className="font-mono text-[10.5px] text-muted-foreground">
                 {'{name}'} source · {'{seq}'} number · {'{date}'} {'{time}'} captured — e.g.{' '}
                 {exampleFileName(fileTemplate, photos.find((p) => p.id === ids[0]), ids.length, format)}
+                {isRaw && " · ignored when exporting into the photos' own folder"}
               </span>
             </div>,
           )}
@@ -277,61 +321,65 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
                 <span className="w-9 text-right font-mono text-[13px] tabular-nums">{quality}</span>
               </>,
             )}
-          {row(
-            'Resize',
-            <>
+          {!isRaw &&
+            row(
+              'Resize',
+              <>
+                <Segmented
+                  aria-label="Resize"
+                  size="sm"
+                  items={[
+                    { value: 'full', label: 'Full res' },
+                    { value: 'edge', label: 'Long edge' },
+                  ]}
+                  value={resize}
+                  onValueChange={setResize}
+                  className="border-0 bg-secondary dark:bg-white/5"
+                />
+                {resize === 'edge' && (
+                  <div className="flex h-[34px] items-center gap-1.5 rounded-lg border border-input bg-secondary px-2.5 dark:bg-white/5">
+                    <input
+                      className="w-[46px] bg-transparent text-right font-mono text-xs text-foreground outline-none"
+                      value={edgePx}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        if (Number.isFinite(n)) setEdgePx(Math.max(0, Math.min(65536, Math.round(n))));
+                      }}
+                      aria-label="Long edge pixels"
+                    />
+                    <span className="font-mono text-[11px] text-muted-foreground">px</span>
+                  </div>
+                )}
+              </>,
+            )}
+          {!isRaw &&
+            row(
+              'Color space',
               <Segmented
-                aria-label="Resize"
+                aria-label="Color space"
                 size="sm"
-                items={[
-                  { value: 'full', label: 'Full res' },
-                  { value: 'edge', label: 'Long edge' },
-                ]}
-                value={resize}
-                onValueChange={setResize}
+                items={COLOR_ITEMS}
+                value={colorSpace}
+                onValueChange={setColorSpace}
                 className="border-0 bg-secondary dark:bg-white/5"
-              />
-              {resize === 'edge' && (
-                <div className="flex h-[34px] items-center gap-1.5 rounded-lg border border-input bg-secondary px-2.5 dark:bg-white/5">
-                  <input
-                    className="w-[46px] bg-transparent text-right font-mono text-xs text-foreground outline-none"
-                    value={edgePx}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      if (Number.isFinite(n)) setEdgePx(Math.max(0, Math.min(65536, Math.round(n))));
-                    }}
-                    aria-label="Long edge pixels"
-                  />
-                  <span className="font-mono text-[11px] text-muted-foreground">px</span>
-                </div>
-              )}
-            </>,
-          )}
-          {row(
-            'Color space',
-            <Segmented
-              aria-label="Color space"
-              size="sm"
-              items={COLOR_ITEMS}
-              value={colorSpace}
-              onValueChange={setColorSpace}
-              className="border-0 bg-secondary dark:bg-white/5"
-            />,
-          )}
+              />,
+            )}
           {/* Output sharpening is a property of the final render, not of the
               container, so it applies to TIFF too. */}
-          {row(
-            'Sharpen for',
-            <Segmented
-              aria-label="Sharpen for"
-              size="sm"
-              items={SHARPEN_TARGET_ITEMS}
-              value={sharpenTarget}
-              onValueChange={setSharpenTarget}
-              className="border-0 bg-secondary dark:bg-white/5"
-            />,
-          )}
-          {sharpenTarget !== 'off' &&
+          {!isRaw &&
+            row(
+              'Sharpen for',
+              <Segmented
+                aria-label="Sharpen for"
+                size="sm"
+                items={SHARPEN_TARGET_ITEMS}
+                value={sharpenTarget}
+                onValueChange={setSharpenTarget}
+                className="border-0 bg-secondary dark:bg-white/5"
+              />,
+            )}
+          {!isRaw &&
+            sharpenTarget !== 'off' &&
             row(
               'Amount',
               <Segmented

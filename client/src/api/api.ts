@@ -12,6 +12,7 @@ export const ExportFormat = {
     Jpeg: "jpeg",
     Tiff8: "tiff8",
     Png: "png",
+    RawXmp: "rawXmp",
 } as const;
 export type ExportFormatType = typeof ExportFormat[keyof typeof ExportFormat];
 

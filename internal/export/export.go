@@ -23,13 +23,14 @@ import (
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
+	"github.com/marrasen/marraw/internal/xmp"
 )
 
 type Request struct {
 	PhotoIDs    []int64
 	DestDir     string
-	Format      string // "jpeg", "tiff8", or "png"
-	JpegQuality int    // 0 = 90; ignored by tiff8/png
+	Format      string // "jpeg", "tiff8", "png", or "rawXmp" (copy RAW + .xmp sidecar)
+	JpegQuality int    // 0 = 90; jpeg only
 	LongEdge    int    // 0 = full resolution
 	// ColorSpace selects the output primaries: "srgb" (default),
 	// "adobergb", or "prophoto". LibRaw converts during decode; both encoders
@@ -75,6 +76,28 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 		photo, err := db.GetPhoto(ctx, id)
 		if err != nil {
 			onItem(Item{PhotoID: id, Err: err})
+			continue
+		}
+		if req.Format == "rawXmp" {
+			// Exporting into the photo's own folder writes only the sidecar,
+			// next to the original under its own name — and must bypass the
+			// namer, whose collision check would see the original RAW itself
+			// and "resolve" it to a renamed copy. Case-insensitive compare per
+			// the Windows convention elsewhere (junction/subst aliases of the
+			// same directory are not detected).
+			sameDir := strings.EqualFold(filepath.Clean(req.DestDir), filepath.Clean(photo.FolderPath))
+			outName := photo.FileName
+			if !sameDir {
+				outName = names.claim(photo.FileName, photo.TakenAt, req.Format)
+			}
+			g.Go(func() error {
+				if gctx.Err() != nil {
+					return gctx.Err()
+				}
+				err := exportRawXmp(photo, filepath.Join(req.DestDir, outName), sameDir)
+				onItem(Item{PhotoID: photo.ID, FileName: outName, Err: err})
+				return nil
+			})
 			continue
 		}
 		outName := names.claim(photo.FileName, photo.TakenAt, req.Format)
@@ -253,6 +276,9 @@ func (n *namer) claim(srcName string, takenAt int64, format string) string {
 		ext = ".tif"
 	case "png":
 		ext = ".png"
+	case "rawXmp":
+		// The copy keeps the RAW's own extension (and its case).
+		ext = filepath.Ext(srcName)
 	}
 	n.seq++
 	src := strings.TrimSuffix(srcName, filepath.Ext(srcName))
@@ -261,11 +287,28 @@ func (n *namer) claim(srcName string, takenAt int64, format string) string {
 		base = src
 	}
 	name := base + ext
-	for i := 2; n.used[strings.ToLower(name)] || exists(filepath.Join(n.destDir, name)); i++ {
+	for i := 2; n.collides(name, format); i++ {
 		name = fmt.Sprintf("%s-%d%s", base, i, ext)
 	}
 	n.used[strings.ToLower(name)] = true
+	if format == "rawXmp" {
+		n.used[strings.ToLower(xmp.PathFor(name))] = true
+	}
 	return name
+}
+
+// collides reports whether name is already claimed in this batch or present
+// on disk. A rawXmp claim also covers its derived .xmp sidecar, so two RAWs
+// sharing a basename (IMG1.ARW + IMG1.CR2) don't both write IMG1.xmp.
+func (n *namer) collides(name, format string) bool {
+	if n.used[strings.ToLower(name)] || exists(filepath.Join(n.destDir, name)) {
+		return true
+	}
+	if format != "rawXmp" {
+		return false
+	}
+	sc := xmp.PathFor(name)
+	return n.used[strings.ToLower(sc)] || exists(filepath.Join(n.destDir, sc))
 }
 
 func expandTemplate(template, name string, takenAt int64, seq, total int) string {

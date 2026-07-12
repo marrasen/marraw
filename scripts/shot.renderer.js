@@ -58,6 +58,16 @@ if (shot === 'cull') {
   ui().setPaletteOpen(true);
 } else if (shot === 'export') {
   ui().setExportOpen(true);
+} else if (shot === 'export-raw') {
+  ui().setExportOpen(true);
+  await sleep(400);
+  [...document.querySelectorAll('button')].find((b) => b.textContent === 'RAW + XMP')?.click();
+} else if (shot === 'export-inplace') {
+  ui().setExportOpen(true);
+  await sleep(400);
+  [...document.querySelectorAll('button')].find((b) => b.textContent === 'RAW + XMP')?.click();
+  await sleep(200);
+  [...document.querySelectorAll('button')].find((b) => b.textContent === 'Use current folder')?.click();
 } else if (shot === 'settings') {
   ui().setSettingsOpen(true);
 } else if (shot === 'sidecars') {

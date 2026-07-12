@@ -34,17 +34,22 @@ func FlagFromInt(i int) Flag {
 	}
 }
 
-// ExportFormat selects the export encoder. All render the same pixels; TIFF
-// and PNG are the lossless options (8-bit RGB), JPEG the compact one.
+// ExportFormat selects the export output. JPEG/TIFF/PNG render the same
+// pixels (TIFF and PNG lossless 8-bit RGB, JPEG compact); rawXmp skips
+// rendering entirely and instead copies the source RAW with an Adobe .xmp
+// sidecar carrying the rating, label and an approximation of the edit.
 type ExportFormat string
 
 const (
-	ExportJPEG  ExportFormat = "jpeg"
-	ExportTIFF8 ExportFormat = "tiff8"
-	ExportPNG   ExportFormat = "png"
+	ExportJPEG   ExportFormat = "jpeg"
+	ExportTIFF8  ExportFormat = "tiff8"
+	ExportPNG    ExportFormat = "png"
+	ExportRawXMP ExportFormat = "rawXmp"
 )
 
-func ExportFormatValues() []ExportFormat { return []ExportFormat{ExportJPEG, ExportTIFF8, ExportPNG} }
+func ExportFormatValues() []ExportFormat {
+	return []ExportFormat{ExportJPEG, ExportTIFF8, ExportPNG, ExportRawXMP}
+}
 
 // ColorSpace selects the export output primaries.
 type ColorSpace string

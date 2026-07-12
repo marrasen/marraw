@@ -80,7 +80,8 @@ function sanitizeExportOptions(o: Partial<ExportOptions> | undefined): ExportOpt
   return {
     // An older blob may still say 'tiff16'; that format is gone, so it falls
     // back to the jpeg default like any other unknown value.
-    format: o?.format === 'tiff8' || o?.format === 'png' ? o.format : 'jpeg',
+    format:
+      o?.format === 'tiff8' || o?.format === 'png' || o?.format === 'rawXmp' ? o.format : 'jpeg',
     jpegQuality:
       typeof o?.jpegQuality === 'number' && o.jpegQuality >= 1 && o.jpegQuality <= 100
         ? Math.round(o.jpegQuality)
