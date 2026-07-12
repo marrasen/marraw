@@ -209,6 +209,16 @@ func (l *Library) metaPass(ctx context.Context, folderID int64, path string) {
 	task.SetMeta(TaskMeta{Kind: "scan", Folder: name, FolderPath: path})
 	task.Progress(0, n)
 	task.Err(l.deps.Scanner.Backfill(tctx, folderID, task.Progress))
+	// The backfill just wrote taken_at values the rail's shoot list was built
+	// without; re-list so Shoot.earliestTakenAt (the date sort/grouping key)
+	// reflects them. A shoot lives in its parent's listing; a managed parent's
+	// own loose-RAW row lives in its own.
+	if parent := filepath.Dir(filepath.Clean(path)); l.isParentRoot(ctx, parent) {
+		l.deps.TriggerRefresh(shootsKey(parent))
+	}
+	if l.isParentRoot(ctx, path) {
+		l.deps.TriggerRefresh(shootsKey(path))
+	}
 }
 
 // prerenderPass renders the loupe-ready 2048 rendition (which also yields

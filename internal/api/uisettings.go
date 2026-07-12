@@ -55,6 +55,37 @@ func LibrarySortValues() []LibrarySort {
 	return []LibrarySort{LibrarySortCaptureAsc, LibrarySortCaptureDesc, LibrarySortNameAsc, LibrarySortNameDesc}
 }
 
+// ShootSort is the folder ordering in the library rail (LibrarySort is the
+// photos within a folder). date* keys on Shoot.earliestTakenAt, undated
+// folders last either way.
+type ShootSort string
+
+const (
+	ShootSortNameAsc  ShootSort = "nameAsc"
+	ShootSortNameDesc ShootSort = "nameDesc"
+	ShootSortDateAsc  ShootSort = "dateAsc"
+	ShootSortDateDesc ShootSort = "dateDesc"
+)
+
+func ShootSortValues() []ShootSort {
+	return []ShootSort{ShootSortNameAsc, ShootSortNameDesc, ShootSortDateAsc, ShootSortDateDesc}
+}
+
+// ShootGroup is the rail's time bucketing of folders under collapsible
+// year / month / day headers, keyed on Shoot.earliestTakenAt.
+type ShootGroup string
+
+const (
+	ShootGroupNone  ShootGroup = "none"
+	ShootGroupYear  ShootGroup = "year"
+	ShootGroupMonth ShootGroup = "month"
+	ShootGroupDay   ShootGroup = "day"
+)
+
+func ShootGroupValues() []ShootGroup {
+	return []ShootGroup{ShootGroupNone, ShootGroupYear, ShootGroupMonth, ShootGroupDay}
+}
+
 // AutoPreset is a creative auto preset: named auto sections plus style
 // offsets layered on top. The client sanitizes sections/offset keys on read,
 // so unknown values from older/newer clients survive as stored.
@@ -164,6 +195,11 @@ type UISettings struct {
 	// LibrarySort is the photo ordering in the grids and filmstrips
 	// (default captureAsc).
 	LibrarySort LibrarySort `json:"librarySort"`
+	// ShootSort is the folder ordering in the library rail (default nameAsc,
+	// the order ListShoots serves).
+	ShootSort ShootSort `json:"shootSort"`
+	// ShootGroup is the rail's time bucketing of folders (default none).
+	ShootGroup ShootGroup `json:"shootGroup"`
 }
 
 // Settings serves the persisted client preferences. Everything lives in the
@@ -195,6 +231,8 @@ const (
 	settingUIPrerenderFull = "ui:prerenderFullres"
 	settingUIThumbFit      = "ui:thumbFit"
 	settingUILibrarySort   = "ui:librarySort"
+	settingUIShootSort     = "ui:shootSort"
+	settingUIShootGroup    = "ui:shootGroup"
 )
 
 // Library rail width bounds; the default matches the design handoff.
@@ -258,6 +296,22 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		}
 	}
 
+	// Name order unless an explicit, recognized value is stored.
+	shootSort := ShootSortNameAsc
+	if raw, _ := db.GetSetting(ctx, settingUIShootSort); raw != "" {
+		if v := ShootSort(raw); enumValid(v, ShootSortValues()) {
+			shootSort = v
+		}
+	}
+
+	// No time grouping unless an explicit, recognized value is stored.
+	shootGroup := ShootGroupNone
+	if raw, _ := db.GetSetting(ctx, settingUIShootGroup); raw != "" {
+		if v := ShootGroup(raw); enumValid(v, ShootGroupValues()) {
+			shootGroup = v
+		}
+	}
+
 	return &UISettings{
 		Theme:            theme,
 		GapMinutes:       gap,
@@ -275,6 +329,8 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		PrerenderFullres: prerenderFullRaw == "true",
 		ThumbFit:         thumbFit,
 		LibrarySort:      librarySort,
+		ShootSort:        shootSort,
+		ShootGroup:       shootGroup,
 	}, nil
 }
 
@@ -493,6 +549,22 @@ func (u *Settings) SetLibrarySort(ctx context.Context, sort LibrarySort) error {
 		return aprot.ErrInvalidParams(fmt.Sprintf("unknown librarySort %q", sort))
 	}
 	return u.save(ctx, settingUILibrarySort, string(sort))
+}
+
+// SetShootSort persists the folder ordering in the library rail.
+func (u *Settings) SetShootSort(ctx context.Context, sort ShootSort) error {
+	if !enumValid(sort, ShootSortValues()) {
+		return aprot.ErrInvalidParams(fmt.Sprintf("unknown shootSort %q", sort))
+	}
+	return u.save(ctx, settingUIShootSort, string(sort))
+}
+
+// SetShootGroup persists the rail's time bucketing of folders.
+func (u *Settings) SetShootGroup(ctx context.Context, group ShootGroup) error {
+	if !enumValid(group, ShootGroupValues()) {
+		return aprot.ErrInvalidParams(fmt.Sprintf("unknown shootGroup %q", group))
+	}
+	return u.save(ctx, settingUIShootGroup, string(group))
 }
 
 // save writes one row and pushes the fresh snapshot to every window.

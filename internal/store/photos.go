@@ -96,6 +96,37 @@ func (db *DB) FolderPhotoCount(ctx context.Context, path string) (int, bool, err
 	return n, true, nil
 }
 
+// FolderEarliest is one folder row's earliest known capture time.
+type FolderEarliest struct {
+	Path     string
+	Earliest int64 // unix seconds
+}
+
+// EarliestTakenByFolder returns, for every scanned folder, the earliest
+// non-zero taken_at among its photos. Folders whose photos all lack a capture
+// time (taken_at = 0, not yet backfilled or absent from EXIF) are omitted.
+// One aggregate over the whole folders table: callers match paths to shoots
+// in Go, for the same reason RenameFolderPaths does its prefix math there.
+func (db *DB) EarliestTakenByFolder(ctx context.Context) ([]FolderEarliest, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT f.path, MIN(p.taken_at) FROM folders f
+		JOIN photos p ON p.folder_id = f.id
+		WHERE p.taken_at > 0 GROUP BY f.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FolderEarliest
+	for rows.Next() {
+		var fe FolderEarliest
+		if err := rows.Scan(&fe.Path, &fe.Earliest); err != nil {
+			return nil, err
+		}
+		out = append(out, fe)
+	}
+	return out, rows.Err()
+}
+
 // RenameFolderPaths moves a folder row (and any rows for folders nested
 // beneath it) to a new path after an on-disk rename. Photo rows are keyed by
 // folder id and are untouched; their cache keys are recomputed on the next

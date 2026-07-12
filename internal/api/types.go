@@ -176,6 +176,10 @@ type Shoot struct {
 	PhotoCount int `json:"photoCount"`
 	// IsSelf marks the parent's own row.
 	IsSelf bool `json:"isSelf"`
+	// EarliestTakenAt is the earliest capture time (unix seconds) among the
+	// folder's catalogued photos, 0 until the metadata pass has read one.
+	// Display only — feeds the rail's date sort and time grouping.
+	EarliestTakenAt int64 `json:"earliestTakenAt"`
 }
 
 // PickEntry is one folder row in the Add-folder picker: a subdirectory with

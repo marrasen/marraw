@@ -10,6 +10,10 @@ export type Theme = 'dark' | 'light' | 'system';
 export type ThumbFit = 'crop' | 'fit' | 'natural';
 // Photo ordering in the grids and filmstrips. Mirrors the Go LibrarySort enum.
 export type LibrarySort = 'captureAsc' | 'captureDesc' | 'nameAsc' | 'nameDesc';
+// Folder ordering in the library rail. Mirrors the Go ShootSort enum.
+export type ShootSort = 'nameAsc' | 'nameDesc' | 'dateAsc' | 'dateDesc';
+// Time bucketing of rail folders. Mirrors the Go ShootGroup enum.
+export type ShootGroup = 'none' | 'year' | 'month' | 'day';
 
 export type View = 'grid' | 'loupe';
 export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
@@ -49,6 +53,16 @@ function sanitizeThumbFit(v: string | undefined): ThumbFit {
 // A librarySort from an older/newer server blob falls back to capture order.
 function sanitizeLibrarySort(v: string | undefined): LibrarySort {
   return v === 'captureDesc' || v === 'nameAsc' || v === 'nameDesc' ? v : 'captureAsc';
+}
+
+// A shootSort from an older/newer server blob falls back to name order.
+function sanitizeShootSort(v: string | undefined): ShootSort {
+  return v === 'nameDesc' || v === 'dateAsc' || v === 'dateDesc' ? v : 'nameAsc';
+}
+
+// A shootGroup from an older/newer server blob falls back to no grouping.
+function sanitizeShootGroup(v: string | undefined): ShootGroup {
+  return v === 'year' || v === 'month' || v === 'day' ? v : 'none';
 }
 
 // Effective time-gap threshold: gaps are computed between neighboring frames,
@@ -134,6 +148,9 @@ interface UIState {
   // Photo ordering in the grids and filmstrips (default captureAsc). Read
   // the gap threshold through selectGapMinutes — name order has no gaps.
   librarySort: LibrarySort;
+  // Folder ordering / time bucketing in the library rail.
+  shootSort: ShootSort;
+  shootGroup: ShootGroup;
   // Edit-panel group id -> open (absent = open).
   editGroups: Record<string, boolean>;
   // Library-group display aliases / rail collapse state, keyed by the
@@ -145,6 +162,11 @@ interface UIState {
   // True once the first uiSettings snapshot has arrived.
   settingsLoaded: boolean;
   // ---- end server-persisted mirror
+
+  // Bumped by "Collapse previous years" in the rail's sort/group menu; each
+  // ManagedParent reacts with its own shoot data (per-window, not persisted —
+  // the resulting collapse states are, via railGroups).
+  collapsePrevYearsTick: number;
 
   focusId: number | null;
   anchorId: number | null;
@@ -246,6 +268,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   prerenderFullres: false,
   thumbFit: 'fit',
   librarySort: 'captureAsc',
+  shootSort: 'nameAsc',
+  shootGroup: 'none',
+  collapsePrevYearsTick: 0,
   editGroups: {},
   groupAliases: {},
   railGroups: {},
@@ -300,6 +325,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       prerenderFullres: s.prerenderFullres,
       thumbFit: sanitizeThumbFit(s.thumbFit),
       librarySort: sanitizeLibrarySort(s.librarySort),
+      shootSort: sanitizeShootSort(s.shootSort),
+      shootGroup: sanitizeShootGroup(s.shootGroup),
       editGroups: s.editGroups,
       groupAliases: s.groupAliases,
       railGroups: s.railGroups,

@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppWindow,
   ArrowDown,
   ArrowUp,
+  ArrowUpDown,
   Check,
   Copy,
   ExternalLink,
@@ -40,6 +41,17 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import {
   baseName,
@@ -56,8 +68,14 @@ import {
   type RailBlock,
   type RootGroup,
 } from '@/lib/library';
-import { updateGroupAlias, updateRailGroupOpen } from '@/lib/uiSettings';
-import { useUIStore } from '@/stores/uiStore';
+import { groupShoots, sortShoots, timeGroupKey } from '@/lib/shootGroups';
+import {
+  updateGroupAlias,
+  updateRailGroupOpen,
+  updateShootGroup,
+  updateShootSort,
+} from '@/lib/uiSettings';
+import { useUIStore, type ShootGroup, type ShootSort } from '@/stores/uiStore';
 
 // Display aliases are a pure display preference, persisted server-side
 // (uiSettings.groupAliases), keyed by the lowercased settings key.
@@ -155,8 +173,11 @@ export function LibraryRail() {
             <span className="text-[10px] tracking-[.07em] text-faint uppercase">
               In your library
             </span>
-            <span className="font-mono text-[10.5px] text-faint">
-              {roots.length} folder{roots.length === 1 ? '' : 's'}
+            <span className="flex items-center gap-1.5">
+              <span className="font-mono text-[10.5px] text-faint">
+                {roots.length} folder{roots.length === 1 ? '' : 's'}
+              </span>
+              <RailSortMenu />
             </span>
           </div>
           <div className="flex flex-1 flex-col gap-px overflow-y-auto px-2">
@@ -305,6 +326,121 @@ function BlockHeader({
   );
 }
 
+// ---------------------------------------------------------------- sort & group
+
+const SHOOT_SORT_ITEMS: { value: ShootSort; label: string }[] = [
+  { value: 'nameAsc', label: 'Name · A to Z' },
+  { value: 'nameDesc', label: 'Name · Z to A' },
+  { value: 'dateAsc', label: 'Date · oldest first' },
+  { value: 'dateDesc', label: 'Date · newest first' },
+];
+
+const SHOOT_GROUP_ITEMS: { value: ShootGroup; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'year', label: 'Year' },
+  { value: 'month', label: 'Month' },
+  { value: 'day', label: 'Day' },
+];
+
+/** Sort mode and time grouping for the rail's folders (both persisted). */
+function RailSortMenu() {
+  const client = useApiClient();
+  const shootSort = useUIStore((s) => s.shootSort);
+  const shootGroup = useUIStore((s) => s.shootGroup);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={cn(
+          'flex size-5 shrink-0 items-center justify-center rounded hover:bg-accent hover:text-foreground',
+          shootSort === 'nameAsc' && shootGroup === 'none' ? 'text-faint' : 'text-accent-text',
+        )}
+        title="Sort & group folders"
+        aria-label="Sort & group folders"
+        data-testid="rail-sort-menu"
+      >
+        <ArrowUpDown className="size-3.5" strokeWidth={1.5} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-[200px]">
+        {/* base-ui GroupLabel must sit inside a Group. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Sort folders</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={shootSort}
+            onValueChange={(v) => updateShootSort(client, v as ShootSort)}
+          >
+            {SHOOT_SORT_ITEMS.map((it) => (
+              <DropdownMenuRadioItem key={it.value} value={it.value}>
+                {it.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Group by date</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={shootGroup}
+            onValueChange={(v) => updateShootGroup(client, v as ShootGroup)}
+          >
+            {SHOOT_GROUP_ITEMS.map((it) => (
+              <DropdownMenuRadioItem key={it.value} value={it.value}>
+                {it.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={shootGroup === 'none'}
+          onClick={() =>
+            useUIStore.setState((s) => ({ collapsePrevYearsTick: s.collapsePrevYearsTick + 1 }))
+          }
+        >
+          Collapse previous years
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * One collapsible time bucket inside a managed parent — visually lighter than
+ * the parent's BlockHeader, since it is a derived slice, not a stored folder.
+ */
+function TimeGroupHeader({
+  label,
+  groupId,
+  count,
+  open,
+  onToggle,
+}: {
+  label: string;
+  groupId: string;
+  count: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      className="flex h-6 shrink-0 cursor-default items-center gap-[7px] rounded-md pr-2 pl-4 hover:bg-accent"
+      onClick={onToggle}
+      data-testid="rail-timegroup"
+      data-group={groupId}
+      data-open={open ? '1' : undefined}
+    >
+      <span
+        className={cn('text-[8px] text-muted-foreground transition-transform', open && 'rotate-90')}
+      >
+        ▶
+      </span>
+      <span className="flex-1 truncate text-left text-[10.5px] tracking-[.05em] text-faint uppercase">
+        {label}
+      </span>
+      <span className="font-mono text-[10px] text-faint">{count.toLocaleString()}</span>
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------- managed parent
 
 /**
@@ -332,15 +468,42 @@ function ManagedParent({
   const client = useApiClient();
   const groupAliases = useUIStore((s) => s.groupAliases);
   const key = parentKey(root.path);
-  const open = useUIStore((s) => s.railGroups[key.toLowerCase()] !== false);
+  const railGroups = useUIStore((s) => s.railGroups);
+  const shootSort = useUIStore((s) => s.shootSort);
+  const shootGroup = useUIStore((s) => s.shootGroup);
+  const open = railGroups[key.toLowerCase()] !== false;
   const { data: shoots, refetch } = useListShoots(root.path);
 
   const self: RailBlock = { kind: 'parent', root };
   const name = aliasFor(key, baseName(root.path), groupAliases);
   const rows = useMemo(
-    () => (shoots ?? []).filter((s) => !filter || s.name.toLowerCase().includes(filter)),
-    [shoots, filter],
+    () =>
+      sortShoots(
+        (shoots ?? []).filter((s) => !filter || s.name.toLowerCase().includes(filter)),
+        shootSort,
+      ),
+    [shoots, filter, shootSort],
   );
+  const grouped = useMemo(
+    () => (shootGroup === 'none' ? null : groupShoots(rows, shootGroup)),
+    [rows, shootGroup],
+  );
+
+  // "Collapse previous years" in the rail menu: computed here, per parent,
+  // because only this component holds its own shoot list. Buckets from every
+  // earlier year close, this year's open; the no-date bucket is untouched.
+  const collapseTick = useUIStore((s) => s.collapsePrevYearsTick);
+  const seenTick = useRef(collapseTick);
+  useEffect(() => {
+    if (collapseTick === seenTick.current) return;
+    seenTick.current = collapseTick;
+    if (shootGroup === 'none') return;
+    const currentYear = new Date().getFullYear();
+    for (const g of groupShoots(sortShoots(shoots ?? [], shootSort), shootGroup)) {
+      if (g.year == null) continue;
+      updateRailGroupOpen(client, timeGroupKey(key, g.id), g.year >= currentYear);
+    }
+  }, [collapseTick, client, key, shoots, shootGroup, shootSort]);
 
   if (filter && rows.length === 0 && !name.toLowerCase().includes(filter)) return null;
 
@@ -463,9 +626,38 @@ function ManagedParent({
       {showRows && online && shoots != null && shoots.length === 0 && (
         <span className="px-6 py-1.5 text-[11px] text-faint">No photo folders yet</span>
       )}
-      {showRows &&
-        online &&
+      {showRows && online && grouped == null &&
         rows.map((s) => <ShootRow key={s.path} shoot={s} parent={root} roots={roots} />)}
+      {showRows && online && grouped != null && (
+        <>
+          {/* Loose files are the parent's own row, not a dated shoot — they
+              stay above the time buckets. */}
+          {rows
+            .filter((s) => s.isSelf)
+            .map((s) => (
+              <ShootRow key={s.path} shoot={s} parent={root} roots={roots} />
+            ))}
+          {grouped.map((g) => {
+            const gKey = timeGroupKey(key, g.id);
+            const gOpen = railGroups[gKey.toLowerCase()] !== false;
+            return (
+              <div key={g.id} className="flex flex-col gap-px">
+                <TimeGroupHeader
+                  label={g.label}
+                  groupId={g.id}
+                  count={g.shoots.reduce((n, s) => n + s.photoCount, 0)}
+                  open={gOpen || filter !== ''}
+                  onToggle={() => updateRailGroupOpen(client, gKey, !gOpen)}
+                />
+                {(gOpen || filter !== '') &&
+                  g.shoots.map((s) => (
+                    <ShootRow key={s.path} shoot={s} parent={root} roots={roots} indent />
+                  ))}
+              </div>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }
@@ -479,10 +671,13 @@ function ShootRow({
   shoot,
   parent,
   roots,
+  indent,
 }: {
   shoot: Shoot;
   parent: LibraryRoot;
   roots: LibraryRoot[];
+  /** Nested under a time-group header, one step deeper than the header. */
+  indent?: boolean;
 }) {
   const client = useApiClient();
   const folderPath = useUIStore((s) => s.folderPath);
@@ -518,7 +713,8 @@ function ShootRow({
     <ContextMenu>
       <ContextMenuTrigger
         className={cn(
-          'flex h-[30px] shrink-0 cursor-pointer items-center gap-[7px] rounded-[7px] pr-2 pl-6',
+          'flex h-[30px] shrink-0 cursor-pointer items-center gap-[7px] rounded-[7px] pr-2',
+          indent ? 'pl-8' : 'pl-6',
           active ? 'bg-sidebar-accent font-semibold text-foreground' : 'hover:bg-accent',
         )}
         onClick={open}

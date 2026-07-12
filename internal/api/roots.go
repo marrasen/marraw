@@ -12,6 +12,7 @@ import (
 	"github.com/marrasen/aprot"
 
 	"github.com/marrasen/marraw/internal/scan"
+	"github.com/marrasen/marraw/internal/store"
 )
 
 const (
@@ -156,11 +157,21 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 		return false
 	}
 
+	// Capture dates are display-only (they feed the rail's date sort and time
+	// grouping), so a failed lookup degrades to "no date" rather than failing
+	// the listing.
+	earliest, err := l.deps.DB.EarliestTakenByFolder(ctx)
+	if err != nil {
+		earliest = nil
+	}
+
 	out := []Shoot{}
 	// The parent's own loose RAWs are a flat count: anything nested belongs to
-	// one of the children below.
+	// one of the children below — so its date, like its count, is exact-match
+	// only.
 	if n := countDirectRaws(parent); n > 0 {
-		out = append(out, Shoot{Path: parent, Name: filepath.Base(parent), PhotoCount: n, IsSelf: true})
+		out = append(out, Shoot{Path: parent, Name: filepath.Base(parent), PhotoCount: n, IsSelf: true,
+			EarliestTakenAt: earliestFor(earliest, parent, true)})
 	}
 
 	var children []Shoot
@@ -181,12 +192,31 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 		if !ok {
 			continue
 		}
-		children = append(children, Shoot{Path: full, Name: de.Name(), PhotoCount: count})
+		children = append(children, Shoot{Path: full, Name: de.Name(), PhotoCount: count,
+			EarliestTakenAt: earliestFor(earliest, full, false)})
 	}
 	sort.Slice(children, func(i, j int) bool {
 		return strings.ToLower(children[i].Name) < strings.ToLower(children[j].Name)
 	})
 	return append(out, children...), nil
+}
+
+// earliestFor picks a shoot's earliest capture time from the per-folder
+// aggregate: the shoot's own folder row plus, unless selfOnly, any folder rows
+// beneath it (a nested subdirectory opened directly gets its own row). The
+// parent's IsSelf row matches exactly — its descendants belong to the child
+// shoots. Returns 0 when nothing under the path has a known capture time.
+func earliestFor(rows []store.FolderEarliest, shootPath string, selfOnly bool) int64 {
+	var min int64
+	for _, r := range rows {
+		if !strings.EqualFold(r.Path, shootPath) && (selfOnly || !hasPathPrefixFold(r.Path, shootPath)) {
+			continue
+		}
+		if min == 0 || r.Earliest < min {
+			min = r.Earliest
+		}
+	}
+	return min
 }
 
 // shootCount returns a child's photo count and whether it qualifies as a shoot.

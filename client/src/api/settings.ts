@@ -18,6 +18,22 @@ export const LibrarySort = {
 } as const;
 export type LibrarySortType = typeof LibrarySort[keyof typeof LibrarySort];
 
+export const ShootGroup = {
+    None: "none",
+    Year: "year",
+    Month: "month",
+    Day: "day",
+} as const;
+export type ShootGroupType = typeof ShootGroup[keyof typeof ShootGroup];
+
+export const ShootSort = {
+    NameAsc: "nameAsc",
+    NameDesc: "nameDesc",
+    DateAsc: "dateAsc",
+    DateDesc: "dateDesc",
+} as const;
+export type ShootSortType = typeof ShootSort[keyof typeof ShootSort];
+
 export const Theme = {
     Dark: "dark",
     Light: "light",
@@ -67,6 +83,8 @@ export interface UISettings {
     prerenderFullres: boolean;
     thumbFit: ThumbFitType;
     librarySort: LibrarySortType;
+    shootSort: ShootSortType;
+    shootGroup: ShootGroupType;
 }
 
 export interface UserPreset {
@@ -255,6 +273,32 @@ setRailWidth.method = 'Settings.SetRailWidth' as const;
 
 export function subscribeSetRailWidth(client: ApiClient, px: number, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetRailWidth', [px], callback, onError, options);
+}
+
+
+export function setShootGroup(client: ApiClient, group: ShootGroupType, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetShootGroup', [group], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setShootGroup.method = 'Settings.SetShootGroup' as const;
+
+export function subscribeSetShootGroup(client: ApiClient, group: ShootGroupType, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetShootGroup', [group], callback, onError, options);
+}
+
+
+export function setShootSort(client: ApiClient, sort: ShootSortType, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetShootSort', [sort], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setShootSort.method = 'Settings.SetShootSort' as const;
+
+export function subscribeSetShootSort(client: ApiClient, sort: ShootSortType, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetShootSort', [sort], callback, onError, options);
 }
 
 
@@ -505,6 +549,36 @@ export function useSetRailWidth(px: number, options?: UseQueryOptions<void>): Us
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [px], _subscribe: { method: 'Settings.SetRailWidth', params: [px] } });
+}
+
+/**
+ * Subscribes to `Settings.SetShootGroup` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetShootGroup(group: ShootGroupType, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, group: ShootGroupType) => setShootGroup(client, group, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [group], _subscribe: { method: 'Settings.SetShootGroup', params: [group] } });
+}
+
+/**
+ * Subscribes to `Settings.SetShootSort` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetShootSort(sort: ShootSortType, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, sort: ShootSortType) => setShootSort(client, sort, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [sort], _subscribe: { method: 'Settings.SetShootSort', params: [sort] } });
 }
 
 /**

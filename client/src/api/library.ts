@@ -114,6 +114,7 @@ export interface Shoot {
     name: string;
     photoCount: number;
     isSelf: boolean;
+    earliestTakenAt: number;
 }
 
 
