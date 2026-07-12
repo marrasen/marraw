@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ import (
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
+	"github.com/marrasen/marraw/internal/sysmem"
 	"github.com/marrasen/marraw/internal/watermark"
 )
 
@@ -53,6 +55,18 @@ func main() {
 		defer logFile.Close()
 	}
 	log.Printf("marrawd starting (pid %d, data: %s)", os.Getpid(), *dataDir)
+
+	// Soft GC backstop: return dropped decode buffers promptly instead of
+	// riding the GOGC 2× curve. LibRaw's C-side allocations are invisible to
+	// the Go GC — the export admission budget is the real defense; this only
+	// keeps the Go heap honest. An explicit GOMEMLIMIT env always wins.
+	if os.Getenv("GOMEMLIMIT") == "" {
+		if st, err := sysmem.Query(); err == nil {
+			lim := int64(st.TotalPhys / 2)
+			debug.SetMemoryLimit(lim)
+			log.Printf("go memory limit set to %d MiB (half of %d MiB physical)", lim>>20, st.TotalPhys>>20)
+		}
+	}
 
 	token := os.Getenv("MARRAW_TOKEN")
 	if token == "" && !*dev {

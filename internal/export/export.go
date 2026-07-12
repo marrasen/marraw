@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,11 +19,13 @@ import (
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
+	"github.com/marrasen/marraw/internal/sysmem"
 	"github.com/marrasen/marraw/internal/watermark"
 	"github.com/marrasen/marraw/internal/xmp"
 )
@@ -80,6 +83,21 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 	// can't collide on duplicates, and so {seq} follows the request order.
 	names := newNamer(req.DestDir, req.FileNameTemplate, len(req.PhotoIDs))
 
+	// A full-res render peaks near estBytesPerPixel of RAM, so saturating all
+	// cores on a big batch can outrun physical memory and swap. Admission is
+	// double-gated: the errgroup caps CPU, the weighted semaphore caps the
+	// estimated bytes in flight against what the machine can actually spare.
+	avail := uint64(fallbackAvail)
+	if st, err := sysmem.Query(); err == nil {
+		avail = st.AvailPhys
+	} else {
+		log.Printf("export: memory probe failed (%v); assuming %d MiB available", err, uint64(fallbackAvail)>>20)
+	}
+	budget := exportBudget(avail)
+	sem := semaphore.NewWeighted(budget)
+	log.Printf("export: %d photos, mem budget %d MiB (%.0f%% of %d MiB avail), cpu limit %d",
+		len(req.PhotoIDs), budget>>20, budgetFraction*100, avail>>20, runtime.NumCPU())
+
 	g, gctx := errgroup.WithContext(ctx)
 	// Export is a deliberate foreground action with its own LibRaw handles
 	// (separate from the decode pool), so saturate every thread — the user is
@@ -114,10 +132,14 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 			continue
 		}
 		outName := names.claim(photo.FileName, photo.TakenAt, req.Format)
+		// Clamping to the budget guarantees Acquire can always succeed, so an
+		// image estimated above the whole budget still runs — just alone.
+		w := min(jobWeight(photo.Width, photo.Height), budget)
 		g.Go(func() error {
-			if gctx.Err() != nil {
-				return gctx.Err()
+			if err := sem.Acquire(gctx, w); err != nil {
+				return err
 			}
+			defer sem.Release(w)
 			err := exportOne(gctx, photo, filepath.Join(req.DestDir, outName), req)
 			onItem(Item{PhotoID: photo.ID, FileName: outName, Err: err})
 			return nil
@@ -207,6 +229,9 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, req 
 		rgba.Pix[j+2] = img.Data[i+2]
 		rgba.Pix[j+3] = 0xff
 	}
+	// The LibRaw copy is fully transcribed into rgba; drop it now so the GC
+	// can reclaim ~3 B/px before geometry/detail allocate their own planes.
+	img.Data = nil
 	rgba = pyramid.ApplyGeometry(rgba, params)
 	pyramid.ApplyLook(rgba, lookGamma, params)
 	pyramid.ApplyDetail(rgba, params)
