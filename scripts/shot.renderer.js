@@ -27,10 +27,23 @@ if (shot === 'cull') {
   ui().setContactSheet(true);
 } else if (shot === 'develop') {
   ui().setMode('develop');
-} else if (shot === 'crop') {
+} else if (shot === 'crop' || shot === 'crop-exit') {
   ui().setMode('develop');
   await until(() => mw.useEditSession.getState().draft != null);
+  const zoomBefore = ui().loupeZoom;
   mw.esSetCropping(true);
+  // Wait for the flat frame so loupeFitScale mirrors the crop-mode geometry.
+  await until(() => mw.useEditSession.getState().preview?.flat);
+  await sleep(600);
+  const zoomInCrop = ui().loupeZoom;
+  const fitInCrop = ui().loupeFitScale;
+  let zoomAfterExit = null;
+  if (shot === 'crop-exit') {
+    mw.esSetCropping(false);
+    await sleep(600);
+    zoomAfterExit = ui().loupeZoom;
+  }
+  window.__cropProbe = { zoomBefore, zoomInCrop, fitInCrop, zoomAfterExit };
 } else if (shot === 'wb') {
   ui().setMode('develop');
   await until(() => mw.useEditSession.getState().draft != null);
@@ -149,4 +162,5 @@ if (shot === 'cull') {
 await sleep(3600);
 window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
 await sleep(400);
-return window.__wmProbe ? { shot, ...window.__wmProbe } : shot;
+const probe = window.__wmProbe ?? window.__cropProbe;
+return probe ? { shot, ...probe } : shot;

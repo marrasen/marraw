@@ -452,6 +452,29 @@ export function CinemaImage({
   const slackX = cropping ? 0 : slackFor(boxW, container[0]);
   const slackY = cropping ? 0 : slackFor(boxH, container[1]);
 
+  // Entering crop at Fit leaves the frame flush against the container, so the
+  // edge/corner handles sit on the window border where the OS claims the
+  // pointer for window resizing (or exits fullscreen). Step the zoom out once
+  // (the keyboard's 0.8 factor) so every handle has grabbable margin — sized
+  // against the FLAT frame's fit scale, since that's the geometry crop mode
+  // shows and its fit can be smaller than the cropped frame's. If the user
+  // came from Fit, leaving crop returns there.
+  const cropWasFit = useRef(false);
+  const prevCropping = useRef(cropping);
+  useEffect(() => {
+    if (cropping === prevCropping.current) return;
+    prevCropping.current = cropping;
+    if (cropping) {
+      cropWasFit.current = zoom === 'fit';
+      if (cropWasFit.current && rfw > 0 && rfh > 0 && container[0] > 0 && container[1] > 0) {
+        setZoom(Math.min(container[0] / rfw, container[1] / rfh) * 0.8);
+      }
+    } else if (cropWasFit.current) {
+      cropWasFit.current = false;
+      setZoom('fit');
+    }
+  }, [cropping, zoom, rfw, rfh, container, setZoom]);
+
   // While an edit preview is active, show the JPEG the backend just pushed
   // over the WebSocket instead of a cache URL — but only when its geometry
   // matches the mode: flat frames belong to crop mode, cropped renders to
