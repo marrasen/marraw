@@ -9,7 +9,9 @@
 // slider), FBDDNoiseRd, MedPasses, Demosaic, CARed/CABlue, raw WBMul
 // multipliers, and the relative WBTemp/WBTint shifts outside kelvin mode
 // (they offset multipliers, so no absolute Kelvin base exists to express
-// them against).
+// them against). Masks (local adjustments) are dropped too: ACR's local
+// corrections are nested rdf:Seq structures (crs:MaskGroupBasedCorrections)
+// this attribute-only writer cannot express.
 package xmp
 
 import (

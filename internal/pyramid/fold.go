@@ -146,8 +146,7 @@ func RenderPreviewLinear(lin *image.RGBA64, longEdge int, fp FoldParams, lookGam
 	}
 	disp := foldScale(lin, max(1, ow), max(1, oh), fp)
 	disp = ApplyGeometry(disp, edits)
-	ApplyLook(disp, lookGamma, edits)
-	ApplyDetail(disp, edits)
+	ApplyFinish(disp, lookGamma, edits)
 	return disp
 }
 

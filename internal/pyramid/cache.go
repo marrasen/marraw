@@ -164,7 +164,7 @@ func nested(a, b string) bool {
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r7"
+const renderVersion = "r8"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
@@ -330,9 +330,13 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
 	rgba = ApplyGeometry(rgba, edits)
 	if level == "full" {
+		// Mirrors ApplyFinish stage for stage — kept inline only for the
+		// progress ticks between the stages.
 		report(0.72)
 		ApplyLook(rgba, gamma, edits)
-		report(0.80)
+		report(0.78)
+		ApplyMasks(rgba, edits)
+		report(0.82)
 		ApplyDetail(rgba, edits)
 		report(0.90)
 		if err := c.writeTiles(rgba, photo.CacheKey, editHash, func(done, total int) {
@@ -350,8 +354,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// Downscale before applying the look: 4x fewer pixels, same result at
 	// these sizes.
 	scaled := scaleToLongEdge(rgba, 2048)
-	ApplyLook(scaled, gamma, edits)
-	ApplyDetail(scaled, edits)
+	ApplyFinish(scaled, gamma, edits)
 	return c.WriteLevels(scaled, photo.CacheKey, editHash, 2048, 1024, 512, 256)
 }
 
@@ -483,8 +486,7 @@ func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit
 	// Runs on the scaled copy, never on src (which may be a shared cached
 	// decode), so a concurrent reuse of the same decode is unaffected.
 	applyExposureLUT(dst, expDeltaEV)
-	ApplyLook(dst, lookGamma, edits)
-	ApplyDetail(dst, edits)
+	ApplyFinish(dst, lookGamma, edits)
 	return dst
 }
 

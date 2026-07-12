@@ -94,6 +94,18 @@ func MeanLuma(img *image.RGBA) float64 {
 	return float64(sum) / float64(n)
 }
 
+// ApplyFinish runs the shared post-geometry stages in canonical order: the
+// global look, then the local adjustment masks over the developed color, then
+// the detail pass on the final tones. Every render path (pyramid levels,
+// tiles, interactive previews, export) must go through this order — the one
+// call site that can't use the helper (cache.generate's full-res path, which
+// interleaves progress reports) mirrors it stage for stage.
+func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params) {
+	ApplyLook(img, gamma, e)
+	ApplyMasks(img, e)
+	ApplyDetail(img, e)
+}
+
 // ApplyLook warms up LibRaw's flat output to sit close to the camera's own
 // JPEG rendering — the calibrated gamma lift, a mild S-curve, and a
 // saturation boost — and layers the edit's look-stage adjustments (tone

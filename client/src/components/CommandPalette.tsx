@@ -3,6 +3,7 @@ import { Search } from 'lucide-react';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
 import {
+  esAddMask,
   esApplyAutoPreset,
   esAuto,
   esReset,
@@ -77,6 +78,18 @@ function buildCommands(
       { id: 'wb-pick', label: 'White balance eyedropper', group: 'Develop', run: () => {
           goDevelop();
           esSetWBPicking(true);
+        } },
+      { id: 'mask-linear', label: 'Add linear gradient mask', group: 'Develop', run: (client) => {
+          goDevelop();
+          esAddMask(client, 'linear');
+        } },
+      { id: 'mask-radial', label: 'Add radial mask', group: 'Develop', run: (client) => {
+          goDevelop();
+          esAddMask(client, 'radial');
+        } },
+      { id: 'mask-brush', label: 'Add brush mask', group: 'Develop', run: (client) => {
+          goDevelop();
+          esAddMask(client, 'brush');
         } },
       { id: 'reset', label: 'Reset develop settings', group: 'Develop', hint: 'Ctrl+0', run: (client) => esReset(client) },
       { id: 'auto-tone', label: 'Auto dynamics', group: 'Develop', hint: 'Ctrl+U', run: (client) => {

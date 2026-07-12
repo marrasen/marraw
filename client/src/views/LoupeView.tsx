@@ -27,6 +27,7 @@ import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, rotatedDims, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
+import { MaskOverlay } from '@/components/MaskOverlay';
 import type { Params } from '@/api/edit';
 
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
@@ -354,6 +355,8 @@ export function CinemaImage({
   const preview = useEditSession((s) => s.preview);
   const wbPicking = useEditSession((s) => s.wbPicking);
   const cropping = useEditSession((s) => s.cropping);
+  const activeMask = useEditSession((s) => s.activeMask);
+  const uiMode = useUIStore((s) => s.mode);
   const draft = useEditSession((s) => s.draft);
   const esPhotoId = useEditSession((s) => s.photoId);
   // The crop that applies to the shown pixels: the draft when the edit session
@@ -372,6 +375,16 @@ export function CinemaImage({
   // loupe keeps showing the ordinary cropped view; controls (chip, CropBar)
   // key off plain `cropping` so they appear instantly.
   const cropUI = cropping && !!preview && preview.photoId === photo.id && preview.flat;
+  // The mask overlay edits the selected local adjustment on the ordinary
+  // (cropped) Develop view — never during crop or WB picking, and only while
+  // the edit session is on this photo.
+  const maskUI =
+    uiMode === 'develop' &&
+    activeMask != null &&
+    !cropping &&
+    !wbPicking &&
+    esPhotoId === photo.id &&
+    !!draft?.masks?.[activeMask];
 
   useEffect(() => {
     const el = containerRef.current;
@@ -979,6 +992,16 @@ export function CinemaImage({
                 pxDims={[rfw, rfh]}
                 onChange={(patch) => esUpdate(client, patch)}
                 onCommit={() => esCommit(client)}
+              />
+            )}
+            {maskUI && draft && (
+              <MaskOverlay
+                client={client}
+                draft={draft}
+                frameW={rfw}
+                frameH={rfh}
+                boxW={boxW}
+                boxH={boxH}
               />
             )}
             {wbPicking && cursor && (

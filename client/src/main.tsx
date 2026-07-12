@@ -34,6 +34,10 @@ if (import.meta.env.DEV) {
       esSetCropping: (on: boolean) => es.esSetCropping(client, on),
       esAuto: (sections: unknown) => es.esAuto(client, sections as never),
       esPreviewSettled: () => es.esPreviewSettled(),
+      // Local adjustment masks (the `masks` shot surface).
+      esAddMask: (type: unknown) => es.esAddMask(client, type as never),
+      esUpdateMask: (i: number, patch: unknown) => es.esUpdateMask(client, i, patch as never),
+      esSetActiveMask: (i: number | null) => es.esSetActiveMask(i),
       // Server-persisted UI settings (optimistic store write + server call).
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),

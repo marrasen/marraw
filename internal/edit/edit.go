@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math"
+	"reflect"
 
 	"github.com/marrasen/marraw/internal/libraw"
 )
@@ -40,6 +41,72 @@ const (
 
 func DemosaicValues() []Demosaic {
 	return []Demosaic{DemosaicVNG, DemosaicPPG, DemosaicAHD, DemosaicDHT}
+}
+
+// MaskType tags the geometry variant of a local adjustment mask.
+type MaskType string
+
+const (
+	MaskLinear MaskType = "linear"
+	MaskRadial MaskType = "radial"
+	MaskBrush  MaskType = "brush"
+)
+
+// MaskAdjust is the adjustment a mask applies inside its weighted region:
+// the tone and color basics, all with zero neutral. Kept slice-free so the
+// == neutrality check stays valid even as Mask itself grows slice fields.
+type MaskAdjust struct {
+	ExpEV          float64 `json:"expEV,omitempty"`          // -4..4 EV
+	Contrast       float64 `json:"contrast,omitempty"`       // ±1
+	ToneHighlights float64 `json:"toneHighlights,omitempty"` // ±1
+	ToneShadows    float64 `json:"toneShadows,omitempty"`    // ±1
+	Whites         float64 `json:"whites,omitempty"`         // ±1
+	Blacks         float64 `json:"blacks,omitempty"`         // ±1
+	Temp           float64 `json:"temp,omitempty"`           // ±1, warm/cool
+	Tint           float64 `json:"tint,omitempty"`           // ±1, green/magenta
+	Saturation     float64 `json:"saturation,omitempty"`     // ±1
+}
+
+// IsNeutral reports whether the mask's adjustment changes nothing.
+func (a *MaskAdjust) IsNeutral() bool { return *a == MaskAdjust{} }
+
+// Stroke is one brush stroke: a polyline of feathered circular stamps.
+// Coordinates are fractions of the oriented frame (like the crop rectangle);
+// Radius is a fraction of the frame's long edge so strokes are resolution
+// independent.
+type Stroke struct {
+	Erase   bool      `json:"erase,omitempty"`
+	Radius  float64   `json:"radius"`
+	Feather float64   `json:"feather,omitempty"` // 0..1 of Radius
+	Flow    float64   `json:"flow,omitempty"`    // 0 means full (1.0)
+	Pts     []float64 `json:"pts"`               // flattened x0,y0,x1,y1,…
+}
+
+// Mask is one local adjustment: a weighted region plus the adjustment it
+// applies there. Geometry is stored in fractional coordinates of the oriented
+// frame (after quarter-rotate/FlipH, before straighten and crop — the same
+// space as the crop rectangle) so masks stay glued to image content across
+// recrop and re-straighten. Masks apply in list order.
+type Mask struct {
+	Type   MaskType `json:"type"`
+	Invert bool     `json:"invert,omitempty"`
+	// Linear gradient: weight 1 at A(x0,y0) ramping to 0 at B(x1,y1);
+	// the A→B span is the feather.
+	X0 float64 `json:"x0,omitempty"`
+	Y0 float64 `json:"y0,omitempty"`
+	X1 float64 `json:"x1,omitempty"`
+	Y1 float64 `json:"y1,omitempty"`
+	// Radial ellipse: center and radii as fractions of the frame width and
+	// height, rotated by Angle degrees; Feather softens from the edge inward.
+	CX      float64 `json:"cx,omitempty"`
+	CY      float64 `json:"cy,omitempty"`
+	RX      float64 `json:"rx,omitempty"`
+	RY      float64 `json:"ry,omitempty"`
+	Angle   float64 `json:"angle,omitempty"`
+	Feather float64 `json:"feather,omitempty"`
+	// Brush: feathered stamps accumulated along stroke polylines.
+	Strokes []Stroke   `json:"strokes,omitempty"`
+	Adjust  MaskAdjust `json:"adjust"`
 }
 
 // Params is the edit state, stored as JSON in photos.edit_params.
@@ -138,6 +205,16 @@ type Params struct {
 	CropW     float64 `json:"cropW" validate:"gte=0,lte=1"`
 	CropH     float64 `json:"cropH" validate:"gte=0,lte=1"`
 	CropAngle float64 `json:"cropAngle" validate:"gte=-15,lte=15"`
+
+	// Masks are the local adjustments, applied in order in the look stage
+	// (pyramid.ApplyMasks). Kept last with omitempty so mask-free edits
+	// marshal byte-identically to older builds and existing hashes stay
+	// stable; the wire validator doesn't dive into the slice, so Normalize
+	// clamps mask fields (the HSL-array precedent). The subset hashes
+	// (librawInputs/linearInputs) never copy this field, keeping mask drags
+	// on the warm decode. NOTE: the slice makes Params non-comparable —
+	// IsNeutral uses reflect.DeepEqual, never ==.
+	Masks []Mask `json:"masks,omitempty"`
 }
 
 // RotateTurns returns the coarse rotation as canonical quarter turns
@@ -160,6 +237,11 @@ func (e *Params) HasHSL() bool {
 		}
 	}
 	return false
+}
+
+// HasMasks reports whether any local adjustment mask is present.
+func (e *Params) HasMasks() bool {
+	return e != nil && len(e.Masks) > 0
 }
 
 // HasCrop reports whether a crop rectangle is set (a straighten angle alone
@@ -230,7 +312,89 @@ func (e *Params) Normalize() {
 		e.HSLSat[i] = clamp(e.HSLSat[i], -1, 1)
 		e.HSLLum[i] = clamp(e.HSLLum[i], -1, 1)
 	}
+	e.normalizeMasks()
 }
+
+// normalizeMasks clamps and canonicalizes the local adjustment masks so
+// equivalent states hash identically: each type zeroes the other types'
+// geometry, unknown types are dropped, and brush geometry is quantized so
+// pointer-event float noise doesn't churn hashes. Masks with a neutral
+// adjustment are kept — a just-created mask must survive a save — and are
+// skipped per-mask at render time instead.
+func (e *Params) normalizeMasks() {
+	if len(e.Masks) == 0 {
+		e.Masks = nil
+		return
+	}
+	// Build fresh slices throughout: IsNeutral and Hash normalize a shallow
+	// copy of the receiver, so mutating shared backing arrays here would
+	// corrupt the caller's masks.
+	kept := make([]Mask, 0, len(e.Masks))
+	for _, m := range e.Masks {
+		switch m.Type {
+		case MaskLinear:
+			m.CX, m.CY, m.RX, m.RY, m.Angle, m.Feather = 0, 0, 0, 0, 0, 0
+			m.Strokes = nil
+			m.X0, m.Y0 = clampFrac(m.X0), clampFrac(m.Y0)
+			m.X1, m.Y1 = clampFrac(m.X1), clampFrac(m.Y1)
+		case MaskRadial:
+			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
+			m.Strokes = nil
+			m.CX, m.CY = clampFrac(m.CX), clampFrac(m.CY)
+			m.RX = clamp(m.RX, 0.001, 2)
+			m.RY = clamp(m.RY, 0.001, 2)
+			// An ellipse is symmetric under a half turn.
+			m.Angle = math.Mod(math.Mod(m.Angle, 180)+180, 180)
+			m.Feather = clamp(m.Feather, 0, 1)
+		case MaskBrush:
+			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
+			m.CX, m.CY, m.RX, m.RY, m.Angle, m.Feather = 0, 0, 0, 0, 0, 0
+			var strokes []Stroke
+			for _, s := range m.Strokes {
+				n := len(s.Pts) &^ 1 // drop an odd trailing coordinate
+				if n < 2 {
+					continue
+				}
+				s.Radius = quant4(clamp(s.Radius, 0.001, 1))
+				s.Feather = quant4(clamp(s.Feather, 0, 1))
+				s.Flow = quant4(clamp(s.Flow, 0, 1))
+				pts := make([]float64, n)
+				for i := range n {
+					pts[i] = quant4(clampFrac(s.Pts[i]))
+				}
+				s.Pts = pts
+				strokes = append(strokes, s)
+			}
+			if len(strokes) == 0 {
+				strokes = nil
+			}
+			m.Strokes = strokes
+		default:
+			continue
+		}
+		m.Adjust.ExpEV = clamp(m.Adjust.ExpEV, -4, 4)
+		m.Adjust.Contrast = clamp(m.Adjust.Contrast, -1, 1)
+		m.Adjust.ToneHighlights = clamp(m.Adjust.ToneHighlights, -1, 1)
+		m.Adjust.ToneShadows = clamp(m.Adjust.ToneShadows, -1, 1)
+		m.Adjust.Whites = clamp(m.Adjust.Whites, -1, 1)
+		m.Adjust.Blacks = clamp(m.Adjust.Blacks, -1, 1)
+		m.Adjust.Temp = clamp(m.Adjust.Temp, -1, 1)
+		m.Adjust.Tint = clamp(m.Adjust.Tint, -1, 1)
+		m.Adjust.Saturation = clamp(m.Adjust.Saturation, -1, 1)
+		kept = append(kept, m)
+	}
+	if len(kept) == 0 {
+		kept = nil
+	}
+	e.Masks = kept
+}
+
+// clampFrac bounds a fractional frame coordinate; masks may hang partly
+// off-frame, so allow half a frame of overhang on each side.
+func clampFrac(v float64) float64 { return clamp(v, -0.5, 1.5) }
+
+// quant4 rounds to 1e-4 so brush geometry hashes deterministically.
+func quant4(v float64) float64 { return math.Round(v*1e4) / 1e4 }
 
 // IsNeutral reports whether the edit changes nothing; neutral edits are
 // stored as NULL and rendered as the base look.
@@ -240,7 +404,9 @@ func (e *Params) IsNeutral() bool {
 	}
 	n := *e
 	n.Normalize()
-	return n == Params{}
+	// Masks make Params non-comparable, so == is unavailable; DeepEqual runs
+	// per RPC (never per pixel) and the cost is irrelevant there.
+	return reflect.DeepEqual(n, Params{})
 }
 
 // Hash returns the short content hash identifying this edit state in

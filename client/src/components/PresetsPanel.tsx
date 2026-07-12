@@ -159,6 +159,8 @@ function UserPresetsSection({
       cropW: 0,
       cropH: 0,
       cropAngle: 0,
+      // Masks are local geometry tied to one photo's content, not a look.
+      masks: undefined,
     };
     updateUserPresets(client, [...presets, { id: crypto.randomUUID(), name: trimmed, params }]);
     setNaming(false);
@@ -179,6 +181,9 @@ function UserPresetsSection({
         cropW: draft.cropW,
         cropH: draft.cropH,
         cropAngle: draft.cropAngle,
+        // The photo keeps its own local adjustments (like its crop) — and a
+        // preset saved by an older build can't clobber them either.
+        masks: draft.masks,
       },
       { label: p.name },
     );

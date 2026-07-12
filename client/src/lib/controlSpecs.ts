@@ -4,7 +4,7 @@
 // mode). A leaf module — editSession (keyboard stepping) and dials (toolbar
 // mini dials) both build on it, and it must import nothing that could pull
 // them back in.
-import type { Params } from '@/api/edit';
+import type { Mask, MaskAdjust, Params } from '@/api/edit';
 
 export const NEUTRAL: Params = {
   expEV: 0,
@@ -248,4 +248,74 @@ const PARAM_LABELS: Partial<Record<keyof Params, string>> = {
 
 export function paramLabel(key: keyof Params): string {
   return PARAM_LABELS[key] ?? String(key);
+}
+
+// --- Local adjustment masks ---
+// Masks live in Params.masks; each carries its own MaskAdjust slider set,
+// deliberately OUTSIDE the ControlId/CONTROL_ORDER machinery (those map flat
+// Params fields for keyboard walking and dials) — the mask panel renders
+// these specs directly for whichever mask is selected.
+
+export type MaskControlId = keyof MaskAdjust;
+
+export interface MaskControlSpec {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  bigStep: number;
+}
+
+// Panel order. Ranges mirror the server's Normalize clamps (edit.go).
+export const MASK_CONTROL_ORDER: MaskControlId[] = [
+  'expEV', 'contrast', 'toneHighlights', 'toneShadows', 'whites', 'blacks',
+  'temp', 'tint', 'saturation',
+];
+
+const pm1 = { min: -1, max: 1, step: 0.02, bigStep: 0.1 };
+export const MASK_CONTROL_SPECS: Record<MaskControlId, MaskControlSpec> = {
+  expEV: { label: 'Exposure', min: -4, max: 4, step: 0.05, bigStep: 0.25 },
+  contrast: { label: 'Contrast', ...pm1 },
+  toneHighlights: { label: 'Highlights', ...pm1 },
+  toneShadows: { label: 'Shadows', ...pm1 },
+  whites: { label: 'Whites', ...pm1 },
+  blacks: { label: 'Blacks', ...pm1 },
+  temp: { label: 'Temperature', ...pm1 },
+  tint: { label: 'Tint', ...pm1 },
+  saturation: { label: 'Saturation', ...pm1 },
+};
+
+export const NEUTRAL_MASK_ADJUST: Required<MaskAdjust> = {
+  expEV: 0, contrast: 0, toneHighlights: 0, toneShadows: 0,
+  whites: 0, blacks: 0, temp: 0, tint: 0, saturation: 0,
+};
+
+export function maskAdjustIsNeutral(a: MaskAdjust | undefined): boolean {
+  if (!a) return true;
+  return MASK_CONTROL_ORDER.every((k) => (a[k] ?? 0) === 0);
+}
+
+export const MASK_TYPE_LABELS: Record<string, string> = {
+  linear: 'Linear gradient',
+  radial: 'Radial',
+  brush: 'Brush',
+};
+
+export function maskLabel(m: Mask, index: number): string {
+  return `${MASK_TYPE_LABELS[m.type] ?? 'Mask'} ${index + 1}`;
+}
+
+// Default geometry for a freshly added mask: centered and clearly visible,
+// so the user immediately sees what the handles do. Fractions of the
+// oriented frame, matching the server model.
+export function defaultMask(type: Mask['type']): Mask {
+  switch (type) {
+    case 'linear':
+      // Top-down sky gradient: full above 30%, gone by 60%.
+      return { type, x0: 0.5, y0: 0.3, x1: 0.5, y1: 0.6, adjust: {} };
+    case 'radial':
+      return { type, cx: 0.5, cy: 0.5, rx: 0.3, ry: 0.25, feather: 0.5, adjust: {} };
+    default:
+      return { type: 'brush', strokes: [], adjust: {} };
+  }
 }

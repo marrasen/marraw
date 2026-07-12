@@ -1,5 +1,5 @@
 // Captures a screenshot of one app surface for visual review:
-//   node scripts/shot.mjs <raw-folder> <cull|sheet|develop|crop|wb> [out.png]
+//   node scripts/shot.mjs <raw-folder> <cull|sheet|develop|crop|wb|masks> [out.png]
 // Needs the dev servers running (npm run dev); set MARRAW_VITE_PORT if Vite
 // is not on 5173.
 import { spawn } from 'node:child_process';

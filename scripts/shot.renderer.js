@@ -61,6 +61,56 @@ if (shot === 'cull') {
       }),
     );
   }
+} else if (shot === 'masks') {
+  // Local adjustments: add a radial mask with a strong warm lift, keep it
+  // selected so the overlay handles show, and probe that the preview pixels
+  // actually changed inside the mask but not outside.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200); // initial preview settles
+  const pixelsAt = async (blob) => {
+    const bmp = await createImageBitmap(blob, { resizeWidth: 64 });
+    const c = document.createElement('canvas');
+    c.width = bmp.width;
+    c.height = bmp.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bmp, 0, 0);
+    const d = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const px = (fx, fy) => {
+      const i = (Math.floor(fy * (bmp.height - 1)) * bmp.width + Math.floor(fx * (bmp.width - 1))) * 4;
+      return [d[i], d[i + 1], d[i + 2]];
+    };
+    return { center: px(0.5, 0.5), corner: px(0.03, 0.03) };
+  };
+  // Idempotence: a previous run's masks persisted to the fixture photo —
+  // start from a mask-free state. The commit also lands the sharp 2048
+  // settle of the base params, so the before/after comparison is
+  // settle-to-settle (a 1024 draft frame differs from the 2048 by resample
+  // noise). No preview blob exists until an edit renders one.
+  mw.esUpdate({ masks: [] });
+  mw.esCommit();
+  await until(() => es.getState().preview?.blob && mw.esPreviewSettled(), 30000);
+  const before = await pixelsAt(es.getState().preview.blob);
+  mw.esAddMask('radial');
+  await sleep(300);
+  const idx = (es.getState().draft.masks?.length ?? 1) - 1;
+  mw.esUpdateMask(idx, { adjust: { expEV: 1.5, temp: 0.6 } });
+  mw.esCommit();
+  await until(() => mw.esPreviewSettled(), 30000);
+  const after = await pixelsAt(es.getState().preview.blob);
+  const luma = (p) => (p[0] * 299 + p[1] * 587 + p[2] * 114) / 1000;
+  window.__maskProbe = {
+    maskCount: es.getState().draft.masks?.length ?? 0,
+    activeMask: es.getState().activeMask,
+    overlayMounted: !!document.querySelector('[data-testid="mask-overlay"]'),
+    centerLumaBefore: Math.round(luma(before.center)),
+    centerLumaAfter: Math.round(luma(after.center)),
+    centerBrightened: luma(after.center) > luma(before.center) + 8,
+    cornerLumaBefore: Math.round(luma(before.corner)),
+    cornerLumaAfter: Math.round(luma(after.corner)),
+    cornerUnchanged: Math.abs(luma(after.corner) - luma(before.corner)) <= 3,
+  };
 } else if (shot === 'addfolder') {
   ui().setAddFolderOpen(true);
 } else if (shot === 'shortcuts') {
@@ -318,6 +368,7 @@ window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 30
 await sleep(400);
 const probe =
   window.__wmProbe ??
+  window.__maskProbe ??
   window.__cropProbe ??
   window.__renderProbe ??
   window.__settleProbe ??

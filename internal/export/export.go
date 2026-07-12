@@ -233,8 +233,7 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, req 
 	// can reclaim ~3 B/px before geometry/detail allocate their own planes.
 	img.Data = nil
 	rgba = pyramid.ApplyGeometry(rgba, params)
-	pyramid.ApplyLook(rgba, lookGamma, params)
-	pyramid.ApplyDetail(rgba, params)
+	pyramid.ApplyFinish(rgba, lookGamma, params)
 	out := resizeRGBA(rgba, req.LongEdge)
 	pyramid.ApplyOutputSharpen(out, req.SharpenTarget, req.SharpenAmount)
 	if req.Watermark != nil {

@@ -17,9 +17,17 @@ import {
   resetEdits,
   setEditParams,
 } from '@/api/edits';
-import type { Params } from '@/api/edit';
+import type { Mask, Params } from '@/api/edit';
 import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPresets';
-import { CONTROL_ORDER, CONTROL_SPECS, NEUTRAL, paramLabel, type ControlId } from '@/lib/controlSpecs';
+import {
+  CONTROL_ORDER,
+  CONTROL_SPECS,
+  MASK_TYPE_LABELS,
+  NEUTRAL,
+  defaultMask,
+  paramLabel,
+  type ControlId,
+} from '@/lib/controlSpecs';
 import { updateEditGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 
@@ -34,7 +42,7 @@ export type { ControlId } from '@/lib/controlSpecs';
 // holds each control. Selecting a control opens its group; Ctrl+↑/↓ skips
 // controls whose group is closed. Open state lives in uiStore.editGroups
 // (absent = open), server-persisted via updateEditGroupOpen.
-export type GroupId = 'crop' | 'tone' | 'presence' | 'wb' | 'color' | 'effects' | 'detail';
+export type GroupId = 'crop' | 'masks' | 'tone' | 'presence' | 'wb' | 'color' | 'effects' | 'detail';
 
 const CONTROL_GROUP: Record<ControlId, GroupId> = {
   cropAngle: 'crop',
@@ -110,6 +118,18 @@ interface EditSessionState {
   // Reset/Cancel. Null when the picker is closed.
   wbPickBase: Params | null;
   cropping: boolean; // crop overlay active: loupe shows the uncropped frame
+  // The selected local-adjustment mask (index into draft.masks): its overlay
+  // handles show on the loupe and its sliders expand in the Masks group.
+  activeMask: number | null;
+  // Brush paint mode: pointer strokes on the loupe paint into the active
+  // (brush) mask instead of panning.
+  maskPaint: boolean;
+  // Brush tool settings shared between the Masks panel and the paint overlay.
+  // Radius is a fraction of the frame long edge (the server's stroke model).
+  brushRadius: number;
+  brushFeather: number;
+  brushFlow: number;
+  brushErase: boolean;
   // Heads-up keyboard adjust: set while +/- is nudging the active control so
   // Develop hides its chrome + drawer and floats a compact bottom readout of
   // just that slider. Cleared by focusing/walking a control, a photo switch,
@@ -131,6 +151,12 @@ export const useEditSession = create<EditSessionState>(() => ({
   wbPicking: false,
   wbPickBase: null,
   cropping: false,
+  activeMask: null,
+  maskPaint: false,
+  brushRadius: 0.05,
+  brushFeather: 0.5,
+  brushFlow: 1,
+  brushErase: false,
   keyAdjust: false,
 }));
 
@@ -258,6 +284,25 @@ function paramIsDefault(p: Params, key: keyof Params): boolean {
   return v === d;
 }
 
+// maskDiffLabel names a masks-only change: add/remove by count, otherwise by
+// what part of the changed mask moved (a brush stroke, the shape, the sliders).
+function maskDiffLabel(prev: Mask[] | undefined, next: Mask[] | undefined): string {
+  const a = prev ?? [];
+  const b = next ?? [];
+  if (b.length > a.length) {
+    const type = b[b.length - 1]?.type;
+    return MASK_TYPE_LABELS[type] ? `Add ${type} mask` : 'Add mask';
+  }
+  if (b.length < a.length) return 'Remove mask';
+  for (let i = 0; i < b.length; i++) {
+    if (JSON.stringify(a[i]) === JSON.stringify(b[i])) continue;
+    if (JSON.stringify(a[i]?.strokes) !== JSON.stringify(b[i]?.strokes)) return 'Brush stroke';
+    if (JSON.stringify(a[i]?.adjust) !== JSON.stringify(b[i]?.adjust)) return 'Adjust mask';
+    return 'Move mask';
+  }
+  return 'Adjust mask';
+}
+
 // labelForDiff names a commit from the params that changed between the
 // previous history head and the new snapshot: a single control by its label
 // (with Add/Remove for effect toggles), a mixed change as "Adjust".
@@ -268,6 +313,7 @@ function labelForDiff(prev: Params, next: Params): string {
     return Array.isArray(a) && Array.isArray(b) ? JSON.stringify(a) !== JSON.stringify(b) : a !== b;
   });
   if (keys.length === 0) return 'Edit';
+  if (keys.length === 1 && keys[0] === 'masks') return maskDiffLabel(prev.masks, next.masks);
   const labels = new Set(keys.map((k) => paramLabel(k)));
   if (labels.size !== 1) return 'Adjust';
   const label = [...labels][0];
@@ -297,6 +343,8 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     wbPicking: false,
     wbPickBase: null,
     cropping: false,
+    activeMask: null,
+    maskPaint: false,
     keyAdjust: false,
   }));
   const params = await getEditParams(client, photoId).catch(() => null);
@@ -344,8 +392,11 @@ export function esSetKeyAdjust(on: boolean) {
 // Cull; this closes the other door. uiStore cannot call in here (it is a
 // dependency of this module), so the invariant is enforced from this side.
 useUIStore.subscribe((s, prev) => {
-  if (s.mode === 'cull' && prev.mode !== 'cull' && useEditSession.getState().activeControl != null) {
-    setState({ activeControl: null, keyAdjust: false });
+  if (s.mode === 'cull' && prev.mode !== 'cull') {
+    const es = useEditSession.getState();
+    if (es.activeControl != null || es.activeMask != null || es.maskPaint) {
+      setState({ activeControl: null, keyAdjust: false, activeMask: null, maskPaint: false });
+    }
   }
 });
 
@@ -371,6 +422,77 @@ export function esSetCropping(client: ApiClient, on: boolean) {
   } else {
     schedulePreview(client, 'settle');
   }
+}
+
+// --- Local adjustment masks ---
+// Masks live inside the draft (Params.masks) so history, copy/paste and
+// persistence handle them for free; these helpers only edit the array and
+// drive the same esUpdate/esCommit flow as any slider. Unlike the crop there
+// is no client-only preview path — mask changes alter pixels, so shape drags
+// render backend draft frames like any adjustment.
+
+// esSetActiveMask selects a mask (its overlay handles + expanded sliders).
+// Deselecting leaves paint mode.
+export function esSetActiveMask(index: number | null) {
+  setState((s) => ({
+    activeMask: index,
+    maskPaint: index == null ? false : s.maskPaint,
+    keyAdjust: false,
+  }));
+}
+
+// esSetMaskPaint toggles brush paint mode for the active brush mask.
+export function esSetMaskPaint(on: boolean) {
+  setState({ maskPaint: on });
+}
+
+// esSetBrushTool updates the shared brush tool settings (radius/feather/flow/
+// erase) used for the next stroke.
+export function esSetBrushTool(
+  patch: Partial<Pick<EditSessionState, 'brushRadius' | 'brushFeather' | 'brushFlow' | 'brushErase'>>,
+) {
+  setState(patch);
+}
+
+// esAddMask appends a mask with a sensible default shape, selects it, and
+// commits ("Add radial mask" in history). A brush starts empty and drops the
+// session straight into paint mode. Also opens the Masks panel group so the
+// new mask's sliders are visible.
+export function esAddMask(client: ApiClient, type: Mask['type']) {
+  esFlushDraft();
+  const s = useEditSession.getState();
+  if (!s.draft || s.photoId == null) return;
+  const masks = [...(s.draft.masks ?? []), defaultMask(type)];
+  if (useUIStore.getState().editGroups.masks === false) {
+    updateEditGroupOpen(client, 'masks', true);
+  }
+  setState({ activeMask: masks.length - 1, maskPaint: type === 'brush' });
+  esCommit(client, { masks });
+}
+
+// esUpdateMask merges a patch into one mask during an overlay drag or slider
+// move (coalesced low-res preview; commit on release). Flushes first so
+// back-to-back updates within one frame don't clobber each other — the patch
+// value is the whole masks array.
+export function esUpdateMask(client: ApiClient, index: number, patch: Partial<Mask>) {
+  esFlushDraft();
+  const s = useEditSession.getState();
+  const masks = s.draft?.masks;
+  if (!masks || !masks[index]) return;
+  const next = masks.slice();
+  next[index] = { ...next[index], ...patch };
+  esUpdate(client, { masks: next });
+}
+
+// esRemoveMask deletes a mask and commits.
+export function esRemoveMask(client: ApiClient, index: number) {
+  esFlushDraft();
+  const s = useEditSession.getState();
+  const masks = s.draft?.masks;
+  if (!masks || !masks[index]) return;
+  const next = masks.filter((_, i) => i !== index);
+  setState({ activeMask: null, maskPaint: false });
+  esCommit(client, { masks: next });
 }
 
 const CROP_RECT_KEYS = ['cropX', 'cropY', 'cropW', 'cropH'] as const;

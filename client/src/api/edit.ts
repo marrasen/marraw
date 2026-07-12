@@ -17,6 +17,35 @@ export const WBMode = {
 } as const;
 export type WBModeType = typeof WBMode[keyof typeof WBMode];
 
+export interface Mask {
+    type: string;
+    invert?: boolean;
+    x0?: number;
+    y0?: number;
+    x1?: number;
+    y1?: number;
+    cx?: number;
+    cy?: number;
+    rx?: number;
+    ry?: number;
+    angle?: number;
+    feather?: number;
+    strokes?: Stroke[];
+    adjust: MaskAdjust;
+}
+
+export interface MaskAdjust {
+    expEV?: number;
+    contrast?: number;
+    toneHighlights?: number;
+    toneShadows?: number;
+    whites?: number;
+    blacks?: number;
+    temp?: number;
+    tint?: number;
+    saturation?: number;
+}
+
 export interface Params {
     expEV: number;
     expPreserve: number;
@@ -61,5 +90,14 @@ export interface Params {
     cropW: number;
     cropH: number;
     cropAngle: number;
+    masks?: Mask[];
+}
+
+export interface Stroke {
+    erase?: boolean;
+    radius: number;
+    feather?: number;
+    flow?: number;
+    pts: number[];
 }
 

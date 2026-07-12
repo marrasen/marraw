@@ -1,12 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw, Image as ImageIcon } from 'lucide-react';
+import {
+  Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw,
+  Image as ImageIcon, Plus, Trash2, Paintbrush, Circle, Eraser,
+} from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
 import { applyBatchEdit, type Delta } from '@/api/edits';
-import type { Params } from '@/api/edit';
+import type { Mask, MaskAdjust, Params } from '@/api/edit';
+import {
+  MASK_CONTROL_ORDER,
+  MASK_CONTROL_SPECS,
+  maskAdjustIsNeutral,
+  maskLabel,
+  type MaskControlId,
+} from '@/lib/controlSpecs';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -19,18 +29,24 @@ import { formatAperture, formatShutter } from '@/lib/exif';
 import { updateEditGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 import {
+  esAddMask,
   esAuto,
   esCanRedo,
   esCanUndo,
   esCommit,
   esLoad,
   esRedo,
+  esRemoveMask,
   esSetActive,
+  esSetActiveMask,
   esSetApplyIds,
+  esSetBrushTool,
   esSetCropping,
+  esSetMaskPaint,
   esSetWBPicking,
   esUndo,
   esUpdate,
+  esUpdateMask,
   esWBPickDone,
   useEditSession,
   NEUTRAL,
@@ -293,6 +309,7 @@ function DevelopPanel({
       'splitShadowHue', 'splitShadowAmt', 'splitHighlightHue', 'splitHighlightAmt',
       'hslHue', 'hslSat', 'hslLum',
     ]),
+    masks: (draft.masks?.length ?? 0) > 0,
     effects: groupChanged(draft, ['vignette']),
     detail: groupChanged(draft, [
       'sharpen', 'highlight', 'nrThreshold', 'fbddNoiseRd', 'medPasses',
@@ -366,6 +383,10 @@ function DevelopPanel({
           // previews through the ordinary backend render path.
           {...num('cropAngle')}
         />
+      </Group>
+
+      <Group id="masks" title="Masks" changed={changed.masks}>
+        <MasksSection client={client} draft={draft} />
       </Group>
 
       <Group
@@ -773,6 +794,223 @@ function AutoButton({
     >
       Auto
     </button>
+  );
+}
+
+// MasksSection is the Masks group body: add buttons, the mask list, and —
+// for the selected mask — its adjustment sliders (plus the brush tool row).
+// Masks live in draft.masks, so every change flows through the same
+// esUpdate/esCommit path as any slider; the on-canvas shape/paint overlay is
+// MaskOverlay on the Develop loupe, driven by the same activeMask state.
+function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
+  const activeMask = useEditSession((s) => s.activeMask);
+  const setMode = useUIStore((s) => s.setMode);
+  const masks = draft.masks ?? [];
+  const add = (type: Mask['type']) => {
+    setMode('develop'); // the overlay lives on the Develop canvas
+    esAddMask(client, type);
+  };
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex gap-1.5" role="group" aria-label="Add mask">
+        <Button size="sm" variant="outline" className="flex-1" title="Add linear gradient" onClick={() => add('linear')}>
+          <Plus data-icon="inline-start" />
+          Linear
+        </Button>
+        <Button size="sm" variant="outline" className="flex-1" title="Add radial mask" onClick={() => add('radial')}>
+          <Circle data-icon="inline-start" />
+          Radial
+        </Button>
+        <Button size="sm" variant="outline" className="flex-1" title="Add brush mask" onClick={() => add('brush')}>
+          <Paintbrush data-icon="inline-start" />
+          Brush
+        </Button>
+      </div>
+      {masks.map((m, i) => (
+        <MaskRow
+          key={i}
+          client={client}
+          mask={m}
+          index={i}
+          selected={activeMask === i}
+          onSelect={() => {
+            setMode('develop');
+            esSetActiveMask(activeMask === i ? null : i);
+          }}
+        />
+      ))}
+      {masks.length === 0 && (
+        <span className="pt-0.5 text-[11.5px] leading-snug text-muted-foreground">
+          Local adjustments: a gradient, ellipse or brushed region with its own
+          exposure, tone and color.
+        </span>
+      )}
+    </div>
+  );
+}
+
+function MaskRow({
+  client,
+  mask,
+  index,
+  selected,
+  onSelect,
+}: {
+  client: ApiClient;
+  mask: Mask;
+  index: number;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const adjust = mask.adjust ?? {};
+  const changed = !maskAdjustIsNeutral(adjust);
+  const patchAdjust = (key: MaskControlId, v: number): { adjust: MaskAdjust } => ({
+    adjust: { ...adjust, [key]: v },
+  });
+  return (
+    <div className={cn('flex flex-col rounded-md border', selected ? 'border-primary/45' : 'border-border')}>
+      <div className="flex items-center gap-1.5 px-2 py-1.5">
+        <button type="button" className="flex flex-1 items-center gap-1.5 text-left" onClick={onSelect} aria-pressed={selected}>
+          <span className="text-[11.5px] text-secondary-foreground">{maskLabel(mask, index)}</span>
+          {changed && <span className="size-[5px] shrink-0 rounded-full bg-primary" title="Has adjustments" />}
+        </button>
+        <button
+          type="button"
+          className={cn(
+            'rounded px-1 text-[9px] font-semibold tracking-[.05em] uppercase',
+            mask.invert ? 'bg-primary/18 text-accent-text' : 'text-faint hover:text-foreground',
+          )}
+          title="Invert mask"
+          aria-pressed={!!mask.invert}
+          onClick={() => {
+            esUpdateMask(client, index, { invert: !mask.invert });
+            esCommit(client);
+          }}
+        >
+          Invert
+        </button>
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground"
+          title="Delete mask"
+          aria-label="Delete mask"
+          onClick={() => esRemoveMask(client, index)}
+        >
+          <Trash2 className="size-3" />
+        </button>
+      </div>
+      {selected && (
+        <div className="flex flex-col gap-[7px] px-2 pb-2">
+          {mask.type === 'brush' && <BrushToolRow client={client} mask={mask} index={index} />}
+          {MASK_CONTROL_ORDER.map((key) => {
+            const spec = MASK_CONTROL_SPECS[key];
+            const raw = adjust[key] ?? 0;
+            const isEV = key === 'expEV';
+            return (
+              <EditSlider
+                key={key}
+                label={spec.label}
+                value={isEV ? raw : raw * 100}
+                display={isEV ? `${raw >= 0 ? '+' : ''}${raw.toFixed(2)} EV` : pct(raw)}
+                min={isEV ? spec.min : spec.min * 100}
+                max={isEV ? spec.max : spec.max * 100}
+                step={isEV ? spec.step : spec.step * 100}
+                neutral={0}
+                gradient={key === 'temp' ? TEMP_GRADIENT : key === 'tint' ? TINT_GRADIENT : undefined}
+                onChange={(v) => esUpdateMask(client, index, patchAdjust(key, isEV ? v : v / 100))}
+                onCommit={(v) => {
+                  esUpdateMask(client, index, patchAdjust(key, isEV ? v : v / 100));
+                  esCommit(client);
+                }}
+                onClear={() => {
+                  esUpdateMask(client, index, patchAdjust(key, 0));
+                  esCommit(client);
+                }}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// BrushToolRow: paint-mode toggle plus the shared stroke settings (size /
+// feather / flow / erase) for the next stroke. Tool state, not photo state —
+// nothing here touches the draft.
+function BrushToolRow({ client, mask, index }: { client: ApiClient; mask: Mask; index: number }) {
+  const paint = useEditSession((s) => s.maskPaint);
+  const radius = useEditSession((s) => s.brushRadius);
+  const feather = useEditSession((s) => s.brushFeather);
+  const flow = useEditSession((s) => s.brushFlow);
+  const erase = useEditSession((s) => s.brushErase);
+  const strokes = mask.strokes ?? [];
+  return (
+    <div className="flex flex-col gap-[7px]">
+      <div className="flex items-center gap-1.5">
+        <Button
+          size="sm"
+          variant={paint ? 'default' : 'outline'}
+          className="flex-1 justify-start"
+          onClick={() => esSetMaskPaint(!paint)}
+        >
+          <Paintbrush data-icon="inline-start" />
+          {paint ? 'Done painting' : 'Paint'}
+        </Button>
+        <Button
+          size="icon-sm"
+          variant={erase ? 'default' : 'outline'}
+          title="Erase strokes"
+          aria-pressed={erase}
+          onClick={() => esSetBrushTool({ brushErase: !erase })}
+        >
+          <Eraser />
+        </Button>
+        {strokes.length > 0 && (
+          <Button
+            size="icon-sm"
+            variant="outline"
+            title="Clear all strokes"
+            onClick={() => {
+              esUpdateMask(client, index, { strokes: [] });
+              esCommit(client);
+            }}
+          >
+            <RotateCcw />
+          </Button>
+        )}
+      </div>
+      <EditSlider
+        label="Size"
+        value={radius * 100}
+        display={String(Math.round(radius * 100))}
+        min={0.5}
+        max={25}
+        step={0.5}
+        onChange={(v) => esSetBrushTool({ brushRadius: v / 100 })}
+        onCommit={(v) => esSetBrushTool({ brushRadius: v / 100 })}
+      />
+      <EditSlider
+        label="Feather"
+        value={feather * 100}
+        display={String(Math.round(feather * 100))}
+        min={0}
+        max={100}
+        step={2}
+        onChange={(v) => esSetBrushTool({ brushFeather: v / 100 })}
+        onCommit={(v) => esSetBrushTool({ brushFeather: v / 100 })}
+      />
+      <EditSlider
+        label="Flow"
+        value={flow * 100}
+        display={String(Math.round(flow * 100))}
+        min={5}
+        max={100}
+        step={5}
+        onChange={(v) => esSetBrushTool({ brushFlow: v / 100 })}
+        onCommit={(v) => esSetBrushTool({ brushFlow: v / 100 })}
+      />
+    </div>
   );
 }
 

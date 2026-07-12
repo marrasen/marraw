@@ -116,6 +116,12 @@ control, any preset.
 
 - **Geometry** — crop & straighten via an interactive overlay (±15°), 90°
   rotation and mirroring from the overlay toolbar.
+- **Local adjustments** — linear (graduated) filters, radial filters, and a
+  feathered brush with flow and eraser, each carrying its own exposure,
+  contrast, highlights/shadows, whites/blacks, temperature, tint and
+  saturation. Masks are anchored to image content, so they survive recrops
+  and re-straightens, and render identically in previews, 1:1 tiles and
+  exports.
 - **Tone** — exposure, preserve highlights, brightness, gamma, shadow slope,
   contrast, whites, blacks, shadows, highlights.
 - **Presence** — clarity, texture, dehaze.
@@ -170,9 +176,10 @@ them is load-bearing for your work, marraw is not ready for you yet.
 
 **Editing**
 
-- ❌ **No local adjustments of any kind.** No brush, no radial or graduated
-  filters, no AI subject/sky masks. Every adjustment is global to the frame.
-  This is the single biggest gap.
+- ❌ **No AI masks.** Local adjustments exist (linear/radial/brush — see
+  Editing tools), but there is no subject/sky/person detection, no luminance
+  or color range masks, and local adjustments are not carried into RAW + XMP
+  handoffs.
 - ❌ **No tone curve.** Contrast and the whites/blacks/shadows/highlights
   sliders drive a fixed parametric curve. There is no point curve and no
   per-channel R/G/B curves.

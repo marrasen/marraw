@@ -3,6 +3,7 @@ package pyramid
 import (
 	"image"
 	"math"
+	"reflect"
 	"testing"
 
 	"github.com/marrasen/marraw/internal/edit"
@@ -219,7 +220,7 @@ func TestAutoSectionIsolation(t *testing.T) {
 	check := tone
 	check.ExpEV, check.Contrast, check.Whites, check.Blacks, check.ToneShadows, check.ToneHighlights =
 		seed.ExpEV, seed.Contrast, seed.Whites, seed.Blacks, seed.ToneShadows, seed.ToneHighlights
-	if check != seed {
+	if !reflect.DeepEqual(check, seed) {
 		t.Errorf("tone auto touched fields outside its section:\n got %+v\nwant %+v", check, seed)
 	}
 
@@ -227,7 +228,7 @@ func TestAutoSectionIsolation(t *testing.T) {
 	AutoAdjust(img, testGamma, &color, []AutoSection{AutoColor})
 	check = color
 	check.Vibrance, check.Saturation = seed.Vibrance, seed.Saturation
-	if check != seed {
+	if !reflect.DeepEqual(check, seed) {
 		t.Errorf("color auto touched fields outside its section:\n got %+v\nwant %+v", check, seed)
 	}
 }

@@ -1,6 +1,8 @@
 package edit
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/marrasen/marraw/internal/libraw"
@@ -126,5 +128,124 @@ func TestHashStableAcrossEquivalentStates(t *testing.T) {
 	b := &Params{WBMode: WBKelvin, WBKelvin: 5500}
 	if a.Hash() != b.Hash() {
 		t.Error("normalized-equal states must hash equal")
+	}
+}
+
+func radialMask() Mask {
+	return Mask{Type: MaskRadial, CX: 0.5, CY: 0.5, RX: 0.3, RY: 0.2, Feather: 0.5}
+}
+
+func TestMaskNeutrality(t *testing.T) {
+	if !(&Params{Masks: []Mask{}}).IsNeutral() {
+		t.Error("an empty mask list must stay neutral")
+	}
+	if !(&Params{Masks: []Mask{{Type: "sky-ai"}}}).IsNeutral() {
+		t.Error("unknown mask types must be dropped, leaving neutral")
+	}
+	// A just-created mask with a neutral adjustment is a real edit: it must
+	// persist (not be stored as NULL) even though it changes no pixels yet.
+	if (&Params{Masks: []Mask{radialMask()}}).IsNeutral() {
+		t.Error("a mask with neutral adjust must not be neutral")
+	}
+}
+
+func TestMaskHashing(t *testing.T) {
+	base := &Params{Masks: []Mask{radialMask()}}
+	moved := &Params{Masks: []Mask{radialMask()}}
+	moved.Masks[0].CX = 0.7
+	adjusted := &Params{Masks: []Mask{radialMask()}}
+	adjusted.Masks[0].Adjust.ExpEV = 1
+	if base.Hash() == moved.Hash() {
+		t.Error("mask geometry change must change the hash")
+	}
+	if base.Hash() == adjusted.Hash() {
+		t.Error("mask adjust change must change the hash")
+	}
+	// The decode-subset hashes must be mask-blind so mask drags reuse the
+	// warm decode and linear reference.
+	plain := &Params{Contrast: 0.5}
+	masked := &Params{Contrast: 0.5, Masks: []Mask{radialMask()}}
+	if plain.LibrawInputsHash() != masked.LibrawInputsHash() {
+		t.Error("LibrawInputsHash must ignore masks")
+	}
+	if plain.LinearInputsHash() != masked.LinearInputsHash() {
+		t.Error("LinearInputsHash must ignore masks")
+	}
+	l := masked.librawInputs()
+	b, _ := json.Marshal(&l)
+	if bytes.Contains(b, []byte("masks")) {
+		t.Errorf("librawInputs must omit masks entirely, got %s", b)
+	}
+}
+
+func TestMaskNormalize(t *testing.T) {
+	e := &Params{Masks: []Mask{
+		{Type: MaskLinear, X0: -3, Y0: 0.5, X1: 0.5, Y1: 9, CX: 0.5, RX: 0.3, Feather: 0.7,
+			Adjust: MaskAdjust{ExpEV: 99, Saturation: -2}},
+		{Type: MaskRadial, CX: 0.5, CY: 0.5, RX: 0, RY: 5, Angle: 365, X0: 0.1},
+		{Type: MaskBrush, Feather: 0.5, Strokes: []Stroke{
+			{Radius: 0.05, Flow: 3, Pts: []float64{0.123456789, 0.2, 0.3}},
+			{Radius: 0.05, Pts: []float64{0.4}}, // degenerate: dropped
+		}},
+		{Type: "unknown"},
+	}}
+	e.Normalize()
+	if len(e.Masks) != 3 {
+		t.Fatalf("want unknown-type mask dropped, got %d masks", len(e.Masks))
+	}
+	lin := e.Masks[0]
+	if lin.X0 != -0.5 || lin.Y1 != 1.5 {
+		t.Errorf("linear coords not clamped: %+v", lin)
+	}
+	if lin.CX != 0 || lin.RX != 0 || lin.Feather != 0 {
+		t.Errorf("linear mask must zero radial fields: %+v", lin)
+	}
+	if lin.Adjust.ExpEV != 4 || lin.Adjust.Saturation != -1 {
+		t.Errorf("adjust not clamped: %+v", lin.Adjust)
+	}
+	rad := e.Masks[1]
+	if rad.RX != 0.001 || rad.RY != 2 {
+		t.Errorf("radii not clamped: %+v", rad)
+	}
+	if rad.Angle != 5 {
+		t.Errorf("angle must wrap into [0,180), got %v", rad.Angle)
+	}
+	if rad.X0 != 0 {
+		t.Errorf("radial mask must zero linear fields: %+v", rad)
+	}
+	br := e.Masks[2]
+	if br.Feather != 0 {
+		t.Errorf("brush mask must zero the parametric feather: %+v", br)
+	}
+	if len(br.Strokes) != 1 {
+		t.Fatalf("degenerate stroke must be dropped, got %d", len(br.Strokes))
+	}
+	s := br.Strokes[0]
+	if s.Flow != 1 || len(s.Pts) != 2 || s.Pts[0] != 0.1235 {
+		t.Errorf("stroke not clamped/quantized/evened: %+v", s)
+	}
+}
+
+// TestMaskNormalizeDoesNotAliasCaller pins the copy-on-normalize contract:
+// Hash and IsNeutral normalize a shallow copy, which must never mutate the
+// caller's mask slices through shared backing arrays.
+func TestMaskNormalizeDoesNotAliasCaller(t *testing.T) {
+	e := &Params{Masks: []Mask{
+		{Type: "unknown"}, // dropped by Normalize — must not shift caller's slice
+		{Type: MaskBrush, Strokes: []Stroke{{Radius: 0.05, Flow: 3, Pts: []float64{0.123456789, 0.2}}}},
+	}}
+	_ = e.Hash()
+	_ = e.IsNeutral()
+	if e.Masks[0].Type != "unknown" || e.Masks[1].Strokes[0].Pts[0] != 0.123456789 || e.Masks[1].Strokes[0].Flow != 3 {
+		t.Errorf("Hash/IsNeutral mutated the receiver's masks: %+v", e.Masks)
+	}
+}
+
+func TestMasksOmittedFromNoMaskJSON(t *testing.T) {
+	// omitempty is load-bearing: mask-free edits must marshal byte-identical
+	// to older builds so existing edit hashes stay stable.
+	b, _ := json.Marshal(&Params{Contrast: 0.5})
+	if bytes.Contains(b, []byte("masks")) {
+		t.Errorf("mask-free params must omit the masks key, got %s", b)
 	}
 }

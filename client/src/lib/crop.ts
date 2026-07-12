@@ -190,6 +190,59 @@ export function slideMoveRect(from: CropRect, to: CropRect, angleDeg: number, as
   return { ...afterX, y: afterX.y + dy * ty };
 }
 
+// --- Mask coordinate mapping (twin of internal/pyramid/mask.go maskFrame) ---
+// Mask geometry is stored in fractions of the oriented frame (the rotated,
+// pre-straighten, pre-crop space the crop rectangle lives in). The displayed
+// image is the straightened crop of that frame, so the overlay maps pointer
+// positions (fractions of the displayed image box) into frame fractions and
+// back. frameW/frameH are the frame's pixel dims (rotatedDims) — the rotation
+// is not aspect invariant, so the math runs in pixel space.
+
+// frameFromDisplay maps a displayed-image fraction to a frame fraction:
+// offset by the crop origin, then un-rotate the straighten angle about the
+// frame center (the same inverse map ApplyGeometry samples with).
+export function frameFromDisplay(
+  bx: number,
+  by: number,
+  p: Params | null | undefined,
+  frameW: number,
+  frameH: number,
+): [number, number] {
+  const crop = hasCrop(p);
+  const px = ((crop ? p!.cropX + bx * p!.cropW : bx)) * frameW;
+  const py = ((crop ? p!.cropY + by * p!.cropH : by)) * frameH;
+  const rad = (-(p?.cropAngle ?? 0) * Math.PI) / 180;
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  const fcx = frameW / 2;
+  const fcy = frameH / 2;
+  const dx = px - fcx;
+  const dy = py - fcy;
+  return [(fcx + dx * c - dy * s) / frameW, (fcy + dx * s + dy * c) / frameH];
+}
+
+// displayFromFrame is the inverse: rotate the frame point by +cropAngle about
+// the center, then express it in crop-rectangle fractions.
+export function displayFromFrame(
+  fx: number,
+  fy: number,
+  p: Params | null | undefined,
+  frameW: number,
+  frameH: number,
+): [number, number] {
+  const rad = ((p?.cropAngle ?? 0) * Math.PI) / 180;
+  const c = Math.cos(rad);
+  const s = Math.sin(rad);
+  const fcx = frameW / 2;
+  const fcy = frameH / 2;
+  const dx = fx * frameW - fcx;
+  const dy = fy * frameH - fcy;
+  const px = (fcx + dx * c - dy * s) / frameW;
+  const py = (fcy + dx * s + dy * c) / frameH;
+  if (!hasCrop(p)) return [px, py];
+  return [(px - p!.cropX) / p!.cropW, (py - p!.cropY) / p!.cropH];
+}
+
 // Common aspect presets for the crop overlay. `null` ratio means freeform.
 export interface AspectPreset {
   key: string;
