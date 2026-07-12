@@ -23,10 +23,12 @@ import {
   setTheme,
   setThumbFit,
   setUserPresets,
+  setWatermarks,
   useGetUISettings,
   type AutoPreset as WireAutoPreset,
   type ExportOptions,
   type UserPreset,
+  type Watermark,
 } from '@/api/settings';
 import type { ApiClient } from '@/api/client';
 import type { AutoPreset } from '@/lib/autoPresets';
@@ -81,6 +83,11 @@ export function updateAutoPresets(client: ApiClient, presets: AutoPreset[]) {
 export function updateUserPresets(client: ApiClient, presets: UserPreset[]) {
   useUIStore.setState({ userPresets: presets });
   setUserPresets(client, presets).catch(swallow);
+}
+
+export function updateWatermarks(client: ApiClient, watermarks: Watermark[]) {
+  useUIStore.setState({ watermarks });
+  setWatermarks(client, watermarks).catch(swallow);
 }
 
 export function updateExportDir(client: ApiClient, dir: string) {

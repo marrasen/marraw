@@ -57,6 +57,15 @@ export function tileUrl(p: ImgRef, tx: number, ty: number): string {
   return `${backend.http}/img/${p.id}/tile/${tx}/${ty}?${params}`;
 }
 
+// watermarkAssetUrl serves a stored watermark image (content-hash name from
+// Settings.AddWatermarkAsset) for the editor preview.
+export function watermarkAssetUrl(fileName: string): string {
+  const params = new URLSearchParams();
+  if (backend.token) params.set('t', backend.token);
+  const qs = params.toString();
+  return `${backend.http}/wm/${fileName}${qs ? `?${qs}` : ''}`;
+}
+
 // levelForSize picks the smallest pyramid level that covers cssPx on this
 // display, capped (past 2048 the loupe switches to full-resolution tiles).
 export function levelForSize(cssPx: number, cap: Level = '2048'): Level {

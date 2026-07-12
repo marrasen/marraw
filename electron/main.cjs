@@ -314,6 +314,13 @@ ipcMain.handle('marraw:pick-directory', async () => {
   const res = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
   return res.canceled ? null : res.filePaths[0];
 });
+ipcMain.handle('marraw:pick-image', async () => {
+  const res = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }],
+  });
+  return res.canceled ? null : res.filePaths[0];
+});
 ipcMain.handle('marraw:reveal', (_ev, p) => {
   if (typeof p === 'string') shell.showItemInFolder(p);
 });

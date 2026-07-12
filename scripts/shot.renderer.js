@@ -101,9 +101,52 @@ if (shot === 'cull') {
   const ids = ui().visibleIds;
   ui().focus(ids[2]);
   for (const id of ids.slice(3, 14)) ui().focus(id, { toggle: true });
+} else if (shot === 'watermark' || shot === 'watermark-portrait') {
+  // Drive the editor like a user — create, rename, type — so every step
+  // exercises the live-write path. React inputs need the native setter.
+  const setInput = (el, v) => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const btn = (label) =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === label);
+  ui().setWatermarkEditorOpen(true);
+  await sleep(400);
+  btn('New watermark')?.click();
+  await sleep(300);
+  const nameInput = document.querySelector('input[aria-label="Watermark name"]');
+  if (nameInput) setInput(nameInput, 'UITEST watermark');
+  const textInput = document.querySelector('input[aria-label="Watermark text"]');
+  if (textInput) setInput(textInput, '© Marcus Johansson');
+  if (shot === 'watermark-portrait') {
+    await sleep(300);
+    btn('Portrait')?.click();
+  }
+  // Fonts + canvas settle, then probe the preview: white-ish text pixels
+  // must exist in the bottom-right quadrant (default anchor) and nowhere in
+  // the top-left one.
+  await sleep(2500);
+  // The app renders other canvases (histogram) — scope to the dialog.
+  const canvas = document.querySelector('[role="dialog"] canvas');
+  let textDrawn = false;
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const lit = (x0, y0, w, h) => {
+      const d = ctx.getImageData(x0, y0, w, h).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i] > 225 && d[i + 1] > 225 && d[i + 2] > 225) n++;
+      }
+      return n;
+    };
+    const br = lit(canvas.width / 2, canvas.height / 2, canvas.width / 2, canvas.height / 2);
+    const tl = lit(0, 0, canvas.width / 2, canvas.height / 2);
+    textDrawn = br > 50 && tl === 0;
+  }
+  window.__wmProbe = { textDrawn, canvas: !!canvas };
 }
 // Let previews decode, then wake the chrome (capture fires on resolve).
 await sleep(3600);
 window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
 await sleep(400);
-return shot;
+return window.__wmProbe ? { shot, ...window.__wmProbe } : shot;

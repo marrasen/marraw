@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import type { FlagType, Photo, PhotoPatch } from '@/api/library';
-import type { ExportOptions, UISettings, UserPreset } from '@/api/settings';
+import type { ExportOptions, UISettings, UserPreset, Watermark } from '@/api/settings';
 import type { Params } from '@/api/edit';
 import { sanitizeDialKeys, type DialKey } from '@/lib/dials';
 import { sanitizeAutoPresets, type AutoPreset } from '@/lib/autoPresets';
+import { sanitizeWatermarks } from '@/lib/watermarks';
 
 export type Theme = 'dark' | 'light' | 'system';
 // How thumbnails are framed in the grids. Mirrors the Go ThumbFit enum.
@@ -37,6 +38,7 @@ export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   removeLocation: false,
   artist: '',
   copyright: '',
+  watermarkId: '',
 };
 
 // Library rail width bounds — mirror the server's SetRailWidth validation.
@@ -108,6 +110,7 @@ function sanitizeExportOptions(o: Partial<ExportOptions> | undefined): ExportOpt
     removeLocation: o?.removeLocation === true,
     artist: typeof o?.artist === 'string' ? o.artist.trim() : '',
     copyright: typeof o?.copyright === 'string' ? o.copyright.trim() : '',
+    watermarkId: typeof o?.watermarkId === 'string' ? o.watermarkId : '',
   };
 }
 
@@ -140,6 +143,8 @@ interface UIState {
   autoPresets: AutoPreset[];
   // Saved develop looks (Presets tab → Save current look).
   userPresets: UserPreset[];
+  // Named export overlays (Export dialog → Watermark → Edit…).
+  watermarks: Watermark[];
   theme: Theme;
   // Last export destination directory ('' = none yet).
   exportDir: string;
@@ -208,6 +213,8 @@ interface UIState {
   clipboard: Params | null;
   exportOpen: boolean;
   settingsOpen: boolean;
+  // The watermark editor dialog. Per-window, not persisted.
+  watermarkEditorOpen: boolean;
 
   // Grid cell target width (zoom slider in the gallery).
   cellSize: number;
@@ -248,6 +255,7 @@ interface UIState {
   setClipboard: (p: Params | null) => void;
   setExportOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setWatermarkEditorOpen: (open: boolean) => void;
   setCellSize: (px: number) => void;
   setLoupeZoom: (z: 'fit' | number) => void;
   setLoupeFitScale: (scale: number) => void;
@@ -270,6 +278,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   quickDials: [],
   autoPresets: [],
   userPresets: [],
+  watermarks: [],
   theme: 'dark',
   exportDir: '',
   exportOptions: DEFAULT_EXPORT_OPTIONS,
@@ -299,6 +308,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   clipboard: null,
   exportOpen: false,
   settingsOpen: false,
+  watermarkEditorOpen: false,
   cellSize: 220,
   loupeZoom: 'fit',
   loupeCenterTick: 0,
@@ -329,6 +339,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       // The server re-marshals presets through edit.Params, so params arrive
       // complete; only entries missing identity are dropped.
       userPresets: (s.userPresets ?? []).filter((p) => p.id && p.name && p.params),
+      watermarks: sanitizeWatermarks(s.watermarks),
       exportDir: s.exportDir,
       exportOptions: sanitizeExportOptions(s.exportOptions),
       prerenderFullres: s.prerenderFullres,
@@ -431,6 +442,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setClipboard: (p) => set({ clipboard: p }),
   setExportOpen: (open) => set({ exportOpen: open }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setWatermarkEditorOpen: (open) => set({ watermarkEditorOpen: open }),
   setCellSize: (px) => set({ cellSize: Math.min(400, Math.max(120, px)) }),
   // Entering fit always recenters — a photo panned away at 1:1 must not come
   // back off-center. Bumping the tick here (not at the call sites) covers the

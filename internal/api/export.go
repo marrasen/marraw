@@ -12,6 +12,7 @@ import (
 	"github.com/marrasen/aprot/tasks"
 
 	"github.com/marrasen/marraw/internal/export"
+	"github.com/marrasen/marraw/internal/watermark"
 )
 
 // Export handles rendering photos out to disk.
@@ -43,6 +44,9 @@ type ExportRequest struct {
 	// Artist and Copyright are written as EXIF tags 315/33432 when non-empty.
 	Artist    string `json:"artist" validate:"omitempty,max=120"`
 	Copyright string `json:"copyright" validate:"omitempty,max=120"`
+	// WatermarkID composites the named watermark onto the pixels; empty or
+	// unknown (a since-deleted watermark) = none.
+	WatermarkID string `json:"watermarkId" validate:"omitempty,max=64"`
 	// CreateDir creates DestDir if missing (the client asks the user first).
 	CreateDir bool `json:"createDir"`
 }
@@ -74,6 +78,13 @@ func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.Tas
 	format := string(req.Format)
 	if format == "" {
 		format = string(ExportJPEG)
+	}
+
+	// Resolve the watermark up front, while the request context is live —
+	// the stored list can change mid-batch without affecting this export.
+	var wmSpec *watermark.Spec
+	if wm := watermarkByID(ctx, x.deps.DB, req.WatermarkID); wm != nil {
+		wmSpec = toWatermarkSpec(*wm, x.deps.WatermarkDir)
 	}
 
 	total := len(req.PhotoIDs)
@@ -110,6 +121,7 @@ func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.Tas
 			RemoveLocation:   req.RemoveLocation,
 			Artist:           strings.TrimSpace(req.Artist),
 			Copyright:        strings.TrimSpace(req.Copyright),
+			Watermark:        wmSpec,
 		}, func(it export.Item) {
 			mu.Lock()
 			done++

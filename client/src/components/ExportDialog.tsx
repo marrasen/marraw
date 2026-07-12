@@ -12,6 +12,12 @@ import { checkDest, startExport } from '@/api/export';
 import { useApiClient } from '@/api/client';
 import type { Photo } from '@/api/library';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Segmented } from '@/components/ui/segmented';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
@@ -97,6 +103,8 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   const setOpen = useUIStore((s) => s.setExportOpen);
   const selection = useUIStore((s) => s.selection);
   const folderPath = useUIStore((s) => s.folderPath);
+  const watermarks = useUIStore((s) => s.watermarks);
+  const setWatermarkEditorOpen = useUIStore((s) => s.setWatermarkEditorOpen);
   const { roots } = useLibraryRoots();
 
   const [destDir, setDestDir] = useState('');
@@ -112,6 +120,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   const [removeLocation, setRemoveLocation] = useState(false);
   const [artist, setArtist] = useState('');
   const [copyright, setCopyright] = useState('');
+  const [watermarkId, setWatermarkId] = useState('');
   const [starting, setStarting] = useState(false);
   const [needsCreate, setNeedsCreate] = useState(false);
 
@@ -137,6 +146,11 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
     setRemoveLocation(exportOptions.removeLocation);
     setArtist(exportOptions.artist);
     setCopyright(exportOptions.copyright);
+    // A remembered watermark that was deleted since falls back to none.
+    const { watermarks } = useUIStore.getState();
+    setWatermarkId(
+      watermarks.some((w) => w.id === exportOptions.watermarkId) ? exportOptions.watermarkId : '',
+    );
   }, [open, folderPath]);
 
   const ids = selection.size > 0 ? [...selection] : photos.map((p) => p.id);
@@ -178,6 +192,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
         removeLocation: exifMode === 'all' ? removeLocation : false,
         artist: artist.trim(),
         copyright: copyright.trim(),
+        watermarkId: isRaw ? '' : watermarkId,
         createDir,
       });
       updateExportDir(client, destDir);
@@ -195,6 +210,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
         removeLocation,
         artist: artist.trim(),
         copyright: copyright.trim(),
+        watermarkId,
       });
       setOpen(false); // progress lives in the top-bar task chip
     } catch (err) {
@@ -219,6 +235,9 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
             ? [COLOR_ITEMS.find((c) => c.value === colorSpace)!.label]
             : []),
           ...(sharpenTarget !== 'off' ? [`sharpen ${sharpenTarget}`] : []),
+          ...(watermarkId && watermarks.some((w) => w.id === watermarkId)
+            ? [`wm ${watermarks.find((w) => w.id === watermarkId)!.name}`]
+            : []),
           ...(exifMode === 'none'
             ? ['no metadata']
             : exifMode === 'copyright'
@@ -421,6 +440,51 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
                 onValueChange={setSharpenAmount}
                 className="border-0 bg-secondary dark:bg-white/5"
               />,
+            )}
+          {/* The watermark is composited onto the rendered pixels (like
+              output sharpening), so it applies to every format but RAW. */}
+          {!isRaw &&
+            row(
+              'Watermark',
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger className="flex h-[34px] items-center gap-2 rounded-lg border border-input bg-secondary px-2.5 text-xs text-secondary-foreground dark:bg-white/5">
+                    <span className="max-w-[220px] truncate">
+                      {watermarks.find((w) => w.id === watermarkId)?.name ?? 'None'}
+                    </span>
+                    <span className="text-[10px] opacity-60">▾</span>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[220px] rounded-[11px] border-glass-border bg-popover/98 p-[7px]">
+                    <DropdownMenuItem
+                      className="flex h-8 rounded-[7px] px-2.5 text-[13px] text-muted-foreground"
+                      onClick={() => setWatermarkId('')}
+                    >
+                      None
+                    </DropdownMenuItem>
+                    {watermarks.map((w) => (
+                      <DropdownMenuItem
+                        key={w.id}
+                        className={
+                          w.id === watermarkId
+                            ? 'flex h-8 rounded-[7px] px-2.5 text-[13px] font-semibold text-foreground'
+                            : 'flex h-8 rounded-[7px] px-2.5 text-[13px]'
+                        }
+                        onClick={() => setWatermarkId(w.id)}
+                      >
+                        <span className="truncate">{w.name}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-[34px]"
+                  onClick={() => setWatermarkEditorOpen(true)}
+                >
+                  Edit…
+                </Button>
+              </>,
             )}
           {/* RAW + XMP copies the source file, whose own EXIF rides along
               untouched — the metadata options only apply to rendered files. */}

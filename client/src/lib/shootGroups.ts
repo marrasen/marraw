@@ -87,7 +87,7 @@ export function groupShoots(sorted: Shoot[], g: ShootGroup): ShootTimeGroup[] {
   for (const s of sorted) {
     if (s.isSelf) continue;
     const id = shootGroupId(s.earliestTakenAt, g);
-    let group = id === 'no-date' ? noDate : byId.get(id);
+    let group: ShootTimeGroup | null | undefined = id === 'no-date' ? noDate : byId.get(id);
     if (!group) {
       group = {
         id,

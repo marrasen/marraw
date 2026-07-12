@@ -15,6 +15,7 @@ export const ExportRequestSchema = z.object({
     removeLocation: z.boolean(),
     artist: z.union([z.literal(""), z.string().max(120)]),
     copyright: z.union([z.literal(""), z.string().max(120)]),
+    watermarkId: z.union([z.literal(""), z.string().max(64)]),
     createDir: z.boolean(),
 });
 

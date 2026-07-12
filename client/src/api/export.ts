@@ -27,6 +27,7 @@ export interface ExportRequest {
     removeLocation: boolean;
     artist: string;
     copyright: string;
+    watermarkId: string;
     createDir: boolean;
 }
 

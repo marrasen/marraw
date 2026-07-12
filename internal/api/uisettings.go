@@ -127,6 +127,9 @@ type ExportOptions struct {
 	// Artist and Copyright are the credit written into exports (tags 315/33432).
 	Artist    string `json:"artist"`
 	Copyright string `json:"copyright"`
+	// WatermarkID selects the watermark composited onto exports; empty (or a
+	// deleted watermark's id) = none.
+	WatermarkID string `json:"watermarkId"`
 }
 
 // normalizeExportOptions maps missing or invalid fields (older/partial blobs
@@ -162,6 +165,7 @@ func normalizeExportOptions(o ExportOptions) ExportOptions {
 	}
 	o.Artist = clampText(o.Artist, 120)
 	o.Copyright = clampText(o.Copyright, 120)
+	o.WatermarkID = clampText(o.WatermarkID, 64)
 	return o
 }
 
@@ -194,7 +198,9 @@ type UISettings struct {
 	AutoPresets []AutoPreset `json:"autoPresets"`
 	// UserPresets are saved develop looks (Presets tab → Save current look).
 	UserPresets []UserPreset `json:"userPresets"`
-	ExportDir   string       `json:"exportDir"`
+	// Watermarks are the named export overlays (Export dialog → Watermark).
+	Watermarks []Watermark `json:"watermarks"`
+	ExportDir  string      `json:"exportDir"`
 	// ExportOptions is the export dialog's last-used state.
 	ExportOptions ExportOptions `json:"exportOptions"`
 	// DevelopPinned keeps the develop drawer expanded.
@@ -242,6 +248,7 @@ const (
 	settingUIQuickDials    = "ui:quickDials"
 	settingUIAutoPresets   = "ui:autoPresets"
 	settingUIUserPresets   = "ui:userPresets"
+	settingUIWatermarks    = "ui:watermarks"
 	settingUIExportDir     = "ui:exportDir"
 	settingUIExportOptions = "ui:exportOptions"
 	settingUIDevelopPinned = "ui:developPinned"
@@ -340,6 +347,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		QuickDials:       jsonSetting(ctx, db, settingUIQuickDials, []string{}),
 		AutoPresets:      autoPresetsOrDefault(ctx, db),
 		UserPresets:      jsonSetting(ctx, db, settingUIUserPresets, []UserPreset{}),
+		Watermarks:       jsonSetting(ctx, db, settingUIWatermarks, []Watermark{}),
 		ExportDir:        exportDir,
 		ExportOptions:    normalizeExportOptions(jsonSetting(ctx, db, settingUIExportOptions, ExportOptions{})),
 		DevelopPinned:    pinned,

@@ -29,6 +29,7 @@ import (
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
+	"github.com/marrasen/marraw/internal/watermark"
 )
 
 func main() {
@@ -93,7 +94,12 @@ func main() {
 		}
 	}
 
-	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir}
+	watermarkDir := filepath.Join(*dataDir, "watermarks")
+	if err := os.MkdirAll(watermarkDir, 0o755); err != nil {
+		log.Fatalf("create watermark dir: %v", err)
+	}
+
+	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir, WatermarkDir: watermarkDir}
 	registry, library, _, _ := api.NewRegistry(deps)
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any
@@ -152,6 +158,26 @@ func main() {
 	img := &imghttp.Handler{DB: db, Cache: cache, Token: imgToken}
 	mux.Handle("GET /img/{id}/{level}", img)
 	mux.Handle("GET /img/{id}/tile/{tx}/{ty}", http.HandlerFunc(img.ServeTile))
+	mux.Handle("GET /wm/{name}", &imghttp.Assets{Dir: watermarkDir, Token: imgToken})
+	// The bundled watermark fonts, so the editor preview renders with the
+	// byte-identical faces the exporter uses. Fonts are CORS-gated even on
+	// file:// — the wildcard origin is required, and safe under the same
+	// token-in-URL trust model as the images (the files are public anyway).
+	mux.HandleFunc("GET /fonts/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if imgToken != "" && r.URL.Query().Get("t") != imgToken && r.Header.Get("X-Marraw-Token") != imgToken {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		raw, ok := watermark.FontBytes(watermark.FontID(r.PathValue("id")))
+		if !ok {
+			http.Error(w, "unknown font", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "font/ttf")
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+		w.Write(raw)
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})

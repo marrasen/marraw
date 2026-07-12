@@ -48,6 +48,33 @@ export const ThumbFit = {
 } as const;
 export type ThumbFitType = typeof ThumbFit[keyof typeof ThumbFit];
 
+export const WatermarkAnchor = {
+    TopLeft: "topLeft",
+    Top: "top",
+    TopRight: "topRight",
+    Left: "left",
+    Center: "center",
+    Right: "right",
+    BottomLeft: "bottomLeft",
+    Bottom: "bottom",
+    BottomRight: "bottomRight",
+} as const;
+export type WatermarkAnchorType = typeof WatermarkAnchor[keyof typeof WatermarkAnchor];
+
+export const WatermarkElementType = {
+    Text: "text",
+    Image: "image",
+} as const;
+export type WatermarkElementTypeType = typeof WatermarkElementType[keyof typeof WatermarkElementType];
+
+export const WatermarkFontID = {
+    Sans: "sans",
+    Serif: "serif",
+    Mono: "mono",
+    Script: "script",
+} as const;
+export type WatermarkFontIDType = typeof WatermarkFontID[keyof typeof WatermarkFontID];
+
 export interface AutoPreset {
     id: string;
     name: string;
@@ -68,6 +95,7 @@ export interface ExportOptions {
     removeLocation: boolean;
     artist: string;
     copyright: string;
+    watermarkId: string;
 }
 
 export interface UISettings {
@@ -77,6 +105,7 @@ export interface UISettings {
     quickDials: string[];
     autoPresets: AutoPreset[];
     userPresets: UserPreset[];
+    watermarks: Watermark[];
     exportDir: string;
     exportOptions: ExportOptions;
     developPinned: boolean;
@@ -95,6 +124,46 @@ export interface UserPreset {
     id: string;
     name: string;
     params: Params;
+}
+
+export interface Watermark {
+    id: string;
+    name: string;
+    elements: WatermarkElement[];
+}
+
+export interface WatermarkAssetInfo {
+    fileName: string;
+    width: number;
+    height: number;
+}
+
+export interface WatermarkElement {
+    id: string;
+    type: WatermarkElementTypeType;
+    text: string;
+    font: WatermarkFontIDType;
+    color: string;
+    asset: string;
+    assetWidth: number;
+    assetHeight: number;
+    anchor: WatermarkAnchorType;
+    sizePct: number;
+    marginPct: number;
+    opacity: number;
+}
+
+
+export function addWatermarkAsset(client: ApiClient, path: string, options?: RequestOptions): Promise<WatermarkAssetInfo> {
+    return client.request<WatermarkAssetInfo>('Settings.AddWatermarkAsset', [path], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+addWatermarkAsset.method = 'Settings.AddWatermarkAsset' as const;
+
+export function subscribeAddWatermarkAsset(client: ApiClient, path: string, callback: (data: WatermarkAssetInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<WatermarkAssetInfo>('Settings.AddWatermarkAsset', [path], callback, onError, options);
 }
 
 
@@ -344,7 +413,35 @@ export function subscribeSetUserPresets(client: ApiClient, presets: UserPreset[]
     return client.subscribe<void>('Settings.SetUserPresets', [presets], callback, onError, options);
 }
 
+
+export function setWatermarks(client: ApiClient, watermarks: Watermark[], options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetWatermarks', [watermarks], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setWatermarks.method = 'Settings.SetWatermarks' as const;
+
+export function subscribeSetWatermarks(client: ApiClient, watermarks: Watermark[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetWatermarks', [watermarks], callback, onError, options);
+}
+
 // React Hooks for Settings
+
+/**
+ * Subscribes to `Settings.AddWatermarkAsset` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useAddWatermarkAsset(path: string, options?: UseQueryOptions<WatermarkAssetInfo>): UseQueryResult<WatermarkAssetInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, path: string) => addWatermarkAsset(client, path, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Settings.AddWatermarkAsset', params: [path] } });
+}
 
 /**
  * Subscribes to `Settings.GetUISettings` and re-renders automatically when the
@@ -628,4 +725,19 @@ export function useSetUserPresets(presets: UserPreset[], options?: UseQueryOptio
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [presets], _subscribe: { method: 'Settings.SetUserPresets', params: [presets] } });
+}
+
+/**
+ * Subscribes to `Settings.SetWatermarks` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetWatermarks(watermarks: Watermark[], options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, watermarks: Watermark[]) => setWatermarks(client, watermarks, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [watermarks], _subscribe: { method: 'Settings.SetWatermarks', params: [watermarks] } });
 }

@@ -30,6 +30,9 @@ type Deps struct {
 	// DefaultCacheDir is the built-in preview-cache location (under the app
 	// data dir); System.SetCacheDir("") restores it.
 	DefaultCacheDir string
+	// WatermarkDir stores the user's watermark images (under the app data
+	// dir); AddWatermarkAsset writes it, exports and GET /wm/{name} read it.
+	WatermarkDir string
 	// Watch notices new folders and new photos on disk. Nil is valid: a
 	// zero-value Deps is used for TypeScript generation, and a daemon whose
 	// watch handle failed to open still works through manual rescans.
@@ -138,6 +141,9 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.RegisterEnumFor(settings, LibrarySortValues())
 	registry.RegisterEnumFor(settings, ShootSortValues())
 	registry.RegisterEnumFor(settings, ShootGroupValues())
+	registry.RegisterEnumFor(settings, WatermarkElementTypeValues())
+	registry.RegisterEnumFor(settings, WatermarkAnchorValues())
+	registry.RegisterEnumFor(settings, WatermarkFontIDValues())
 	registry.RegisterEnumFor(edits, edit.WBModeValues())
 	registry.RegisterEnumFor(edits, edit.DemosaicValues())
 	registry.RegisterEnumFor(export, ExportFormatValues())

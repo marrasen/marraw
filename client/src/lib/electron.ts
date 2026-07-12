@@ -4,6 +4,8 @@ declare global {
   interface Window {
     marraw?: {
       pickDirectory: () => Promise<string | null>;
+      // Absent on builds predating the watermark editor — feature-check.
+      pickImage?: () => Promise<string | null>;
       revealInExplorer: (path: string) => void;
       getPathForFile: (file: File) => string;
       isDirectory: (path: string) => Promise<boolean>;

@@ -23,6 +23,7 @@ import (
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
+	"github.com/marrasen/marraw/internal/watermark"
 	"github.com/marrasen/marraw/internal/xmp"
 )
 
@@ -53,6 +54,9 @@ type Request struct {
 	// 315/33432 when non-empty (modes all and copyright).
 	Artist    string
 	Copyright string
+	// Watermark is composited onto the final pixels after output sharpening;
+	// nil = none.
+	Watermark *watermark.Spec
 }
 
 type Item struct {
@@ -206,6 +210,11 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, req 
 	pyramid.ApplyDetail(rgba, params)
 	out := resizeRGBA(rgba, req.LongEdge)
 	pyramid.ApplyOutputSharpen(out, req.SharpenTarget, req.SharpenAmount)
+	if req.Watermark != nil {
+		if err := watermark.Apply(out, *req.Watermark); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
 }
 

@@ -12,6 +12,7 @@ import { FilterBar } from '@/components/FilterBar';
 import { EditPanel } from '@/components/EditPanel';
 import { ExportDialog } from '@/components/ExportDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
+import { WatermarkDialog } from '@/components/WatermarkDialog';
 import { StatusBar } from '@/components/StatusBar';
 import { TaskToasts } from '@/components/TaskTray';
 import { clampRailWidth, RAIL_WIDTH_DEFAULT, useUIStore } from '@/stores/uiStore';
@@ -68,7 +69,13 @@ function useDropFolder() {
       // of its own would pull it out of that block into a duplicate group.
       if (roots.some((r) => r.isParent && samePath(r.path, parentPath(path)))) {
         toast.info('That folder is already in the library');
-        void openShoot(client, { path, name: baseName(path), photoCount: 0, isSelf: false });
+        void openShoot(client, {
+          path,
+          name: baseName(path),
+          photoCount: 0,
+          isSelf: false,
+          earliestTakenAt: 0,
+        });
         return;
       }
       const next: LibraryRoot[] = [
@@ -132,6 +139,7 @@ export default function App() {
       </div>
       <AddFolderDialog />
       <SettingsDialog />
+      <WatermarkDialog />
       <CommandPalette />
       <ShortcutsOverlay />
       <TaskToasts />
