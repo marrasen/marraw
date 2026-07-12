@@ -11,6 +11,7 @@ import {
   setEditGroupOpen,
   setExportDir,
   setExportOptions,
+  setFolderView,
   setGapMinutes,
   setGroupAlias,
   setLastSeenVersion,
@@ -28,6 +29,7 @@ import {
   useGetUISettings,
   type AutoPreset as WireAutoPreset,
   type ExportOptions,
+  type FolderView,
   type UserPreset,
   type Watermark,
 } from '@/api/settings';
@@ -37,6 +39,7 @@ import type { DialKey } from '@/lib/dials';
 import {
   clampRailWidth,
   useUIStore,
+  type FlagFilter,
   type LibrarySort,
   type ShootGroup,
   type ShootSort,
@@ -61,9 +64,36 @@ export function updateTheme(client: ApiClient, theme: Theme) {
   setTheme(client, theme).catch(swallow);
 }
 
+// Remembers a per-folder view patch for the folder open in this window:
+// optimistic merge into the local folderViews map (lowercased path key,
+// same convention as group aliases), then the server merge — nil fields
+// stay untouched there, so concurrent windows never clobber each other.
+// No folder open = nothing to remember (globals still get their write).
+function patchFolderView(client: ApiClient, patch: FolderView) {
+  const { folderPath, folderViews } = useUIStore.getState();
+  if (!folderPath) return;
+  const key = folderPath.toLowerCase();
+  useUIStore.setState({ folderViews: { ...folderViews, [key]: { ...folderViews[key], ...patch } } });
+  setFolderView(client, key, patch).catch(swallow);
+}
+
+// Library rating/flag filters: effective values in the store plus the
+// current folder's remembered view.
+export function updateFolderFilters(
+  client: ApiClient,
+  f: { minRating?: number; flagFilter?: FlagFilter },
+) {
+  useUIStore.setState(f);
+  const patch: FolderView = {};
+  if (f.minRating !== undefined) patch.minRating = f.minRating;
+  if (f.flagFilter !== undefined) patch.flagFilter = f.flagFilter;
+  patchFolderView(client, patch);
+}
+
 export function updateGapMinutes(client: ApiClient, min: number | null) {
-  useUIStore.setState({ gapMinutes: min });
+  useUIStore.setState({ gapMinutes: min, globalGapMinutes: min });
   setGapMinutes(client, min ?? 0).catch(swallow);
+  patchFolderView(client, { gapMinutes: min ?? 0 });
 }
 
 export function updateCullDials(client: ApiClient, dials: DialKey[]) {
@@ -112,8 +142,9 @@ export function updateThumbFit(client: ApiClient, fit: ThumbFit) {
 }
 
 export function updateLibrarySort(client: ApiClient, sort: LibrarySort) {
-  useUIStore.setState({ librarySort: sort });
+  useUIStore.setState({ librarySort: sort, globalLibrarySort: sort });
   setLibrarySort(client, sort).catch(swallow);
+  patchFolderView(client, { librarySort: sort });
 }
 
 export function updateShootSort(client: ApiClient, sort: ShootSort) {

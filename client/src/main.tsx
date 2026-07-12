@@ -22,7 +22,8 @@ if (import.meta.env.DEV) {
     import('@/lib/uiSettings'),
     import('@/api/export'),
     import('@/lib/changelog'),
-  ]).then(([ui, es, us, ex, cl]) => {
+    import('@/lib/library'),
+  ]).then(([ui, es, us, ex, cl, lib]) => {
     (window as unknown as Record<string, unknown>).__marraw = {
       useUIStore: ui.useUIStore,
       useEditSession: es.useEditSession,
@@ -37,7 +38,10 @@ if (import.meta.env.DEV) {
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),
       setGapMinutes: (min: number | null) => us.updateGapMinutes(client, min),
+      setLibrarySort: (s: unknown) => us.updateLibrarySort(client, s as never),
       setLastSeenVersion: (v: string) => us.updateLastSeenVersion(client, v),
+      // Folder hop for the `folderview` shot (per-folder view memory).
+      openPath: (path: string) => lib.openShoot(client, { path } as never),
       // The changelog parser, probed by the `welcome` shot surface.
       changelog: cl,
       startExport: (req: unknown) => ex.startExport(client, req as never),

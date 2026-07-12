@@ -152,6 +152,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.RegisterEnumFor(settings, LibrarySortValues())
 	registry.RegisterEnumFor(settings, ShootSortValues())
 	registry.RegisterEnumFor(settings, ShootGroupValues())
+	registry.RegisterEnumFor(settings, FlagFilterValues())
 	registry.RegisterEnumFor(settings, WatermarkElementTypeValues())
 	registry.RegisterEnumFor(settings, WatermarkAnchorValues())
 	registry.RegisterEnumFor(settings, WatermarkFontIDValues())

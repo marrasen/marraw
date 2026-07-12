@@ -10,6 +10,14 @@ import type {
 import type { ColorSpaceType, ExifModeType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
 import type { Params } from './edit';
 
+export const FlagFilter = {
+    All: "all",
+    Pick: "pick",
+    "Not-excluded": "not-excluded",
+    Exclude: "exclude",
+} as const;
+export type FlagFilterType = typeof FlagFilter[keyof typeof FlagFilter];
+
 export const LibrarySort = {
     CaptureAsc: "captureAsc",
     CaptureDesc: "captureDesc",
@@ -98,6 +106,13 @@ export interface ExportOptions {
     watermarkId: string;
 }
 
+export interface FolderView {
+    minRating?: number;
+    flagFilter?: FlagFilterType;
+    librarySort?: LibrarySortType;
+    gapMinutes?: number;
+}
+
 export interface UISettings {
     theme: ThemeType;
     gapMinutes: number;
@@ -119,6 +134,7 @@ export interface UISettings {
     shootSort: ShootSortType;
     shootGroup: ShootGroupType;
     lastSeenVersion: string;
+    folderViews: Record<string, FolderView>;
 }
 
 export interface UserPreset {
@@ -256,6 +272,19 @@ setExportOptions.method = 'Settings.SetExportOptions' as const;
 
 export function subscribeSetExportOptions(client: ApiClient, opts: ExportOptions, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetExportOptions', [opts], callback, onError, options);
+}
+
+
+export function setFolderView(client: ApiClient, path: string, patch: FolderView, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetFolderView', [path, patch], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setFolderView.method = 'Settings.SetFolderView' as const;
+
+export function subscribeSetFolderView(client: ApiClient, path: string, patch: FolderView, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetFolderView', [path, patch], callback, onError, options);
 }
 
 
@@ -559,6 +588,21 @@ export function useSetExportOptions(opts: ExportOptions, options?: UseQueryOptio
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [opts], _subscribe: { method: 'Settings.SetExportOptions', params: [opts] } });
+}
+
+/**
+ * Subscribes to `Settings.SetFolderView` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetFolderView(path: string, patch: FolderView, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, path: string, patch: FolderView) => setFolderView(client, path, patch, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [path, patch], _subscribe: { method: 'Settings.SetFolderView', params: [path, patch] } });
 }
 
 /**

@@ -86,6 +86,33 @@ func ShootGroupValues() []ShootGroup {
 	return []ShootGroup{ShootGroupNone, ShootGroupYear, ShootGroupMonth, ShootGroupDay}
 }
 
+// FlagFilter is the library's pick/exclude filter. not-excluded shows
+// everything but excluded frames.
+type FlagFilter string
+
+const (
+	FlagFilterAll         FlagFilter = "all"
+	FlagFilterPick        FlagFilter = "pick"
+	FlagFilterNotExcluded FlagFilter = "not-excluded"
+	FlagFilterExclude     FlagFilter = "exclude"
+)
+
+func FlagFilterValues() []FlagFilter {
+	return []FlagFilter{FlagFilterAll, FlagFilterPick, FlagFilterNotExcluded, FlagFilterExclude}
+}
+
+// FolderView is one folder's remembered library view. Every field is a
+// pointer: nil means "not set for this folder" — a SetFolderView patch
+// leaves it untouched, and the client falls back (sort/gap to the global
+// last-used rows, filters to show-all).
+type FolderView struct {
+	MinRating   *int         `json:"minRating,omitempty"`
+	FlagFilter  *FlagFilter  `json:"flagFilter,omitempty"`
+	LibrarySort *LibrarySort `json:"librarySort,omitempty"`
+	// GapMinutes is the time-gap grouping threshold; 0 = off.
+	GapMinutes *int `json:"gapMinutes,omitempty"`
+}
+
 // AutoPreset is a creative auto preset: named auto sections plus style
 // offsets layered on top. The client sanitizes sections/offset keys on read,
 // so unknown values from older/newer clients survive as stored.
@@ -230,6 +257,10 @@ type UISettings struct {
 	// LastSeenVersion is the app version whose changelog the Welcome page
 	// last showed ("" = never — a fresh install baselines silently).
 	LastSeenVersion string `json:"lastSeenVersion"`
+	// FolderViews: lowercased folder path -> that folder's remembered
+	// filters / sort / gap grouping. LibrarySort and GapMinutes above stay
+	// the last-used fallback for folders with no entry.
+	FolderViews map[string]FolderView `json:"folderViews"`
 }
 
 // Settings serves the persisted client preferences. Everything lives in the
@@ -265,6 +296,7 @@ const (
 	settingUIShootSort     = "ui:shootSort"
 	settingUIShootGroup    = "ui:shootGroup"
 	settingUILastSeen      = "ui:lastSeenVersion"
+	settingUIFolderViews   = "ui:folderViews"
 )
 
 // Library rail width bounds; the default matches the design handoff.
@@ -366,6 +398,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		ShootSort:        shootSort,
 		ShootGroup:       shootGroup,
 		LastSeenVersion:  lastSeen,
+		FolderViews:      jsonSetting(ctx, db, settingUIFolderViews, map[string]FolderView{}),
 	}, nil
 }
 
@@ -558,6 +591,44 @@ func (u *Settings) SetGroupAlias(ctx context.Context, parentPath, alias string) 
 func (u *Settings) SetRailGroupOpen(ctx context.Context, parentPath string, open bool) error {
 	return updateMapSetting(ctx, u, settingUIRailGroups, parentPath, !open, func(m map[string]bool) {
 		m[parentPath] = false
+	})
+}
+
+// SetFolderView merges a per-folder view patch (nil fields untouched), so
+// windows changing different settings of the same folder never clobber
+// each other. Path is the lowercased folder path (client convention, same
+// as group aliases).
+func (u *Settings) SetFolderView(ctx context.Context, path string, patch FolderView) error {
+	if strings.TrimSpace(path) == "" {
+		return aprot.ErrInvalidParams("empty folder path")
+	}
+	if patch.MinRating != nil && (*patch.MinRating < 0 || *patch.MinRating > 5) {
+		return aprot.ErrInvalidParams("minRating must be 0..5")
+	}
+	if patch.FlagFilter != nil && !enumValid(*patch.FlagFilter, FlagFilterValues()) {
+		return aprot.ErrInvalidParams(fmt.Sprintf("unknown flagFilter %q", *patch.FlagFilter))
+	}
+	if patch.LibrarySort != nil && !enumValid(*patch.LibrarySort, LibrarySortValues()) {
+		return aprot.ErrInvalidParams(fmt.Sprintf("unknown librarySort %q", *patch.LibrarySort))
+	}
+	if patch.GapMinutes != nil && (*patch.GapMinutes < 0 || *patch.GapMinutes > 1440) {
+		return aprot.ErrInvalidParams("gap minutes must be 0..1440")
+	}
+	return updateMapSetting(ctx, u, settingUIFolderViews, path, true, func(m map[string]FolderView) {
+		cur := m[path]
+		if patch.MinRating != nil {
+			cur.MinRating = patch.MinRating
+		}
+		if patch.FlagFilter != nil {
+			cur.FlagFilter = patch.FlagFilter
+		}
+		if patch.LibrarySort != nil {
+			cur.LibrarySort = patch.LibrarySort
+		}
+		if patch.GapMinutes != nil {
+			cur.GapMinutes = patch.GapMinutes
+		}
+		m[path] = cur
 	})
 }
 

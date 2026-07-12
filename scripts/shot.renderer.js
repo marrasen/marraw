@@ -239,6 +239,35 @@ if (shot === 'cull') {
     ),
     entries: mw.changelog ? mw.changelog.parseChangelog().length : 'no bridge',
   };
+} else if (shot === 'folderview') {
+  // Per-folder view memory: set filters through the real FilterBar in folder
+  // A (sort/gap via the bridge — the sort menu is click-trappy), hop to
+  // ?altFolder= (folder B) and expect the mixed fallback (filters reset,
+  // sort/gap follow last-used), hop back and expect A's view restored whole.
+  // The capture shows folder A's FilterBar: 3 lit stars, Picks, gap Off.
+  const alt = new URLSearchParams(location.search).get('altFolder');
+  const pathA = ui().folderPath;
+  const view = () => {
+    const { minRating, flagFilter, librarySort, gapMinutes } = ui();
+    return { minRating, flagFilter, librarySort, gapMinutes };
+  };
+  document.querySelector('button[aria-label="Show 3+ stars"]')?.click();
+  [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Picks')?.click();
+  mw.setLibrarySort('nameDesc');
+  mw.setGapMinutes(null);
+  await sleep(1000); // server write + echo round-trip
+  const inA = view();
+  await mw.openPath(alt);
+  await until(() => ui().folderPath === alt);
+  await sleep(1000);
+  const inB = view();
+  mw.setLibrarySort('captureAsc'); // give B its own view; A must not care
+  await sleep(500);
+  await mw.openPath(pathA);
+  await until(() => ui().folderPath === pathA);
+  await sleep(1000);
+  const backInA = view();
+  window.__folderViewProbe = { inA, inB, backInA };
 } else if (shot === 'watermark' || shot === 'watermark-portrait') {
   // Drive the editor like a user — create, rename, type — so every step
   // exercises the live-write path. React inputs need the native setter.
@@ -292,5 +321,6 @@ const probe =
   window.__cropProbe ??
   window.__renderProbe ??
   window.__settleProbe ??
-  window.__welcomeProbe;
+  window.__welcomeProbe ??
+  window.__folderViewProbe;
 return probe ? { shot, ...probe } : shot;

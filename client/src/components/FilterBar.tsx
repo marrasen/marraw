@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { applyFlag, applyRating } from '@/lib/actions';
 import { esApplyParams } from '@/lib/editSession';
-import { updateLibrarySort } from '@/lib/uiSettings';
+import { updateFolderFilters, updateLibrarySort } from '@/lib/uiSettings';
 import { useUIStore, type FlagFilter, type LibrarySort } from '@/stores/uiStore';
 
 const FLAG_ITEMS: { value: FlagFilter; label: string }[] = [
@@ -48,7 +48,6 @@ export function FilterBar() {
   const minRating = useUIStore((s) => s.minRating);
   const librarySort = useUIStore((s) => s.librarySort);
   const flagFilter = useUIStore((s) => s.flagFilter);
-  const setFilters = useUIStore((s) => s.setFilters);
   const view = useUIStore((s) => s.view);
   const cellSize = useUIStore((s) => s.cellSize);
   const setCellSize = useUIStore((s) => s.setCellSize);
@@ -71,7 +70,7 @@ export function FilterBar() {
           {[1, 2, 3, 4, 5].map((n) => (
             <button
               key={n}
-              onClick={() => setFilters({ minRating: minRating === n ? 0 : n })}
+              onClick={() => updateFolderFilters(client, { minRating: minRating === n ? 0 : n })}
               className="p-0.5"
               aria-label={`Show ${n}+ stars`}
             >
@@ -96,7 +95,7 @@ export function FilterBar() {
         size="sm"
         items={FLAG_ITEMS}
         value={flagFilter}
-        onValueChange={(v) => setFilters({ flagFilter: v })}
+        onValueChange={(v) => updateFolderFilters(client, { flagFilter: v })}
         className="border-0 bg-secondary dark:bg-white/5"
       />
 

@@ -7,6 +7,7 @@ When cutting a release: bump the version in package.json and add a section here.
 
 ## 0.1.0 - 2026-07-12
 
+- Library remembers filters, sort order, and gap grouping per folder
 - Watermark editor: text and image overlays composited onto exports
 - 1:1 renders: cancel mid-decode, live progress, instant fit renders
 - Quick edits settle to full resolution immediately; superseded renders are cancelled

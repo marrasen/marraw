@@ -235,6 +235,8 @@ async function createWindow(opts = {}) {
     // card render ("" = fresh-install state).
     if (process.env.MARRAW_SEED_LAST_SEEN != null)
       query.seedLastSeen = process.env.MARRAW_SEED_LAST_SEEN;
+    // Second fixture folder for the `folderview` shot (A/B switch probe).
+    if (process.env.MARRAW_ALT_FOLDER) query.altFolder = process.env.MARRAW_ALT_FOLDER;
   }
 
   if (DEV && !PREVIEW) {

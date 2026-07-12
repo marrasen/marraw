@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { FlagType, Photo, PhotoPatch } from '@/api/library';
-import type { ExportOptions, UISettings, UserPreset, Watermark } from '@/api/settings';
+import type { ExportOptions, FolderView, UISettings, UserPreset, Watermark } from '@/api/settings';
 import type { Params } from '@/api/edit';
 import { sanitizeDialKeys, type DialKey } from '@/lib/dials';
 import { sanitizeAutoPresets, type AutoPreset } from '@/lib/autoPresets';
@@ -80,6 +80,46 @@ export const selectGapMinutes = (s: {
 }): number | null =>
   s.librarySort === 'nameAsc' || s.librarySort === 'nameDesc' ? null : s.gapMinutes;
 
+// One folder's remembered view resolved to effective values. Sort and gap
+// fall back to the last-used globals; filters fall back to show-all, so a
+// leftover rating filter never makes a fresh folder look empty. Wire values
+// are sanitized field by field — a bad field from an older/newer blob
+// degrades alone, not the whole entry.
+function resolveFolderView(
+  s: {
+    folderViews: Record<string, FolderView>;
+    globalLibrarySort: LibrarySort;
+    globalGapMinutes: number | null;
+  },
+  folderPath: string | null,
+): { minRating: number; flagFilter: FlagFilter; librarySort: LibrarySort; gapMinutes: number | null } {
+  const v = folderPath ? s.folderViews[folderPath.toLowerCase()] : undefined;
+  return {
+    minRating:
+      typeof v?.minRating === 'number' && v.minRating >= 0 && v.minRating <= 5
+        ? Math.round(v.minRating)
+        : 0,
+    flagFilter:
+      v?.flagFilter === 'pick' || v?.flagFilter === 'not-excluded' || v?.flagFilter === 'exclude'
+        ? v.flagFilter
+        : 'all',
+    librarySort:
+      v?.librarySort === 'captureAsc' ||
+      v?.librarySort === 'captureDesc' ||
+      v?.librarySort === 'nameAsc' ||
+      v?.librarySort === 'nameDesc'
+        ? v.librarySort
+        : s.globalLibrarySort,
+    // Stored 0 = per-folder "Off" (the same null bridge as the global row).
+    gapMinutes:
+      typeof v?.gapMinutes === 'number' && v.gapMinutes >= 0
+        ? v.gapMinutes === 0
+          ? null
+          : Math.round(v.gapMinutes)
+        : s.globalGapMinutes,
+  };
+}
+
 // Mirrors the server's normalizeExportOptions: missing or invalid fields
 // from older blobs fall back to the dialog defaults.
 function sanitizeExportOptions(o: Partial<ExportOptions> | undefined): ExportOptions {
@@ -134,6 +174,8 @@ interface UIState {
   // every server snapshot in via applyUISettings, and writes go through the
   // optimistic helpers in lib/uiSettings.ts — never set these directly.
   // Cull time-gap grouping threshold in minutes (null = off, one flat grid).
+  // Effective value for the current folder: the folder's remembered view if
+  // it has one, else the global last-used (globalGapMinutes).
   gapMinutes: number | null;
   // Develop dials pinned to the Cull confirm bar / Develop quick dock
   // (Settings → Toolbars). Empty = none, the compact default.
@@ -161,7 +203,17 @@ interface UIState {
   thumbFit: ThumbFit;
   // Photo ordering in the grids and filmstrips (default captureAsc). Read
   // the gap threshold through selectGapMinutes — name order has no gaps.
+  // Effective value for the current folder, like gapMinutes.
   librarySort: LibrarySort;
+  // Last-used global sort/gap — still written on every change; the fallback
+  // for folders with no folderViews entry.
+  globalLibrarySort: LibrarySort;
+  globalGapMinutes: number | null;
+  // Per-folder remembered views (filters/sort/gap), keyed by the lowercased
+  // folder path. Raw server map — resolveFolderView derives the effective
+  // minRating/flagFilter/librarySort/gapMinutes on folder switch and on
+  // every snapshot.
+  folderViews: Record<string, FolderView>;
   // Folder ordering / time bucketing in the library rail.
   shootSort: ShootSort;
   shootGroup: ShootGroup;
@@ -188,6 +240,9 @@ interface UIState {
   anchorId: number | null;
   selection: Set<number>;
 
+  // Library filters — effective values for the current folder, persisted
+  // per folder via folderViews (write through updateFolderFilters in
+  // lib/uiSettings.ts). Folders with no entry show everything.
   minRating: number;
   flagFilter: FlagFilter;
 
@@ -248,7 +303,6 @@ interface UIState {
   focus: (id: number | null, opts?: { extend?: boolean; toggle?: boolean }) => void;
   selectAll: (ids: number[]) => void;
   clearSelection: () => void;
-  setFilters: (f: { minRating?: number; flagFilter?: FlagFilter }) => void;
   applyPatches: (patches: PhotoPatch[]) => void;
   applyLocal: (ids: number[], patch: Partial<Photo>) => void;
   setNavRowModel: (rowStarts: number[], colCenters?: number[] | null) => void;
@@ -288,6 +342,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   prerenderFullres: false,
   thumbFit: 'fit',
   librarySort: 'captureAsc',
+  globalLibrarySort: 'captureAsc',
+  globalGapMinutes: 6,
+  folderViews: {},
   shootSort: 'nameAsc',
   shootGroup: 'none',
   collapsePrevYearsTick: 0,
@@ -331,11 +388,20 @@ export const useUIStore = create<UIState>((set, get) => ({
   setShowEditPanel: (open) => set({ showEditPanel: open }),
   toggleEditPanel: () => set((s) => ({ showEditPanel: !s.showEditPanel })),
   setDevelopTab: (t) => set({ developTab: t }),
-  // Server snapshot in (wire shapes sanitized to the client types).
-  applyUISettings: (s) =>
+  // Server snapshot in (wire shapes sanitized to the client types). The
+  // effective view is resolved against the folder open *now*, so a late
+  // echo of folder A's write never touches a window that moved on to B,
+  // and two windows on the same folder stay in sync.
+  applyUISettings: (s) => {
+    const globals = {
+      folderViews: s.folderViews ?? {},
+      globalLibrarySort: sanitizeLibrarySort(s.librarySort),
+      globalGapMinutes: s.gapMinutes === 0 ? null : s.gapMinutes,
+    };
     set({
       theme: s.theme,
-      gapMinutes: s.gapMinutes === 0 ? null : s.gapMinutes,
+      ...globals,
+      ...resolveFolderView(globals, get().folderPath),
       cullDials: sanitizeDialKeys(s.cullDials),
       quickDials: sanitizeDialKeys(s.quickDials),
       autoPresets: sanitizeAutoPresets(s.autoPresets),
@@ -347,7 +413,6 @@ export const useUIStore = create<UIState>((set, get) => ({
       exportOptions: sanitizeExportOptions(s.exportOptions),
       prerenderFullres: s.prerenderFullres,
       thumbFit: sanitizeThumbFit(s.thumbFit),
-      librarySort: sanitizeLibrarySort(s.librarySort),
       shootSort: sanitizeShootSort(s.shootSort),
       shootGroup: sanitizeShootGroup(s.shootGroup),
       editGroups: s.editGroups,
@@ -356,12 +421,17 @@ export const useUIStore = create<UIState>((set, get) => ({
       railWidth: clampRailWidth(s.railWidth),
       lastSeenVersion: s.lastSeenVersion ?? '',
       settingsLoaded: true,
-    }),
+    });
+  },
 
   setFolder: (id, path) =>
     set({
       folderId: id,
       folderPath: path,
+      // The folder's remembered view (or the fallbacks). Before the first
+      // snapshot the map is empty and this yields defaults; the snapshot's
+      // applyUISettings re-resolve then applies the saved view.
+      ...resolveFolderView(get(), path),
       view: 'grid',
       focusId: null,
       anchorId: null,
@@ -398,8 +468,6 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   selectAll: (ids) => set({ selection: new Set(ids) }),
   clearSelection: () => set({ selection: new Set() }),
-
-  setFilters: (f) => set(f),
 
   applyPatches: (patches) =>
     set((s) => {
