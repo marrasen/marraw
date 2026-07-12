@@ -587,19 +587,46 @@ export function CinemaImage({
     el.scrollTop = panRatio.current[1] * Math.max(0, el.scrollHeight - el.clientHeight);
   }, [photo.id, boxW, boxH, slackX, slackY, container]);
 
-  // Any return to fit recenters: reset the persisted pan ratio and snap the
-  // scroll back to the middle of the slack range.
+  // Any return to fit recenters — as a glide, not a snap: the pan ratio eases
+  // to the middle with the same duration/curve as the zoom tween, so a photo
+  // panned away at 1:1 travels home WHILE it shrinks instead of jumping to
+  // center first. Each frame writes the scroll from the live ranges, which is
+  // the same formula the pan-ratio restore applies when the zoom tween resizes
+  // the box — the two writers agree, so they compose instead of fighting.
+  const centerTweenRaf = useRef(0);
+  const cancelCenterTween = () => cancelAnimationFrame(centerTweenRaf.current);
   const centerTick = useUIStore((s) => s.loupeCenterTick);
   const lastCenterTick = useRef(centerTick);
   useLayoutEffect(() => {
     if (centerTick === lastCenterTick.current) return;
     lastCenterTick.current = centerTick;
-    panRatio.current = [0.5, 0.5];
     const el = containerRef.current;
-    if (!el) return;
+    if (!el) {
+      panRatio.current = [0.5, 0.5];
+      return;
+    }
     cancelPanTween();
-    el.scrollLeft = 0.5 * Math.max(0, el.scrollWidth - el.clientWidth);
-    el.scrollTop = 0.5 * Math.max(0, el.scrollHeight - el.clientHeight);
+    cancelCenterTween();
+    const apply = () => {
+      el.scrollLeft = panRatio.current[0] * Math.max(0, el.scrollWidth - el.clientWidth);
+      el.scrollTop = panRatio.current[1] * Math.max(0, el.scrollHeight - el.clientHeight);
+    };
+    const [fx, fy] = panRatio.current;
+    if (Math.abs(fx - 0.5) < 1e-3 && Math.abs(fy - 0.5) < 1e-3) {
+      panRatio.current = [0.5, 0.5];
+      apply();
+      return;
+    }
+    const start = performance.now();
+    const DURATION = 160;
+    centerTweenRaf.current = requestAnimationFrame(function tick(t) {
+      const p = Math.min(1, (t - start) / DURATION);
+      const eased = 1 - Math.pow(1 - p, 3);
+      panRatio.current = [fx + (0.5 - fx) * eased, fy + (0.5 - fy) * eased];
+      apply();
+      if (p < 1) centerTweenRaf.current = requestAnimationFrame(tick);
+    });
+    return cancelCenterTween;
   }, [centerTick]);
 
   const onScroll = () => {
@@ -627,6 +654,7 @@ export function CinemaImage({
     if (dx === 0 && dy === 0) return;
     const el = containerRef.current;
     if (!el) return;
+    cancelCenterTween(); // a fresh keyboard pan takes over from a recenter glide
     const base = panTweenTarget.current ?? [el.scrollLeft, el.scrollTop];
     const target: [number, number] = [base[0] + dx * el.clientWidth, base[1] + dy * el.clientHeight];
     panTweenTarget.current = target;
@@ -685,6 +713,7 @@ export function CinemaImage({
   wheelZoomRef.current = scale;
   const onWheel = (e: React.WheelEvent) => {
     if (!e.ctrlKey) return;
+    cancelCenterTween(); // wheel zoom owns panRatio (cursor anchor) from here
     const next = Math.min(4, Math.max(0.05, wheelZoomRef.current * Math.exp(-e.deltaY * 0.003)));
     wheelZoomRef.current = next;
     const el = containerRef.current;
@@ -732,6 +761,7 @@ export function CinemaImage({
       // can't be captured (synthetic test events) still pans.
     }
     cancelPanTween(); // grabbing the photo mid-glide wins over the keyboard tween
+    cancelCenterTween();
     dragFrom.current = [e.clientX, e.clientY];
     setDragging(true);
   };
