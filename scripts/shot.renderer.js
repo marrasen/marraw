@@ -136,6 +136,77 @@ if (shot === 'cull') {
     await sleep(80);
   }
   window.__renderProbe = { sawPercent, badgeGone: !badgeText() };
+} else if (shot === 'settle') {
+  // Probes the immediate-settle scheduler: (1) a one-shot apply must land its
+  // low-res frame and then the sharp 2048 with NO dead gap between them (the
+  // old 200ms settle timer would show as rendering===0 polls in between);
+  // (2) an edit while the 2048 is in flight must abort it and land a fast
+  // low-res frame instead of waiting the full render out.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1500); // initial preview + decode warm-up
+  const events = [];
+  const polls = [];
+  es.subscribe((s, prev) => {
+    if (s.preview !== prev.preview && s.preview) {
+      events.push({ t: performance.now(), size: s.preview.blob.size });
+    }
+  });
+  let polling = true;
+  const pollLoop = (async () => {
+    while (polling) {
+      polls.push({ t: performance.now(), rendering: es.getState().rendering });
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  })();
+
+  // Probe 1: auto-apply → low-res then full, back to back.
+  await mw.esAuto(['all']);
+  await until(() => mw.esPreviewSettled(), 30000);
+  await sleep(60);
+  const p1 = events.slice();
+  let deadGapPolls = -1;
+  if (p1.length >= 2) {
+    const t1 = p1[0].t + 5;
+    const t2 = p1[p1.length - 1].t - 5;
+    deadGapPolls = polls.filter((p) => p.t > t1 && p.t < t2 && p.rendering === 0).length;
+  }
+
+  // Probe 2: supersede an in-flight 2048. Commit starts the settle; an edit
+  // 120ms in must abort it and land a small (draft-size) frame promptly.
+  events.length = 0;
+  const exp = es.getState().draft.expEV ?? 0;
+  mw.esUpdate({ expEV: Math.round((exp + 0.4) * 100) / 100 });
+  await until(() => events.length >= 1, 15000); // drag frame landed
+  mw.esCommit(); // 2048 settle starts
+  await sleep(120);
+  const renderingMidSettle = es.getState().rendering;
+  const tSupersede = performance.now();
+  mw.esUpdate({ expEV: Math.round((exp + 0.7) * 100) / 100 });
+  await until(() => events.some((e) => e.t > tSupersede), 15000);
+  const afterSupersede = events.find((e) => e.t > tSupersede);
+  mw.esCommit();
+  await until(() => mw.esPreviewSettled(), 30000);
+  await sleep(60);
+  polling = false;
+  await pollLoop;
+  const sizes = events.map((e) => Math.round(e.size / 1024));
+  const maxSize = Math.max(...events.map((e) => e.size));
+  window.__settleProbe = {
+    // Probe 1: >=2 frames, small→large, zero dead-gap polls between them.
+    p1Frames: p1.map((e) => Math.round(e.size / 1024)),
+    p1SettledSharp: p1.length >= 2 && p1[p1.length - 1].size > p1[0].size,
+    deadGapPolls,
+    // Probe 2: a render was in flight at supersede time, the next landed
+    // frame is draft-sized (not the aborted 2048), latency from supersede.
+    renderingMidSettle,
+    supersededFrameKB: afterSupersede ? Math.round(afterSupersede.size / 1024) : null,
+    supersededIsDraft: !!afterSupersede && afterSupersede.size < maxSize * 0.55,
+    supersedeLatencyMs: afterSupersede ? Math.round(afterSupersede.t - tSupersede) : null,
+    p2FramesKB: sizes,
+    settled: mw.esPreviewSettled(),
+  };
 } else if (shot === 'watermark' || shot === 'watermark-portrait') {
   // Drive the editor like a user — create, rename, type — so every step
   // exercises the live-write path. React inputs need the native setter.
@@ -184,5 +255,5 @@ if (shot === 'cull') {
 await sleep(3600);
 window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
 await sleep(400);
-const probe = window.__wmProbe ?? window.__cropProbe ?? window.__renderProbe;
+const probe = window.__wmProbe ?? window.__cropProbe ?? window.__renderProbe ?? window.__settleProbe;
 return probe ? { shot, ...probe } : shot;

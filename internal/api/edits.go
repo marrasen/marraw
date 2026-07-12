@@ -107,6 +107,11 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 		if err != nil {
 			return nil, err
 		}
+		// A superseded settle was cancelled by the client — skip shipping a
+		// blob nobody will look at.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
@@ -191,6 +196,12 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 
 	rgba, err := e.previewDecode(ctx, photoID, photo, ep)
 	if err != nil {
+		return "", err
+	}
+	// A cancelled (superseded) render stops here: the decode above still
+	// warmed the cache for its successor, but the JPEG encode and disk write
+	// would be pure waste.
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	gamma := photo.LookGamma

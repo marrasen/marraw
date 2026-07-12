@@ -31,6 +31,7 @@ if (import.meta.env.DEV) {
       esCommit: () => es.esCommit(client),
       esSetCropping: (on: boolean) => es.esSetCropping(client, on),
       esAuto: (sections: unknown) => es.esAuto(client, sections as never),
+      esPreviewSettled: () => es.esPreviewSettled(),
       // Server-persisted UI settings (optimistic store write + server call).
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),

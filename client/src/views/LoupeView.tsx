@@ -537,10 +537,10 @@ export function CinemaImage({
       if (levelRef.current !== 'tiles') return;
       if (useEditSession.getState().cropping) return;
       // A one-shot auto/preset apply advances the hash immediately (its persist)
-      // while deferring the sharp render — evicting here would drop the instant
-      // low-res blob and fall back to a committed rendition that isn't rendered
-      // yet. Keep the preview until the session settles; the settled clear below
-      // then takes over once the 2048 lands.
+      // while the sharp render is still queued or in flight — evicting here
+      // would drop the instant low-res blob and fall back to a committed
+      // rendition that isn't rendered yet. Keep the preview until the session
+      // settles; the settled clear below then takes over once the 2048 lands.
       if (!esPreviewSettled()) return;
       const p = useEditSession.getState().preview;
       if (p && p.photoId === photo.id) esClearPreview();

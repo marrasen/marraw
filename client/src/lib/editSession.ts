@@ -141,35 +141,78 @@ export const useEditSession = create<EditSessionState>(() => ({
 // is added to any adjustment. Drag frames render at DRAFT_PX (quarter the
 // pixels of 2048, in-memory on the server — fast and cheap, transiently
 // upscaled by the loupe); commits and one-shot applies render FULL_PX, which
-// the server also persists to the pyramid cache for /img.
+// the server also persists to the pyramid cache for /img. There is no settle
+// timer anywhere: the sharp 2048 is queued immediately behind the instant
+// low-res frame, and a further edit ABORTS a stale in-flight 2048 (the abort
+// rides the WebSocket as a cancel frame and cancels the server handler's ctx)
+// instead of waiting behind it.
 const DRAFT_PX = 1024;
 const FULL_PX = 2048;
-let previewInFlight = false;
-let previewPending: { full: boolean } | null = null;
-let previewAbort: AbortController | null = null;
+// A render is keyed by the exact params it draws — crop-flattened while
+// cropping — plus the flat tag itself: entering crop mode re-renders the same
+// params as a different frame (the flat one), so the tag must participate.
+type RenderKey = { params: string; flat: boolean };
+// The single in-flight render. A full (2048) render is aborted when a newer
+// edit supersedes it; in-flight 1024s are never aborted — fold frames are
+// fast, land fresher feedback than a restart would, and the server can't
+// cancel mid-decode anyway.
+let inFlight: { full: boolean; abort: AbortController; key: RenderKey } | null = null;
+// What to render next, remembered while a render is in flight. Two slots so
+// a step/preset toggle that asks for a drag frame AND a settle in the same
+// tick paints the instant 1024 first with the 2048 queued right behind it —
+// a single sticky slot would render every held-key step at 2048.
+let pending: { low: boolean; full: boolean } | null = null;
+// The last FULL render that landed on screen: a settle request for the
+// identical frame is skipped (the drag-release commit right after an
+// identical settle, most commonly).
+let lastShown: { photoId: number; key: RenderKey } | null = null;
 let commitTimer = 0;
-// A one-shot auto/preset apply paints an instant low-res preview and defers
-// the full-res settle by SETTLE_MS so rapid toggling (Ctrl+1..9, Ctrl+U) only
-// renders cheap 1024 frames — the 2048 lands once the user stops.
-let settleTimer = 0;
-const SETTLE_MS = 200;
-// True while a deferred full-res settle is armed (or its render is queued): the
-// low-res blob currently on screen is NOT the final state, so esPreviewSettled
-// must report unsettled and the loupe must not evict the preview yet — else at
-// 1:1 the editHash advance from the apply's persist would drop the instant
-// low-res frame and fall back to a not-yet-rendered committed rendition.
-let settlePending = false;
 // Monotonic token guarding the async autoAdjust in esAuto/esApplyAutoPreset:
 // a newer apply (or a photo switch) supersedes an in-flight one so a stale
 // result can't clobber the draft.
 let applyGen = 0;
 
-function schedulePreview(client: ApiClient, full: boolean) {
-  if (previewInFlight) {
-    previewPending = { full: (previewPending?.full ?? false) || full };
+// In crop mode the loupe draws the rectangle and applies the straighten angle
+// as a CSS rotation, both client-side — so the backend renders the flat full
+// frame (crop + angle stripped) and the overlay/transform do the rest. The
+// draft keeps the real crop and angle for commit.
+function flattenedParams(draft: Params, cropping: boolean): Params {
+  return cropping ? { ...draft, cropX: 0, cropY: 0, cropW: 0, cropH: 0, cropAngle: 0 } : draft;
+}
+
+function keyFor(draft: Params, cropping: boolean): RenderKey {
+  return { params: JSON.stringify(flattenedParams(draft, cropping)), flat: cropping };
+}
+
+function sameKey(a: RenderKey, b: RenderKey): boolean {
+  return a.flat === b.flat && a.params === b.params;
+}
+
+// schedulePreview requests a render of the current draft. 'draft' is a drag
+// frame: it REPLACES the pending slots (a manual edit supersedes any queued
+// settle — the commit at drag end queues a fresh one) and aborts an in-flight
+// full render, whose pixels are now stale. 'settle' queues the sharp 2048
+// stickily behind whatever is running, aborting an in-flight full only when
+// it renders different params.
+function schedulePreview(client: ApiClient, kind: 'draft' | 'settle') {
+  if (!inFlight) {
+    void renderPreview(client, kind === 'settle');
     return;
   }
-  void renderPreview(client, full);
+  if (kind === 'draft') {
+    pending = { low: true, full: false };
+    if (inFlight.full) inFlight.abort.abort();
+  } else {
+    pending = { low: pending?.low ?? false, full: true };
+    if (inFlight.full) {
+      // The supersede comparison must see the freshest slider state — but
+      // only this branch pays the flush, so drag frames keep their per-frame
+      // draft coalescing.
+      esFlushDraft();
+      const s = useEditSession.getState();
+      if (s.draft && !sameKey(inFlight.key, keyFor(s.draft, s.cropping))) inFlight.abort.abort();
+    }
+  }
 }
 
 function setState(patch: Partial<EditSessionState> | ((s: EditSessionState) => Partial<EditSessionState>)) {
@@ -183,6 +226,9 @@ function sameParams(a: Params, b: Params): boolean {
 export function esClearPreview() {
   const p = useEditSession.getState().preview;
   if (p) URL.revokeObjectURL(p.url);
+  // The sharp frame (if any) is no longer what's displayed, so a future
+  // settle for the same params must render, not dedupe-skip.
+  lastShown = null;
   setState({ preview: null });
 }
 
@@ -192,7 +238,7 @@ export function esClearPreview() {
 // carries uncommitted pixels the committed renditions don't have yet).
 export function esPreviewSettled(): boolean {
   const s = useEditSession.getState();
-  if (settlePending || s.rendering > 0 || previewPending || pendingPatch) return false;
+  if (inFlight || s.rendering > 0 || pending || pendingPatch) return false;
   if (s.photoId == null || !s.draft) return false;
   const h = s.history[s.photoId];
   return !h || sameParams(s.draft, h.stack[h.index].params);
@@ -237,11 +283,10 @@ function labelForDiff(prev: Params, next: Params): string {
 // esLoad opens an edit session for the newly focused photo.
 export async function esLoad(client: ApiClient, photoId: number, applyIds: number[]) {
   window.clearTimeout(commitTimer);
-  window.clearTimeout(settleTimer);
-  settlePending = false;
   applyGen++; // supersede any autoAdjust still in flight for the old photo
-  previewPending = null;
-  previewAbort?.abort();
+  pending = null; // BEFORE the abort: its finally must not refire for the old photo
+  inFlight?.abort.abort();
+  lastShown = null;
   esClearPreview();
   setState((s) => ({
     photoId,
@@ -324,7 +369,7 @@ export function esSetCropping(client: ApiClient, on: boolean) {
   if (!on) {
     esCommit(client); // persist the crop; the commit re-renders the cropped frame
   } else {
-    schedulePreview(client, true);
+    schedulePreview(client, 'settle');
   }
 }
 
@@ -362,8 +407,6 @@ export function esFlushDraft() {
 export function esUpdate(client: ApiClient, patch: Partial<Params>) {
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
-  window.clearTimeout(settleTimer); // a manual edit supersedes a deferred settle
-  settlePending = false;
   pendingPatch = { ...(pendingPatch ?? {}), ...patch };
   if (!draftRaf) draftRaf = requestAnimationFrame(flushDraft);
   // While cropping, the crop rectangle and straighten angle are previewed
@@ -371,24 +414,22 @@ export function esUpdate(client: ApiClient, patch: Partial<Params>) {
   if (s.cropping && Object.keys(patch).every((k) => (CROP_LIVE_KEYS as readonly string[]).includes(k))) {
     return;
   }
-  schedulePreview(client, false);
+  schedulePreview(client, 'draft');
 }
 
 async function renderPreview(client: ApiClient, full: boolean) {
   esFlushDraft(); // render the freshest slider state, not last frame's
   const { photoId, draft, cropping } = useEditSession.getState();
   if (photoId == null || !draft) return;
-  previewInFlight = true;
+  const renderParams = flattenedParams(draft, cropping);
+  const key = keyFor(draft, cropping);
+  // The identical sharp frame already landed (and ensurePreview wrote it to
+  // the pyramid cache) — nothing to render. Most commonly the drag-release
+  // commit right after an identical settle.
+  if (full && lastShown && lastShown.photoId === photoId && sameKey(lastShown.key, key)) return;
   const ac = new AbortController();
-  previewAbort = ac;
+  inFlight = { full, abort: ac, key };
   setState((s) => ({ rendering: s.rendering + 1 }));
-  // In crop mode the loupe draws the rectangle and applies the straighten
-  // angle as a CSS rotation, both client-side — so render the flat full frame
-  // (crop + angle stripped) once and let the overlay/transform do the rest.
-  // The draft keeps the real crop and angle for commit.
-  const renderParams = cropping
-    ? { ...draft, cropX: 0, cropY: 0, cropW: 0, cropH: 0, cropAngle: 0 }
-    : draft;
   try {
     const blob = await previewEdit(client, photoId, renderParams, full ? FULL_PX : DRAFT_PX, {
       signal: ac.signal,
@@ -398,16 +439,26 @@ async function renderPreview(client: ApiClient, full: boolean) {
     const old = useEditSession.getState().preview;
     if (old) URL.revokeObjectURL(old.url);
     setState({ preview: { photoId, url, blob, flat: cropping } });
+    // lastShown means "the displayed blob IS this sharp frame" — a low-res
+    // frame replacing it on screen must clear it, or returning to the exact
+    // same params would dedupe-skip the settle and leave the soft 1024 up.
+    lastShown = full ? { photoId, key } : null;
   } catch {
     // aborted or superseded
   } finally {
-    previewInFlight = false;
+    inFlight = null;
+    // Fire the queued state now — even when this render was aborted: the
+    // abort-on-supersede path wants its replacement immediately, and a photo
+    // switch cleared `pending` before aborting so it never refires here. The
+    // low frame goes first for instant feedback, keeping the settle queued
+    // behind it. Refire BEFORE decrementing so `rendering` never touches 0
+    // mid-handoff and esPreviewSettled stays false throughout.
+    const p = pending;
+    if (p) {
+      pending = p.low && p.full ? { low: false, full: true } : null;
+      void renderPreview(client, !p.low);
+    }
     setState((s) => ({ rendering: Math.max(0, s.rendering - 1) }));
-    const pending = previewPending;
-    previewPending = null;
-    // A newer state arrived while rendering — fire it now (unless the whole
-    // session moved on and aborted us).
-    if (pending && !ac.signal.aborted) void renderPreview(client, pending.full);
   }
 }
 
@@ -431,8 +482,6 @@ function persist(client: ApiClient, params: Params, ids: number[]) {
 // esCommit persists the draft (merged with an optional final patch) to every
 // photo in the selection and records it in the undo history.
 export function esCommit(client: ApiClient, patch?: Partial<Params>) {
-  window.clearTimeout(settleTimer); // this commit is the settle
-  settlePending = false;
   esFlushDraft(); // apply any frame-pending slider move before snapshotting
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
@@ -445,7 +494,7 @@ export function esCommit(client: ApiClient, patch?: Partial<Params>) {
   persist(client, params, ids);
   // Settle render: drag frames were low-res, so bring the loupe back to the
   // full 2048 (which the server also writes to the pyramid cache).
-  schedulePreview(client, true);
+  schedulePreview(client, 'settle');
 }
 
 // esApplyParams replaces the whole draft (paste, picker result, undo) with
@@ -457,21 +506,19 @@ export function esApplyParams(
 ) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
-  window.clearTimeout(settleTimer); // this discrete apply supersedes any deferred settle
-  settlePending = false;
   setState({ draft: params });
   if (!opts?.skipHistory) pushHistory(s.photoId, params, opts?.label ?? 'Edit');
-  schedulePreview(client, true);
+  schedulePreview(client, 'settle');
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
   persist(client, params, ids);
 }
 
 // esApplyParamsPreview is esApplyParams for one-shot auto/preset applies: it
 // records history and persists immediately (a discrete, undoable action) but
-// paints a low-res preview now and defers the full-res settle by SETTLE_MS.
-// Rapid toggling only ever renders 1024 frames — the coalescer never sees the
-// full flag until the idle timer fires — and the sharp 2048 lands once the
-// user stops. esUpdate/esCommit/esLoad clear settleTimer when they supersede.
+// paints a low-res preview now with the full-res settle queued right behind.
+// Rapid toggling stays cheap without any timer: each re-trigger's low-res
+// request replaces the queued settle and aborts a stale in-flight 2048, so
+// the sharp frame lands right after the last toggle.
 function esApplyParamsPreview(client: ApiClient, params: Params, label: string) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
@@ -482,19 +529,14 @@ function esApplyParamsPreview(client: ApiClient, params: Params, label: string) 
   previewThenSettle(client);
 }
 
-// previewThenSettle paints an instant low-res frame and defers the sharp 2048
-// by SETTLE_MS, so rapid re-triggers (preset toggles, WB picks) only render
-// cheap frames until the user stops. settlePending keeps the loupe on the
-// low-res blob until the 2048 lands. Does NOT touch the draft, history, or
+// previewThenSettle paints an instant low-res frame with the sharp 2048
+// queued immediately behind it (no timer — a re-trigger aborts/replaces the
+// stale settle instead). The pending low/full slots keep the loupe reporting
+// unsettled until the 2048 lands. Does NOT touch the draft, history, or
 // persistence — callers own that.
 function previewThenSettle(client: ApiClient) {
-  schedulePreview(client, false); // instant low-res
-  window.clearTimeout(settleTimer);
-  settlePending = true;
-  settleTimer = window.setTimeout(() => {
-    settlePending = false;
-    schedulePreview(client, true);
-  }, SETTLE_MS);
+  schedulePreview(client, 'draft'); // instant low-res, supersedes a stale settle
+  schedulePreview(client, 'settle');
 }
 
 export function esCanUndo(s: EditSessionState): boolean {
@@ -536,14 +578,12 @@ export function esJumpTo(client: ApiClient, index: number) {
   const h = s.history[s.photoId];
   if (!h) return;
   if (index < 0 || index >= h.stack.length || index === h.index) return;
-  window.clearTimeout(settleTimer); // this jump supersedes any deferred settle
-  settlePending = false;
   const params = h.stack[index].params;
   setState({
     draft: params,
     history: { ...s.history, [s.photoId]: { ...h, index } },
   });
-  schedulePreview(client, true);
+  schedulePreview(client, 'settle');
   setEditParams(client, s.photoId, params).catch((err) =>
     toast.error(`Save failed: ${(err as Error).message}`),
   );
@@ -558,7 +598,10 @@ export function esHistory(s: EditSessionState): { entries: HistorySnapshot[]; in
 }
 
 // esStep adjusts the active (or given) control from the keyboard: +/- steps
-// numeric controls and cycles enum controls. Commits after a short idle.
+// numeric controls and cycles enum controls. Every step renders the instant
+// low-res frame with the sharp settle queued right behind it (the next step
+// aborts a stale in-flight settle); only the persist + history entry waits
+// for a short idle, so a run of nudges lands as one undoable commit.
 export function esStep(client: ApiClient, control: ControlId, dir: 1 | -1, big = false) {
   const s = useEditSession.getState();
   if (!s.draft) return;
@@ -578,6 +621,7 @@ export function esStep(client: ApiClient, control: ControlId, dir: 1 | -1, big =
   }
   esUpdate(client, patch);
   esFlushDraft(); // a discrete key step should land in the draft immediately
+  schedulePreview(client, 'settle'); // sharp frame right behind the instant one
   window.clearTimeout(commitTimer);
   commitTimer = window.setTimeout(() => esCommit(client), 600);
 }
@@ -588,9 +632,13 @@ export function esStep(client: ApiClient, control: ControlId, dir: 1 | -1, big =
 export function esReset(client: ApiClient) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
-  window.clearTimeout(settleTimer); // reset supersedes any deferred settle
-  settlePending = false;
   const photoId = s.photoId;
+  // Same order as esLoad: clear pending BEFORE aborting so the finally does
+  // not refire, then abort so an in-flight pre-reset render can't land a
+  // stale blob after the clear below (the photoId guard alone won't catch
+  // it — the photo hasn't changed).
+  pending = null;
+  inFlight?.abort.abort();
   setState({ draft: { ...NEUTRAL } });
   esClearPreview();
   const ids = s.applyIds.length > 1 ? s.applyIds : [photoId];
@@ -610,9 +658,9 @@ export type AutoSection = 'tone' | 'wb' | 'color';
 
 // esAuto asks the backend to compute auto values for the given sections of the
 // focused photo and applies the merged result with an instant low-res preview
-// and a deferred full-res settle (esApplyParamsPreview) so it stays snappy to
-// re-trigger. On a multi-selection the focused photo's auto result applies to
-// all targets — the same semantics as paste and the WB picker.
+// and the full-res settle queued behind it (esApplyParamsPreview) so it stays
+// snappy to re-trigger. On a multi-selection the focused photo's auto result
+// applies to all targets — the same semantics as paste and the WB picker.
 export async function esAuto(client: ApiClient, sections: (AutoSection | 'all')[]) {
   const s = useEditSession.getState();
   if (s.photoId == null || !s.draft) return;
@@ -631,8 +679,8 @@ export async function esAuto(client: ApiClient, sections: (AutoSection | 'all')[
 // esApplyAutoPreset runs a creative auto: the preset's auto sections first
 // (skipped when empty — an offsets-only preset), then its style offsets on
 // top, clamped to the control ranges. One history entry, one persist, with an
-// instant low-res preview and a deferred full-res settle so toggling between
-// presets stays responsive (esApplyParamsPreview).
+// instant low-res preview and the full-res settle queued right behind so
+// toggling between presets stays responsive (esApplyParamsPreview).
 export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
   const s = useEditSession.getState();
   if (s.photoId == null || !s.draft) return;
@@ -693,13 +741,12 @@ export async function esPickWB(client: ApiClient, x: number, y: number) {
     const cur = useEditSession.getState();
     if (cur.photoId !== s.photoId || !cur.wbPicking) return; // superseded / closed
     setState({ draft: params });
-    // Low-res only, no deferred 2048 settle: the fast fold and the exact 2048
-    // render WB slightly differently, so settling on every click flashed the
-    // balance twice and made picks impossible to compare. Each click now shows
-    // one consistent fold frame; Done renders the exact 2048 once.
-    window.clearTimeout(settleTimer);
-    settlePending = false;
-    schedulePreview(client, false);
+    // Low-res only, no 2048 settle: the fast fold and the exact 2048 render
+    // WB slightly differently, so settling on every click flashed the balance
+    // twice and made picks impossible to compare. The 'draft' flavor replaces
+    // any queued settle (from a preceding As-shot/Auto/Reset), so each click
+    // shows one consistent fold frame; Done renders the exact 2048 once.
+    schedulePreview(client, 'draft');
   } catch (err) {
     toast.error(`White balance pick failed: ${(err as Error).message}`);
   }
@@ -713,12 +760,10 @@ export function esWBPickDone(client: ApiClient) {
   setState({ wbPicking: false, wbPickBase: null });
   if (s.photoId == null || !s.draft) return;
   if (base && sameParams(base, s.draft)) {
-    window.clearTimeout(settleTimer);
-    settlePending = false;
-    schedulePreview(client, true); // land a sharp frame, no history churn
+    schedulePreview(client, 'settle'); // land a sharp frame, no history churn
     return;
   }
-  esApplyParams(client, s.draft, { label: 'White balance' }); // clears the settle timer itself
+  esApplyParams(client, s.draft, { label: 'White balance' });
 }
 
 // esWBPickCancel restores the pre-picker draft and closes the picker.
@@ -726,11 +771,9 @@ export function esWBPickCancel(client: ApiClient) {
   const s = useEditSession.getState();
   const base = s.wbPickBase;
   setState({ wbPicking: false, wbPickBase: null });
-  window.clearTimeout(settleTimer); // drop any pending pick settle
-  settlePending = false;
   if (base && s.draft && !sameParams(base, s.draft)) {
     setState({ draft: base });
-    schedulePreview(client, true);
+    schedulePreview(client, 'settle');
   }
 }
 
