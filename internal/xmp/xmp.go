@@ -283,8 +283,8 @@ func (o orient) apply(u, v float64) (float64, float64) {
 // straighten angle negates under a mirror (quarter turns preserve it).
 // crs:CropAngle then stores the negation of the content-clockwise angle
 // (ACR keeps the crop-rect rotation, the inverse of the content rotation).
-// Both conventions are assumptions verified against Lightroom — flip the
-// constants here if a round-trip proves them wrong.
+// Both conventions are assumptions NOT yet round-tripped through a real
+// Lightroom — if one proves wrong, each is a single flip in this function.
 func cropToNative(n *edit.Params, total orient) (left, top, right, bottom, angle float64) {
 	x0, y0, x1, y1 := 0.0, 0.0, 1.0, 1.0
 	if n.HasCrop() {
