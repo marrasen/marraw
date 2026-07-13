@@ -181,6 +181,26 @@ func (c *Cache) PathForTile(cacheKey string, tx, ty int, editHash string) string
 		fmt.Sprintf("%s_t%dx%d_%s_%s.jpg", cacheKey, tx, ty, editHash, renderVersion))
 }
 
+// InvalidateEdit deletes every cached rendition (levels and tiles) of one
+// edit state. Needed when derived inputs OUTSIDE the edit hash change the
+// pixels — today that's an AI-mask map being (re)generated for an edit that
+// already referenced it: the params (and so the hash) are unchanged, but a
+// cached render made while the map was missing no longer matches. Server
+// files only; a browser may still hold the immutable /img URL until the next
+// edit bumps the hash — the loupe preview path re-reads these files, which
+// is where masks matter.
+func (c *Cache) InvalidateEdit(cacheKey, editHash string) {
+	if cacheKey == "" || editHash == "" {
+		return
+	}
+	pattern := filepath.Join(c.Dir(), cacheKey[:2],
+		fmt.Sprintf("%s_*_%s_%s.jpg", cacheKey, editHash, renderVersion))
+	matches, _ := filepath.Glob(pattern)
+	for _, m := range matches {
+		os.Remove(m)
+	}
+}
+
 // Ensure guarantees the rendition exists on disk and returns its path.
 // editHash must be edit.BaseHash or the photo's current edit hash.
 // Generation is deduplicated and prioritized through the decode pool;

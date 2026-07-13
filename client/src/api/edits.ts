@@ -20,6 +20,11 @@ export interface AIMapResult {
     categories?: AICategory[];
 }
 
+export interface AIModelInfo {
+    downloaded: boolean;
+    bytes: number;
+}
+
 export interface Delta {
     expEV: number | null;
     bright: number | null;
@@ -34,6 +39,19 @@ export interface Delta {
     toneHighlights: number | null;
     saturation: number | null;
     vibrance: number | null;
+}
+
+
+export function aIModelStatus(client: ApiClient, kind: AIKindType, options?: RequestOptions): Promise<AIModelInfo> {
+    return client.request<AIModelInfo>('Edits.AIModelStatus', [kind], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+aIModelStatus.method = 'Edits.AIModelStatus' as const;
+
+export function subscribeAIModelStatus(client: ApiClient, kind: AIKindType, callback: (data: AIModelInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<AIModelInfo>('Edits.AIModelStatus', [kind], callback, onError, options);
 }
 
 
@@ -63,16 +81,16 @@ export function subscribeAutoAdjust(client: ApiClient, photoID: number, params: 
 }
 
 
-export function generateAIMap(client: ApiClient, photoID: number, kind: AIKindType, options?: RequestOptions): Promise<AIMapResult> {
-    return client.request<AIMapResult>('Edits.GenerateAIMap', [photoID, kind], options);
+export function generateAIMap(client: ApiClient, photoID: number, kind: AIKindType, allowDownload: boolean, options?: RequestOptions): Promise<AIMapResult> {
+    return client.request<AIMapResult>('Edits.GenerateAIMap', [photoID, kind, allowDownload], options);
 }
 // Wire-method tag consumed by useQuerySuspense to key the promise cache and
 // open the matching server subscription. Stable identifier across builds
 // (unaffected by minification, unlike Function.name).
 generateAIMap.method = 'Edits.GenerateAIMap' as const;
 
-export function subscribeGenerateAIMap(client: ApiClient, photoID: number, kind: AIKindType, callback: (data: AIMapResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
-    return client.subscribe<AIMapResult>('Edits.GenerateAIMap', [photoID, kind], callback, onError, options);
+export function subscribeGenerateAIMap(client: ApiClient, photoID: number, kind: AIKindType, allowDownload: boolean, callback: (data: AIMapResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<AIMapResult>('Edits.GenerateAIMap', [photoID, kind, allowDownload], callback, onError, options);
 }
 
 
@@ -169,6 +187,21 @@ export function subscribeSetEditParams(client: ApiClient, photoID: number, param
 // React Hooks for Edits
 
 /**
+ * Subscribes to `Edits.AIModelStatus` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useAIModelStatus(kind: AIKindType, options?: UseQueryOptions<AIModelInfo>): UseQueryResult<AIModelInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, kind: AIKindType) => aIModelStatus(client, kind, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [kind], _subscribe: { method: 'Edits.AIModelStatus', params: [kind] } });
+}
+
+/**
  * Subscribes to `Edits.ApplyBatchEdit` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -205,12 +238,12 @@ export function useAutoAdjust(photoID: number, params: Params, sections: string[
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useGenerateAIMap(photoID: number, kind: AIKindType, options?: UseQueryOptions<AIMapResult>): UseQueryResult<AIMapResult> {
+export function useGenerateAIMap(photoID: number, kind: AIKindType, allowDownload: boolean, options?: UseQueryOptions<AIMapResult>): UseQueryResult<AIMapResult> {
     const wrappedFn = useCallback(
-        (client: ApiClient, signal: AbortSignal, photoID: number, kind: AIKindType) => generateAIMap(client, photoID, kind, { signal }),
+        (client: ApiClient, signal: AbortSignal, photoID: number, kind: AIKindType, allowDownload: boolean) => generateAIMap(client, photoID, kind, allowDownload, { signal }),
         [],
     );
-    return useQuery(wrappedFn, { ...options, params: [photoID, kind], _subscribe: { method: 'Edits.GenerateAIMap', params: [photoID, kind] } });
+    return useQuery(wrappedFn, { ...options, params: [photoID, kind, allowDownload], _subscribe: { method: 'Edits.GenerateAIMap', params: [photoID, kind, allowDownload] } });
 }
 
 /**

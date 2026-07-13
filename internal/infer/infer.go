@@ -13,6 +13,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 
@@ -113,6 +115,13 @@ func (m *Manager) Session(ctx context.Context, spec ModelSpec, progress Progress
 		delete(m.sessions, evict)
 	}
 	return s, nil
+}
+
+// HasModel reports whether spec's weights are already on disk — the check
+// consent-gated callers make before a Session call that would download.
+func (m *Manager) HasModel(spec ModelSpec) bool {
+	_, err := os.Stat(filepath.Join(m.modelsDir, spec.fileName()))
+	return err == nil
 }
 
 // touch moves id to the most-recently-used end. Caller holds m.mu.

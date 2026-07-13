@@ -9,7 +9,9 @@ import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
-import { applyBatchEdit, generateAIMap, type AIMapResult, type Delta } from '@/api/edits';
+// (aprot's camelCasing lowercases exactly one leading character: aIModelStatus.)
+import { aIModelStatus as aiModelStatus, applyBatchEdit, generateAIMap, type AIMapResult, type Delta } from '@/api/edits';
+import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import type { AIKindType, Mask, MaskAdjust, Params } from '@/api/edit';
 import {
   MASK_CONTROL_ORDER,
@@ -850,8 +852,13 @@ function MasksPanel({ client, targetCount }: { client: ApiClient; targetCount: n
 // aiRestoreFired remembers which (photo, kind) map restores this session has
 // already requested — GenerateAIMap is idempotent and cheap when the map is
 // on disk, but there's no reason to re-fire it on every render (or for
-// StrictMode's double effect).
+// StrictMode's double effect). A consent-declined kind stays in the set so
+// the dialog doesn't nag on every re-render; it re-asks next session.
 const aiRestoreFired = new Set<string>();
+
+// isModelNotDownloaded matches the server's consent sentinel (aimasks.go).
+const isModelNotDownloaded = (err: unknown) =>
+  err instanceof Error && err.message.includes('model not downloaded');
 
 function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   const activeMask = useEditSession((s) => s.activeMask);
@@ -860,24 +867,32 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   const [generating, setGenerating] = useState<AIKindType | null>(null);
   // Scene detection result for THIS photo: mapVer + the category chips.
   const [scene, setScene] = useState<AIMapResult | null>(null);
+  // A feature waiting on download consent; non-null renders the dialog.
+  const [pendingAI, setPendingAI] = useState<PendingAIDownload | null>(null);
   useEffect(() => setScene(null), [photoId]);
   const masks = draft.masks ?? [];
   const add = (type: Mask['type']) => {
     setMode('develop'); // the overlay lives on the Develop canvas
     esAddMask(client, type);
   };
-  const addAI = async (kind: 'subject' | 'depth' | 'class') => {
-    if (photoId == null || generating) return;
+
+  // runAI generates the map (downloading only with explicit consent) and
+  // applies the mode: add a fresh mask / show scene chips, or — for a
+  // restore — nudge a preview re-render so the now-live mask shows.
+  const runAI = async (kind: AIKindType, allowDownload: boolean, mode: 'add' | 'restore') => {
+    if (photoId == null) return;
     setGenerating(kind);
     try {
-      const res = await generateAIMap(client, photoId, kind);
-      if (kind === 'class') {
+      const res = await generateAIMap(client, photoId, kind, allowDownload);
+      if (mode === 'restore') {
+        esUpdate(client, {}); // repaint: the mask's map just came alive
+      } else if (kind === 'class') {
         // Scene detection adds no mask by itself — it offers one chip per
         // detected category; clicking a chip adds that category's mask.
         setScene(res);
       } else {
         setMode('develop');
-        esAddMaskObject(client, aiMask(kind, res.mapVer));
+        esAddMaskObject(client, aiMask(kind as 'subject' | 'depth', res.mapVer));
       }
     } catch (err) {
       toast.error(`AI mask failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -886,16 +901,43 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
     }
   };
 
+  // Button path: ask for consent first when the model isn't on disk yet.
+  const addAI = async (kind: 'subject' | 'depth' | 'class') => {
+    if (photoId == null || generating) return;
+    try {
+      const status = await aiModelStatus(client, kind);
+      if (!status.downloaded) {
+        setPendingAI({ kind, bytes: status.bytes, mode: 'add' });
+        return;
+      }
+    } catch (err) {
+      toast.error(`AI mask failed: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    void runAI(kind, false, 'add');
+  };
+
   // Restore maps for AI masks that arrived without local map files (sidecar
-  // from another machine, cleared data dir): idempotent per photo+kind.
+  // from another machine, cleared data dir): idempotent per photo+kind, and
+  // never a silent download — a missing model opens the consent dialog.
   useEffect(() => {
     if (photoId == null) return;
     for (const m of masks) {
-      if (m.type !== 'ai' || !m.aiKind || m.aiKind === 'class') continue;
-      const key = `${photoId}|${m.aiKind}`;
+      if (m.type !== 'ai' || !m.aiKind) continue;
+      const kind = m.aiKind;
+      const key = `${photoId}|${kind}`;
       if (aiRestoreFired.has(key)) continue;
       aiRestoreFired.add(key);
-      generateAIMap(client, photoId, m.aiKind).catch(() => aiRestoreFired.delete(key));
+      generateAIMap(client, photoId, kind, false)
+        .then(() => esUpdate(client, {}))
+        .catch(async (err) => {
+          if (isModelNotDownloaded(err)) {
+            const status = await aiModelStatus(client, kind).catch(() => null);
+            if (status) setPendingAI({ kind, bytes: status.bytes, mode: 'restore' });
+            return; // stays in aiRestoreFired: don't re-nag this session
+          }
+          aiRestoreFired.delete(key); // transient failure: allow a retry
+        });
     }
   }, [client, photoId, masks]);
 
@@ -987,6 +1029,14 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
           }}
         />
       ))}
+      <AIModelDialog
+        pending={pendingAI}
+        onConfirm={(p) => {
+          setPendingAI(null);
+          void runAI(p.kind, true, p.mode);
+        }}
+        onCancel={() => setPendingAI(null)}
+      />
     </div>
   );
 }

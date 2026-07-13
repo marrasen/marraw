@@ -92,17 +92,45 @@ func (e *Edits) categoriesFor(photoKey, ver string) []AICategory {
 	return out
 }
 
+// AIModelInfo reports whether a kind's model weights are on disk, and how
+// large the download is when they aren't — what the client's consent dialog
+// shows before the first use of an AI feature.
+type AIModelInfo struct {
+	Downloaded bool  `json:"downloaded"`
+	Bytes      int64 `json:"bytes"`
+}
+
+// AIModelStatus reports the download state of the model serving kind.
+func (e *Edits) AIModelStatus(ctx context.Context, kind edit.AIKind) (*AIModelInfo, error) {
+	spec, ok := aimask.SpecFor(kind)
+	if !ok {
+		return nil, fmt.Errorf("ai masks: %q has no model available yet", kind)
+	}
+	if e.deps.Infer == nil {
+		return nil, fmt.Errorf("ai masks: inference is not configured")
+	}
+	return &AIModelInfo{Downloaded: e.deps.Infer.HasModel(spec), Bytes: spec.Bytes}, nil
+}
+
+// aiModelNotDownloadedMsg is the sentinel the client matches to open its
+// download-consent dialog. Keep in sync with isModelNotDownloaded in
+// EditPanel.tsx.
+const aiModelNotDownloadedMsg = "model not downloaded"
+
 // GenerateAIMap ensures the model-generated map for (photo, kind) exists and
 // returns its version tag. Idempotent and cheap when the map is already on
 // disk — the client may call it freely (e.g. to restore maps for an edit
 // that arrived via sidecar from another machine). The first use of a kind
-// downloads its model (tens to hundreds of MB), surfaced as a shared task
-// with progress; ctx cancellation aborts both download and generation.
+// needs its model (tens of MB to ~1.3 GB): downloads happen ONLY with
+// allowDownload — the client sets it after the user confirmed the consent
+// dialog — and are surfaced as a shared task with progress; ctx cancellation
+// aborts both download and generation. Without consent a missing model fails
+// with aiModelNotDownloadedMsg so the client can ask.
 //
 // The inference input is a neutral base-orientation render, deliberately
 // independent of the current develop settings and crop, so the map never
 // shifts as the user edits.
-func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKind) (*AIMapResult, error) {
+func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKind, allowDownload bool) (*AIMapResult, error) {
 	ver, ok := aimask.MapVerFor(kind)
 	if !ok {
 		return nil, fmt.Errorf("ai masks: %q has no model available yet", kind)
@@ -122,6 +150,9 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 		}
 		return res, nil
 	}
+	if spec, _ := aimask.SpecFor(kind); !allowDownload && !e.deps.Infer.HasModel(spec) {
+		return nil, fmt.Errorf("ai masks: %s", aiModelNotDownloadedMsg)
+	}
 
 	rgba, err := e.previewDecode(ctx, photoID, photo, nil)
 	if err != nil {
@@ -140,6 +171,13 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 	if err := store.Save(photo.CacheKey, kind, ver, gray); err != nil {
 		task.Err(err)
 		return nil, err
+	}
+	// A freshly (re)generated map changes pixels for any SAVED edit that
+	// already references it without changing that edit's hash (the restore
+	// path: sidecar-imported AI masks). Drop the stale cached renditions so
+	// the next render sees the map. A base-hash photo has no masks — skip.
+	if photo.EditHash != edit.BaseHash {
+		e.deps.Cache.InvalidateEdit(photo.CacheKey, photo.EditHash)
 	}
 	task.Err(nil)
 	res := &AIMapResult{MapVer: ver}

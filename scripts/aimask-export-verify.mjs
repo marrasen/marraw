@@ -57,7 +57,7 @@ const photos = await call('Library.ListPhotos', [info.folderId]);
 const p = photos[0];
 // Strip any crop left behind by UI probes — this check wants sensor pixels.
 const base = { ...(await call('Edits.GetEditParams', [p.id])), cropX: 0, cropY: 0, cropW: 0, cropH: 0, cropAngle: 0 };
-const sub = await call('Edits.GenerateAIMap', [p.id, 'subject']);
+const sub = await call('Edits.GenerateAIMap', [p.id, 'subject', true]);
 
 const dest = mkdtempSync(join(tmpdir(), 'marraw-aiexp-'));
 const exportOnce = async (params, name) => {

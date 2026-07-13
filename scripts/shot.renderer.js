@@ -174,6 +174,21 @@ if (shot === 'cull') {
     tintW: tintImg()?.naturalWidth ?? 0,
     tintH: tintImg()?.naturalHeight ?? 0,
   };
+} else if (shot === 'aidialog') {
+  // Download-consent dialog: with the subject model hidden (the shot wrapper
+  // renames it beforehand), clicking Subject must ask instead of fetching.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  ui().setDevelopTab('masks');
+  await sleep(800);
+  document.querySelector('[data-testid="ai-mask-subject"]')?.click();
+  await until(() => document.querySelector('[data-testid="ai-model-dialog"]'), 15000);
+  await sleep(300);
+  window.__maskProbe = {
+    dialogShown: !!document.querySelector('[data-testid="ai-model-dialog"]'),
+    dialogText: document.querySelector('[data-testid="ai-model-dialog"]')?.textContent?.slice(0, 240) ?? '',
+  };
 } else if (shot === 'aiscene') {
   // Scene detection chips: click the Scene button, wait for the detected
   // category chips, add a mask from the largest one.

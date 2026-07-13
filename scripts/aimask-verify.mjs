@@ -68,23 +68,23 @@ const base = await call('Edits.GetEditParams', [p.id]); // seeded camera-mimic e
 
 // --- Subject map generation ---
 let t = Date.now();
-const sub = await call('Edits.GenerateAIMap', [p.id, 'subject']);
+const sub = await call('Edits.GenerateAIMap', [p.id, 'subject', true]);
 console.log(`GenerateAIMap subject -> ${sub.mapVer} in ${Date.now() - t}ms`);
 check(sub.mapVer === 'isnet-1', `subject mapVer is isnet-1 (${sub.mapVer})`);
 
 t = Date.now();
-const sub2 = await call('Edits.GenerateAIMap', [p.id, 'subject']);
+const sub2 = await call('Edits.GenerateAIMap', [p.id, 'subject', true]);
 check(sub2.mapVer === sub.mapVer && Date.now() - t < 2000, `second call idempotent + fast (${Date.now() - t}ms)`);
 
 // --- Depth map generation ---
 t = Date.now();
-const dep = await call('Edits.GenerateAIMap', [p.id, 'depth']);
+const dep = await call('Edits.GenerateAIMap', [p.id, 'depth', true]);
 console.log(`GenerateAIMap depth -> ${dep.mapVer} in ${Date.now() - t}ms`);
 check(dep.mapVer === 'depthany2s-1', `depth mapVer is depthany2s-1 (${dep.mapVer})`);
 
 // --- Class map: scene detection on a real outdoor photo ---
 t = Date.now();
-const cls = await call('Edits.GenerateAIMap', [p.id, 'class']);
+const cls = await call('Edits.GenerateAIMap', [p.id, 'class', true]);
 console.log(`GenerateAIMap class -> ${cls.mapVer} in ${Date.now() - t}ms:`,
   (cls.categories ?? []).map((c) => `${c.name} ${(c.fraction * 100).toFixed(0)}%`).join(', ') || '(none)');
 check(cls.mapVer === 'adeseg-1', `class mapVer is adeseg-1 (${cls.mapVer})`);
@@ -135,6 +135,35 @@ const neutral = await call('Edits.PreviewEdit', [
   p.id, { ...base, masks: [{ type: 'ai', aiKind: 'subject', mapVer: sub.mapVer, adjust: {} }] }, 1024,
 ]);
 check(Buffer.compare(Buffer.from(neutral.bytes), Buffer.from(plain2.bytes)) === 0, 'neutral ai mask is a no-op');
+
+// --- Download consent gate ---
+// With the model file hidden, generation WITHOUT consent must refuse (the
+// client shows its dialog on this error), status must report the download,
+// and nothing must have been fetched behind the user's back.
+{
+  const { renameSync, existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const modelPath = join(process.env.APPDATA, 'marraw', 'models', 'isnet-1.onnx');
+  if (existsSync(modelPath)) {
+    renameSync(modelPath, modelPath + '.bak');
+    try {
+      const p2 = photos[1]; // no cached subject map → reaches the model check
+      const gateErr = await call('Edits.GenerateAIMap', [p2.id, 'subject', false]).then(() => null, (e) => e);
+      check(gateErr != null && /model not downloaded/.test(gateErr.message),
+        `no-consent generation refuses (${gateErr?.message})`);
+      const st = await call('Edits.AIModelStatus', ['subject']);
+      check(st.downloaded === false && st.bytes === 178648008,
+        `status reports pending download (downloaded=${st.downloaded} bytes=${st.bytes})`);
+      check(!existsSync(modelPath), 'refusal downloaded nothing');
+    } finally {
+      renameSync(modelPath + '.bak', modelPath);
+    }
+    const st2 = await call('Edits.AIModelStatus', ['subject']);
+    check(st2.downloaded === true, 'status reports downloaded after restore');
+  } else {
+    check(false, `consent-gate fixture missing: ${modelPath}`);
+  }
+}
 
 // --- Persist + settle path (2048 cache render) sees the mask too ---
 await call('Edits.SetEditParams', [p.id, { ...base, masks: [subjectMask] }]);
