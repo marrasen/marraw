@@ -11,6 +11,7 @@ import (
 
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/infer"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
@@ -40,6 +41,9 @@ type Deps struct {
 	// Avail caches which roots' storage is currently reachable. Nil until the
 	// availability poller starts; rootOnline falls back to a live stat.
 	Avail *availability
+	// Infer runs ONNX models for the AI features (mask map generation). Nil
+	// is valid — the AI RPCs then report inference as unconfigured.
+	Infer *infer.Manager
 
 	mu     sync.RWMutex
 	server *aprot.Server
@@ -158,6 +162,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.RegisterEnumFor(settings, WatermarkFontIDValues())
 	registry.RegisterEnumFor(edits, edit.WBModeValues())
 	registry.RegisterEnumFor(edits, edit.DemosaicValues())
+	registry.RegisterEnumFor(edits, edit.AIKindValues())
 	registry.RegisterEnumFor(export, ExportFormatValues())
 	registry.RegisterEnumFor(export, ColorSpaceValues())
 	registry.RegisterEnumFor(export, SharpenTargetValues())

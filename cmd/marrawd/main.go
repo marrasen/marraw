@@ -27,6 +27,7 @@ import (
 	"github.com/marrasen/marraw/internal/api"
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/imghttp"
+	"github.com/marrasen/marraw/internal/infer"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
@@ -116,7 +117,8 @@ func main() {
 		log.Fatalf("create watermark dir: %v", err)
 	}
 
-	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir, WatermarkDir: watermarkDir}
+	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir, WatermarkDir: watermarkDir,
+		Infer: infer.NewManager(filepath.Join(*dataDir, "models"))}
 	registry, library, _, _ := api.NewRegistry(deps)
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any

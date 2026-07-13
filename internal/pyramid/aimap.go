@@ -156,14 +156,18 @@ func (s *AIMapStore) Load(photoKey string, kind edit.AIKind, ver string) *AIMap 
 	return m
 }
 
-// SetFor loads every map the edit's AI masks reference. Missing maps are
-// simply absent from the set — the mask renders as a no-op until the map is
-// (re)generated; rendering never fails on a missing map. Nil-safe on a nil
-// store (renders that predate wiring, TS-generation Deps).
+// SetFor loads every map the edit's AI masks reference, transformed into the
+// edit's oriented frame. Maps are stored in the base display orientation (no
+// user rotate/flip) so a later quarter-rotate or mirror doesn't orphan them —
+// the transform is a lossless pixel-grid permutation done at load and cached.
+// Missing maps are simply absent from the set — the mask renders as a no-op
+// until the map is (re)generated; rendering never fails on a missing map.
+// Nil-safe on a nil store (renders that predate wiring, TS-generation Deps).
 func (s *AIMapStore) SetFor(photoKey string, e *edit.Params) AIMapSet {
 	if s == nil || e == nil || photoKey == "" {
 		return nil
 	}
+	rot, flip := e.RotateTurns(), e.FlipH
 	var set AIMapSet
 	for i := range e.Masks {
 		m := &e.Masks[i]
@@ -174,7 +178,7 @@ func (s *AIMapStore) SetFor(photoKey string, e *edit.Params) AIMapSet {
 		if _, done := set[k]; done {
 			continue
 		}
-		if am := s.Load(photoKey, m.AIKind, m.MapVer); am != nil {
+		if am := s.loadOriented(photoKey, m.AIKind, m.MapVer, rot, flip); am != nil {
 			if set == nil {
 				set = AIMapSet{}
 			}
@@ -182,6 +186,70 @@ func (s *AIMapStore) SetFor(photoKey string, e *edit.Params) AIMapSet {
 		}
 	}
 	return set
+}
+
+// loadOriented returns the map in the edit's oriented frame: the stored
+// display transform is FlipH∘RotateCW^rot (ApplyGeometry's order), applied to
+// the base map. Oriented variants share the decoded-plane LRU.
+func (s *AIMapStore) loadOriented(photoKey string, kind edit.AIKind, ver string, rot int, flip bool) *AIMap {
+	base := s.Load(photoKey, kind, ver)
+	if base == nil || (rot == 0 && !flip) {
+		return base
+	}
+	key := fmt.Sprintf("%s|r%d|f%t", base.Key, rot, flip)
+
+	s.mu.Lock()
+	if m, ok := s.planes[key]; ok {
+		s.mu.Unlock()
+		return m
+	}
+	s.mu.Unlock()
+
+	m := orientMap(base, rot, flip)
+	m.Key = key
+
+	s.mu.Lock()
+	if _, ok := s.planes[key]; !ok {
+		s.planes[key] = m
+		s.order = append(s.order, key)
+		if len(s.order) > aiMapCacheCap {
+			delete(s.planes, s.order[0])
+			s.order = s.order[1:]
+		}
+	}
+	s.mu.Unlock()
+	return m
+}
+
+// orientMap applies FlipH∘RotateCW^rot to the plane. A 90° CW turn maps a
+// source pixel (x,y) of a W×H plane to (H-1-y, x); the mirror then reflects
+// about the vertical axis.
+func orientMap(base *AIMap, rot int, flip bool) *AIMap {
+	pix, w, h := base.Pix, base.W, base.H
+	for range rot {
+		nw, nh := h, w
+		out := make([]uint8, len(pix))
+		for y := 0; y < h; y++ {
+			row := pix[y*w : (y+1)*w]
+			dx := nw - 1 - y
+			for x, v := range row {
+				out[x*nw+dx] = v
+			}
+		}
+		pix, w, h = out, nw, nh
+	}
+	if flip {
+		out := make([]uint8, len(pix))
+		for y := 0; y < h; y++ {
+			row := pix[y*w : (y+1)*w]
+			orow := out[y*w : (y+1)*w]
+			for x, v := range row {
+				orow[w-1-x] = v
+			}
+		}
+		pix = out
+	}
+	return &AIMap{Pix: pix, W: w, H: h}
 }
 
 // --- Derived coverage planes ---

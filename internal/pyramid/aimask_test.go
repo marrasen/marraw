@@ -248,6 +248,44 @@ func TestAIMaskContentAnchoring(t *testing.T) {
 	}
 }
 
+// TestAIMaskSurvivesRotation: maps are stored in base orientation and
+// rotated at load, so a quarter-rotate edit keeps the mask glued to content.
+// Category 3 fills the TOP half of the base map; after a 90° CW display turn
+// that content occupies the RIGHT half of the oriented frame.
+func TestAIMaskSurvivesRotation(t *testing.T) {
+	s, key := testStoreWithMap(t, edit.AIClass, "m1", paintedClassMap(200, 160))
+	e := &edit.Params{Rotate: 1, Masks: []edit.Mask{{
+		Type: edit.MaskAI, AIKind: edit.AIClass, MapVer: "m1", ClassID: 3,
+		Adjust: edit.MaskAdjust{ExpEV: 1.5},
+	}}}
+
+	// Oriented frame of a 200×160 base is 160×200 after one turn.
+	img := smoothImage(160, 200)
+	before := append([]uint8(nil), img.Pix...)
+	ApplyMasks(img, e, s.SetFor(key, e))
+
+	changed := func(x, y int) bool {
+		i := y*img.Stride + x*4
+		return img.Pix[i] != before[i]
+	}
+	if !changed(130, 100) { // right half = base top half
+		t.Error("rotated AI mask lost its content region")
+	}
+	if changed(30, 100) { // left half = base bottom half
+		t.Error("rotated AI mask leaked outside its content region")
+	}
+
+	// FlipH mirrors: the region moves to the left half.
+	e.FlipH = true
+	img2 := smoothImage(160, 200)
+	before2 := append([]uint8(nil), img2.Pix...)
+	ApplyMasks(img2, e, s.SetFor(key, e))
+	i := 100*img2.Stride + 30*4
+	if img2.Pix[i] == before2[i] {
+		t.Error("flipped AI mask lost its content region")
+	}
+}
+
 // TestNormalizeAIMasks: canonicalization drops unknown kinds, zeroes
 // irrelevant per-kind fields, and orders the depth window.
 func TestNormalizeAIMasks(t *testing.T) {
