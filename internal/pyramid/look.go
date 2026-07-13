@@ -100,9 +100,11 @@ func MeanLuma(img *image.RGBA) float64 {
 // tiles, interactive previews, export) must go through this order — the one
 // call site that can't use the helper (cache.generate's full-res path, which
 // interleaves progress reports) mirrors it stage for stage.
-func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params) {
+// ai carries the photo's AI-mask maps (AIMapStore.SetFor); nil when the edit
+// has none or they are unavailable.
+func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet) {
 	ApplyLook(img, gamma, e)
-	ApplyMasks(img, e)
+	ApplyMasks(img, e, ai)
 	ApplyDetail(img, e)
 }
 

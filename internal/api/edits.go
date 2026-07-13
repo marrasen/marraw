@@ -160,7 +160,8 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 			return nil, err
 		}
 	}
-	return jpegBlob(pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta))
+	return jpegBlob(pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta,
+		e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep)))
 }
 
 // jpegBlob encodes a transient preview frame. The quality is slightly below
@@ -311,7 +312,8 @@ func (e *Edits) previewLinear(ctx context.Context, photoID int64, photo store.Ph
 		return nil, false, err
 	}
 	fp := foldParamsFor(ep, entry.refMul, entry.camXYZ)
-	return pyramid.RenderPreviewLinear(entry.lin, longEdge, fp, gamma, ep), true, nil
+	ai := e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep)
+	return pyramid.RenderPreviewLinear(entry.lin, longEdge, fp, gamma, ep, ai), true, nil
 }
 
 // linearMaster returns the cached scene-linear reference for the photo at ep's

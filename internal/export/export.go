@@ -60,6 +60,9 @@ type Request struct {
 	// Watermark is composited onto the final pixels after output sharpening;
 	// nil = none.
 	Watermark *watermark.Spec
+	// AIMaps resolves model-generated mask maps so AI masks export exactly as
+	// previewed; nil renders them as no-ops.
+	AIMaps *pyramid.AIMapStore
 }
 
 type Item struct {
@@ -182,7 +185,7 @@ func exportOne(ctx context.Context, photo store.Photo, outPath string, req Reque
 		gamma = pyramid.FallbackLookGamma
 	}
 
-	rendered, err := renderFinal(img, gamma, params, req)
+	rendered, err := renderFinal(img, gamma, params, photo, req)
 	if err != nil {
 		return err
 	}
@@ -218,7 +221,7 @@ func exportOne(ctx context.Context, photo store.Photo, outPath string, req Reque
 // saw in the loupe: crop and straighten, the look, detail, then the output
 // resize and sharpening. Both encoders share it — a JPEG and a TIFF of the
 // same photo differ only in how the pixels are written down.
-func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, req Request) (*image.RGBA, error) {
+func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, photo store.Photo, req Request) (*image.RGBA, error) {
 	if img.Bits != 8 {
 		return nil, fmt.Errorf("export: needs 8-bit output, got %d", img.Bits)
 	}
@@ -233,7 +236,7 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, req 
 	// can reclaim ~3 B/px before geometry/detail allocate their own planes.
 	img.Data = nil
 	rgba = pyramid.ApplyGeometry(rgba, params)
-	pyramid.ApplyFinish(rgba, lookGamma, params)
+	pyramid.ApplyFinish(rgba, lookGamma, params, req.AIMaps.SetFor(photo.CacheKey, params))
 	out := resizeRGBA(rgba, req.LongEdge)
 	pyramid.ApplyOutputSharpen(out, req.SharpenTarget, req.SharpenAmount)
 	if req.Watermark != nil {

@@ -50,7 +50,23 @@ const (
 	MaskLinear MaskType = "linear"
 	MaskRadial MaskType = "radial"
 	MaskBrush  MaskType = "brush"
+	MaskAI     MaskType = "ai"
 )
+
+// AIKind selects which model-generated map an AI mask samples.
+type AIKind string
+
+const (
+	// AISubject is the salient-subject matte (continuous 0..255 coverage).
+	AISubject AIKind = "subject"
+	// AIClass is the semantic category map (pixel = photographer-category ID,
+	// see pyramid's category table; 0 = uncategorized).
+	AIClass AIKind = "class"
+	// AIDepth is the normalized relative depth map (255 = nearest).
+	AIDepth AIKind = "depth"
+)
+
+func AIKindValues() []AIKind { return []AIKind{AISubject, AIClass, AIDepth} }
 
 // MaskAdjust is the adjustment a mask applies inside its weighted region:
 // the tone and color basics, all with zero neutral. Kept slice-free so the
@@ -105,8 +121,24 @@ type Mask struct {
 	Angle   float64 `json:"angle,omitempty"`
 	Feather float64 `json:"feather,omitempty"`
 	// Brush: feathered stamps accumulated along stroke polylines.
-	Strokes []Stroke   `json:"strokes,omitempty"`
-	Adjust  MaskAdjust `json:"adjust"`
+	Strokes []Stroke `json:"strokes,omitempty"`
+	// AI: weight sampled from a model-generated map cached per photo on this
+	// machine (pyramid.AIMapStore) — the map is derived data, only its
+	// reference lives here so sidecars stay small and portable. AIKind picks
+	// the map; MapVer pins the model version the map was generated with (part
+	// of the hash, so regenerating with a newer model re-renders). ClassID is
+	// the photographer category for "class" kinds; DepthLo/DepthHi bound the
+	// kept depth window (0..1, 1 = nearest) for "depth"; Threshold moves the
+	// subject matte cutoff (0 = default 0.5). Feather is reused as the edge
+	// softness control for all three kinds.
+	AIKind    AIKind  `json:"aiKind,omitempty"`
+	MapVer    string  `json:"mapVer,omitempty"`
+	ClassID   int     `json:"classId,omitempty"`
+	DepthLo   float64 `json:"depthLo,omitempty"`
+	DepthHi   float64 `json:"depthHi,omitempty"`
+	Threshold float64 `json:"threshold,omitempty"`
+
+	Adjust MaskAdjust `json:"adjust"`
 }
 
 // Params is the edit state, stored as JSON in photos.edit_params.
@@ -335,11 +367,13 @@ func (e *Params) normalizeMasks() {
 		case MaskLinear:
 			m.CX, m.CY, m.RX, m.RY, m.Angle, m.Feather = 0, 0, 0, 0, 0, 0
 			m.Strokes = nil
+			m.clearAI()
 			m.X0, m.Y0 = clampFrac(m.X0), clampFrac(m.Y0)
 			m.X1, m.Y1 = clampFrac(m.X1), clampFrac(m.Y1)
 		case MaskRadial:
 			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
 			m.Strokes = nil
+			m.clearAI()
 			m.CX, m.CY = clampFrac(m.CX), clampFrac(m.CY)
 			m.RX = clamp(m.RX, 0.001, 2)
 			m.RY = clamp(m.RY, 0.001, 2)
@@ -349,6 +383,7 @@ func (e *Params) normalizeMasks() {
 		case MaskBrush:
 			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
 			m.CX, m.CY, m.RX, m.RY, m.Angle, m.Feather = 0, 0, 0, 0, 0, 0
+			m.clearAI()
 			var strokes []Stroke
 			for _, s := range m.Strokes {
 				n := len(s.Pts) &^ 1 // drop an odd trailing coordinate
@@ -369,6 +404,28 @@ func (e *Params) normalizeMasks() {
 				strokes = nil
 			}
 			m.Strokes = strokes
+		case MaskAI:
+			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
+			m.CX, m.CY, m.RX, m.RY, m.Angle = 0, 0, 0, 0, 0
+			m.Strokes = nil
+			m.Feather = quant4(clamp(m.Feather, 0, 1))
+			switch m.AIKind {
+			case AISubject:
+				m.ClassID, m.DepthLo, m.DepthHi = 0, 0, 0
+				m.Threshold = quant4(clamp(m.Threshold, 0, 1))
+			case AIClass:
+				m.DepthLo, m.DepthHi, m.Threshold = 0, 0, 0
+				m.ClassID = int(clamp(float64(m.ClassID), 0, 255))
+			case AIDepth:
+				m.ClassID, m.Threshold = 0, 0
+				m.DepthLo = quant4(clamp(m.DepthLo, 0, 1))
+				m.DepthHi = quant4(clamp(m.DepthHi, 0, 1))
+				if m.DepthHi < m.DepthLo {
+					m.DepthLo, m.DepthHi = m.DepthHi, m.DepthLo
+				}
+			default:
+				continue // unknown kind: drop, like an unknown mask type
+			}
 		default:
 			continue
 		}
@@ -387,6 +444,14 @@ func (e *Params) normalizeMasks() {
 		kept = nil
 	}
 	e.Masks = kept
+}
+
+// clearAI zeroes the AI-mask fields on non-AI mask types so equivalent
+// states hash identically.
+func (m *Mask) clearAI() {
+	m.AIKind, m.MapVer = "", ""
+	m.ClassID = 0
+	m.DepthLo, m.DepthHi, m.Threshold = 0, 0, 0
 }
 
 // clampFrac bounds a fractional frame coordinate; masks may hang partly

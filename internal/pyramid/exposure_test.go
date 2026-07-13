@@ -27,9 +27,9 @@ func TestRenderPreviewExposureDelta(t *testing.T) {
 	src := flatGray(64, 48, 128)
 	e := &edit.Params{}
 
-	base := meanLuma(RenderPreview(src, 64, 0.72, e, 0))
-	up := meanLuma(RenderPreview(src, 64, 0.72, e, 1))
-	down := meanLuma(RenderPreview(src, 64, 0.72, e, -1))
+	base := meanLuma(RenderPreview(src, 64, 0.72, e, 0, nil))
+	up := meanLuma(RenderPreview(src, 64, 0.72, e, 1, nil))
+	down := meanLuma(RenderPreview(src, 64, 0.72, e, -1, nil))
 
 	if up <= base {
 		t.Errorf("+1 EV mean %.1f not brighter than base %.1f", up, base)
@@ -42,7 +42,7 @@ func TestRenderPreviewExposureDelta(t *testing.T) {
 	noFold := flatGray(64, 48, 128)
 	ApplyLook(noFold, 0.72, e)
 	ApplyDetail(noFold, e)
-	if got := meanLuma(RenderPreview(src, 64, 0.72, e, 0)); math.Abs(got-meanLuma(noFold)) > 0.5 {
+	if got := meanLuma(RenderPreview(src, 64, 0.72, e, 0, nil)); math.Abs(got-meanLuma(noFold)) > 0.5 {
 		t.Errorf("delta 0 render %.2f differs from unfolded %.2f", got, meanLuma(noFold))
 	}
 }

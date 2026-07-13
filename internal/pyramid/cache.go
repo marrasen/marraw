@@ -73,6 +73,9 @@ type Cache struct {
 	dir  atomic.Pointer[string]
 	pool *decode.Pool
 	db   *store.DB
+	// AIMaps resolves model-generated mask maps for renders; nil is valid
+	// (maps unavailable → AI masks render as no-ops).
+	AIMaps *AIMapStore
 	// OnPhotoChanged, when set, is called after the cache corrects a photo
 	// row (dimension healing) so folder subscribers can refresh.
 	OnPhotoChanged func(folderID int64)
@@ -328,6 +331,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		c.healDimensions(photo, rgba.Bounds().Dx(), rgba.Bounds().Dy())
 	}
 	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
+	ai := c.AIMaps.SetFor(photo.CacheKey, edits)
 	rgba = ApplyGeometry(rgba, edits)
 	if level == "full" {
 		// Mirrors ApplyFinish stage for stage — kept inline only for the
@@ -335,7 +339,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		report(0.72)
 		ApplyLook(rgba, gamma, edits)
 		report(0.78)
-		ApplyMasks(rgba, edits)
+		ApplyMasks(rgba, edits, ai)
 		report(0.82)
 		ApplyDetail(rgba, edits)
 		report(0.90)
@@ -354,7 +358,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// Downscale before applying the look: 4x fewer pixels, same result at
 	// these sizes.
 	scaled := scaleToLongEdge(rgba, 2048)
-	ApplyFinish(scaled, gamma, edits)
+	ApplyFinish(scaled, gamma, edits, ai)
 	return c.WriteLevels(scaled, photo.CacheKey, editHash, 2048, 1024, 512, 256)
 }
 
@@ -459,7 +463,7 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 // across an exposure-only change to skip the demosaic), and this closes the
 // gap approximately. 0 for the accurate cache render, whose decode already
 // carries the exact exposure via LibRaw's pre-demosaic exp_shift.
-func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit.Params, expDeltaEV float64) *image.RGBA {
+func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit.Params, expDeltaEV float64, ai AIMapSet) *image.RGBA {
 	scale := func(img *image.RGBA) *image.RGBA {
 		b := img.Bounds()
 		long := max(b.Dx(), b.Dy())
@@ -486,7 +490,7 @@ func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit
 	// Runs on the scaled copy, never on src (which may be a shared cached
 	// decode), so a concurrent reuse of the same decode is unaffected.
 	applyExposureLUT(dst, expDeltaEV)
-	ApplyFinish(dst, lookGamma, edits)
+	ApplyFinish(dst, lookGamma, edits, ai)
 	return dst
 }
 
@@ -527,7 +531,8 @@ func applyExposureLUT(img *image.RGBA, expDeltaEV float64) {
 // WritePreview writes the 2048 rendition on the interactive path so a
 // following commit serves the same pixels over /img.
 func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGamma float64, edits *edit.Params) error {
-	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits, 0), cacheKey, "2048", editHash, 80)
+	ai := c.AIMaps.SetFor(cacheKey, edits)
+	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits, 0, ai), cacheKey, "2048", editHash, 80)
 }
 
 // WriteLevels writes a chain of downscaled renditions from src, skipping

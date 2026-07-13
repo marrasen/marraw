@@ -137,7 +137,7 @@ func dcrawGammaEncoder(pwr, ts float64) func(float64) float64 {
 // live in fp, dragging them reuses lin with no demosaic. Geometry runs on the
 // downscaled buffer (a pure-crop preview is therefore taken from the frame's
 // longEdge rather than the crop's — the deferred settle crops at full res).
-func RenderPreviewLinear(lin *image.RGBA64, longEdge int, fp FoldParams, lookGamma float64, edits *edit.Params) *image.RGBA {
+func RenderPreviewLinear(lin *image.RGBA64, longEdge int, fp FoldParams, lookGamma float64, edits *edit.Params, ai AIMapSet) *image.RGBA {
 	b := lin.Bounds()
 	sw, sh := b.Dx(), b.Dy()
 	ow, oh := sw, sh
@@ -146,7 +146,7 @@ func RenderPreviewLinear(lin *image.RGBA64, longEdge int, fp FoldParams, lookGam
 	}
 	disp := foldScale(lin, max(1, ow), max(1, oh), fp)
 	disp = ApplyGeometry(disp, edits)
-	ApplyFinish(disp, lookGamma, edits)
+	ApplyFinish(disp, lookGamma, edits, ai)
 	return disp
 }
 

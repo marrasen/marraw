@@ -122,6 +122,7 @@ func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.Tas
 			Artist:           strings.TrimSpace(req.Artist),
 			Copyright:        strings.TrimSpace(req.Copyright),
 			Watermark:        wmSpec,
+			AIMaps:           x.deps.Cache.AIMaps,
 		}, func(it export.Item) {
 			mu.Lock()
 			done++
