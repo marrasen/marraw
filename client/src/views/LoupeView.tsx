@@ -28,6 +28,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, rotatedDims, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
 import { MaskOverlay } from '@/components/MaskOverlay';
+import { MaskHoverTint } from '@/components/MaskHoverTint';
 import type { Params } from '@/api/edit';
 
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
@@ -385,6 +386,9 @@ export function CinemaImage({
     !wbPicking &&
     esPhotoId === photo.id &&
     !!draft?.masks?.[activeMask];
+  // The hover tint needs no selected mask — hovering any Masks-panel row
+  // shows that mask's weight over the ordinary Develop view.
+  const tintUI = uiMode === 'develop' && !cropping && !wbPicking && esPhotoId === photo.id;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -992,6 +996,15 @@ export function CinemaImage({
                 pxDims={[rfw, rfh]}
                 onChange={(patch) => esUpdate(client, patch)}
                 onCommit={() => esCommit(client)}
+              />
+            )}
+            {tintUI && draft && (
+              <MaskHoverTint
+                draft={draft}
+                frameW={rfw}
+                frameH={rfh}
+                boxW={boxW}
+                boxH={boxH}
               />
             )}
             {maskUI && draft && (

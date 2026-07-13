@@ -415,8 +415,9 @@ function RadialHandles({
 // MaskTint paints the mask's weight as a red overlay: SVG gradients for the
 // parametric shapes, canvas stroke rendering for the brush (an approximation
 // of the backend's feathered stamps — round-capped strokes with a blur for
-// the feather; the pixels themselves are always the backend's).
-function MaskTint({
+// the feather; the pixels themselves are always the backend's). Exported for
+// MaskHoverTint, which shows the same tint while a mask row is hovered.
+export function MaskTint({
   mask,
   draft,
   frameW,

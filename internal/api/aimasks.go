@@ -1,13 +1,18 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/png"
 
+	"github.com/marrasen/aprot"
 	"github.com/marrasen/aprot/tasks"
 
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/pyramid"
 )
 
 // AIMapResult reports the generated (or already present) map's version tag;
@@ -25,6 +30,53 @@ type AICategory struct {
 	ID       int     `json:"id"`
 	Name     string  `json:"name"`
 	Fraction float64 `json:"fraction"`
+}
+
+// MaskTintPreview renders one mask's weight as a red-tinted transparent PNG
+// in display space (the same OutputDims math as the render), so the develop
+// overlay can stretch it 1:1 over the displayed image — the hover tint for
+// AI masks, whose weights the client cannot compute itself. Sized to
+// longEdge (default 1024). A missing AI map yields a fully transparent
+// image, never an error.
+func (e *Edits) MaskTintPreview(ctx context.Context, photoID int64, params edit.Params, maskIndex int, longEdge int) (*aprot.Blob, error) {
+	if maskIndex < 0 || maskIndex >= len(params.Masks) {
+		return nil, aprot.ErrInvalidParams("maskIndex out of range")
+	}
+	if longEdge <= 0 || longEdge > 2048 {
+		longEdge = 1024
+	}
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	// Display-oriented full dims (the client's displayDims twin), then the
+	// rendered (cropped) size, scaled down to the preview edge.
+	dispW, dispH := photo.Width, photo.Height
+	if photo.Orientation == 5 || photo.Orientation == 6 {
+		dispW, dispH = dispH, dispW
+	}
+	ow, oh := params.OutputDims(dispW, dispH)
+	if long := max(ow, oh); long > longEdge {
+		ow, oh = ow*longEdge/long, oh*longEdge/long
+	}
+	ow, oh = max(1, ow), max(1, oh)
+
+	ai := e.deps.Cache.AIMaps.SetFor(photo.CacheKey, &params)
+	plane := pyramid.MaskWeightPlane(ow, oh, &params, maskIndex, ai)
+
+	// The overlay red at 40% peak alpha — MaskTint's rgba(240,64,64,.4).
+	img := image.NewNRGBA(image.Rect(0, 0, ow, oh))
+	for i, w := range plane {
+		img.Pix[i*4+0] = 240
+		img.Pix[i*4+1] = 64
+		img.Pix[i*4+2] = 64
+		img.Pix[i*4+3] = uint8((int(w)*102 + 127) / 255)
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return &aprot.Blob{ContentType: "image/png", Data: buf.Bytes()}, nil
 }
 
 // categoriesFor computes the detected-category chips from a stored class map.

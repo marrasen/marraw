@@ -145,6 +145,35 @@ if (shot === 'cull') {
     tabAfterDevelop,
     escCleared: es.getState().activeMask == null && es.getState().activeMaskControl == null,
   };
+} else if (shot === 'aitint') {
+  // AI mask hover tint: generate a subject mask via the real button, hover
+  // its row header, and assert the server-rendered red tint appears over the
+  // loupe (the only visualization an AI mask has).
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  ui().setDevelopTab('masks');
+  await sleep(600);
+  mw.esUpdate({ masks: [] }); // idempotence: drop persisted masks first
+  mw.esCommit();
+  await sleep(800);
+  document.querySelector('[data-testid="ai-mask-subject"]')?.click();
+  // Generation runs a local model (seconds warm; the map may also already
+  // exist from a previous run) and adds the mask on success.
+  await until(() => (es.getState().draft?.masks ?? []).some((m) => m.type === 'ai'), 120000);
+  await sleep(500);
+  // Hover the mask row header (React onMouseEnter listens to mouseover).
+  const row = [...document.querySelectorAll('span')].find((s) => s.textContent.startsWith('Subject '));
+  row?.parentElement?.parentElement?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  const tintImg = () => document.querySelector('[data-testid="mask-hover-tint"] img');
+  await until(() => tintImg()?.complete && tintImg()?.naturalWidth > 0, 15000);
+  await sleep(400); // fade-in settles for the screenshot
+  window.__maskProbe = {
+    aiMask: true,
+    tintShown: !!tintImg(),
+    tintW: tintImg()?.naturalWidth ?? 0,
+    tintH: tintImg()?.naturalHeight ?? 0,
+  };
 } else if (shot === 'addfolder') {
   ui().setAddFolderOpen(true);
 } else if (shot === 'shortcuts') {

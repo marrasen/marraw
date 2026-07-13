@@ -43,6 +43,7 @@ import {
   esSetActive,
   esSetActiveMask,
   esSetActiveMaskControl,
+  esSetTintMask,
   esSetApplyIds,
   esSetBrushTool,
   esSetCropping,
@@ -968,7 +969,14 @@ function MaskRow({
   });
   return (
     <div className={cn('flex flex-col rounded-md border', selected ? 'border-primary/45' : 'border-border')}>
-      <div className="flex items-center gap-1.5 px-2 py-1.5">
+      {/* Hovering the row header shows this mask's red weight tint on the
+          loupe (the only way to SEE an AI mask's detected region); it fades
+          out on leave. */}
+      <div
+        className="flex items-center gap-1.5 px-2 py-1.5"
+        onMouseEnter={() => esSetTintMask(index)}
+        onMouseLeave={() => esSetTintMask(null)}
+      >
         <button type="button" className="flex flex-1 items-center gap-1.5 text-left" onClick={onSelect} aria-pressed={selected}>
           <span className="text-[11.5px] text-secondary-foreground">{maskLabel(mask, index)}</span>
           {changed && <span className="size-[5px] shrink-0 rounded-full bg-primary" title="Has adjustments" />}

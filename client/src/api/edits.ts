@@ -89,6 +89,19 @@ export function subscribeGetEditParams(client: ApiClient, photoID: number, callb
 }
 
 
+export function maskTintPreview(client: ApiClient, photoID: number, params: Params, maskIndex: number, longEdge: number, options?: RequestOptions): Promise<Blob> {
+    return client.request<Blob>('Edits.MaskTintPreview', [photoID, params, maskIndex, longEdge], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+maskTintPreview.method = 'Edits.MaskTintPreview' as const;
+
+export function subscribeMaskTintPreview(client: ApiClient, photoID: number, params: Params, maskIndex: number, longEdge: number, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Blob>('Edits.MaskTintPreview', [photoID, params, maskIndex, longEdge], callback, onError, options);
+}
+
+
 export function pasteEditParams(client: ApiClient, ids: number[], params: Params, options?: RequestOptions): Promise<void> {
     return client.request<void>('Edits.PasteEditParams', [ids, params], options);
 }
@@ -213,6 +226,21 @@ export function useGetEditParams(photoID: number, options?: UseQueryOptions<Para
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID], _subscribe: { method: 'Edits.GetEditParams', params: [photoID] } });
+}
+
+/**
+ * Subscribes to `Edits.MaskTintPreview` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useMaskTintPreview(photoID: number, params: Params, maskIndex: number, longEdge: number, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, maskIndex: number, longEdge: number) => maskTintPreview(client, photoID, params, maskIndex, longEdge, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, maskIndex, longEdge], _subscribe: { method: 'Edits.MaskTintPreview', params: [photoID, params, maskIndex, longEdge] } });
 }
 
 /**

@@ -81,6 +81,34 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) {
 	}
 }
 
+// MaskWeightPlane rasterizes one mask's weight into an outW×outH byte plane
+// (255 = full weight) in display space — the develop overlay's hover-tint
+// source. A missing/degenerate mask (or an AI mask whose map isn't in ai)
+// yields an all-zero plane, never an error.
+func MaskWeightPlane(outW, outH int, e *edit.Params, index int, ai AIMapSet) []uint8 {
+	plane := make([]uint8, outW*outH)
+	if e == nil || index < 0 || index >= len(e.Masks) || outW <= 0 || outH <= 0 {
+		return plane
+	}
+	f := newMaskFrame(outW, outH, e)
+	ev := newMaskEvaluator(&e.Masks[index], f, ai, nil)
+	if ev == nil {
+		return plane
+	}
+	wrow := make([]uint16, outW)
+	for y := 0; y < outH; y++ {
+		for i := range wrow {
+			wrow[i] = 0
+		}
+		x0, x1 := ev.weightRow(y, wrow)
+		row := plane[y*outW:]
+		for x := x0; x < x1 && x < outW; x++ {
+			row[x] = uint8(min(255, int(wrow[x])*255/256))
+		}
+	}
+	return plane
+}
+
 // maskFrame maps output-buffer pixels back onto the oriented frame — the
 // full quarter-rotated/mirrored frame before straighten and crop, whose
 // fractions the mask geometry (and the crop rectangle) are stored in. The

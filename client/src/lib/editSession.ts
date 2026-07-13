@@ -130,6 +130,9 @@ interface EditSessionState {
   // Brush paint mode: pointer strokes on the loupe paint into the active
   // (brush) mask instead of panning.
   maskPaint: boolean;
+  // Mask row currently hovered in the Masks panel: the loupe shows that
+  // mask's red weight tint while set (see MaskHoverTint).
+  tintMask: number | null;
   // Brush tool settings shared between the Masks panel and the paint overlay.
   // Radius is a fraction of the frame long edge (the server's stroke model).
   brushRadius: number;
@@ -160,6 +163,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   activeMask: null,
   activeMaskControl: null,
   maskPaint: false,
+  tintMask: null,
   brushRadius: 0.05,
   brushFeather: 0.5,
   brushFlow: 1,
@@ -353,6 +357,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     activeMask: null,
     activeMaskControl: null,
     maskPaint: false,
+    tintMask: null,
     keyAdjust: false,
   }));
   const params = await getEditParams(client, photoId).catch(() => null);
@@ -526,6 +531,11 @@ export function esSetBrushTool(
   patch: Partial<Pick<EditSessionState, 'brushRadius' | 'brushFeather' | 'brushFlow' | 'brushErase'>>,
 ) {
   setState(patch);
+}
+
+// esSetTintMask shows (or clears) the hover weight tint for one mask.
+export function esSetTintMask(index: number | null) {
+  setState({ tintMask: index });
 }
 
 // esAddMask appends a mask with a sensible default shape, selects it, and
