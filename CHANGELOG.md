@@ -5,6 +5,14 @@ Only two constructs are parsed (client/src/lib/changelog.ts): `## X.Y.Z - YYYY-M
 version headers and `-` bullets; everything else is ignored. Newest release first.
 When cutting a release: bump the version in package.json and add a section here.
 
+## 0.3.0 - 2026-07-13
+
+- Local adjustments: linear, radial and brush masks, in their own Masks tab
+- Masks: every slider can be walked with the arrow keys for fine control
+- Linux: first Linux release — AppImage (auto-updating) and .deb installers
+- macOS: first macOS release — Apple Silicon .dmg; the app is unsigned, so first launch needs right-click → Open (or "Open Anyway" under Privacy & Security on macOS 15+), and auto-update is not available
+- Note: the macOS and Linux builds are brand new and untested on real hardware — issue reports are very welcome
+
 ## 0.2.0 - 2026-07-12
 
 - HSL color mixer: 8-band hue / saturation / luminance adjustments
