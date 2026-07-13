@@ -165,7 +165,7 @@ func TestAIDepthWindow(t *testing.T) {
 	e := &edit.Params{Masks: []edit.Mask{{
 		Type: edit.MaskAI, AIKind: edit.AIDepth, MapVer: "m1",
 		DepthLo: 0.7, DepthHi: 1.0, // keep the near third
-		Adjust:  edit.MaskAdjust{ExpEV: 1.5},
+		Adjust: edit.MaskAdjust{ExpEV: 1.5},
 	}}}
 	img := smoothImage(128, 96)
 	before := append([]uint8(nil), img.Pix...)
@@ -236,7 +236,7 @@ func TestAIMaskContentAnchoring(t *testing.T) {
 
 	for _, out := range [][2]int{{100, 100}, {300, 250}, {50, 400}, {500, 300}} {
 		fx, fy := f.framePoint(float64(out[0]), float64(out[1]))
-		px, py := int(fx - 0.5), int(fy - 0.5)
+		px, py := int(fx-0.5), int(fy-0.5)
 		if px < 0 || px >= 1000 || py < 0 || py >= 800 {
 			continue
 		}
