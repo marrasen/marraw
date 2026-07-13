@@ -299,10 +299,27 @@ export const MASK_TYPE_LABELS: Record<string, string> = {
   linear: 'Linear gradient',
   radial: 'Radial',
   brush: 'Brush',
+  ai: 'AI',
 };
 
 export function maskLabel(m: Mask, index: number): string {
+  if (m.type === 'ai') {
+    const kind = m.aiKind === 'subject' ? 'Subject' : m.aiKind === 'depth' ? 'Depth' : 'AI';
+    return `${kind} ${index + 1}`;
+  }
   return `${MASK_TYPE_LABELS[m.type] ?? 'Mask'} ${index + 1}`;
+}
+
+// aiMask builds a freshly generated AI mask. mapVer comes from
+// Edits.GenerateAIMap — it pins the model that produced the map, so the
+// server renders only against a matching map file. Depth seeds a near-range
+// window (1 = nearest); subject relies on the server defaults (threshold
+// 0.5, model edges).
+export function aiMask(kind: 'subject' | 'depth', mapVer: string): Mask {
+  if (kind === 'depth') {
+    return { type: 'ai', aiKind: kind, mapVer, depthLo: 0.6, depthHi: 1, feather: 0.3, adjust: {} };
+  }
+  return { type: 'ai', aiKind: kind, mapVer, adjust: {} };
 }
 
 // Default geometry for a freshly added mask: centered and clearly visible,

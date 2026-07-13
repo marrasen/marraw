@@ -533,12 +533,18 @@ export function esSetBrushTool(
 // session straight into paint mode. Also switches the panel to the Masks tab
 // so the new mask's sliders are visible.
 export function esAddMask(client: ApiClient, type: Mask['type']) {
+  esAddMaskObject(client, defaultMask(type));
+}
+
+// esAddMaskObject appends a fully-formed mask — the AI path builds its mask
+// from a GenerateAIMap result (kind + mapVer) rather than default geometry.
+export function esAddMaskObject(client: ApiClient, mask: Mask) {
   esFlushDraft();
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
-  const masks = [...(s.draft.masks ?? []), defaultMask(type)];
+  const masks = [...(s.draft.masks ?? []), mask];
   useUIStore.getState().setDevelopTab('masks');
-  setState({ activeMask: masks.length - 1, activeMaskControl: null, maskPaint: type === 'brush' });
+  setState({ activeMask: masks.length - 1, activeMaskControl: null, maskPaint: mask.type === 'brush' });
   esCommit(client, { masks });
 }
 

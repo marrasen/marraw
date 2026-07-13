@@ -3,16 +3,18 @@ import { toast } from 'sonner';
 import {
   Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw,
   Image as ImageIcon, Plus, Trash2, Paintbrush, Circle, Eraser,
+  Focus, Layers, Loader2,
 } from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
-import { applyBatchEdit, type Delta } from '@/api/edits';
-import type { Mask, MaskAdjust, Params } from '@/api/edit';
+import { applyBatchEdit, generateAIMap, type Delta } from '@/api/edits';
+import type { AIKindType, Mask, MaskAdjust, Params } from '@/api/edit';
 import {
   MASK_CONTROL_ORDER,
   MASK_CONTROL_SPECS,
+  aiMask,
   maskAdjustIsNeutral,
   maskLabel,
   type MaskControlId,
@@ -30,6 +32,7 @@ import { updateEditGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 import {
   esAddMask,
+  esAddMaskObject,
   esAuto,
   esCanRedo,
   esCanUndo,
@@ -833,23 +836,58 @@ function MasksPanel({ client, targetCount }: { client: ApiClient; targetCount: n
       </div>
       <MasksSection client={client} draft={draft} />
       <p className="mt-4 mb-1 text-xs text-muted-foreground">
-        A mask is a local adjustment: a gradient, ellipse or brushed region
-        carrying its own exposure, tone and color. Select one to move its
-        shape on the photo; masks stay anchored to image content through
-        crops and straightens.
+        A mask is a local adjustment: a gradient, ellipse, brushed region or
+        AI-detected area carrying its own exposure, tone and color. Subject
+        and Depth run a local model once per photo; masks stay anchored to
+        image content through crops and straightens.
       </p>
     </div>
   );
 }
 
+// aiRestoreFired remembers which (photo, kind) map restores this session has
+// already requested — GenerateAIMap is idempotent and cheap when the map is
+// on disk, but there's no reason to re-fire it on every render (or for
+// StrictMode's double effect).
+const aiRestoreFired = new Set<string>();
+
 function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   const activeMask = useEditSession((s) => s.activeMask);
+  const photoId = useEditSession((s) => s.photoId);
   const setMode = useUIStore((s) => s.setMode);
+  const [generating, setGenerating] = useState<AIKindType | null>(null);
   const masks = draft.masks ?? [];
   const add = (type: Mask['type']) => {
     setMode('develop'); // the overlay lives on the Develop canvas
     esAddMask(client, type);
   };
+  const addAI = async (kind: 'subject' | 'depth') => {
+    if (photoId == null || generating) return;
+    setGenerating(kind);
+    try {
+      const res = await generateAIMap(client, photoId, kind);
+      setMode('develop');
+      esAddMaskObject(client, aiMask(kind, res.mapVer));
+    } catch (err) {
+      toast.error(`AI mask failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGenerating(null);
+    }
+  };
+
+  // Restore maps for AI masks that arrived without local map files (sidecar
+  // from another machine, cleared data dir): idempotent per photo+kind.
+  useEffect(() => {
+    if (photoId == null) return;
+    for (const m of masks) {
+      if (m.type !== 'ai' || !m.aiKind || m.aiKind === 'class') continue;
+      const key = `${photoId}|${m.aiKind}`;
+      if (aiRestoreFired.has(key)) continue;
+      aiRestoreFired.add(key);
+      generateAIMap(client, photoId, m.aiKind).catch(() => aiRestoreFired.delete(key));
+    }
+  }, [client, photoId, masks]);
+
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex gap-1.5" role="group" aria-label="Add mask">
@@ -864,6 +902,32 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
         <Button size="sm" variant="outline" className="flex-1" title="Add brush mask" onClick={() => add('brush')}>
           <Paintbrush data-icon="inline-start" />
           Brush
+        </Button>
+      </div>
+      <div className="flex gap-1.5" role="group" aria-label="Add AI mask">
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          title="Detect the subject and mask it (runs a local model)"
+          disabled={generating != null}
+          onClick={() => addAI('subject')}
+          data-testid="ai-mask-subject"
+        >
+          {generating === 'subject' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Focus data-icon="inline-start" />}
+          Subject
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          title="Estimate depth and mask a distance range (runs a local model)"
+          disabled={generating != null}
+          onClick={() => addAI('depth')}
+          data-testid="ai-mask-depth"
+        >
+          {generating === 'depth' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Layers data-icon="inline-start" />}
+          Depth
         </Button>
       </div>
       {masks.map((m, i) => (
@@ -937,6 +1001,7 @@ function MaskRow({
       {selected && (
         <div className="flex flex-col gap-[7px] px-2 pb-2">
           {mask.type === 'brush' && <BrushToolRow client={client} mask={mask} index={index} />}
+          {mask.type === 'ai' && <AIShapeRows client={client} mask={mask} index={index} />}
           {MASK_CONTROL_ORDER.map((key) => {
             const spec = MASK_CONTROL_SPECS[key];
             const raw = adjust[key] ?? 0;
@@ -969,6 +1034,55 @@ function MaskRow({
         </div>
       )}
     </div>
+  );
+}
+
+// AIShapeRows: the map-shaping sliders for an AI mask — unlike the brush tool
+// row this IS photo state (threshold/feather/depth window live in the mask
+// params and change pixels), so every move flows through esUpdateMask.
+function AIShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; index: number }) {
+  const patch = (p: Partial<Mask>) => esUpdateMask(client, index, p);
+  const commit = (p: Partial<Mask>) => {
+    esUpdateMask(client, index, p);
+    esCommit(client);
+  };
+  const shapeSlider = (
+    label: string,
+    raw: number,
+    displayDefault: number, // shown when raw is 0 (server default)
+    onValue: (v: number) => Partial<Mask>,
+    min = 0,
+  ) => {
+    const shown = raw === 0 ? displayDefault : raw;
+    return (
+      <EditSlider
+        key={label}
+        label={label}
+        value={shown * 100}
+        display={pct(shown)}
+        min={min * 100}
+        max={100}
+        step={1}
+        neutral={displayDefault * 100}
+        onChange={(v) => patch(onValue(v / 100))}
+        onCommit={(v) => commit(onValue(v / 100))}
+        onClear={() => commit(onValue(0))}
+      />
+    );
+  };
+  return (
+    <>
+      {/* Threshold's floor is 2%: a raw 0 means "server default (50%)", so the
+          slider must never land exactly on 0. */}
+      {mask.aiKind === 'subject' && shapeSlider('Threshold', mask.threshold ?? 0, 0.5, (v) => ({ threshold: v }), 0.02)}
+      {mask.aiKind === 'depth' && (
+        <>
+          {shapeSlider('Far edge', mask.depthLo ?? 0, 0, (v) => ({ depthLo: v }))}
+          {shapeSlider('Near edge', mask.depthHi ?? 0, 0, (v) => ({ depthHi: v }))}
+        </>
+      )}
+      {shapeSlider('Edge feather', mask.feather ?? 0, 0, (v) => ({ feather: v }))}
+    </>
   );
 }
 
