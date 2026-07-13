@@ -10,6 +10,17 @@ import { PyramidImage } from '@/components/PyramidImage';
 import { rowLayout } from '@/lib/justify';
 import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
 
+// softThreshold derives the soft-focus badge cutoff from the shoot itself:
+// sharpness scores are scene-dependent (low-texture scenes score low at
+// perfect focus), so a frame is "soft" when it sits far below its own
+// folder's median — the within-shoot comparison culling actually needs.
+// The 50 floor keeps uniformly-low-texture folders badge-free.
+function softThreshold(photos: Photo[]): number {
+  const vals = photos.map((p) => p.sharpness).filter((v): v is number => v != null).sort((a, b) => a - b);
+  if (vals.length < 4) return 0; // too few measurements to call anything soft
+  return Math.max(50, vals[Math.floor(vals.length / 2)] / 15);
+}
+
 const CELL_GAP = 12;
 const HEADER_H = 40;
 
@@ -57,6 +68,7 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
   const gapMinutes = useUIStore(selectGapMinutes);
   const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
   const grouped = gapMinutes != null && photos.length > 0;
+  const softBelow = useMemo(() => softThreshold(photos), [photos]);
 
   // photoRow maps flat photo index -> row index (scroll-to-focus). rowStarts is
   // the nav row model (flat index each photos-row begins at); widths/centersX
@@ -208,6 +220,7 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
                     w={widths ? widths[r.start + j] : cellW}
                     h={r.height}
                     fitClass={fitClass}
+                    softBelow={softBelow}
                   />
                 ))}
               </div>
@@ -254,7 +267,7 @@ function GroupHeaderRow({ group, multiDay, top }: { group: TimeGroup; multiDay: 
   );
 }
 
-function GridCell({ photo, w, h, fitClass }: { photo: Photo; w: number; h: number; fitClass: string }) {
+function GridCell({ photo, w, h, fitClass, softBelow }: { photo: Photo; w: number; h: number; fitClass: string; softBelow: number }) {
   const focusId = useUIStore((s) => s.focusId);
   const selected = useUIStore((s) => s.selection.has(photo.id));
   const multiSelect = useUIStore((s) => s.selection.size > 1);
@@ -302,6 +315,16 @@ function GridCell({ photo, w, h, fitClass }: { photo: Photo; w: number; h: numbe
           )}
           aria-label={photo.flag === 'pick' ? 'Pick' : 'Excluded'}
         />
+      )}
+      {photo.sharpness != null && softBelow > 0 && photo.sharpness < softBelow && (
+        <div
+          className="absolute bottom-[5px] right-[5px] rounded bg-black/50 px-[4px] py-0.5 text-[9px] text-amber-400"
+          title={`Soft focus (score ${Math.round(photo.sharpness)})`}
+          aria-label="Soft focus"
+          data-testid="soft-badge"
+        >
+          ◐
+        </div>
       )}
       {multiSelect && selected && (
         <>

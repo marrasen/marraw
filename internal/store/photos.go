@@ -53,6 +53,10 @@ type Photo struct {
 	GPSLat sql.NullFloat64
 	GPSLon sql.NullFloat64
 	GPSAlt sql.NullFloat64
+	// Sharpness is the Laplacian-variance focus score of the embedded thumb
+	// (pyramid.SharpnessScore), measured by the calibrate pass and rendered
+	// as the grid's soft-photo badge. Invalid = not yet measured.
+	Sharpness sql.NullFloat64
 }
 
 // Path returns the absolute file path of the photo.
@@ -256,14 +260,14 @@ func (db *DB) SyncFolder(ctx context.Context, folderID int64, folderPath string,
 const photoCols = `p.id, p.folder_id, f.path, p.file_name, p.file_size, p.mtime_ns, p.cache_key,
 	p.meta_loaded, p.width, p.height, p.orientation, p.make, p.model,
 	p.iso, p.shutter, p.aperture, p.focal_len, p.taken_at, p.rating, p.flag, p.edit_params, p.edit_hash,
-	p.look_gamma, p.base_exp_ev, p.updated_at, p.lens, p.gps_lat, p.gps_lon, p.gps_alt`
+	p.look_gamma, p.base_exp_ev, p.updated_at, p.lens, p.gps_lat, p.gps_lon, p.gps_alt, p.sharpness`
 
 func scanPhoto(row interface{ Scan(...any) error }) (Photo, error) {
 	var p Photo
 	err := row.Scan(&p.ID, &p.FolderID, &p.FolderPath, &p.FileName, &p.FileSize, &p.MtimeNs, &p.CacheKey,
 		&p.MetaLoaded, &p.Width, &p.Height, &p.Orientation, &p.Make, &p.Model,
 		&p.ISO, &p.Shutter, &p.Aperture, &p.FocalLen, &p.TakenAt, &p.Rating, &p.Flag, &p.EditParams, &p.EditHash,
-		&p.LookGamma, &p.BaseExpEV, &p.UpdatedAt, &p.Lens, &p.GPSLat, &p.GPSLon, &p.GPSAlt)
+		&p.LookGamma, &p.BaseExpEV, &p.UpdatedAt, &p.Lens, &p.GPSLat, &p.GPSLon, &p.GPSAlt, &p.Sharpness)
 	return p, err
 }
 
@@ -283,6 +287,12 @@ func (db *DB) SetLookGamma(ctx context.Context, id int64, gamma float64) error {
 // SetBaseExpEV persists the measured auto-brighten EV for a photo.
 func (db *DB) SetBaseExpEV(ctx context.Context, id int64, ev float64) error {
 	_, err := db.ExecContext(ctx, `UPDATE photos SET base_exp_ev = ? WHERE id = ?`, ev, id)
+	return err
+}
+
+// SetSharpness persists the measured focus score for a photo.
+func (db *DB) SetSharpness(ctx context.Context, id int64, score float64) error {
+	_, err := db.ExecContext(ctx, `UPDATE photos SET sharpness = ? WHERE id = ?`, score, id)
 	return err
 }
 

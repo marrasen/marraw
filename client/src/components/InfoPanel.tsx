@@ -32,6 +32,9 @@ export function InfoPanel({ photo }: { photo: Photo }) {
           <Row label="File" value={fileName} title={photo.fileName} />
           <Row label="Resolution" value={formatResolution(photo.width, photo.height)} />
           <Row label="File size" value={formatBytes(photo.fileSize)} />
+          {photo.sharpness != null && (
+            <Row label="Focus score" value={String(Math.round(photo.sharpness))} />
+          )}
           {photo.metaLoaded ? (
             <>
               <Row label="Camera" value={[photo.make, photo.model].filter(Boolean).join(' ') || '—'} />

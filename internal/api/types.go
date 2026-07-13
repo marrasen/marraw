@@ -130,6 +130,10 @@ type Photo struct {
 	TakenAt     int64   `json:"takenAt"` // unix seconds, 0 = unknown
 	Make        string  `json:"make"`
 	Model       string  `json:"model"`
+	// Sharpness is the focus score (Laplacian variance of the embedded thumb
+	// at a 512 px basis); the grid badges values below the soft threshold.
+	// Nil = not yet measured.
+	Sharpness *float64 `json:"sharpness,omitempty"`
 }
 
 type DriveInfo struct {

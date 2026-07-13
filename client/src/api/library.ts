@@ -76,6 +76,7 @@ export interface Photo {
     takenAt: number;
     make: string;
     model: string;
+    sharpness?: number;
 }
 
 export interface PhotoPatch {

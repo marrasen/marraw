@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 type DB struct {
 	*sql.DB
@@ -119,6 +119,15 @@ func (db *DB) migrate(ctx context.Context) error {
 				if _, err := tx.ExecContext(ctx, stmt); err != nil {
 					return fmt.Errorf("store: migrate v7: %w", err)
 				}
+			}
+		}
+		if v < 8 {
+			// Sharpness score (Laplacian variance of the embedded thumb, see
+			// pyramid.SharpnessScore), measured by the calibrate pass for the
+			// grid's soft-photo badge; NULL = not yet measured.
+			if _, err := tx.ExecContext(ctx,
+				`ALTER TABLE photos ADD COLUMN sharpness REAL`); err != nil {
+				return fmt.Errorf("store: migrate v8: %w", err)
 			}
 		}
 	}

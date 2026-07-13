@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -329,7 +330,15 @@ func toAPIPhoto(p store.Photo) Photo {
 		TakenAt:     p.TakenAt,
 		Make:        p.Make,
 		Model:       p.Model,
+		Sharpness:   nullableFloat(p.Sharpness),
 	}
+}
+
+func nullableFloat(v sql.NullFloat64) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Float64
 }
 
 // SetRating rates the given photos 0-5. Subscribers learn via a granular

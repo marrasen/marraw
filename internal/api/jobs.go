@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -134,11 +136,12 @@ func (l *Library) fullresPass(ctx context.Context, folderID int64, path string) 
 	task.Err(g.Wait())
 }
 
-// calibratePass measures the base look's auto-brighten lift (as an exposure
-// EV) for photos that don't have one yet. The value seeds the exposure dial
-// so the camera-mimic compensation is visible in the develop values instead
-// of silently vanishing on the first edit. Two demosaic-free half-size
-// decodes per photo — much cheaper than the pre-render pass that follows.
+// calibratePass measures per-photo derived values that are missing: the base
+// look's auto-brighten lift (as an exposure EV, seeding the exposure dial so
+// the camera-mimic compensation is visible in the develop values) and the
+// sharpness score (Laplacian variance of the embedded thumb, the grid's
+// soft-photo badge). Two demosaic-free half-size decodes plus a thumb read
+// per photo — much cheaper than the pre-render pass that follows.
 func (l *Library) calibratePass(ctx context.Context, folderID int64, path string) {
 	name := filepath.Base(path)
 	photos, err := l.deps.DB.ListPhotos(ctx, folderID)
@@ -147,7 +150,7 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 	}
 	var work []store.Photo
 	for _, p := range photos {
-		if !p.BaseExpEV.Valid {
+		if !p.BaseExpEV.Valid || !p.Sharpness.Valid {
 			work = append(work, p)
 		}
 	}
@@ -177,6 +180,19 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 					}
 					if err := proc.Open(p.Path()); err != nil {
 						return err
+					}
+					if !p.Sharpness.Valid {
+						if thumb, err := proc.EmbeddedThumb(); err == nil {
+							if img, err := jpeg.Decode(bytes.NewReader(thumb)); err == nil {
+								score := pyramid.SharpnessScore(img)
+								if err := l.deps.DB.SetSharpness(context.WithoutCancel(jctx), p.ID, score); err != nil {
+									return err
+								}
+							}
+						}
+					}
+					if p.BaseExpEV.Valid {
+						return nil // only the sharpness backfill was missing
 					}
 					ev, err := pyramid.MeasureAutoBrightEV(jctx, proc)
 					if err != nil {
