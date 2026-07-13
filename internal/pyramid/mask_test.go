@@ -287,3 +287,103 @@ func TestMaskLUTNeutralIsIdentityish(t *testing.T) {
 		}
 	}
 }
+
+// remapMaskCW applies the display-space quarter-turn (CW) remap rule the
+// client uses in crop.ts (rotateCropPatch): points map (x,y)→(1−y,x), radial
+// radii swap with no aspect factor and the tilt angle keeps, brush points map
+// while radii (fractions of the invariant long edge) keep.
+func remapMaskCW(m edit.Mask) edit.Mask {
+	mapPt := func(x, y float64) (float64, float64) { return 1 - y, x }
+	switch m.Type {
+	case edit.MaskLinear:
+		m.X0, m.Y0 = mapPt(m.X0, m.Y0)
+		m.X1, m.Y1 = mapPt(m.X1, m.Y1)
+	case edit.MaskRadial:
+		m.CX, m.CY = mapPt(m.CX, m.CY)
+		m.RX, m.RY = m.RY, m.RX
+	case edit.MaskBrush:
+		strokes := make([]edit.Stroke, len(m.Strokes))
+		for i, s := range m.Strokes {
+			pts := make([]float64, len(s.Pts))
+			for j := 0; j+1 < len(s.Pts); j += 2 {
+				pts[j], pts[j+1] = mapPt(s.Pts[j], s.Pts[j+1])
+			}
+			s.Pts = pts
+			strokes[i] = s
+		}
+		m.Strokes = strokes
+	}
+	return m
+}
+
+// remapMaskFlipH applies the client's mirror remap rule (flipCropPatch axis
+// h): points map (x,y)→(1−x,y), the radial tilt negates, radii keep.
+func remapMaskFlipH(m edit.Mask) edit.Mask {
+	mapPt := func(x, y float64) (float64, float64) { return 1 - x, y }
+	switch m.Type {
+	case edit.MaskLinear:
+		m.X0, m.Y0 = mapPt(m.X0, m.Y0)
+		m.X1, m.Y1 = mapPt(m.X1, m.Y1)
+	case edit.MaskRadial:
+		m.CX, m.CY = mapPt(m.CX, m.CY)
+		m.Angle = math.Mod(math.Mod(-m.Angle, 180)+180, 180)
+	case edit.MaskBrush:
+		strokes := make([]edit.Stroke, len(m.Strokes))
+		for i, s := range m.Strokes {
+			pts := make([]float64, len(s.Pts))
+			for j := 0; j+1 < len(s.Pts); j += 2 {
+				pts[j], pts[j+1] = mapPt(s.Pts[j], s.Pts[j+1])
+			}
+			s.Pts = pts
+			strokes[i] = s
+		}
+		m.Strokes = strokes
+	}
+	return m
+}
+
+// TestMaskRemapRule: the geometry remap the client applies on rotate/flip
+// (crop.ts remapMasks) must keep every mask glued to image content — the
+// weight at a fixed content pixel is unchanged when the mask is remapped and
+// evaluated in the transformed frame. Radial includes a tilted ellipse in a
+// non-square frame: the case where a wrong aspect treatment would show.
+func TestMaskRemapRule(t *testing.T) {
+	const W, H = 800, 600
+	masks := []edit.Mask{
+		{Type: edit.MaskLinear, X0: 0.2, Y0: 0.3, X1: 0.7, Y1: 0.8},
+		{Type: edit.MaskRadial, CX: 0.4, CY: 0.55, RX: 0.3, RY: 0.15, Angle: 35, Feather: 0.5},
+		{Type: edit.MaskBrush, Strokes: []edit.Stroke{{
+			Radius: 0.08, Feather: 0.5, Pts: []float64{0.25, 0.3, 0.6, 0.45, 0.7, 0.75},
+		}}},
+	}
+	samples := [][2]int{{160, 180}, {320, 330}, {480, 270}, {560, 450}, {200, 500}}
+
+	for _, m := range masks {
+		base := newMaskEvaluator(&m, newMaskFrame(W, H, &edit.Params{}), nil, nil)
+		if base == nil {
+			t.Fatalf("%s: nil base evaluator", m.Type)
+		}
+
+		// CW quarter turn: frame becomes H×W, content pixel (x,y) → (H−1−y, x).
+		cw := remapMaskCW(m)
+		cwEv := newMaskEvaluator(&cw, newMaskFrame(H, W, &edit.Params{}), nil, nil)
+		for _, s := range samples {
+			want := weightAt(base, s[0], s[1], W)
+			got := weightAt(cwEv, H-1-s[1], s[0], H)
+			if d := int(got) - int(want); d < -10 || d > 10 {
+				t.Errorf("%s: CW remap weight at content (%d,%d): %d, want %d", m.Type, s[0], s[1], got, want)
+			}
+		}
+
+		// Horizontal mirror: same frame dims, content pixel (x,y) → (W−1−x, y).
+		fl := remapMaskFlipH(m)
+		flEv := newMaskEvaluator(&fl, newMaskFrame(W, H, &edit.Params{}), nil, nil)
+		for _, s := range samples {
+			want := weightAt(base, s[0], s[1], W)
+			got := weightAt(flEv, W-1-s[0], s[1], W)
+			if d := int(got) - int(want); d < -10 || d > 10 {
+				t.Errorf("%s: flip remap weight at content (%d,%d): %d, want %d", m.Type, s[0], s[1], got, want)
+			}
+		}
+	}
+}

@@ -2,7 +2,7 @@
 // overlay. Mirrors internal/edit/edit.go (OutputDims) and internal/pyramid/
 // geometry.go so the client sizes the rendered image identically to what the
 // backend produced — no round trip needed.
-import type { Params } from '@/api/edit';
+import type { Mask, Params } from '@/api/edit';
 import type { Photo } from '@/api/library';
 
 // displayDims is the on-screen, orientation-corrected size of the full frame:
@@ -45,8 +45,9 @@ export function renderedDims(fullW: number, fullH: number, p: Params | null | un
 // flip∘rotate, so under a mirror the stored turn runs the opposite way
 // (mirror∘R_cw = R_ccw∘mirror). An existing crop rectangle is remapped in
 // display space so the same pixels stay selected (a 90° CW display turn maps
-// a point (x,y) to (1-y, x), so the rect follows its corners). The straighten
-// angle turns with the frame and needs no change.
+// a point (x,y) to (1-y, x), so the rect follows its corners), and mask
+// geometry follows through the same point map (see remapMasks). The
+// straighten angle turns with the frame and needs no change.
 export function rotateCropPatch(p: Params, dir: 'cw' | 'ccw'): Partial<Params> {
   const cwTurn = p.flipH ? 3 : 1;
   const patch: Partial<Params> = {
@@ -63,13 +64,17 @@ export function rotateCropPatch(p: Params, dir: 'cw' | 'ccw'): Partial<Params> {
     patch.cropW = p.cropH;
     patch.cropH = p.cropW;
   }
+  const map: PointMap = dir === 'cw' ? (x, y) => [1 - y, x] : (x, y) => [y, 1 - x];
+  const masks = remapMasks(p, map, true);
+  if (masks) patch.masks = masks;
   return patch;
 }
 
 // flipCropPatch mirrors the displayed image about the given axis. Both axes
 // toggle FlipH — a vertical mirror is the horizontal one plus a half turn —
 // and an existing crop rectangle reflects along the mirrored axis while the
-// straighten angle negates (a tilt reads the other way in a mirror).
+// straighten angle negates (a tilt reads the other way in a mirror). Mask
+// geometry reflects through the same point map.
 export function flipCropPatch(p: Params, axis: 'h' | 'v'): Partial<Params> {
   const patch: Partial<Params> = { flipH: !p.flipH };
   if (axis === 'v') patch.rotate = (rotateTurns(p) + 2) % 4;
@@ -78,7 +83,58 @@ export function flipCropPatch(p: Params, axis: 'h' | 'v'): Partial<Params> {
     else patch.cropY = 1 - (p.cropY + p.cropH);
   }
   if (p.cropAngle !== 0) patch.cropAngle = -p.cropAngle;
+  const map: PointMap = axis === 'h' ? (x, y) => [1 - x, y] : (x, y) => [x, 1 - y];
+  const masks = remapMasks(p, map, false);
+  if (masks) patch.masks = masks;
   return patch;
+}
+
+type PointMap = (x: number, y: number) => [number, number];
+
+// remapMasks pushes every parametric mask's geometry through a display-space
+// point map so masks stay glued to image content when the displayed frame is
+// quarter-turned or mirrored — the exact treatment the crop rectangle gets.
+// AI masks pass through untouched: they carry no geometry, and the server
+// re-orients their bitmaps from the edit's Rotate/FlipH at load time.
+//
+// Radial subtleties, both aspect-free by construction:
+//   - Quarter turn: rx/ry swap with NO aspect factor. The radii are fractions
+//     of frame width/height, and an odd turn swaps those same dims, so the
+//     aspect terms cancel; the tilt angle is invariant (the ellipse axes and
+//     the frame axes rotate together — identical mod 180).
+//   - Mirror: radii keep, the tilt reads the other way (angle negates,
+//     normalized to [0,180) like the server does).
+function remapMasks(p: Params, map: PointMap, quarterTurn: boolean): Mask[] | undefined {
+  if (!p.masks?.length) return undefined;
+  return p.masks.map((m): Mask => {
+    switch (m.type) {
+      case 'linear': {
+        const [x0, y0] = map(m.x0 ?? 0, m.y0 ?? 0);
+        const [x1, y1] = map(m.x1 ?? 0, m.y1 ?? 0);
+        return { ...m, x0, y0, x1, y1 };
+      }
+      case 'radial': {
+        const [cx, cy] = map(m.cx ?? 0, m.cy ?? 0);
+        if (quarterTurn) return { ...m, cx, cy, rx: m.ry, ry: m.rx };
+        return { ...m, cx, cy, angle: ((-(m.angle ?? 0) % 180) + 180) % 180 };
+      }
+      case 'brush': {
+        if (!m.strokes?.length) return m;
+        return {
+          ...m,
+          strokes: m.strokes.map((s) => {
+            const pts = s.pts.slice();
+            for (let i = 0; i + 1 < pts.length; i += 2) {
+              [pts[i], pts[i + 1]] = map(pts[i], pts[i + 1]);
+            }
+            return { ...s, pts };
+          }),
+        };
+      }
+      default:
+        return m;
+    }
+  });
 }
 
 // A neutral (full-frame, unrotated) crop rectangle.

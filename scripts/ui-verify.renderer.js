@@ -451,6 +451,57 @@ try {
       ? true
       : JSON.stringify({ x: es().draft.cropX, angle: es().draft.cropAngle });
 
+  // --- rotate/flip remap masks: geometry follows content like the crop rect.
+  // CW display turn maps (x,y)->(1-y,x); radial radii swap (aspect-free, the
+  // frame dims swap with them) and the tilt keeps; a mirror keeps radii and
+  // negates the tilt. AI masks are untouched (server re-orients their maps).
+  mw.esUpdate({
+    masks: [
+      { type: 'radial', cx: 0.3, cy: 0.4, rx: 0.25, ry: 0.1, angle: 30, feather: 0.5, adjust: { expEV: 1 } },
+      { type: 'brush', strokes: [{ radius: 0.05, pts: [0.2, 0.7, 0.5, 0.7] }], adjust: { expEV: -1 } },
+    ],
+  });
+  await until(() => es().draft.masks?.length === 2, 3000, 'test masks in draft');
+  buttons().find((b) => b.title === 'Rotate 90° clockwise')?.click();
+  await until(() => es().draft.rotate === 1, 5000, 'mask rotate applied');
+  await sleep(200);
+  {
+    const [r, b] = es().draft.masks;
+    R.rotateRemapsMasks =
+      Math.abs(r.cx - 0.6) < 1e-9 && Math.abs(r.cy - 0.3) < 1e-9 &&
+      r.rx === 0.1 && r.ry === 0.25 && r.angle === 30 &&
+      Math.abs(b.strokes[0].pts[0] - 0.3) < 1e-9 && Math.abs(b.strokes[0].pts[1] - 0.2) < 1e-9
+        ? true
+        : JSON.stringify({ r, pts: b.strokes[0].pts });
+  }
+  buttons().find((b) => b.title === 'Rotate 90° counter-clockwise')?.click();
+  await until(() => es().draft.rotate === 0, 5000, 'mask rotate undone');
+  await sleep(200);
+  {
+    const [r, b] = es().draft.masks;
+    R.rotateRoundTripsMasks =
+      Math.abs(r.cx - 0.3) < 1e-9 && r.rx === 0.25 && r.ry === 0.1 && r.angle === 30 &&
+      Math.abs(b.strokes[0].pts[0] - 0.2) < 1e-9 && Math.abs(b.strokes[0].pts[1] - 0.7) < 1e-9
+        ? true
+        : JSON.stringify({ r, pts: b.strokes[0].pts });
+  }
+  buttons().find((b) => b.title === 'Flip horizontal')?.click();
+  await until(() => es().draft.flipH === true, 5000, 'mask flip applied');
+  await sleep(200);
+  {
+    const r = es().draft.masks[0];
+    R.flipRemapsMasks =
+      Math.abs(r.cx - 0.7) < 1e-9 && Math.abs(r.cy - 0.4) < 1e-9 && r.rx === 0.25 && r.angle === 150
+        ? true
+        : JSON.stringify(r);
+  }
+  buttons().find((b) => b.title === 'Flip horizontal')?.click();
+  await until(() => es().draft.flipH === false, 5000, 'mask flip undone');
+  await sleep(200);
+  mw.esUpdate({ masks: [] }); // clean up: masks off the fixture photo
+  mw.esCommit();
+  await sleep(300);
+
   key('Escape'); // exit crop (commits; Reset below cleans everything)
   await until(() => !es().cropping, 5000, 'crop exited');
   ui().setLoupeZoom('fit');
