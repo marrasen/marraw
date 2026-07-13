@@ -124,6 +124,7 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
 // persists across the two mount sites (Develop drawer ⇄ Library aside).
 const TAB_ITEMS = [
   { value: 'develop' as const, label: 'Develop' },
+  { value: 'masks' as const, label: 'Masks' },
   { value: 'presets' as const, label: 'Presets' },
   { value: 'info' as const, label: 'Info' },
 ];
@@ -150,6 +151,12 @@ function SinglePhotoPanel({
           <>
             {photo && <Histogram photo={photo} />}
             <DevelopPanel client={client} photo={photo} targetCount={targetCount} />
+          </>
+        )}
+        {tab === 'masks' && (
+          <>
+            {photo && <Histogram photo={photo} />}
+            <MasksPanel client={client} targetCount={targetCount} />
           </>
         )}
         {tab === 'presets' && <PresetsPanel client={client} photo={photo} targetCount={targetCount} />}
@@ -309,7 +316,6 @@ function DevelopPanel({
       'splitShadowHue', 'splitShadowAmt', 'splitHighlightHue', 'splitHighlightAmt',
       'hslHue', 'hslSat', 'hslLum',
     ]),
-    masks: (draft.masks?.length ?? 0) > 0,
     effects: groupChanged(draft, ['vignette']),
     detail: groupChanged(draft, [
       'sharpen', 'highlight', 'nrThreshold', 'fbddNoiseRd', 'medPasses',
@@ -383,10 +389,6 @@ function DevelopPanel({
           // previews through the ordinary backend render path.
           {...num('cropAngle')}
         />
-      </Group>
-
-      <Group id="masks" title="Masks" changed={changed.masks}>
-        <MasksSection client={client} draft={draft} />
       </Group>
 
       <Group
@@ -797,11 +799,48 @@ function AutoButton({
   );
 }
 
-// MasksSection is the Masks group body: add buttons, the mask list, and —
-// for the selected mask — its adjustment sliders (plus the brush tool row).
-// Masks live in draft.masks, so every change flows through the same
+// MasksPanel is the Masks tab: add buttons, the mask list, and — for the
+// selected mask — its adjustment sliders (plus the brush tool row). Masks
+// live in draft.masks, so every change flows through the same
 // esUpdate/esCommit path as any slider; the on-canvas shape/paint overlay is
 // MaskOverlay on the Develop loupe, driven by the same activeMask state.
+// Mirrors DevelopPanel's shell: held lastDraft through photo switches (inert
+// input meanwhile), undo/redo in the header.
+function MasksPanel({ client, targetCount }: { client: ApiClient; targetCount: number }) {
+  const liveDraft = useEditSession((s) => s.draft);
+  const draft = useEditSession((s) => s.draft ?? s.lastDraft);
+  const canUndo = useEditSession(esCanUndo);
+  const canRedo = useEditSession(esCanRedo);
+  if (!draft) return <div className="p-4 text-sm text-muted-foreground">Loading edits…</div>;
+  return (
+    <div className={cn('flex flex-col px-4 pt-1 pb-3 text-sm', !liveDraft && 'pointer-events-none')}>
+      <div className="mb-2 flex items-center gap-2">
+        <h2 className="text-[13px] font-medium">Masks</h2>
+        {targetCount > 1 && (
+          <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">
+            applies to {targetCount} photos
+          </span>
+        )}
+        <span className="ml-auto flex items-center gap-1">
+          <Button size="icon-sm" variant="ghost" disabled={!canUndo} onClick={() => esUndo(client)} title="Undo (Ctrl+Z)">
+            <Undo2 />
+          </Button>
+          <Button size="icon-sm" variant="ghost" disabled={!canRedo} onClick={() => esRedo(client)} title="Redo (Ctrl+Y)">
+            <Redo2 />
+          </Button>
+        </span>
+      </div>
+      <MasksSection client={client} draft={draft} />
+      <p className="mt-4 mb-1 text-xs text-muted-foreground">
+        A mask is a local adjustment: a gradient, ellipse or brushed region
+        carrying its own exposure, tone and color. Select one to move its
+        shape on the photo; masks stay anchored to image content through
+        crops and straightens.
+      </p>
+    </div>
+  );
+}
+
 function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   const activeMask = useEditSession((s) => s.activeMask);
   const setMode = useUIStore((s) => s.setMode);
@@ -839,12 +878,6 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
           }}
         />
       ))}
-      {masks.length === 0 && (
-        <span className="pt-0.5 text-[11.5px] leading-snug text-muted-foreground">
-          Local adjustments: a gradient, ellipse or brushed region with its own
-          exposure, tone and color.
-        </span>
-      )}
     </div>
   );
 }

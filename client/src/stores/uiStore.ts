@@ -23,7 +23,7 @@ export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
 // a dialog, not a mode.
 export type Mode = 'library' | 'cull' | 'develop';
 // Tabs of the develop drawer / library edit aside.
-export type DevelopTab = 'develop' | 'presets' | 'info';
+export type DevelopTab = 'develop' | 'masks' | 'presets' | 'info';
 
 export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   format: 'jpeg',

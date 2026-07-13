@@ -42,7 +42,7 @@ export type { ControlId } from '@/lib/controlSpecs';
 // holds each control. Selecting a control opens its group; Ctrl+↑/↓ skips
 // controls whose group is closed. Open state lives in uiStore.editGroups
 // (absent = open), server-persisted via updateEditGroupOpen.
-export type GroupId = 'crop' | 'masks' | 'tone' | 'presence' | 'wb' | 'color' | 'effects' | 'detail';
+export type GroupId = 'crop' | 'tone' | 'presence' | 'wb' | 'color' | 'effects' | 'detail';
 
 const CONTROL_GROUP: Record<ControlId, GroupId> = {
   cropAngle: 'crop',
@@ -456,16 +456,14 @@ export function esSetBrushTool(
 
 // esAddMask appends a mask with a sensible default shape, selects it, and
 // commits ("Add radial mask" in history). A brush starts empty and drops the
-// session straight into paint mode. Also opens the Masks panel group so the
-// new mask's sliders are visible.
+// session straight into paint mode. Also switches the panel to the Masks tab
+// so the new mask's sliders are visible.
 export function esAddMask(client: ApiClient, type: Mask['type']) {
   esFlushDraft();
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
   const masks = [...(s.draft.masks ?? []), defaultMask(type)];
-  if (useUIStore.getState().editGroups.masks === false) {
-    updateEditGroupOpen(client, 'masks', true);
-  }
+  useUIStore.getState().setDevelopTab('masks');
   setState({ activeMask: masks.length - 1, maskPaint: type === 'brush' });
   esCommit(client, { masks });
 }

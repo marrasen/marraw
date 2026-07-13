@@ -69,6 +69,7 @@ function buildCommands(
   if (hasFolder) {
     out.push(
       { id: 'tab-develop', label: 'Develop panel', group: 'Panels', hint: 'Tab', run: () => goDevelop('develop') },
+      { id: 'tab-masks', label: 'Masks panel', group: 'Panels', run: () => goDevelop('masks') },
       { id: 'tab-presets', label: 'Presets panel', group: 'Panels', run: () => goDevelop('presets') },
       { id: 'tab-info', label: 'Info panel', group: 'Panels', run: () => goDevelop('info') },
       { id: 'crop', label: 'Crop & straighten', group: 'Develop', hint: 'R', run: (client) => {
@@ -80,15 +81,15 @@ function buildCommands(
           esSetWBPicking(true);
         } },
       { id: 'mask-linear', label: 'Add linear gradient mask', group: 'Develop', run: (client) => {
-          goDevelop();
+          goDevelop('masks');
           esAddMask(client, 'linear');
         } },
       { id: 'mask-radial', label: 'Add radial mask', group: 'Develop', run: (client) => {
-          goDevelop();
+          goDevelop('masks');
           esAddMask(client, 'radial');
         } },
       { id: 'mask-brush', label: 'Add brush mask', group: 'Develop', run: (client) => {
-          goDevelop();
+          goDevelop('masks');
           esAddMask(client, 'brush');
         } },
       { id: 'reset', label: 'Reset develop settings', group: 'Develop', hint: 'Ctrl+0', run: (client) => esReset(client) },
