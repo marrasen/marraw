@@ -6,7 +6,10 @@ package libraw
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../third_party/libraw/include -DLIBRAW_NODLL
-#cgo LDFLAGS: -L${SRCDIR}/../../third_party/libraw/lib -lraw -lstdc++ -lws2_32 -lm -static
+#cgo LDFLAGS: -L${SRCDIR}/../../third_party/libraw/lib -lraw -lm
+#cgo windows LDFLAGS: -lstdc++ -lws2_32 -static
+#cgo linux LDFLAGS: -lstdc++ -lz -static-libstdc++ -static-libgcc
+#cgo darwin LDFLAGS: -lc++ -lz
 
 #include <stdlib.h>
 #include <libraw/libraw.h>
@@ -46,7 +49,6 @@ import (
 	"fmt"
 	"math"
 	"sync/atomic"
-	"syscall"
 	"time"
 	"unsafe"
 )
@@ -99,10 +101,6 @@ func lrErr(op string, code C.int) error {
 
 // Open reads and parses the file's metadata (no pixel decode).
 func (p *Processor) Open(path string) error {
-	w, err := syscall.UTF16PtrFromString(path)
-	if err != nil {
-		return fmt.Errorf("libraw: bad path %q: %w", path, err)
-	}
 	// libraw_recycle deliberately preserves params, and a pool worker reuses one
 	// handle across jobs. Opening a file sizes it according to the params in
 	// effect at that moment, so a half-size decode (the calibration pass) would
@@ -112,8 +110,8 @@ func (p *Processor) Open(path string) error {
 	// computes the dimensions. Process() applies its own params afterwards, so
 	// nothing else is affected.
 	DefaultParams().apply(p.h)
-	if ret := C.libraw_open_wfile(p.h, (*C.wchar_t)(unsafe.Pointer(w))); ret != 0 {
-		return lrErr("open "+path, ret)
+	if err := p.openFile(path); err != nil { // per-OS: open_windows.go / open_unix.go
+		return err
 	}
 	p.unpacked = false
 	return nil

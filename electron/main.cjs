@@ -129,9 +129,10 @@ async function startDaemon() {
     return { port: process.env.MARRAW_PORT, token: '' };
   }
   const token = crypto.randomUUID();
+  const bin = process.platform === 'win32' ? 'marrawd.exe' : 'marrawd';
   const exe = UNPACKAGED
-    ? path.join(__dirname, '..', 'build', 'marrawd.exe')
-    : path.join(process.resourcesPath, 'marrawd.exe');
+    ? path.join(__dirname, '..', 'build', bin)
+    : path.join(process.resourcesPath, bin);
   child = spawn(exe, ['--port', '0', '--data-dir', app.getPath('userData')], {
     env: { ...process.env, MARRAW_TOKEN: token, MARRAW_PARENT_WATCH: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],

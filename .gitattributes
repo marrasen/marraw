@@ -1,3 +1,6 @@
 # The XMP golden file is compared byte-for-byte in internal/xmp tests;
 # autocrlf rewriting it to CRLF on checkout would break them.
 internal/xmp/testdata/*.xmp -text
+
+# Shell scripts run on the mac/linux CI runners; CRLF breaks bash.
+*.sh text eol=lf

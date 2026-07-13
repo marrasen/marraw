@@ -18,11 +18,11 @@
     "preview:run": "cross-env MARRAW_PREVIEW=1 electron .",
     "preview": "npm run preview:build && npm run preview:run",
     "smoke": "node scripts/smoke.mjs",
-    "build:server": "go build -ldflags \"-s -w\" -o build/marrawd.exe ./cmd/marrawd",
+    "build:server": "node scripts/build-server.mjs",
     "build:client": "npm --prefix client run build",
     "typecheck": "npm --prefix client run typecheck",
-    "dist": "npm run gen && npm run build:client && npm run build:server && electron-builder --win --publish never",
-    "dist:publish": "npm run gen && npm run build:client && npm run build:server && electron-builder --win --publish always"
+    "dist": "npm run gen && npm run build:client && npm run build:server && electron-builder --publish never",
+    "dist:publish": "npm run gen && npm run build:client && npm run build:server && electron-builder --publish always"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
@@ -51,20 +51,51 @@
       "electron/**",
       "client/dist/**"
     ],
-    "extraResources": [
-      {
-        "from": "build/marrawd.exe",
-        "to": "marrawd.exe"
-      }
-    ],
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico",
-      "artifactName": "marraw-Setup-${version}.exe"
+      "artifactName": "marraw-Setup-${version}.exe",
+      "extraResources": [
+        {
+          "from": "build/marrawd.exe",
+          "to": "marrawd.exe"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "identity": null,
+      "category": "public.app-category.photography",
+      "artifactName": "marraw-${version}-${arch}.dmg",
+      "extraResources": [
+        {
+          "from": "build/marrawd",
+          "to": "marrawd"
+        }
+      ]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/icon.png",
+      "category": "Graphics",
+      "maintainer": "marcus@skalarit.se",
+      "artifactName": "marraw-${version}-${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": "build/marrawd",
+          "to": "marrawd"
+        }
+      ]
     }
   }
 }

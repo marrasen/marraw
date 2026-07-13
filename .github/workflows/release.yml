@@ -132,50 +132,172 @@ jobs:
           if-no-files-found: error
 
 # ---------------------------------------------------------------------------
-# macOS and Linux are scaffolded but not enabled: the cgo layer is currently
-# Windows-only (syscall.UTF16PtrFromString, libraw_open_wfile, -lws2_32), the
-# vendored libraw.a is a MinGW artifact, and electron/main.cjs hardcodes
-# marrawd.exe. cgo also rules out cross-compiling, so each platform needs its
-# own native runner.
+# macOS and Linux builds are UNTESTED at runtime: no physical test machine.
+# CI proves they compile and package; users report whether they run.
 #
-# See DEVELOPER.md -> "Porting to macOS and Linux" for the six-step checklist.
-# Once that lands, uncomment these and add mac/linux targets to the
-# electron-builder `build` block in package.json.
+# Both jobs `needs: windows` -- partly as a gate (the tag-version check lives
+# there), partly so the Windows job creates the draft release alone before
+# the other two race electron-builder's find-or-create-draft logic (v0.2.0
+# already produced a split draft with a SINGLE job; see release notes ritual).
 #
-# NOTE: macOS auto-update additionally requires a Developer ID signature --
-# Squirrel.Mac refuses to update an unsigned bundle. An unsigned .dmg installs
-# fine, it just never self-updates.
+# NOTE: macOS auto-update requires a Developer ID signature -- Squirrel.Mac
+# refuses to update an unsigned bundle. The unsigned .dmg installs (via
+# right-click Open / "Open Anyway" in System Settings), it just never
+# self-updates; the app hides the auto-update toggle on darwin. The Linux
+# AppImage self-updates normally.
 # ---------------------------------------------------------------------------
-#
-#  macos:
-#    runs-on: macos-14        # arm64; add macos-13 to the matrix for x64
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: actions/setup-go@v5
-#        with: { go-version-file: go.mod, cache: true }
-#      - uses: actions/setup-node@v4
-#        with: { node-version: '24', cache: npm }
-#      - run: ./scripts/setup-libraw.sh     # TODO: does not exist yet
-#      - run: npm ci && npm --prefix client ci
-#      - run: npm run gen
-#      - run: npm run dist:publish -- --mac
-#        env:
-#          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#          # CSC_LINK / CSC_KEY_PASSWORD / APPLE_ID / APPLE_TEAM_ID
-#          # / APPLE_APP_SPECIFIC_PASSWORD once signing is set up
-#
-#  linux:
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: actions/setup-go@v5
-#        with: { go-version-file: go.mod, cache: true }
-#      - uses: actions/setup-node@v4
-#        with: { node-version: '24', cache: npm }
-#      - run: sudo apt-get update && sudo apt-get install -y build-essential
-#      - run: ./scripts/setup-libraw.sh     # TODO: does not exist yet
-#      - run: npm ci && npm --prefix client ci
-#      - run: npm run gen
-#      - run: npm run dist:publish -- --linux    # AppImage self-updates
-#        env:
-#          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  linux:
+    runs-on: ubuntu-22.04 # oldest supported image = oldest glibc users can run
+    needs: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Cache LibRaw
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/libraw
+            third_party/LibRaw-${{ env.LIBRAW_VERSION }}.tar.gz
+          key: libraw-${{ runner.os }}-${{ env.LIBRAW_VERSION }}-${{ hashFiles('scripts/setup-libraw.sh') }}
+
+      - name: Build LibRaw
+        run: bash scripts/setup-libraw.sh
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix client ci
+
+      - name: Generate API client
+        run: npm run gen
+
+      - name: Vet daemon
+        run: go build ./...
+
+      # A CC0 sample RAW (raw.pixls.us) so the libraw tests exercise the real
+      # decode pipeline on this otherwise-untested platform instead of skipping.
+      # Must be a ~24MP-class file: the cancel/progress/fold-WB tests are
+      # calibrated to real-world sizes and fail on small sensors even on
+      # Windows (verified with a 12MP ILCE-7S sample).
+      - name: Fetch sample RAW
+        run: |
+          mkdir -p /tmp/marraw-raw
+          curl -fsSL --retry 3 -o /tmp/marraw-raw/sample.arw 'https://raw.pixls.us/getfile.php/2414/nice/Sony%20-%20ILCE-7M3%20-%2014bit%2014bit%20compressed%20(3:2).ARW'
+          echo '250784580ea527442c09004417bb0eead484f2bf3ee8f9121a776ac65bb50d0f  /tmp/marraw-raw/sample.arw' | shasum -a 256 -c -
+
+      - name: Test daemon
+        env:
+          MARRAW_TEST_RAW_DIR: /tmp/marraw-raw
+        run: go test ./...
+
+      - name: Build installer
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: npm run dist
+
+      - name: Build and publish draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist:publish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: marraw-linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.yml
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-15 # arm64 (Apple Silicon) only for now
+    needs: windows
+    env:
+      # No signing certificate: stop electron-builder from probing the
+      # keychain and stalling or failing on whatever it finds there.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Cache LibRaw
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/libraw
+            third_party/LibRaw-${{ env.LIBRAW_VERSION }}.tar.gz
+          key: libraw-${{ runner.os }}-${{ env.LIBRAW_VERSION }}-${{ hashFiles('scripts/setup-libraw.sh') }}
+
+      - name: Build LibRaw
+        run: bash scripts/setup-libraw.sh
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix client ci
+
+      - name: Generate API client
+        run: npm run gen
+
+      - name: Vet daemon
+        run: go build ./...
+
+      # A CC0 sample RAW (raw.pixls.us) so the libraw tests exercise the real
+      # decode pipeline on this otherwise-untested platform instead of skipping.
+      # Must be a ~24MP-class file: the cancel/progress/fold-WB tests are
+      # calibrated to real-world sizes and fail on small sensors even on
+      # Windows (verified with a 12MP ILCE-7S sample).
+      - name: Fetch sample RAW
+        run: |
+          mkdir -p /tmp/marraw-raw
+          curl -fsSL --retry 3 -o /tmp/marraw-raw/sample.arw 'https://raw.pixls.us/getfile.php/2414/nice/Sony%20-%20ILCE-7M3%20-%2014bit%2014bit%20compressed%20(3:2).ARW'
+          echo '250784580ea527442c09004417bb0eead484f2bf3ee8f9121a776ac65bb50d0f  /tmp/marraw-raw/sample.arw' | shasum -a 256 -c -
+
+      - name: Test daemon
+        env:
+          MARRAW_TEST_RAW_DIR: /tmp/marraw-raw
+        run: go test ./...
+
+      - name: Build installer
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: npm run dist
+
+      - name: Build and publish draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist:publish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: marraw-macos
+          path: |
+            dist/*.dmg
+            dist/*.yml
+          if-no-files-found: error

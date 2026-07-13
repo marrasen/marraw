@@ -207,37 +207,38 @@ To sign later: add the `CSC_LINK` / `CSC_KEY_PASSWORD` (Windows) or
 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` (macOS) secrets
 and drop the `mac`/`win` `signAndEditExecutable: false` escape hatches.
 
-## Porting to macOS and Linux
+## macOS and Linux
 
-The release workflow has macOS and Linux jobs scaffolded but commented out.
-They are blocked on the Go/cgo layer, which is currently Windows-only:
+The release workflow builds all three platforms. Windows is the developed-on,
+tested platform; **macOS and Linux installers are built and unit-tested in CI
+but have never been run on real hardware** — treat user reports accordingly.
 
-1. **`internal/libraw/libraw.go`** — `Open()` calls `syscall.UTF16PtrFromString`
-   and `libraw_open_wfile`, both Windows-only, from an untagged file. Split
-   into `libraw_windows.go` (keep the wide-char path) and `libraw_unix.go`
-   (`//go:build !windows`, use `C.CString` + `libraw_open_file`).
-2. **cgo LDFLAGS**, same file — `-lws2_32` is Winsock and `-static` has no
-   macOS equivalent. Split per-OS:
-   ```
-   #cgo windows LDFLAGS: -lraw -lstdc++ -lws2_32 -lm -static
-   #cgo linux   LDFLAGS: -lraw -lstdc++ -lm
-   #cgo darwin  LDFLAGS: -lraw -lc++ -lm
-   ```
-3. **`third_party/libraw/lib/libraw.a`** is a MinGW artifact. Port
-   `scripts/setup-libraw.ps1` to a `setup-libraw.sh` and build a `libraw.a` per
-   target (linux-amd64, darwin-arm64, darwin-amd64). This is the bulk of the
-   work.
-4. **`electron/main.cjs`** — hardcodes `marrawd.exe` in both the unpackaged and
-   packaged paths. Derive it:
-   `process.platform === 'win32' ? 'marrawd.exe' : 'marrawd'`.
-5. **`package.json`** — `build:server` writes `build/marrawd.exe`; the
-   `build` block has only a `win` target. Add `mac`/`linux` targets, per-platform
-   `extraResources`, and `.icns` / `.png` icons.
-6. **`internal/trash/trash_other.go`** compiles but returns
-   `trash: not supported`. Wire up `gio trash` (Linux) and
-   `NSFileManager trashItemAtURL` (macOS), or delete becomes a hard error.
+How the port is wired:
 
-`cmd/marrawd/main.go` already uses `os.UserConfigDir()`, and all path handling
-goes through `path/filepath`, so the daemon's storage layer is portable as-is.
-Note that cgo rules out cross-compiling: each platform must build on its own
-native runner.
+- **cgo** — `Open()` is split per-OS (`internal/libraw/open_windows.go` wide-char
+  `libraw_open_wfile`, `open_unix.go` narrow `libraw_open_file`); LDFLAGS are
+  per-OS `#cgo` lines in `libraw.go`. cgo rules out cross-compiling, so each
+  platform builds on its own native runner.
+- **LibRaw** — `scripts/setup-libraw.sh` (Unix twin of `setup-libraw.ps1`)
+  builds a static `libraw.a` via LibRaw's dependency-free `Makefile.dist`,
+  which is thread-safe on Unix by default.
+- **Trash** — `trash_linux.go` prefers `gio trash` (full freedesktop spec,
+  external drives included) with a home-trash fallback; `trash_darwin.go`
+  calls `NSFileManager trashItemAtURL` via a small Objective-C cgo shim.
+- **sysmem** — Linux reads `/proc/meminfo`; macOS has no implementation and
+  the export memory governor uses its conservative fallback.
+- **Packaging** — unsigned arm64 `.dmg` (Intel Macs are not built),
+  `AppImage` + `.deb` on Linux (built on the oldest supported Ubuntu image so
+  the daemon's glibc floor stays low). The daemon ships as `extraResources`
+  per platform (`marrawd` / `marrawd.exe`).
+
+Known caveats for user reports:
+
+- **macOS Gatekeeper** — the dmg is unsigned and unnotarized: first launch
+  needs right-click → Open, or on macOS 15+ System Settings → Privacy &
+  Security → **Open Anyway**. No auto-update (see above).
+- **Linux trash without `gio`** — falls back to home-trash; deleting photos
+  that live on a *different filesystem* than `$HOME` errors instead of
+  trashing (deliberate: copying RAWs "to trash" would double disk usage).
+- **AppImage on newer distros** — needs libfuse2 (`apt install libfuse2`),
+  the usual AppImage runtime requirement.

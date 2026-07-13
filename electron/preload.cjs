@@ -8,8 +8,11 @@ contextBridge.exposeInMainWorld('marraw', {
   getPathForFile: (file) => webUtils.getPathForFile(file),
   isDirectory: (path) => ipcRenderer.invoke('marraw:is-directory', path),
   // Background auto-update opt-out. Unsigned macOS builds can never update
-  // themselves, so the setting is hidden rather than shown as a dead toggle.
-  updatesSupported: process.platform !== 'darwin',
+  // themselves, and on Linux only the AppImage packaging self-updates (a .deb
+  // install has no updater) — hide the setting rather than show a dead toggle.
+  updatesSupported:
+    process.platform === 'win32' ||
+    (process.platform === 'linux' && !!process.env.APPIMAGE),
   getAutoUpdate: () => ipcRenderer.invoke('marraw:get-auto-update'),
   setAutoUpdate: (on) => ipcRenderer.invoke('marraw:set-auto-update', on),
 });

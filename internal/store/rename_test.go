@@ -14,23 +14,28 @@ func TestRenameFolderPaths(t *testing.T) {
 	}
 	defer db.Close()
 
-	old := `C:\Shoots\Wedding`
-	sub := `C:\Shoots\Wedding\ceremony`
-	other := `C:\Shoots\WeddingParty` // shares the string prefix but is a sibling
+	// Native separators: RenameFolderPaths matches descendants with the
+	// platform separator, so literal `C:\...` strings would silently be
+	// prefix-only matches on Linux/macOS CI.
+	root := filepath.Join(t.TempDir(), "Shoots")
+	old := filepath.Join(root, "Wedding")
+	sub := filepath.Join(root, "Wedding", "ceremony")
+	other := filepath.Join(root, "WeddingParty") // shares the string prefix but is a sibling
 	for _, p := range []string{old, sub, other} {
 		if _, err := db.UpsertFolder(ctx, p); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	if err := db.RenameFolderPaths(ctx, old, `C:\Shoots\Tobias & Elisabeth`); err != nil {
+	renamed := filepath.Join(root, "Tobias & Elisabeth")
+	if err := db.RenameFolderPaths(ctx, old, renamed); err != nil {
 		t.Fatal(err)
 	}
 
 	want := map[string]bool{
-		`C:\Shoots\Tobias & Elisabeth`:          true,
-		`C:\Shoots\Tobias & Elisabeth\ceremony`: true,
-		`C:\Shoots\WeddingParty`:                true,
+		renamed:                             true,
+		filepath.Join(renamed, "ceremony"):  true,
+		filepath.Join(root, "WeddingParty"): true,
 	}
 	rows, err := db.QueryContext(ctx, `SELECT path FROM folders`)
 	if err != nil {
