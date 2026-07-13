@@ -11,12 +11,15 @@ import {
   esApplyParams,
   esAuto,
   esMoveActive,
+  esMoveMaskActive,
   esRedo,
   esReset,
   esSetActive,
+  esSetActiveMask,
   esSetCropping,
   esSetWBPicking,
   esStep,
+  esStepMask,
   esUndo,
   esWBPickCancel,
   esWBPickDone,
@@ -47,6 +50,8 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 // useKeyboard installs the app-wide keymap:
 //   arrows        navigate (Shift extends the selection; pans in a loupe);
 //                 in a develop loupe ↑/↓ focus the previous/next control
+//                 (on the Masks tab: the previous/next mask slider, walking
+//                 across masks at the ends)
 //   1-5 / 0       set / clear rating
 //   P / X / U     pick / exclude / unflag
 //   Enter · Esc   forward / back a mode: Library ⇄ Cull ⇄ Develop
@@ -55,7 +60,7 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 //   Ctrl+↑/↓      focus the previous/next develop control (alias of plain ↑/↓)
 //   +/- / Z / Space   zoom (loupe, no control focused — Cull never focuses one;
 //                 Z/Space toggle 1:1↔fit)
-//   Tab           in Develop, cycle the Develop/Presets/Info tabs (⇧ backward);
+//   Tab           in Develop, cycle the Develop/Masks/Presets/Info tabs (⇧ backward);
 //                 elsewhere Tab is swallowed — native focus is useless here
 //   Ctrl+A/C/V    select all, copy/paste edit settings
 //   Ctrl+Z/Y      per-photo edit undo/redo
@@ -73,6 +78,9 @@ export function useKeyboard() {
       const s = useUIStore.getState();
       if (s.exportOpen) return;
       const es = useEditSession.getState();
+      // The Masks tab retargets the slider keys: ↑/↓ walk the mask sliders
+      // (across masks) and +/- step the focused one.
+      const masksTab = s.developTab === 'masks' && s.mode !== 'cull' && !!es.draft;
 
       const move = (delta: number) => {
         const ids = s.visibleIds;
@@ -176,12 +184,15 @@ export function useKeyboard() {
             void esApplyAutoPreset(client, preset);
             return;
           }
-          // Ctrl+↑/↓ walk the develop controls in panel order.
+          // Ctrl+↑/↓ walk the develop controls in panel order (the mask
+          // sliders when the Masks tab is up).
           case 'arrowup':
           case 'arrowdown': {
             if (!es.draft || s.mode === 'cull') return;
             e.preventDefault();
-            esMoveActive(e.key === 'ArrowDown' ? 1 : -1);
+            const dir = e.key === 'ArrowDown' ? 1 : -1;
+            if (masksTab) esMoveMaskActive(dir);
+            else esMoveActive(dir);
             return;
           }
         }
@@ -223,7 +234,7 @@ export function useKeyboard() {
         if (s.settingsOpen || s.addFolderOpen || s.shortcutsOpen) return;
         e.preventDefault();
         if (s.mode === 'develop') {
-          const order: DevelopTab[] = ['develop', 'presets', 'info'];
+          const order: DevelopTab[] = ['develop', 'masks', 'presets', 'info'];
           const i = order.indexOf(s.developTab);
           s.setDevelopTab(order[(i + (e.shiftKey ? order.length - 1 : 1)) % order.length]);
         }
@@ -282,12 +293,14 @@ export function useKeyboard() {
         // hotkeys.
         case 'ArrowUp':
           e.preventDefault();
-          if (es.draft && s.mode !== 'cull' && s.view === 'loupe') esMoveActive(-1);
+          if (masksTab && s.view === 'loupe') esMoveMaskActive(-1);
+          else if (es.draft && s.mode !== 'cull' && s.view === 'loupe') esMoveActive(-1);
           else moveRow(-1);
           break;
         case 'ArrowDown':
           e.preventDefault();
-          if (es.draft && s.mode !== 'cull' && s.view === 'loupe') esMoveActive(1);
+          if (masksTab && s.view === 'loupe') esMoveMaskActive(1);
+          else if (es.draft && s.mode !== 'cull' && s.view === 'loupe') esMoveActive(1);
           else moveRow(1);
           break;
         case '0':
@@ -328,6 +341,8 @@ export function useKeyboard() {
             esSetCropping(client, false);
           } else if (es.wbPicking) {
             esWBPickCancel(client); // revert to the pre-picker draft
+          } else if (es.activeMask != null || es.activeMaskControl != null) {
+            esSetActiveMask(null); // drop mask selection + slider focus + overlay
           } else if (es.activeControl != null) {
             esSetActive(client, null);
           } else if (s.contactSheet) {
@@ -342,12 +357,14 @@ export function useKeyboard() {
           break;
         case '+':
         case '=':
-          if (es.activeControl != null) esStep(client, es.activeControl, 1, e.shiftKey);
+          if (masksTab && es.activeMaskControl != null) esStepMask(client, 1, e.shiftKey);
+          else if (!masksTab && es.activeControl != null) esStep(client, es.activeControl, 1, e.shiftKey);
           else zoomStep(1.25);
           break;
         case '-':
         case '_':
-          if (es.activeControl != null) esStep(client, es.activeControl, -1, e.shiftKey);
+          if (masksTab && es.activeMaskControl != null) esStepMask(client, -1, e.shiftKey);
+          else if (!masksTab && es.activeControl != null) esStep(client, es.activeControl, -1, e.shiftKey);
           else zoomStep(0.8);
           break;
         case 'z':

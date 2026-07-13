@@ -100,16 +100,50 @@ if (shot === 'cull') {
   await until(() => mw.esPreviewSettled(), 30000);
   const after = await pixelsAt(es.getState().preview.blob);
   const luma = (p) => (p[0] * 299 + p[1] * 587 + p[2] * 114) / 1000;
+
+  // Keyboard tour: with a second mask added (selected, no slider focused),
+  // ↓ enters its first slider, ↑↑ crosses back onto the previous mask's last
+  // slider, +/- steps the focused slider, Tab cycles develop→masks.
+  const press = (key, opts = {}) =>
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...opts }));
+  mw.esAddMask('linear'); // becomes index 1, selected
+  await sleep(200);
+  press('ArrowDown');
+  const focusEnter = { mask: es.getState().activeMask, ctrl: es.getState().activeMaskControl };
+  press('ArrowUp');
+  press('ArrowUp');
+  const focusCrossed = { mask: es.getState().activeMask, ctrl: es.getState().activeMaskControl };
+  const stepBase =
+    es.getState().draft.masks[focusCrossed.mask]?.adjust?.[focusCrossed.ctrl] ?? 0;
+  press('+');
+  press('+');
+  await sleep(100);
+  const stepped =
+    es.getState().draft.masks[focusCrossed.mask]?.adjust?.[focusCrossed.ctrl] ?? 0;
+  ui().setDevelopTab('develop');
+  press('Tab');
+  const tabAfterDevelop = ui().developTab;
+  // Restore the single-mask state for the screenshot + repeat runs.
+  press('Escape'); // clears mask selection/focus
+  mw.esUpdateMask(1, { adjust: {} });
+  await sleep(100);
+
   window.__maskProbe = {
     maskCount: es.getState().draft.masks?.length ?? 0,
-    activeMask: es.getState().activeMask,
-    overlayMounted: !!document.querySelector('[data-testid="mask-overlay"]'),
     centerLumaBefore: Math.round(luma(before.center)),
     centerLumaAfter: Math.round(luma(after.center)),
     centerBrightened: luma(after.center) > luma(before.center) + 8,
     cornerLumaBefore: Math.round(luma(before.corner)),
     cornerLumaAfter: Math.round(luma(after.corner)),
     cornerUnchanged: Math.abs(luma(after.corner) - luma(before.corner)) <= 3,
+    // ↓ on the freshly added mask 1 lands on its first slider…
+    focusEnter,
+    // …and ↑↑ walks back across the boundary into mask 0 (last slider, then
+    // one more up).
+    focusCrossed,
+    stepDelta: Math.round((stepped - stepBase) * 1000) / 1000,
+    tabAfterDevelop,
+    escCleared: es.getState().activeMask == null && es.getState().activeMaskControl == null,
   };
 } else if (shot === 'addfolder') {
   ui().setAddFolderOpen(true);

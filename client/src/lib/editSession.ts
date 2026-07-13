@@ -22,11 +22,14 @@ import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPre
 import {
   CONTROL_ORDER,
   CONTROL_SPECS,
+  MASK_CONTROL_ORDER,
+  MASK_CONTROL_SPECS,
   MASK_TYPE_LABELS,
   NEUTRAL,
   defaultMask,
   paramLabel,
   type ControlId,
+  type MaskControlId,
 } from '@/lib/controlSpecs';
 import { updateEditGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
@@ -119,8 +122,11 @@ interface EditSessionState {
   wbPickBase: Params | null;
   cropping: boolean; // crop overlay active: loupe shows the uncropped frame
   // The selected local-adjustment mask (index into draft.masks): its overlay
-  // handles show on the loupe and its sliders expand in the Masks group.
+  // handles show on the loupe and its sliders expand in the Masks tab.
   activeMask: number | null;
+  // The keyboard-focused slider of the active mask (Masks-tab counterpart of
+  // activeControl): ↑/↓ walk it across every mask's sliders, +/- adjusts.
+  activeMaskControl: MaskControlId | null;
   // Brush paint mode: pointer strokes on the loupe paint into the active
   // (brush) mask instead of panning.
   maskPaint: boolean;
@@ -152,6 +158,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   wbPickBase: null,
   cropping: false,
   activeMask: null,
+  activeMaskControl: null,
   maskPaint: false,
   brushRadius: 0.05,
   brushFeather: 0.5,
@@ -344,6 +351,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     wbPickBase: null,
     cropping: false,
     activeMask: null,
+    activeMaskControl: null,
     maskPaint: false,
     keyAdjust: false,
   }));
@@ -394,8 +402,14 @@ export function esSetKeyAdjust(on: boolean) {
 useUIStore.subscribe((s, prev) => {
   if (s.mode === 'cull' && prev.mode !== 'cull') {
     const es = useEditSession.getState();
-    if (es.activeControl != null || es.activeMask != null || es.maskPaint) {
-      setState({ activeControl: null, keyAdjust: false, activeMask: null, maskPaint: false });
+    if (es.activeControl != null || es.activeMask != null || es.activeMaskControl != null || es.maskPaint) {
+      setState({
+        activeControl: null,
+        keyAdjust: false,
+        activeMask: null,
+        activeMaskControl: null,
+        maskPaint: false,
+      });
     }
   }
 });
@@ -432,13 +446,73 @@ export function esSetCropping(client: ApiClient, on: boolean) {
 // render backend draft frames like any adjustment.
 
 // esSetActiveMask selects a mask (its overlay handles + expanded sliders).
-// Deselecting leaves paint mode.
+// Row selection carries no slider focus; deselecting leaves paint mode.
 export function esSetActiveMask(index: number | null) {
   setState((s) => ({
     activeMask: index,
+    activeMaskControl: null,
     maskPaint: index == null ? false : s.maskPaint,
     keyAdjust: false,
   }));
+}
+
+// esSetActiveMaskControl focuses one slider of one mask (pointer-down on the
+// row, mirroring esSetActive for the develop controls).
+export function esSetActiveMaskControl(index: number, control: MaskControlId | null) {
+  setState({ activeMask: index, activeMaskControl: control, keyAdjust: false });
+}
+
+// esMoveMaskActive walks the keyboard focus through every mask's sliders as
+// ONE flat list (mask 1's sliders, then mask 2's, …) — stepping past a mask's
+// last slider lands on the next mask's first, selecting that mask as it goes,
+// so ↑/↓ tour all masks. With nothing focused it enters at the selected
+// mask's near edge (or the list's, like esMoveActive); at the very ends it
+// stays put.
+export function esMoveMaskActive(dir: 1 | -1) {
+  const s = useEditSession.getState();
+  const masks = s.draft?.masks;
+  if (!masks || masks.length === 0) return;
+  const per = MASK_CONTROL_ORDER.length;
+  const total = masks.length * per;
+  let i: number;
+  if (s.activeMask != null && s.activeMaskControl != null) {
+    i = s.activeMask * per + MASK_CONTROL_ORDER.indexOf(s.activeMaskControl);
+  } else if (s.activeMask != null) {
+    // A selected mask without a focused slider: enter at its near edge.
+    i = s.activeMask * per + (dir > 0 ? -1 : per);
+  } else {
+    i = dir > 0 ? -1 : total;
+  }
+  i += dir;
+  if (i < 0 || i >= total) return;
+  setState({
+    activeMask: Math.floor(i / per),
+    activeMaskControl: MASK_CONTROL_ORDER[i % per],
+    maskPaint: false,
+    keyAdjust: false,
+  });
+}
+
+// esStepMask nudges the focused mask slider from the keyboard (+/-, Shift =
+// big steps): live low-res preview per step, one undoable commit after a
+// short idle — esStep's contract for the develop controls. Deliberately no
+// heads-up keyAdjust mode: hiding the drawer would hide the slider ring the
+// walk just placed.
+export function esStepMask(client: ApiClient, dir: 1 | -1, big = false) {
+  const s = useEditSession.getState();
+  const masks = s.draft?.masks;
+  if (!masks || s.activeMask == null || s.activeMaskControl == null) return;
+  const m = masks[s.activeMask];
+  if (!m) return;
+  const spec = MASK_CONTROL_SPECS[s.activeMaskControl];
+  const step = big ? spec.bigStep : spec.step;
+  const raw = (m.adjust?.[s.activeMaskControl] ?? 0) + dir * step;
+  const v = Math.min(spec.max, Math.max(spec.min, Math.round(raw * 1000) / 1000));
+  esUpdateMask(client, s.activeMask, { adjust: { ...m.adjust, [s.activeMaskControl]: v } });
+  esFlushDraft(); // a discrete key step should land in the draft immediately
+  schedulePreview(client, 'settle'); // sharp frame right behind the instant one
+  window.clearTimeout(commitTimer);
+  commitTimer = window.setTimeout(() => esCommit(client), 600);
 }
 
 // esSetMaskPaint toggles brush paint mode for the active brush mask.
@@ -464,7 +538,7 @@ export function esAddMask(client: ApiClient, type: Mask['type']) {
   if (!s.draft || s.photoId == null) return;
   const masks = [...(s.draft.masks ?? []), defaultMask(type)];
   useUIStore.getState().setDevelopTab('masks');
-  setState({ activeMask: masks.length - 1, maskPaint: type === 'brush' });
+  setState({ activeMask: masks.length - 1, activeMaskControl: null, maskPaint: type === 'brush' });
   esCommit(client, { masks });
 }
 
@@ -489,7 +563,7 @@ export function esRemoveMask(client: ApiClient, index: number) {
   const masks = s.draft?.masks;
   if (!masks || !masks[index]) return;
   const next = masks.filter((_, i) => i !== index);
-  setState({ activeMask: null, maskPaint: false });
+  setState({ activeMask: null, activeMaskControl: null, maskPaint: false });
   esCommit(client, { masks: next });
 }
 

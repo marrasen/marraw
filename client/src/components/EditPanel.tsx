@@ -39,6 +39,7 @@ import {
   esRemoveMask,
   esSetActive,
   esSetActiveMask,
+  esSetActiveMaskControl,
   esSetApplyIds,
   esSetBrushTool,
   esSetCropping,
@@ -895,6 +896,7 @@ function MaskRow({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const activeMaskControl = useEditSession((s) => s.activeMaskControl);
   const adjust = mask.adjust ?? {};
   const changed = !maskAdjustIsNeutral(adjust);
   const patchAdjust = (key: MaskControlId, v: number): { adjust: MaskAdjust } => ({
@@ -950,6 +952,8 @@ function MaskRow({
                 step={isEV ? spec.step : spec.step * 100}
                 neutral={0}
                 gradient={key === 'temp' ? TEMP_GRADIENT : key === 'tint' ? TINT_GRADIENT : undefined}
+                active={selected && activeMaskControl === key}
+                onFocusControl={() => esSetActiveMaskControl(index, key)}
                 onChange={(v) => esUpdateMask(client, index, patchAdjust(key, isEV ? v : v / 100))}
                 onCommit={(v) => {
                   esUpdateMask(client, index, patchAdjust(key, isEV ? v : v / 100));
