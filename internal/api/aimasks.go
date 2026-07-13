@@ -15,6 +15,29 @@ import (
 // generating model.
 type AIMapResult struct {
 	MapVer string `json:"mapVer"`
+	// Categories lists what a class map detected (class kind only), largest
+	// area first — the UI offers one mask chip per entry.
+	Categories []AICategory `json:"categories,omitempty"`
+}
+
+// AICategory is one detected semantic category in a class map.
+type AICategory struct {
+	ID       int     `json:"id"`
+	Name     string  `json:"name"`
+	Fraction float64 `json:"fraction"`
+}
+
+// categoriesFor computes the detected-category chips from a stored class map.
+func (e *Edits) categoriesFor(photoKey, ver string) []AICategory {
+	m := e.deps.Cache.AIMaps.Load(photoKey, edit.AIClass, ver)
+	if m == nil {
+		return nil
+	}
+	var out []AICategory
+	for _, c := range aimask.DetectCategories(m.Pix) {
+		out = append(out, AICategory{ID: c.ID, Name: c.Name, Fraction: c.Fraction})
+	}
+	return out
 }
 
 // GenerateAIMap ensures the model-generated map for (photo, kind) exists and
@@ -41,7 +64,11 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 		return nil, err
 	}
 	if store.Has(photo.CacheKey, kind, ver) {
-		return &AIMapResult{MapVer: ver}, nil
+		res := &AIMapResult{MapVer: ver}
+		if kind == edit.AIClass {
+			res.Categories = e.categoriesFor(photo.CacheKey, ver)
+		}
+		return res, nil
 	}
 
 	rgba, err := e.previewDecode(ctx, photoID, photo, nil)
@@ -63,5 +90,9 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 		return nil, err
 	}
 	task.Err(nil)
-	return &AIMapResult{MapVer: ver}, nil
+	res := &AIMapResult{MapVer: ver}
+	if kind == edit.AIClass {
+		res.Categories = e.categoriesFor(photo.CacheKey, ver)
+	}
+	return res, nil
 }

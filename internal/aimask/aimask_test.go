@@ -115,6 +115,44 @@ func TestFitMultipleOf14(t *testing.T) {
 	}
 }
 
+func TestCategoryPlaneAndDetection(t *testing.T) {
+	// 100 px: 40 sky (ADE 2), 30 person (12), 20 wall (0→architecture), 10 swivel chair (75→other).
+	classes := make([]uint8, 100)
+	for i := range classes {
+		switch {
+		case i < 40:
+			classes[i] = 2
+		case i < 70:
+			classes[i] = 12
+		case i < 90:
+			classes[i] = 0
+		default:
+			classes[i] = 75
+		}
+	}
+	cats := CategoryPlane(classes)
+	if cats[0] != CatSky || cats[50] != CatPeople || cats[80] != CatArchitecture || cats[95] != CatOther {
+		t.Fatalf("category plane wrong: %d %d %d %d", cats[0], cats[50], cats[80], cats[95])
+	}
+	det := DetectCategories(cats)
+	if len(det) != 3 {
+		t.Fatalf("detected %d categories, want 3 (other excluded): %+v", len(det), det)
+	}
+	if det[0].ID != CatSky || det[0].Fraction != 0.4 {
+		t.Errorf("largest category = %+v, want sky at 0.4", det[0])
+	}
+	if det[1].ID != CatPeople || det[2].ID != CatArchitecture {
+		t.Errorf("order wrong: %+v", det)
+	}
+
+	// Sub-threshold slivers are dropped.
+	tiny := make([]uint8, 1000)
+	tiny[0] = CatAnimals // 0.1%
+	if d := DetectCategories(tiny); len(d) != 0 {
+		t.Errorf("sliver survived detection: %+v", d)
+	}
+}
+
 func mean(g *image.Gray, x0, y0, x1, y1 int) float64 {
 	var sum, n int
 	for y := y0; y < y1; y++ {

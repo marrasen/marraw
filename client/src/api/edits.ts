@@ -9,8 +9,15 @@ import type {
 } from './client';
 import type { AIKindType, Params } from './edit';
 
+export interface AICategory {
+    id: number;
+    name: string;
+    fraction: number;
+}
+
 export interface AIMapResult {
     mapVer: string;
+    categories?: AICategory[];
 }
 
 export interface Delta {
