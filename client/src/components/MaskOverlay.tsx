@@ -3,12 +3,7 @@ import type { Mask, Params, Stroke } from '@/api/edit';
 import type { ApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { displayFromFrame, frameFromDisplay } from '@/lib/crop';
-import {
-  esCommit,
-  esSetActiveMask,
-  esUpdateMask,
-  useEditSession,
-} from '@/lib/editSession';
+import { esCommit, esUpdateMask, useEditSession } from '@/lib/editSession';
 
 // MaskOverlay is the on-canvas editor for the selected local-adjustment mask:
 // draggable shape handles for linear/radial masks, stroke painting for brush
