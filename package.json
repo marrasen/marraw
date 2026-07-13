@@ -8,6 +8,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "setup:libraw": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/setup-libraw.ps1",
+    "setup:ort": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/setup-ort.ps1",
     "gen": "go run ./tools/generate",
     "gen:icon": "node scripts/gen-icon.mjs",
     "dev:server": "go run ./cmd/marrawd --dev --port 8483",

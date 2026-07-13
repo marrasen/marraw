@@ -14,6 +14,10 @@ GPU execution providers and full-res tiling; nothing before it needs them.
 
 ## Milestone 0 — Inference foundation
 
+Status: **implemented 2026-07-13** (`internal/infer`; `npm run setup:ort`; CI
+runs the toy-model test on all three platforms; installer packaging of the
+runtime deferred to 1b when the daemon first links it).
+
 A generic `internal/infer` package. Deliberately feature-agnostic: masks is the first
 consumer, denoise and super-resolution are known future consumers.
 

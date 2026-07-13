@@ -80,6 +80,7 @@ approximation there is deliberate and is corrected by the exact 2048 settle.
 
 ```powershell
 npm run setup:libraw   # download + build static libraw.a (one-time, few min)
+npm run setup:ort      # download the ONNX Runtime shared lib (ML features/tests)
 npm install
 npm --prefix client install
 npm run gen            # aprot codegen -> client/src/api

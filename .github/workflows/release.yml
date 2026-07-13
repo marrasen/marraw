@@ -16,6 +16,7 @@ concurrency:
 
 env:
   LIBRAW_VERSION: '0.22.1'
+  ORT_VERSION: '1.27.1'
   NODE_VERSION: '24'
 
 jobs:
@@ -96,6 +97,15 @@ jobs:
       - name: Build LibRaw
         run: npm run setup:libraw
 
+      - name: Cache ONNX Runtime
+        uses: actions/cache@v4
+        with:
+          path: third_party/onnxruntime
+          key: ort-${{ runner.os }}-${{ env.ORT_VERSION }}-${{ hashFiles('scripts/setup-ort.ps1') }}
+
+      - name: Fetch ONNX Runtime
+        run: npm run setup:ort
+
       - name: Install dependencies
         run: |
           npm ci
@@ -109,6 +119,11 @@ jobs:
 
       - name: Vet daemon
         run: go build ./...
+
+      # The Windows job runs no full test suite (no sample RAW here), but the
+      # inference runtime must be proven on every platform we ship.
+      - name: Test inference runtime
+        run: go test ./internal/infer -count=1
 
       # Not a tag: prove the installer builds, keep it as an artifact.
       - name: Build installer
@@ -176,6 +191,15 @@ jobs:
 
       - name: Build LibRaw
         run: bash scripts/setup-libraw.sh
+
+      - name: Cache ONNX Runtime
+        uses: actions/cache@v4
+        with:
+          path: third_party/onnxruntime
+          key: ort-${{ runner.os }}-${{ env.ORT_VERSION }}-${{ hashFiles('scripts/setup-ort.sh') }}
+
+      - name: Fetch ONNX Runtime
+        run: bash scripts/setup-ort.sh
 
       - name: Install dependencies
         run: |
@@ -256,6 +280,15 @@ jobs:
 
       - name: Build LibRaw
         run: bash scripts/setup-libraw.sh
+
+      - name: Cache ONNX Runtime
+        uses: actions/cache@v4
+        with:
+          path: third_party/onnxruntime
+          key: ort-${{ runner.os }}-${{ env.ORT_VERSION }}-${{ hashFiles('scripts/setup-ort.sh') }}
+
+      - name: Fetch ONNX Runtime
+        run: bash scripts/setup-ort.sh
 
       - name: Install dependencies
         run: |
