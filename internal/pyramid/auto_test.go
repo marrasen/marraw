@@ -85,7 +85,7 @@ func wellExposed(t *testing.T) *image.RGBA {
 func TestAutoToneDarkLiftsExposure(t *testing.T) {
 	img := grayImage(t, []block{{20, 300}, {40, 400}, {60, 300}})
 	var p edit.Params
-	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone})
+	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone}, nil)
 	if p.ExpEV <= 0.5 {
 		t.Errorf("dark scene: ExpEV = %v, want a clear positive lift", p.ExpEV)
 	}
@@ -94,7 +94,7 @@ func TestAutoToneDarkLiftsExposure(t *testing.T) {
 func TestAutoToneBrightPullsExposure(t *testing.T) {
 	img := grayImage(t, []block{{180, 300}, {200, 400}, {220, 300}})
 	var p edit.Params
-	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone})
+	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone}, nil)
 	if p.ExpEV >= -0.5 {
 		t.Errorf("bright scene: ExpEV = %v, want a clear negative pull", p.ExpEV)
 	}
@@ -104,7 +104,7 @@ func TestAutoToneFlatScene(t *testing.T) {
 	// Low-contrast midtones: endpoints far from black/white, narrow spread.
 	img := grayImage(t, []block{{90, 300}, {107, 400}, {130, 300}})
 	var p edit.Params
-	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone})
+	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone}, nil)
 	if p.Blacks >= 0 {
 		t.Errorf("flat scene: Blacks = %v, want negative (deepen)", p.Blacks)
 	}
@@ -119,7 +119,7 @@ func TestAutoToneFlatScene(t *testing.T) {
 func TestAutoToneWellExposedIsNoOp(t *testing.T) {
 	img := wellExposed(t)
 	var p edit.Params
-	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone})
+	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone}, nil)
 	for name, v := range map[string]float64{
 		"ExpEV": p.ExpEV, "Contrast": p.Contrast, "Whites": p.Whites,
 		"Blacks": p.Blacks, "ToneShadows": p.ToneShadows, "ToneHighlights": p.ToneHighlights,
@@ -132,7 +132,7 @@ func TestAutoToneWellExposedIsNoOp(t *testing.T) {
 	// Idempotent: the exposure is already on target, so a second pass must
 	// not drift the result.
 	q := p
-	AutoAdjust(img, testGamma, &q, []AutoSection{AutoTone})
+	AutoAdjust(img, testGamma, &q, []AutoSection{AutoTone}, nil)
 	if math.Abs(q.ExpEV-p.ExpEV) > 0.05 || q.Contrast != p.Contrast || q.Blacks != p.Blacks {
 		t.Errorf("second pass drifted: %+v -> %+v", p, q)
 	}
@@ -147,7 +147,7 @@ func TestAutoToneDegenerateScenes(t *testing.T) {
 		{"empty", image.NewRGBA(image.Rect(0, 0, 0, 0))},
 	} {
 		p := edit.Params{ExpEV: 0.7}
-		AutoAdjust(tc.img, testGamma, &p, []AutoSection{AutoTone})
+		AutoAdjust(tc.img, testGamma, &p, []AutoSection{AutoTone}, nil)
 		if p.ExpEV != 0.7 || p.Contrast != 0 || p.Whites != 0 || p.Blacks != 0 {
 			t.Errorf("%s scene not neutral: %+v", tc.name, p)
 		}
@@ -157,7 +157,7 @@ func TestAutoToneDegenerateScenes(t *testing.T) {
 func TestAutoToneFlatGrayCardStillCorrectsExposure(t *testing.T) {
 	img := grayImage(t, []block{{40, 1000}}) // single-tone, but dark
 	var p edit.Params
-	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone})
+	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone}, nil)
 	if p.ExpEV <= 0.5 {
 		t.Errorf("gray card: ExpEV = %v, want positive", p.ExpEV)
 	}
@@ -169,7 +169,7 @@ func TestAutoToneFlatGrayCardStillCorrectsExposure(t *testing.T) {
 func TestAutoColorMutedGetsVibrance(t *testing.T) {
 	img := colorImage(t, 120, 110, 100, 500) // chroma ≈ 23 after base boost
 	var p edit.Params
-	AutoAdjust(img, testGamma, &p, []AutoSection{AutoColor})
+	AutoAdjust(img, testGamma, &p, []AutoSection{AutoColor}, nil)
 	if p.Vibrance <= 0 {
 		t.Errorf("muted scene: Vibrance = %v, want positive", p.Vibrance)
 	}
@@ -181,7 +181,7 @@ func TestAutoColorMutedGetsVibrance(t *testing.T) {
 func TestAutoColorGarishGetsReinedIn(t *testing.T) {
 	img := colorImage(t, 230, 40, 10, 500) // chroma ≈ 253 after base boost
 	var p edit.Params
-	AutoAdjust(img, testGamma, &p, []AutoSection{AutoColor})
+	AutoAdjust(img, testGamma, &p, []AutoSection{AutoColor}, nil)
 	if p.Vibrance >= 0 {
 		t.Errorf("garish scene: Vibrance = %v, want negative", p.Vibrance)
 	}
@@ -193,7 +193,7 @@ func TestAutoColorGarishGetsReinedIn(t *testing.T) {
 func TestAutoColorGrayscaleStaysNeutral(t *testing.T) {
 	img := wellExposed(t)
 	p := edit.Params{Vibrance: 0.3, Saturation: 0.2}
-	AutoAdjust(img, testGamma, &p, []AutoSection{AutoColor})
+	AutoAdjust(img, testGamma, &p, []AutoSection{AutoColor}, nil)
 	if p.Vibrance != 0 || p.Saturation != 0 {
 		t.Errorf("grayscale scene: vibrance/saturation %v/%v, want 0/0", p.Vibrance, p.Saturation)
 	}
@@ -213,7 +213,7 @@ func TestAutoSectionIsolation(t *testing.T) {
 	}
 
 	tone := seed
-	AutoAdjust(img, testGamma, &tone, []AutoSection{AutoTone})
+	AutoAdjust(img, testGamma, &tone, []AutoSection{AutoTone}, nil)
 	if tone.Vibrance != seed.Vibrance || tone.Saturation != seed.Saturation {
 		t.Errorf("tone auto touched color fields: %+v", tone)
 	}
@@ -225,7 +225,7 @@ func TestAutoSectionIsolation(t *testing.T) {
 	}
 
 	color := seed
-	AutoAdjust(img, testGamma, &color, []AutoSection{AutoColor})
+	AutoAdjust(img, testGamma, &color, []AutoSection{AutoColor}, nil)
 	check = color
 	check.Vibrance, check.Saturation = seed.Vibrance, seed.Saturation
 	if !reflect.DeepEqual(check, seed) {
@@ -245,7 +245,7 @@ func TestAutoWithinValidatorRanges(t *testing.T) {
 	for i, img := range scenes {
 		for _, ev := range []float64{-2, 0, 3} {
 			p := edit.Params{ExpEV: ev}
-			AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone, AutoColor})
+			AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone, AutoColor}, nil)
 			if p.ExpEV < -2 || p.ExpEV > 3 {
 				t.Errorf("scene %d: ExpEV %v out of range", i, p.ExpEV)
 			}
@@ -259,5 +259,48 @@ func TestAutoWithinValidatorRanges(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestAutoToneSubjectAwareMetering: a dark subject on a bright field lifts
+// exposure further when the subject matte weights the metering — and a
+// sliver of a matte (sub-3% coverage) changes nothing.
+func TestAutoToneSubjectAwareMetering(t *testing.T) {
+	lut := buildLookLUT(testGamma, nil)
+	dark, bright := invLUT(&lut, 35), invLUT(&lut, 150)
+	const w, h = 200, 100
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			v := bright
+			if x < w/4 {
+				v = dark // backlit subject: left quarter
+			}
+			i := y*img.Stride + x*4
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = v, v, v, 255
+		}
+	}
+	matte := &AIMap{Pix: make([]uint8, 100*50), W: 100, H: 50}
+	for y := 0; y < 50; y++ {
+		for x := 0; x < 25; x++ {
+			matte.Pix[y*100+x] = 255
+		}
+	}
+
+	var global, subj edit.Params
+	AutoAdjust(img, testGamma, &global, []AutoSection{AutoTone}, nil)
+	AutoAdjust(img, testGamma, &subj, []AutoSection{AutoTone}, matte)
+	if subj.ExpEV <= global.ExpEV+0.2 {
+		t.Errorf("subject metering ExpEV = %v vs global %v, want clearly higher", subj.ExpEV, global.ExpEV)
+	}
+
+	sliver := &AIMap{Pix: make([]uint8, 100*50), W: 100, H: 50}
+	for x := 0; x < 2; x++ { // ~2% of the frame
+		sliver.Pix[x] = 255
+	}
+	var tiny edit.Params
+	AutoAdjust(img, testGamma, &tiny, []AutoSection{AutoTone}, sliver)
+	if tiny.ExpEV != global.ExpEV {
+		t.Errorf("sliver matte moved ExpEV: %v vs %v", tiny.ExpEV, global.ExpEV)
 	}
 }

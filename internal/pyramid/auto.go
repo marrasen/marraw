@@ -43,7 +43,13 @@ const (
 // decode state (white balance, the seeded exposure compensation, crop).
 // The wb section is not handled here: it changes the decode, so the caller
 // sets WBMode before decoding.
-func AutoAdjust(img *image.RGBA, lookGamma float64, p *edit.Params, sections []AutoSection) {
+//
+// subject, when non-nil, is the photo's AI subject matte (same base
+// orientation as img): the exposure decision then meters toward the subject
+// like a camera's face-priority mode — a backlit subject gets lifted for
+// its own sake, not the sky's. Only used when already generated; auto never
+// triggers an inference.
+func AutoAdjust(img *image.RGBA, lookGamma float64, p *edit.Params, sections []AutoSection, subject *AIMap) {
 	tone, color := false, false
 	for _, s := range sections {
 		switch s {
@@ -58,9 +64,15 @@ func AutoAdjust(img *image.RGBA, lookGamma float64, p *edit.Params, sections []A
 	}
 
 	lut := buildLookLUT(lookGamma, nil)
-	var lumaHist, chromaHist [256]int
+	var lumaHist, chromaHist, subjHist [256]int
 	pix := img.Pix
-	n := 0
+	n, subjTotal := 0, 0
+	w := img.Bounds().Dx()
+	var msx, msy float64
+	if subject != nil && subject.W > 0 && subject.H > 0 && w > 0 {
+		msx = float64(subject.W) / float64(w)
+		msy = float64(subject.H) / float64(img.Bounds().Dy())
+	}
 	// Every 4th pixel is plenty for scene statistics (same stride as MeanLuma).
 	for i := 0; i+3 < len(pix); i += 16 {
 		r := int32(lut[pix[i]])
@@ -74,10 +86,21 @@ func AutoAdjust(img *image.RGBA, lookGamma float64, p *edit.Params, sections []A
 		chroma := min(255, (max(r, g, b)-min(r, g, b))*115/100)
 		chromaHist[chroma]++
 		n++
+		if msx > 0 {
+			// Matte-weighted luma counts (nearest sample is plenty here).
+			px := (i % img.Stride) / 4
+			py := i / img.Stride
+			mx := min(subject.W-1, int(float64(px)*msx))
+			my := min(subject.H-1, int(float64(py)*msy))
+			if m := int(subject.Pix[my*subject.W+mx]); m > 0 {
+				subjHist[luma] += m
+				subjTotal += m
+			}
+		}
 	}
 
 	if tone {
-		autoTone(&lumaHist, n, p)
+		autoTone(&lumaHist, n, &subjHist, subjTotal, p)
 	}
 	if color {
 		autoColor(&chromaHist, n, p)
@@ -89,9 +112,22 @@ func AutoAdjust(img *image.RGBA, lookGamma float64, p *edit.Params, sections []A
 // percentile endpoints (rescaled by the exposure move) set Blacks/Whites,
 // the interquartile spread sets Contrast, and clipped mass at the extremes
 // drives shadow lift / highlight pull.
-func autoTone(hist *[256]int, n int, p *edit.Params) {
+//
+// When a subject matte contributed weighted counts (subjHist/subjTotal), the
+// exposure median leans toward the subject — but only when the subject
+// covers a meaningful minority of the frame: a sliver is noise, and a
+// subject filling the frame IS the global histogram. The endpoint sliders
+// (Blacks/Whites/Contrast) stay global — those are scene-wide by nature.
+func autoTone(hist *[256]int, n int, subjHist *[256]int, subjTotal int, p *edit.Params) {
 	p.Contrast, p.Whites, p.Blacks, p.ToneShadows, p.ToneHighlights = 0, 0, 0, 0, 0
 	med := histPercentile(hist, n, 0.50)
+	if subjTotal > 0 && n > 0 {
+		frac := float64(subjTotal) / (255 * float64(n))
+		if frac >= 0.03 && frac <= 0.7 {
+			subjMed := histPercentile(subjHist, subjTotal, 0.50)
+			med = 0.6*subjMed + 0.4*med
+		}
+	}
 	p001 := histPercentile(hist, n, 0.005) / 255
 	p999 := histPercentile(hist, n, 0.995) / 255
 	// Empty or near-black scenes get a neutral tone section rather than an

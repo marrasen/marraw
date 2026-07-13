@@ -92,16 +92,22 @@ func (s *AIMapStore) Save(photoKey string, kind edit.AIKind, ver string, m *imag
 	return nil
 }
 
-// Has reports whether a map exists on disk without decoding it.
+// Has reports whether a map exists on disk without decoding it. Nil-safe.
 func (s *AIMapStore) Has(photoKey string, kind edit.AIKind, ver string) bool {
+	if s == nil {
+		return false
+	}
 	_, err := os.Stat(s.Path(photoKey, kind, ver))
 	return err == nil
 }
 
 // Load returns the decoded map, or nil when absent/corrupt. Decodes are
 // LRU-cached; the cache key carries the file mtime so a regenerated map is
-// picked up.
+// picked up. Nil-safe.
 func (s *AIMapStore) Load(photoKey string, kind edit.AIKind, ver string) *AIMap {
+	if s == nil {
+		return nil
+	}
 	path := s.Path(photoKey, kind, ver)
 	info, err := os.Stat(path)
 	if err != nil {

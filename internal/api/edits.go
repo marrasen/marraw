@@ -14,6 +14,7 @@ import (
 
 	"github.com/marrasen/aprot"
 
+	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/libraw"
@@ -593,7 +594,13 @@ func (e *Edits) AutoAdjust(ctx context.Context, photoID int64, params edit.Param
 	if gamma == 0 {
 		gamma = pyramid.FallbackLookGamma
 	}
-	pyramid.AutoAdjust(rgba, gamma, &out, secs)
+	// Subject-aware metering: use the AI subject matte when one was already
+	// generated for this photo (auto never triggers an inference itself).
+	var subject *pyramid.AIMap
+	if ver, ok := aimask.MapVerFor(edit.AISubject); ok {
+		subject = e.deps.Cache.AIMaps.Load(photo.CacheKey, edit.AISubject, ver)
+	}
+	pyramid.AutoAdjust(rgba, gamma, &out, secs, subject)
 	return &out, nil
 }
 
