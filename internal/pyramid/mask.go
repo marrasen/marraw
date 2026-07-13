@@ -40,7 +40,7 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) {
 		if m.Adjust.IsNeutral() {
 			continue
 		}
-		ev := newMaskEvaluator(m, f, ai)
+		ev := newMaskEvaluator(m, f, ai, img)
 		if ev == nil {
 			continue
 		}
@@ -137,8 +137,10 @@ type maskEvaluator interface {
 }
 
 // newMaskEvaluator builds the per-type weight source; nil means the mask is
-// degenerate (or its AI map is unavailable) and contributes nothing.
-func newMaskEvaluator(m *edit.Mask, f maskFrame, ai AIMapSet) maskEvaluator {
+// degenerate (or its AI map is unavailable) and contributes nothing. img is
+// the render target — AI masks refine their edges against its luma on
+// high-resolution renders (see guided.go); the parametric types ignore it.
+func newMaskEvaluator(m *edit.Mask, f maskFrame, ai AIMapSet, img *image.RGBA) maskEvaluator {
 	// Explicit nil checks: returning a nil *T directly would wrap it in a
 	// non-nil interface.
 	switch m.Type {
@@ -156,6 +158,9 @@ func newMaskEvaluator(m *edit.Mask, f maskFrame, ai AIMapSet) maskEvaluator {
 		}
 	case edit.MaskAI:
 		if ev := newAIEval(m, f, ai); ev != nil {
+			if g := newGuidedEval(ev, img); g != nil {
+				return g
+			}
 			return ev
 		}
 	}

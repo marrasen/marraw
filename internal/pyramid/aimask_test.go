@@ -227,12 +227,12 @@ func TestAIMaskContentAnchoring(t *testing.T) {
 	ai := s.SetFor(key, e)
 
 	plain := newMaskFrame(1000, 800, &edit.Params{})
-	evPlain := newMaskEvaluator(m, plain, ai)
+	evPlain := newMaskEvaluator(m, plain, ai, nil)
 
 	crop := &edit.Params{CropX: 0.2, CropY: 0.1, CropW: 0.6, CropH: 0.7, CropAngle: 5}
 	outW, outH := crop.OutputDims(1000, 800)
 	f := newMaskFrame(outW, outH, crop)
-	ev := newMaskEvaluator(m, f, ai)
+	ev := newMaskEvaluator(m, f, ai, nil)
 
 	for _, out := range [][2]int{{100, 100}, {300, 250}, {50, 400}, {500, 300}} {
 		fx, fy := f.framePoint(float64(out[0]), float64(out[1]))

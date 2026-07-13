@@ -55,7 +55,7 @@ func TestRadialWeightProperties(t *testing.T) {
 	const w, h = 200, 100
 	m := &edit.Mask{Type: edit.MaskRadial, CX: 0.5, CY: 0.5, RX: 0.25, RY: 0.4, Feather: 0.5}
 	f := newMaskFrame(w, h, &edit.Params{})
-	ev := newMaskEvaluator(m, f, nil)
+	ev := newMaskEvaluator(m, f, nil, nil)
 	if got := weightAt(ev, w/2, h/2, w); got != 256 {
 		t.Errorf("center weight = %d, want 256", got)
 	}
@@ -74,7 +74,7 @@ func TestRadialWeightProperties(t *testing.T) {
 	// Invert flips: sum of the two evaluations is 256 everywhere.
 	inv := *m
 	inv.Invert = true
-	evInv := newMaskEvaluator(&inv, f, nil)
+	evInv := newMaskEvaluator(&inv, f, nil, nil)
 	for _, p := range [][2]int{{w / 2, h / 2}, {w/2 + 30, h / 2}, {5, 5}, {w - 1, h - 1}} {
 		a := weightAt(ev, p[0], p[1], w)
 		b := weightAt(evInv, p[0], p[1], w)
@@ -89,8 +89,8 @@ func TestRadialRotationEquivariance(t *testing.T) {
 	// at the same point must match.
 	const w, h = 100, 100
 	f := newMaskFrame(w, h, &edit.Params{})
-	a := newMaskEvaluator(&edit.Mask{Type: edit.MaskRadial, CX: 0.5, CY: 0.5, RX: 0.4, RY: 0.15, Feather: 0.4}, f, nil)
-	b := newMaskEvaluator(&edit.Mask{Type: edit.MaskRadial, CX: 0.5, CY: 0.5, RX: 0.15, RY: 0.4, Angle: 90, Feather: 0.4}, f, nil)
+	a := newMaskEvaluator(&edit.Mask{Type: edit.MaskRadial, CX: 0.5, CY: 0.5, RX: 0.4, RY: 0.15, Feather: 0.4}, f, nil, nil)
+	b := newMaskEvaluator(&edit.Mask{Type: edit.MaskRadial, CX: 0.5, CY: 0.5, RX: 0.15, RY: 0.4, Angle: 90, Feather: 0.4}, f, nil, nil)
 	for _, p := range [][2]int{{50, 50}, {70, 50}, {50, 60}, {85, 50}, {30, 40}} {
 		wa := weightAt(a, p[0], p[1], w)
 		wb := weightAt(b, p[0], p[1], w)
@@ -105,7 +105,7 @@ func TestLinearWeightProperties(t *testing.T) {
 	// Top-to-bottom gradient: full at y=0.25, zero at y=0.75.
 	m := &edit.Mask{Type: edit.MaskLinear, X0: 0.5, Y0: 0.25, X1: 0.5, Y1: 0.75}
 	f := newMaskFrame(w, h, &edit.Params{})
-	ev := newMaskEvaluator(m, f, nil)
+	ev := newMaskEvaluator(m, f, nil, nil)
 	if got := weightAt(ev, 50, 10, w); got != 256 {
 		t.Errorf("A-side weight = %d, want 256", got)
 	}
@@ -117,7 +117,7 @@ func TestLinearWeightProperties(t *testing.T) {
 	}
 	inv := *m
 	inv.Invert = true
-	evInv := newMaskEvaluator(&inv, f, nil)
+	evInv := newMaskEvaluator(&inv, f, nil, nil)
 	for _, p := range [][2]int{{50, 10}, {50, 50}, {50, 90}, {10, 30}} {
 		a := weightAt(ev, p[0], p[1], w)
 		b := weightAt(evInv, p[0], p[1], w)
@@ -126,7 +126,7 @@ func TestLinearWeightProperties(t *testing.T) {
 		}
 	}
 	// A degenerate (zero-span) gradient contributes nothing.
-	if ev := newMaskEvaluator(&edit.Mask{Type: edit.MaskLinear, X0: 0.5, Y0: 0.5, X1: 0.5, Y1: 0.5}, f, nil); ev != nil {
+	if ev := newMaskEvaluator(&edit.Mask{Type: edit.MaskLinear, X0: 0.5, Y0: 0.5, X1: 0.5, Y1: 0.5}, f, nil, nil); ev != nil {
 		t.Error("degenerate linear mask must yield a nil evaluator")
 	}
 }
@@ -158,13 +158,13 @@ func TestMaskContentAnchoring(t *testing.T) {
 
 	// Uncropped 1000×800 frame: output pixels are frame pixels.
 	plain := newMaskFrame(1000, 800, &edit.Params{})
-	evPlain := newMaskEvaluator(m, plain, nil)
+	evPlain := newMaskEvaluator(m, plain, nil, nil)
 
 	// Cropped + straightened view of the same frame.
 	crop := &edit.Params{CropX: 0.2, CropY: 0.1, CropW: 0.6, CropH: 0.7, CropAngle: 5}
 	outW, outH := crop.OutputDims(1000, 800)
 	f := newMaskFrame(outW, outH, crop)
-	ev := newMaskEvaluator(m, f, nil)
+	ev := newMaskEvaluator(m, f, nil, nil)
 
 	for _, out := range [][2]int{{100, 100}, {300, 250}, {50, 400}, {500, 300}} {
 		// Where does this cropped-view pixel land in the frame?
