@@ -15,6 +15,11 @@ type ModelSpec struct {
 	SHA256  string // lowercase hex of the .onnx file
 	Bytes   int64  // expected size; progress total before headers arrive (0 = unknown)
 	License string
+	// PreferGPU asks for the platform GPU execution provider (DirectML on
+	// Windows, CoreML on macOS) with silent CPU fallback. Set it on
+	// restoration-class models only: they are ~100x too slow on CPU, while
+	// the mask models are comfortably fast without the GPU warmup cost.
+	PreferGPU bool
 }
 
 // fileName is the on-disk name under the models dir. Version is baked in so

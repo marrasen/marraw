@@ -187,6 +187,12 @@ Size: **M**.
 
 ## Milestone 3 — ML denoise (builds the heavy-compute layer)
 
+Status: **infrastructure shipped 2026-07-13, user-facing feature HELD** —
+tiled inference + GPU execution providers landed and tested, but measured
+throughput (93 s/MP CPU, DirectML unstable on Arc) makes the feature a trap
+on this hardware class. Full data, decision, and unlock criteria in
+[ml-denoise.md](ml-denoise.md).
+
 Restoration-model denoise (NAFNet/SCUNet-class): one joint denoise + detail-recovery
 pass on **scene-linear** data, before look/masks/detail. Classical sharpening stays
 on top as the taste control. Explicitly *not* bundled with masks — different pipeline
@@ -213,6 +219,11 @@ Size: **L** (the largest single item on this roadmap).
 
 ## Milestone 4 — Super resolution
 
+Status: **same holding pattern as Milestone 3** (Swin2SR ×2 measured at
+822 s/MP CPU / 148 s/MP DML-unstable; the tiling harness already supports
+Scale=2, so wiring is trivial once the throughput unlock lands — see
+ml-denoise.md).
+
 2× upscale at export. Same compute class as denoise but architecturally simple: one
 extra stage in `export.renderFinal` before output sharpening, reusing M3's tiling +
 GPU providers wholesale. No interactive path, no cache design (export is already an
@@ -223,6 +234,9 @@ Size: **M** once M3 exists.
 ---
 
 ## Milestone 5 — Raw-domain demosaic+denoise (exploratory)
+
+Status: **research done 2026-07-13** — no permissive hosted model exists;
+in-house training would be required. Notes in ml-denoise.md.
 
 DeepPRIME-class: the model consumes the Bayer mosaic and does demosaic + denoise
 jointly — where the dramatic high-ISO wins live. Replaces part of libraw's job:

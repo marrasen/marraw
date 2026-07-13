@@ -12,6 +12,8 @@ package infer
 import (
 	"context"
 	"fmt"
+	"log"
+	"runtime"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -82,7 +84,23 @@ func (m *Manager) Session(ctx context.Context, spec ModelSpec, progress Progress
 		m.touch(spec.ID)
 		return s, nil
 	}
-	s, err := newSession(spec.ID, path)
+	if spec.PreferGPU {
+		// One resident GPU session at a time: two heavy DirectML sessions in
+		// the same process crash natively in the driver (reproduced with
+		// SCUNet + Swin2SR on Arc). Restoration models are used one at a
+		// time anyway, so evict any other GPU session first.
+		for i := 0; i < len(m.order); {
+			id := m.order[i]
+			if other := m.sessions[id]; other.OnGPU {
+				other.destroy()
+				delete(m.sessions, id)
+				m.order = append(m.order[:i], m.order[i+1:]...)
+				continue
+			}
+			i++
+		}
+	}
+	s, err := newSession(spec.ID, path, spec.PreferGPU)
 	if err != nil {
 		return nil, err
 	}
@@ -112,11 +130,14 @@ type Session struct {
 	ID      ModelID
 	Inputs  []ort.InputOutputInfo
 	Outputs []ort.InputOutputInfo
+	// OnGPU reports whether the platform GPU execution provider is active
+	// (PreferGPU asked for it AND the loaded runtime supports it).
+	OnGPU bool
 
 	sess *ort.DynamicAdvancedSession
 }
 
-func newSession(id ModelID, path string) (*Session, error) {
+func newSession(id ModelID, path string, preferGPU bool) (*Session, error) {
 	inputs, outputs, err := ort.GetInputOutputInfo(path)
 	if err != nil {
 		return nil, fmt.Errorf("infer: reading model I/O info for %s: %w", id, err)
@@ -129,11 +150,49 @@ func newSession(id ModelID, path string) (*Session, error) {
 	for i, out := range outputs {
 		outNames[i] = out.Name
 	}
+
+	if preferGPU {
+		if opts, err := gpuSessionOptions(); err == nil {
+			s, serr := ort.NewDynamicAdvancedSession(path, inNames, outNames, opts)
+			opts.Destroy()
+			if serr == nil {
+				return &Session{ID: id, Inputs: inputs, Outputs: outputs, OnGPU: true, sess: s}, nil
+			}
+			log.Printf("infer: GPU session for %s failed, falling back to CPU: %v", id, serr)
+		} else {
+			log.Printf("infer: GPU provider unavailable for %s, using CPU: %v", id, err)
+		}
+	}
 	s, err := ort.NewDynamicAdvancedSession(path, inNames, outNames, nil)
 	if err != nil {
 		return nil, fmt.Errorf("infer: loading model %s: %w", id, err)
 	}
 	return &Session{ID: id, Inputs: inputs, Outputs: outputs, sess: s}, nil
+}
+
+// gpuSessionOptions builds session options with the platform GPU execution
+// provider appended: DirectML on Windows (requires the DirectML-enabled ORT
+// build — the CPU-only library rejects the provider and the caller falls
+// back), CoreML on macOS. Linux has no bundled GPU provider yet.
+func gpuSessionOptions() (*ort.SessionOptions, error) {
+	opts, err := ort.NewSessionOptions()
+	if err != nil {
+		return nil, err
+	}
+	var eperr error
+	switch runtime.GOOS {
+	case "windows":
+		eperr = opts.AppendExecutionProviderDirectML(0)
+	case "darwin":
+		eperr = opts.AppendExecutionProviderCoreML(0)
+	default:
+		eperr = fmt.Errorf("no GPU execution provider on %s", runtime.GOOS)
+	}
+	if eperr != nil {
+		opts.Destroy()
+		return nil, eperr
+	}
+	return opts, nil
 }
 
 // Run executes one forward pass. Inputs must match the model's input order.
