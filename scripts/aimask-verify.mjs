@@ -82,9 +82,23 @@ const dep = await call('Edits.GenerateAIMap', [p.id, 'depth']);
 console.log(`GenerateAIMap depth -> ${dep.mapVer} in ${Date.now() - t}ms`);
 check(dep.mapVer === 'depthany2s-1', `depth mapVer is depthany2s-1 (${dep.mapVer})`);
 
-// --- Class kind reports unavailable ---
-const classErr = await call('Edits.GenerateAIMap', [p.id, 'class']).then(() => null, (e) => e);
-check(classErr != null && /no model available/.test(classErr.message), `class kind unavailable (${classErr?.message})`);
+// --- Class map: scene detection on a real outdoor photo ---
+t = Date.now();
+const cls = await call('Edits.GenerateAIMap', [p.id, 'class']);
+console.log(`GenerateAIMap class -> ${cls.mapVer} in ${Date.now() - t}ms:`,
+  (cls.categories ?? []).map((c) => `${c.name} ${(c.fraction * 100).toFixed(0)}%`).join(', ') || '(none)');
+check(cls.mapVer === 'adeseg-1', `class mapVer is adeseg-1 (${cls.mapVer})`);
+const catNames = (cls.categories ?? []).map((c) => c.name);
+check(catNames.includes('Sky'), `outdoor scene detects Sky (got: ${catNames.join(', ')})`);
+check((cls.categories ?? []).length >= 2, 'multiple regions detected');
+
+// A class mask over the largest region changes preview pixels.
+if (cls.categories?.length) {
+  const classMask = { type: 'ai', aiKind: 'class', mapVer: cls.mapVer, classId: cls.categories[0].id, feather: 0.25, adjust: { expEV: 1.2 } };
+  const clsPrev = await call('Edits.PreviewEdit', [p.id, { ...base, masks: [classMask] }, 1024]);
+  const clsPlain = await call('Edits.PreviewEdit', [p.id, base, 1024]);
+  check(Buffer.compare(Buffer.from(clsPrev.bytes), Buffer.from(clsPlain.bytes)) !== 0, 'class mask changes preview pixels');
+}
 
 // --- Preview pixels change when an ai mask carries an adjustment ---
 const plain = await call('Edits.PreviewEdit', [p.id, base, 1024]);

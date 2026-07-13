@@ -100,6 +100,24 @@ Fonts: **Geist** and **Geist Mono** (© Vercel), SIL Open Font License 1.1.
 
 ---
 
+## ML runtime and model weights
+
+The AI features (masks, scene detection) use **ONNX Runtime** (© Microsoft,
+MIT), whose shared library ships next to `marrawd`
+(`scripts/setup-ort.ps1`/`.sh` fetch the upstream binary release).
+
+Model weights are **not** distributed with marraw — the app downloads them on
+first use from <https://github.com/marrasen/marraw-models> (or the pinned
+upstream), verifying each against a SHA-256 baked into `internal/aimask`:
+
+| Weights | Purpose | Origin | License |
+|---|---|---|---|
+| ISNet general-use | Subject masks | [xuebinqin/DIS](https://github.com/xuebinqin/DIS) via [rembg](https://github.com/danielgatis/rembg) | Apache-2.0 |
+| Depth Anything V2 **Small** | Depth masks | [onnx-community/depth-anything-v2-small](https://huggingface.co/onnx-community/depth-anything-v2-small) | Apache-2.0 (only the Small variant — larger ones are CC-BY-NC and are not used) |
+| DPT-Large / ADE20K | Scene (semantic) masks | exported from [smp-hub/dpt-large-ade20k](https://huggingface.co/smp-hub/dpt-large-ade20k) (segmentation_models.pytorch) | MIT |
+
+---
+
 ## Regenerating this file
 
 The tables above list direct dependencies only. To produce an exhaustive,

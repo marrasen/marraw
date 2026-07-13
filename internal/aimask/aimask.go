@@ -26,12 +26,16 @@ const mapLongEdge = 1024
 // Model pins. Weights are hash-verified at download; bump Version when
 // swapping weights so existing edits' MapVer references stay distinct.
 var (
+	// All three download from marrasen/marraw-models (mirrors with identical
+	// hashes; origins in THIRD_PARTY_NOTICES.md) so a moved upstream file
+	// can't strand users.
+	//
 	// subjectModel is ISNet (DIS) general-use, the matte rembg ships.
 	// Code Apache-2.0; weights redistributed under the same reading by the
 	// MIT-licensed rembg project for years.
 	subjectModel = infer.ModelSpec{
 		ID: "isnet", Version: "1",
-		URL:     "https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx",
+		URL:     "https://github.com/marrasen/marraw-models/releases/download/models-v1/isnet-general-use.onnx",
 		SHA256:  "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a",
 		Bytes:   178648008,
 		License: "Apache-2.0",
@@ -40,10 +44,22 @@ var (
 	// variant is Apache-2.0 — Base/Large are CC-BY-NC, never swap up.
 	depthModel = infer.ModelSpec{
 		ID: "depthany2s", Version: "1",
-		URL:     "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx",
+		URL:     "https://github.com/marrasen/marraw-models/releases/download/models-v1/depth-anything-v2-small.onnx",
 		SHA256:  "afb6a5c28f3b6bf1618c6e43f02073ef9dfdc70e937502d51603e57b0a1df10c",
 		Bytes:   99060839,
 		License: "Apache-2.0",
+	}
+	// classModel is DPT-Large/ADE20K exported by us from smp-hub's MIT
+	// checkpoint (the convenient hosted ADE20K models all trace to NVIDIA's
+	// non-commercial SegFormer weights) and hosted on marrasen/marraw-models.
+	// Its Version also pins the category table (categories.go): editing the
+	// table MUST bump this so stale category maps regenerate.
+	classModel = infer.ModelSpec{
+		ID: "adeseg", Version: "1",
+		URL:     "https://github.com/marrasen/marraw-models/releases/download/models-v1/dpt-ade20k.onnx",
+		SHA256:  "52d2d0218c0e1f6ad1a46760baca89af588d2db96d7d42279b4999ec116d284e",
+		Bytes:   1375613437,
+		License: "MIT",
 	}
 )
 
@@ -56,6 +72,8 @@ func SpecFor(kind edit.AIKind) (infer.ModelSpec, bool) {
 		return subjectModel, true
 	case edit.AIDepth:
 		return depthModel, true
+	case edit.AIClass:
+		return classModel, true
 	}
 	return infer.ModelSpec{}, false
 }
@@ -88,8 +106,45 @@ func Generate(ctx context.Context, mgr *infer.Manager, kind edit.AIKind, src *im
 		return generateSubject(ctx, sess, src)
 	case edit.AIDepth:
 		return generateDepth(ctx, sess, src)
+	case edit.AIClass:
+		return generateClass(ctx, sess, src)
 	}
 	return nil, fmt.Errorf("aimask: no generator for kind %q", kind)
+}
+
+// generateClass: the DPT export consumes a stretched 512×512 frame,
+// ImageNet-normalized, and emits (1,150,512,512) ADE20K logits. Argmax
+// collapses them to class indexes, the category table to photographer
+// categories, and the plane upscales NEAREST — category IDs are labels, a
+// smoothing resampler would invent nonexistent categories on boundaries
+// (the mask's feather happens at evaluation time instead).
+func generateClass(ctx context.Context, sess *infer.Session, src *image.RGBA) (*image.Gray, error) {
+	const side = 512
+	in := stretchRGBA(src, side, side)
+	data := infer.NCHWFromRGBA(in,
+		[3]float32{0.485, 0.456, 0.406}, [3]float32{0.229, 0.224, 0.225})
+	tensor, err := ort.NewTensor(ort.NewShape(1, 3, side, side), data)
+	if err != nil {
+		return nil, err
+	}
+	defer tensor.Destroy()
+
+	outs, err := sess.Run(ctx, tensor)
+	if err != nil {
+		return nil, err
+	}
+	defer destroyAll(outs)
+	logits, ok := outs[0].(*ort.Tensor[float32])
+	if !ok {
+		return nil, fmt.Errorf("aimask: unexpected class output type %T", outs[0])
+	}
+	classes, err := infer.ArgmaxPlane(logits.GetData(), 150, side, side)
+	if err != nil {
+		return nil, err
+	}
+	cats := CategoryPlane(classes)
+	w, h := mapDims(src)
+	return resizeGrayNearest(grayFromPlane(cats, side, side), w, h), nil
 }
 
 // generateSubject: ISNet consumes a stretched 1024×1024 frame normalized as
@@ -208,5 +263,25 @@ func resizeGray(src *image.Gray, w, h int) *image.Gray {
 	}
 	dst := image.NewGray(image.Rect(0, 0, w, h))
 	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Src, nil)
+	return dst
+}
+
+// resizeGrayNearest resizes a plane of LABELS (category IDs): every output
+// pixel copies its nearest source pixel — no interpolation, which would
+// blend unrelated IDs into new ones along boundaries.
+func resizeGrayNearest(src *image.Gray, w, h int) *image.Gray {
+	sw, sh := src.Rect.Dx(), src.Rect.Dy()
+	if sw == w && sh == h {
+		return src
+	}
+	dst := image.NewGray(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		sy := min(sh-1, y*sh/h)
+		srow := src.Pix[sy*src.Stride:]
+		drow := dst.Pix[y*dst.Stride:]
+		for x := 0; x < w; x++ {
+			drow[x] = srow[min(sw-1, x*sw/w)]
+		}
+	}
 	return dst
 }

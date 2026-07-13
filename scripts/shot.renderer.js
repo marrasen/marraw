@@ -174,6 +174,28 @@ if (shot === 'cull') {
     tintW: tintImg()?.naturalWidth ?? 0,
     tintH: tintImg()?.naturalHeight ?? 0,
   };
+} else if (shot === 'aiscene') {
+  // Scene detection chips: click the Scene button, wait for the detected
+  // category chips, add a mask from the largest one.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  ui().setDevelopTab('masks');
+  await sleep(600);
+  mw.esUpdate({ masks: [] });
+  mw.esCommit();
+  await sleep(800);
+  document.querySelector('[data-testid="ai-mask-scene"]')?.click();
+  await until(() => document.querySelector('[data-testid="scene-chips"]'), 120000);
+  await sleep(300);
+  const chips = [...document.querySelectorAll('[data-testid="scene-chips"] button')];
+  chips[0]?.click();
+  await until(() => (es.getState().draft?.masks ?? []).some((m) => m.aiKind === 'class'), 5000);
+  await sleep(400);
+  window.__maskProbe = {
+    chips: chips.map((c) => c.textContent),
+    classMaskAdded: (es.getState().draft?.masks ?? []).some((m) => m.aiKind === 'class'),
+  };
 } else if (shot === 'addfolder') {
   ui().setAddFolderOpen(true);
 } else if (shot === 'shortcuts') {

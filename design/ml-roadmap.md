@@ -137,6 +137,12 @@ map, so "support all classes" is free at the pixel level. The work is vocabulary
 
 Size: **S**.
 
+Status: **shipped 2026-07-13** — the license gap closed by exporting
+DPT-Large/ADE20K from smp-hub's MIT checkpoint (recipe in the
+marrasen/marraw-models repo, weights on its models-v1 release, ~4s CPU
+inference at 512px). Subject/depth weights are mirrored there too, so no
+registry URL depends on a third party's release hygiene.
+
 ### Phase 1d — UI
 
 - Masks tab (`EditPanel.tsx` `MasksPanel`): an "AI" add-group alongside

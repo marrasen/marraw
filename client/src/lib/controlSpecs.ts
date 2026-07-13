@@ -304,22 +304,38 @@ export const MASK_TYPE_LABELS: Record<string, string> = {
 
 export function maskLabel(m: Mask, index: number): string {
   if (m.type === 'ai') {
-    const kind = m.aiKind === 'subject' ? 'Subject' : m.aiKind === 'depth' ? 'Depth' : 'AI';
+    const kind =
+      m.aiKind === 'subject' ? 'Subject'
+      : m.aiKind === 'depth' ? 'Depth'
+      : m.aiKind === 'class' ? (AI_CATEGORY_NAMES[m.classId ?? 0] ?? 'Class')
+      : 'AI';
     return `${kind} ${index + 1}`;
   }
   return `${MASK_TYPE_LABELS[m.type] ?? 'Mask'} ${index + 1}`;
 }
 
+// AI_CATEGORY_NAMES mirrors internal/aimask CategoryNames — category IDs are
+// stable API (they live in saved edit params), so index = ID.
+export const AI_CATEGORY_NAMES = [
+  'Other', 'Sky', 'People', 'Foliage', 'Water', 'Ground',
+  'Architecture', 'Mountains & rocks', 'Vehicles', 'Animals',
+] as const;
+
 // aiMask builds a freshly generated AI mask. mapVer comes from
 // Edits.GenerateAIMap — it pins the model that produced the map, so the
 // server renders only against a matching map file. Depth seeds a near-range
 // window (1 = nearest); subject relies on the server defaults (threshold
-// 0.5, model edges).
+// 0.5, model edges); class masks get a light feather to soften the label
+// map's hard boundaries.
 export function aiMask(kind: 'subject' | 'depth', mapVer: string): Mask {
   if (kind === 'depth') {
     return { type: 'ai', aiKind: kind, mapVer, depthLo: 0.6, depthHi: 1, feather: 0.3, adjust: {} };
   }
   return { type: 'ai', aiKind: kind, mapVer, adjust: {} };
+}
+
+export function aiClassMask(classId: number, mapVer: string): Mask {
+  return { type: 'ai', aiKind: 'class', mapVer, classId, feather: 0.25, adjust: {} };
 }
 
 // Default geometry for a freshly added mask: centered and clearly visible,

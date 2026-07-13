@@ -3,17 +3,18 @@ import { toast } from 'sonner';
 import {
   Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw,
   Image as ImageIcon, Plus, Trash2, Paintbrush, Circle, Eraser,
-  Focus, Layers, Loader2,
+  Focus, Layers, Loader2, Shapes,
 } from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
-import { applyBatchEdit, generateAIMap, type Delta } from '@/api/edits';
+import { applyBatchEdit, generateAIMap, type AIMapResult, type Delta } from '@/api/edits';
 import type { AIKindType, Mask, MaskAdjust, Params } from '@/api/edit';
 import {
   MASK_CONTROL_ORDER,
   MASK_CONTROL_SPECS,
+  aiClassMask,
   aiMask,
   maskAdjustIsNeutral,
   maskLabel,
@@ -857,18 +858,27 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   const photoId = useEditSession((s) => s.photoId);
   const setMode = useUIStore((s) => s.setMode);
   const [generating, setGenerating] = useState<AIKindType | null>(null);
+  // Scene detection result for THIS photo: mapVer + the category chips.
+  const [scene, setScene] = useState<AIMapResult | null>(null);
+  useEffect(() => setScene(null), [photoId]);
   const masks = draft.masks ?? [];
   const add = (type: Mask['type']) => {
     setMode('develop'); // the overlay lives on the Develop canvas
     esAddMask(client, type);
   };
-  const addAI = async (kind: 'subject' | 'depth') => {
+  const addAI = async (kind: 'subject' | 'depth' | 'class') => {
     if (photoId == null || generating) return;
     setGenerating(kind);
     try {
       const res = await generateAIMap(client, photoId, kind);
-      setMode('develop');
-      esAddMaskObject(client, aiMask(kind, res.mapVer));
+      if (kind === 'class') {
+        // Scene detection adds no mask by itself — it offers one chip per
+        // detected category; clicking a chip adds that category's mask.
+        setScene(res);
+      } else {
+        setMode('develop');
+        esAddMaskObject(client, aiMask(kind, res.mapVer));
+      }
     } catch (err) {
       toast.error(`AI mask failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -930,7 +940,40 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
           {generating === 'depth' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Layers data-icon="inline-start" />}
           Depth
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          title="Detect scene regions (sky, people, foliage, …) to mask (runs a local model)"
+          disabled={generating != null}
+          onClick={() => addAI('class')}
+          data-testid="ai-mask-scene"
+        >
+          {generating === 'class' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Shapes data-icon="inline-start" />}
+          Scene
+        </Button>
       </div>
+      {scene && (
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Detected regions" data-testid="scene-chips">
+          {(scene.categories ?? []).length === 0 && (
+            <span className="px-1 text-[11px] text-muted-foreground">No distinct regions detected.</span>
+          )}
+          {(scene.categories ?? []).map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className="rounded-full border border-border px-2 py-0.5 text-[11px] text-secondary-foreground hover:border-primary/45 hover:text-foreground"
+              title={`Mask ${c.name} (${Math.round(c.fraction * 100)}% of frame)`}
+              onClick={() => {
+                setMode('develop');
+                esAddMaskObject(client, aiClassMask(c.id, scene.mapVer));
+              }}
+            >
+              {c.name} · {Math.round(c.fraction * 100)}%
+            </button>
+          ))}
+        </div>
+      )}
       {masks.map((m, i) => (
         <MaskRow
           key={i}

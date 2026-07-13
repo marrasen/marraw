@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/infer"
@@ -95,13 +96,45 @@ func TestGenerateDepthRealModel(t *testing.T) {
 	}
 }
 
-func TestSpecFor(t *testing.T) {
-	if _, ok := SpecFor(edit.AIClass); ok {
-		t.Error("class kind must report unavailable until a license-clean model is hosted")
+// TestGenerateClassRealModel proves the DPT export runs end-to-end through
+// our pre/post-processing: right dims, and every pixel is a valid category
+// ID. Synthetic input can't pin semantics — the wire probe against a real
+// photo covers that.
+func TestGenerateClassRealModel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real-model test (1.3 GB graph)")
 	}
-	ver, ok := MapVerFor(edit.AISubject)
-	if !ok || ver != "isnet-1" {
-		t.Errorf("MapVerFor(subject) = %q, %v", ver, ok)
+	mgr := testManager(t, classModel)
+	src := scenePhoto(640, 480)
+	start := time.Now()
+	gray, err := Generate(context.Background(), mgr, edit.AIClass, src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("DPT-Large class map on CPU: %s", time.Since(start))
+	if gray.Rect.Dx() != 1024 || gray.Rect.Dy() != 768 {
+		t.Fatalf("map dims %dx%d, want 1024x768", gray.Rect.Dx(), gray.Rect.Dy())
+	}
+	for i, v := range gray.Pix {
+		if int(v) >= len(CategoryNames) {
+			t.Fatalf("pixel %d holds %d — not a category ID", i, v)
+		}
+	}
+}
+
+func TestSpecFor(t *testing.T) {
+	for kind, want := range map[edit.AIKind]string{
+		edit.AISubject: "isnet-1",
+		edit.AIDepth:   "depthany2s-1",
+		edit.AIClass:   "adeseg-1",
+	} {
+		ver, ok := MapVerFor(kind)
+		if !ok || ver != want {
+			t.Errorf("MapVerFor(%s) = %q, %v; want %q", kind, ver, ok, want)
+		}
+	}
+	if _, ok := SpecFor("bogus"); ok {
+		t.Error("unknown kind must report unavailable")
 	}
 }
 
