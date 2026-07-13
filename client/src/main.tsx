@@ -42,6 +42,7 @@ if (import.meta.env.DEV) {
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),
       setGapMinutes: (min: number | null) => us.updateGapMinutes(client, min),
+      setFlagFilter: (f: unknown) => us.updateFolderFilters(client, { flagFilter: f as never }),
       setLibrarySort: (s: unknown) => us.updateLibrarySort(client, s as never),
       setLastSeenVersion: (v: string) => us.updateLastSeenVersion(client, v),
       // Folder hop for the `folderview` shot (per-folder view memory).

@@ -39,6 +39,9 @@ try {
   // --- thumbnail-size slider renders at its designed width ------------------
   // Regression: width passed as className on the Slider root lost to the
   // root's own data-horizontal:w-full and the track collapsed to ~12px.
+  // Measures the inline FilterBar instance; it hides below the 780px
+  // container-query breakpoint, so a zoomed/narrow harness viewport reads 0
+  // (the harness pins zoomFactor=1 against persisted profile zoom for this).
   const thumbSlider = document.querySelector('[title="Thumbnail size"] [data-slot="slider"]');
   const thumbW = thumbSlider ? thumbSlider.getBoundingClientRect().width : 0;
   R.thumbSliderWidth = thumbW >= 90 ? true : `width=${thumbW}px`;
@@ -99,11 +102,10 @@ try {
   // Start from a clean baseline even if a previous aborted run left edits.
   // The clean draft may carry the seeded camera-mimic exposure (base_exp_ev),
   // so exposure checks below are relative to whatever the baseline reads.
-  const resetBtn = buttons().find((b) => b.textContent.trim() === 'Reset');
-  if (resetBtn) {
-    resetBtn.click();
-    await sleep(900); // reset round-trips, then reloads the seeded baseline
-  }
+  // Ctrl+0 = Reset all; the whole-photo Reset *button* lives on the Presets
+  // tab since the tabbed panel, so the shortcut is the tab-independent path.
+  key('0', { ctrlKey: true });
+  await sleep(900); // reset round-trips, then reloads the seeded baseline
   key('0'); // clear rating
   await sleep(200);
   const baseEV = es().draft.expEV;
@@ -269,10 +271,20 @@ try {
   await sleep(150);
 
   // --- auto adjustments: buttons present, Ctrl+U family lands, undo reverts
-  R.autoButtons =
+  // The per-section Auto buttons live on the Develop tab; the one-tap "Auto
+  // everything" moved to the Presets tab with the tabbed panel.
+  const autoDevelop =
     buttons().some((b) => (b.title || '').startsWith('Auto dynamics')) &&
-    buttons().some((b) => (b.title || '').startsWith('Auto colours')) &&
-    buttons().some((b) => (b.title || '').startsWith('Auto everything'));
+    buttons().some((b) => (b.title || '').startsWith('Auto colours'));
+  ui().setDevelopTab('presets');
+  const autoPresets = !!(await until(
+    () => buttons().some((b) => (b.title || '').startsWith('Auto everything')),
+    5000,
+    'Auto everything on Presets tab',
+  ).catch(() => false));
+  ui().setDevelopTab('develop');
+  await until(() => sliderRowByLabel('Exposure'), 5000, 'develop tab restored');
+  R.autoButtons = autoDevelop && autoPresets ? true : `develop=${autoDevelop} presets=${autoPresets}`;
   // Ctrl+U auto dynamics: the draft carries ~+1.75 EV from the slider click
   // above, so auto tone must land a different (pulled-back) state.
   const preAutoEV = es().draft.expEV;
@@ -508,7 +520,8 @@ try {
   await sleep(400);
 
   // Reset back to neutral (persisted) so later checks and the DB start clean.
-  buttons().find((b) => b.textContent.trim() === 'Reset')?.click();
+  // Ctrl+0 = Reset all (the Reset button lives on the Presets tab now).
+  key('0', { ctrlKey: true });
   await until(() => es().draft.cropW === 0, 5000, 'crop reset');
   await sleep(200);
 
@@ -553,7 +566,8 @@ try {
     await sleep(150);
   }
   await until(() => ui().view === 'grid', 5000, 'back to grid');
-  ui().setFilters({ flagFilter: 'not-excluded' });
+  // Filters persist per folder now (folderViews) — write through the bridge.
+  mw.setFlagFilter('not-excluded');
   await sleep(300);
   const ids0 = ui().visibleIds.slice();
   const target = ids0[9];
@@ -562,7 +576,7 @@ try {
   await until(() => !ui().visibleIds.includes(target), 5000, 'excluded photo removed');
   R.positionKept = ui().focusId === ui().visibleIds[9] ? true : `focus at ${ui().visibleIds.indexOf(ui().focusId)}`;
   // cleanup: unflag it again
-  ui().setFilters({ flagFilter: 'all' });
+  mw.setFlagFilter('all');
   await sleep(200);
   ui().focus(target);
   key('u');
@@ -594,6 +608,10 @@ try {
     [...document.querySelectorAll('[role="menuitemradio"]')].find((b) => b.textContent.trim() === label)?.click();
     await sleep(300);
   };
+  // Gap grouping persists per folder now and may be remembered off — the
+  // header checks need it on; restored after the sort round-trip below.
+  mw.setGapMinutes(1);
+  await until(() => gridHeaders() > 0, 5000, 'headers for sort section');
   const idsAsc = ui().visibleIds.slice();
   R.sortHeadersInCaptureOrder = !!document.querySelector('[data-testid="grid-group-header"]');
   await sortPick('Capture time · newest first');
@@ -611,6 +629,7 @@ try {
   R.sortNameFlattensGroups = !document.querySelector('[data-testid="grid-group-header"]');
   await sortPick('Capture time · oldest first');
   R.sortRestored = ui().visibleIds.join() === idsAsc.join() ? true : 'order not restored';
+  mw.setGapMinutes(gapBefore); // back to the folder's remembered gap setting
 
   // --- export dialog: segmented labels + default dir ------------------------
   key('e', { ctrlKey: true });
@@ -947,8 +966,7 @@ try {
   for (const id of [photoA, photoB]) {
     ui().focus(id);
     await until(() => es().photoId === id && es().draft != null, 5000, 'cleanup session');
-    const reset = buttons().find((b) => b.textContent.trim() === 'Reset');
-    if (reset) reset.click();
+    key('0', { ctrlKey: true }); // Reset all (button lives on the Presets tab)
     await sleep(300);
   }
   ui().focus(photoA);

@@ -254,6 +254,13 @@ async function createWindow(opts = {}) {
     await win.loadFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'), { query });
   }
 
+  // Chromium persists per-host zoom (a stray Ctrl+wheel/pinch in a dev window
+  // lands in the profile's Preferences) and re-applies it to every later
+  // window on that origin. A zoomed harness viewport flips container-query
+  // breakpoints and shifts every measured rect, so probes fail on layouts no
+  // assertion expects — pin harness windows to 100%.
+  if (UITEST) win.webContents.setZoomFactor(1);
+
   if (opts.initial) runHarnessHooks(win);
 }
 
