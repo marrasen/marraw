@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw,
@@ -33,6 +33,7 @@ import { PresetsPanel } from '@/components/PresetsPanel';
 import { InfoPanel } from '@/components/InfoPanel';
 import { formatAperture, formatShutter } from '@/lib/exif';
 import { updateEditGroupOpen } from '@/lib/uiSettings';
+import { bumpImgBust } from '@/lib/imgCacheBust';
 import { useUIStore } from '@/stores/uiStore';
 import {
   esAddMask,
@@ -870,8 +871,14 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   const [scene, setScene] = useState<AIMapResult | null>(null);
   // A feature waiting on download consent; non-null renders the dialog.
   const [pendingAI, setPendingAI] = useState<PendingAIDownload | null>(null);
-  useEffect(() => setScene(null), [photoId]);
-  const masks = draft.masks ?? [];
+  // Drop the scene result when the photo changes — adjust during render, not
+  // an effect (photoId is a primitive, so no re-render loop).
+  const [prevPhotoId, setPrevPhotoId] = useState(photoId);
+  if (photoId !== prevPhotoId) {
+    setPrevPhotoId(photoId);
+    setScene(null);
+  }
+  const masks = useMemo(() => draft.masks ?? [], [draft.masks]);
   const add = (type: Mask['type']) => {
     setMode('develop'); // the overlay lives on the Develop canvas
     esAddMask(client, type);
@@ -889,7 +896,12 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
         // Repaint ONLY when a map actually regenerated: an unconditional
         // nudge forces a transient (non-abortable) decode on every first
         // visit to a masked photo — those piled up into browse stalls.
-        if (res.generated) esUpdate(client, {});
+        // The nudge heals the loupe (live preview); bump the cache-buster so
+        // the immutably-cached grid thumbnail refetches too.
+        if (res.generated) {
+          esUpdate(client, {});
+          bumpImgBust(photoId);
+        }
       } else if (kind === 'class') {
         // Scene detection adds no mask by itself — it offers one chip per
         // detected category; clicking a chip adds that category's mask.
@@ -934,7 +946,10 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
       aiRestoreFired.add(key);
       generateAIMap(client, photoId, kind, false)
         .then((res) => {
-          if (res.generated) esUpdate(client, {});
+          if (res.generated) {
+            esUpdate(client, {});
+            bumpImgBust(photoId);
+          }
         })
         .catch(async (err) => {
           if (isModelNotDownloaded(err)) {

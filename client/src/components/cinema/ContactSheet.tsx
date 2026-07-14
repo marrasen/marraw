@@ -3,6 +3,7 @@ import { Clock } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
+import { useImgBust } from '@/lib/imgCacheBust';
 import { rowLayout } from '@/lib/justify';
 import { uniformRowStarts } from '@/lib/gridNav';
 import { gapLabel, rangeLabel, timeLabel, type TimeGroup } from '@/lib/timeGaps';
@@ -264,6 +265,7 @@ function SheetCell({
   boxStyle?: React.CSSProperties;
   fitClass: string;
 }) {
+  useImgBust(photo.id); // refetch when a restored AI map repaints this thumb
   return (
     <div
       data-sheet-id={photo.id}

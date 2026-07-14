@@ -538,6 +538,9 @@ function CacheSection() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [gb, setGb] = useState('');
   useEffect(() => {
+    // Seed the editable field from fetched cache info. Keyed on the query
+    // snapshot's identity, so this can't live as an adjust-during-render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (info && info.capBytes > 0) setGb(String(Math.round(info.capBytes / (1 << 30))));
   }, [info]);
 

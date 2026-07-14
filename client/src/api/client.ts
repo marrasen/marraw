@@ -2172,6 +2172,10 @@ export function useQuery<TArgs extends unknown[], TRes>(
     const previousSnapshotRef = useRef<SubscriptionSnapshot<TRes> | null>(null);
     const keepPreviousData = options?.keepPreviousData ?? true;
     const effectiveSnapshot = (shouldCache && keepPreviousData)
+        // Reads/writes the previous-data ref during render on purpose — this is
+        // the SWR keep-previous-data seam and is idempotent (same input →
+        // same output for a given render).
+        // eslint-disable-next-line react-hooks/refs
         ? selectWithPreviousData<TRes>(previousSnapshotRef, cachedSnapshot)
         : cachedSnapshot;
 
@@ -2208,6 +2212,9 @@ export function useQuery<TArgs extends unknown[], TRes>(
     useEffect(() => {
         if (!subscribeMethod || options?.enabled === false) return;
         if (options?.cache !== false && queryCacheEnabled) return; // cached path handles this
+        // Flip loading on as the subscription lifecycle begins — this is
+        // synchronizing React with an external system, the sanctioned use.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setIsLoading(true);
         const applyPatch = options?.applyPatch;
         const unsubscribe = client.subscribe<TRes>(
@@ -2237,6 +2244,9 @@ export function useQuery<TArgs extends unknown[], TRes>(
     // One-shot fetch mode (no subscription)
     useEffect(() => {
         if (subscribeMethod) return;
+        // fetch() flips loading on synchronously as it kicks off the request —
+        // lifecycle sync with an external system, not a render cascade.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         fetch();
         return () => {
             abortRef.current?.abort();
@@ -2613,6 +2623,8 @@ export function useStream<TRes>(
     }, [client, fn, paramsKey]);
 
     useEffect(() => {
+        // start() resets items/loading as the stream lifecycle begins.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         start();
         return () => {
             // Intentionally mutates the LIVE ref instead of a captured local —

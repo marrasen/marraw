@@ -53,10 +53,13 @@ export function MaskHoverTint({
 
   const mask = shown != null ? draft.masks?.[shown] : undefined;
 
-  useEffect(() => {
-    if (tintMask == null) return; // keep `shown` for the fade-out
-    setShown(tintMask);
-  }, [tintMask]);
+  // Track the hovered mask, but keep the last one mounted through the
+  // fade-out. Adjust during render (not an effect); tintMask is a primitive.
+  const [prevTint, setPrevTint] = useState(tintMask);
+  if (tintMask !== prevTint) {
+    setPrevTint(tintMask);
+    if (tintMask != null) setShown(tintMask);
+  }
 
   // AI masks: fetch the server-rendered tint for the hovered mask.
   useEffect(() => {
@@ -68,6 +71,7 @@ export function MaskHoverTint({
     });
     const cached = tintCache.get(key);
     if (cached) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- cache-hit fast path of this async tint fetch
       setAiUrl(cached);
       return;
     }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { Mask, Params, Stroke } from '@/api/edit';
 import type { ApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
@@ -434,7 +434,9 @@ export function MaskTint({
   boxH: number;
   k: number;
 }) {
-  const id = useMemo(() => `mask-tint-${Math.random().toString(36).slice(2)}`, []);
+  // Strip useId's non-alphanumerics (colons/guillemets) so the id stays valid
+  // inside SVG `url(#…)` references.
+  const id = `mask-tint-${useId().replace(/[^a-z0-9]/gi, '')}`;
   const toBoxPx = (fx: number, fy: number): [number, number] => {
     const [bx, by] = displayFromFrame(fx, fy, draft, frameW, frameH);
     return [bx * boxW, by * boxH];

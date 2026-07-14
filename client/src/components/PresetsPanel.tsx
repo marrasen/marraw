@@ -268,6 +268,8 @@ function useUserPresetThumbs(client: ApiClient, photo: Photo | undefined, preset
     if (!photo || presets.length === 0) return;
     let alive = true;
     const urls: string[] = [];
+    // Clear stale thumbs before the async regen loop below.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setThumbs({});
     (async () => {
       for (const p of presets) {
@@ -350,6 +352,8 @@ function usePresetThumbs(client: ApiClient, photo: Photo | undefined, presets: A
     // autoAdjust + preview round-trip per preset on each one is what made the
     // grid churn.
     const base = useEditSession.getState().draft ?? { ...NEUTRAL };
+    // Clear stale thumbs before the async regen loop below.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setThumbs({});
     (async () => {
       for (const preset of presets) {

@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useState } from 'react';
 import type { Photo } from '@/api/library';
 import type { Params } from '@/api/edit';
 import { useApiClient } from '@/api/client';
@@ -34,9 +34,11 @@ export function ConfirmBar({
   // (input disabled) instead of swapping the dials for a placeholder — the
   // load takes a frame or two and the swap read as flicker while arrowing
   // through a take.
-  const held = useRef<Params | null>(null);
-  if (onDraft && draft) held.current = draft;
-  const shown = onDraft && draft ? draft : held.current;
+  // Adjust-during-render (not an effect): React re-renders synchronously
+  // before paint, so the held draft updates with no flicker frame.
+  const [held, setHeld] = useState<Params | null>(null);
+  if (onDraft && draft && draft !== held) setHeld(draft);
+  const shown = onDraft && draft ? draft : held;
 
   return (
     <div

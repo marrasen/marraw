@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { formatBytes } from '@/lib/exif';
 
-export const AI_KIND_INFO: Record<string, { title: string; feature: string }> = {
+const AI_KIND_INFO: Record<string, { title: string; feature: string }> = {
   subject: {
     title: 'Subject detection',
     feature: 'Finds the main subject of a photo so you can mask it with one click and adjust it independently of the background.',

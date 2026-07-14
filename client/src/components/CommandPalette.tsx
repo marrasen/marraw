@@ -157,13 +157,20 @@ export function CommandPalette() {
 
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear the field as the dialog opens, alongside the focus kick below
       setQuery('');
       setIndex(0);
       // The dialog mounts in this same tick; focus on the next frame.
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
-  useEffect(() => setIndex(0), [q]);
+  // Reset the highlighted row when the query changes — adjust during render
+  // (not an effect), so there's no extra frame with a stale selection.
+  const [prevQ, setPrevQ] = useState(q);
+  if (q !== prevQ) {
+    setPrevQ(q);
+    setIndex(0);
+  }
   useEffect(() => {
     listRef.current
       ?.querySelector(`[data-cmd-index="${index}"]`)

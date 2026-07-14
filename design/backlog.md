@@ -20,11 +20,15 @@ smaller stuff.
 - **Depth range as a two-thumb slider.** Far edge / Near edge are two
   separate sliders today; a proper range control reads better. The base-ui
   Slider supports multiple thumbs — mostly UI work in AIShapeRows.
-- **Grid thumbnails can stay stale after a map restore.** Cache.InvalidateEdit
-  fixes the server files (and so the loupe), but /img URLs are browser-cached
-  immutable and keyed by edit hash, which a map regeneration doesn't change.
-  Only bites sidecar-import flows; self-heals on the next edit. A real fix
-  needs a cache-buster component in the URL for map-bearing edits.
+- ~~**Grid thumbnails can stay stale after a map restore.**~~ Done 2026-07-14:
+  a per-photo cache-buster (`imgCacheBust.ts`, `b` query param — server-ignored,
+  so no img hot-path cost) advances whenever `Edits.GenerateAIMap` returns
+  `generated=true` (the only trigger of `Cache.InvalidateEdit`). `imgUrl`/
+  `tileUrl` fold it in; `useImgBust` re-renders mounted thumbnails (grid, contact
+  sheet, scrubber) so they refetch immediately, and the nonce is persisted to
+  localStorage so the immutable stale entry can't resurface after a reload. The
+  loupe still heals via its live preview blob. `bumpImgBust` is called from both
+  restore paths in EditPanel (`runAI` and the mount effect).
 
 ## Culling
 

@@ -2,6 +2,8 @@
 // daemon's port and auth token via query params; browser dev falls back to
 // the fixed dev port.
 
+import { getImgBust } from './imgCacheBust';
+
 export type Level = '256' | '512' | '1024' | '2048';
 
 // TILE_SIZE must match pyramid.TileSize in the Go backend: full processed
@@ -48,6 +50,10 @@ export function imgUrl(
   // photo's freshest rendition of this level at ANY edit state (no-store)
   // instead of blocking on a decode — right photo now, right pixels soon.
   if (opts?.stale) params.set('stale', '1');
+  // b: per-photo cache-buster (server-ignored). Advances when a restored AI-mask
+  // map regenerates pixels under an unchanged edit hash — see imgCacheBust.
+  const b = getImgBust(p.id);
+  if (b) params.set('b', String(b));
   if (backend.token) params.set('t', backend.token);
   return `${backend.http}/img/${p.id}/${level}?${params}`;
 }
@@ -57,6 +63,8 @@ export function imgUrl(
 export function tileUrl(p: ImgRef, tx: number, ty: number): string {
   const params = new URLSearchParams({ v: p.cacheKey, r: RENDER_VERSION });
   if (p.editHash && p.editHash !== 'base') params.set('e', p.editHash);
+  const b = getImgBust(p.id);
+  if (b) params.set('b', String(b));
   if (backend.token) params.set('t', backend.token);
   return `${backend.http}/img/${p.id}/tile/${tx}/${ty}?${params}`;
 }

@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef } from 'react';
 import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
+import { useImgBust } from '@/lib/imgCacheBust';
 import { gapLabel, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { aspectOf } from '@/lib/justify';
 import { PyramidImage } from '@/components/PyramidImage';
@@ -187,6 +188,7 @@ const StripThumb = memo(function StripThumb({
   onFocus: (id: number, opts?: { extend?: boolean; toggle?: boolean }) => void;
   width: number;
 }) {
+  useImgBust(photo.id); // refetch when a restored AI map repaints this thumb
   return (
     <button
       data-strip-id={photo.id}

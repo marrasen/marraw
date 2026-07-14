@@ -5,6 +5,7 @@ import { setVisible, type Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
+import { useImgBust } from '@/lib/imgCacheBust';
 import { dayLabel, gapLabel, groupByGap, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { PyramidImage } from '@/components/PyramidImage';
 import { rowLayout } from '@/lib/justify';
@@ -131,6 +132,7 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
   }, [rowStarts, centersX, setNavRowModel]);
   useEffect(() => () => setNavRowModel([], null), [setNavRowModel]);
 
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual returns functions the compiler can't memoize; the component opts out of memoization here
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -280,6 +282,7 @@ function GridCell({ photo, w, h, fitClass, softBelow }: { photo: Photo; w: numbe
   const multiSelect = useUIStore((s) => s.selection.size > 1);
   const focus = useUIStore((s) => s.focus);
   const [loaded, setLoaded] = useState(false);
+  useImgBust(photo.id); // refetch this thumb when a restored AI map repaints it
   const level = w * window.devicePixelRatio > 256 ? '512' : '256';
   const isFocus = focusId === photo.id;
   const score = focusScore(photo);

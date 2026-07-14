@@ -129,6 +129,9 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   // options blob.
   useEffect(() => {
     if (!open) return;
+    // Prefill the form from the external UI store when the dialog opens —
+    // reading getState() during render would be impure, so this stays an effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNeedsCreate(false);
     // Read imperatively: a subscription echo must not clobber a value the
     // user is editing while the dialog is open.

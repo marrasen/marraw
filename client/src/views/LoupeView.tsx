@@ -247,6 +247,8 @@ function levelForPx(px: number): Level | 'tiles' {
 function useTilesWarm(photo: Photo, want: boolean, kick: boolean): boolean {
   const [warm, setWarm] = useState(false);
   useEffect(() => {
+    // New photo starts cold before the async probe/kick below.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setWarm(false);
     if (!want) return;
     const ac = new AbortController();
@@ -363,6 +365,8 @@ function renderStage(frac: number): string {
 function useRenderProgress(client: ApiClient, photoId: number, active: boolean): number | null {
   const [frac, setFrac] = useState<number | null>(null);
   useEffect(() => {
+    // Reset progress before (re)subscribing for this photo.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFrac(null);
     if (!active) return;
     return onRenderProgressEvent(client, (ev) => {
