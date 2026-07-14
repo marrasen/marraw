@@ -302,8 +302,8 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: 
     if (i < 0) return;
     const ac = new AbortController();
     const next = new Map<string, HTMLImageElement>();
-    const warm = (p: Photo, lvl: Level) => {
-      const url = imgUrl(p, lvl);
+    const warm = (p: Photo, lvl: Level, cacheOnly = false) => {
+      const url = imgUrl(p, lvl, cacheOnly ? { cacheOnly: true } : undefined);
       const img = held.current.get(url) ?? new Image();
       if (!img.src) {
         img.src = url;
@@ -314,16 +314,15 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: 
     for (const j of [i + 1, i - 1, i + 2]) {
       const p = photos[j];
       if (!p) continue;
-      // The 512 underlay is cheap (warmed at scan, a disk hit) and keeps the
-      // low-res bridge instant on arrow-through, so warm it for every neighbour.
-      // The heavy 2048 is warmed ONLY at tile depth (1:1), where it is the
-      // wanted bridge and browsing is deliberate: prefetching it in fit fires a
-      // full RAW render per neighbour at visible priority, saturating the decode
-      // pool and the browser's connection budget with long uncancellable renders
-      // — that starves the warm 512s and freezes the browse. In fit the sharp
-      // 2048 loads on demand for the focused photo only (plus the background
-      // pre-render pass warming ahead).
-      warm(p, '512');
+      // The 512 underlay warm is cacheOnly: pull it into the browser cache if
+      // it is already on disk, but NEVER let a neighbour trigger a RAW decode.
+      // A plain (render-allowed) warm fires a PriorityVisible render per cold
+      // neighbour, saturating the pool with long uncancellable unpacks and
+      // freezing the browse the instant the user skims onto an unrendered run.
+      // Cold neighbours are filled by the focus-first background pre-render
+      // pass instead. The heavy 2048 is warmed ONLY at tile depth (1:1), where
+      // browsing is deliberate and the on-demand render is the point.
+      warm(p, '512', true);
       if (!tiles) continue;
       warm(p, '2048');
       const tile = tileUrl(p, 0, 0);
@@ -1033,7 +1032,14 @@ export function CinemaImage({
               // (superseded settle, janitor eviction) must still show the
               // RIGHT photo instantly — at a previous edit state if need be —
               // instead of holding the previous photo while a decode runs.
-              <DecodedImage src={imgUrl(photo, '512', { stale: true })} className="absolute inset-0 size-full" />
+              // cacheOnly too: `stale` already serves the photo's freshest
+              // rendition of this level at ANY edit state, so the ONLY time it
+              // would fall through is a photo with zero renditions (never
+              // pre-rendered). Skimming must never block on a decode there —
+              // 404 and let the double-buffer hold the previous frame; the
+              // focus-first pre-render pass fills it. Prevents a cold cull
+              // frame from firing a second PriorityVisible RAW decode.
+              <DecodedImage src={imgUrl(photo, '512', { stale: true, cacheOnly: true })} className="absolute inset-0 size-full" />
             )}
             {!cropUI && !previewUrl && !wantTiles ? (
               // Fit: show the pre-rendered rendition the instant it exists and
@@ -1599,13 +1605,13 @@ export function DecodedImage({
 // onto the photo. A hit shows the sharp rendition instantly; a miss renders
 // nothing (returns null) and the always-warm 512 underlay behind shows through,
 // so a fast scan across not-yet-pre-rendered frames never stalls. On a miss it
-// immediately kicks ONE render for THIS photo so a frame paused on sharpens,
-// and re-requests the warm file when that lands — cheap when the background
-// pre-render pass has already covered it. Skimming past is safe without a
-// settle delay: the parent keys this by photo, so a switch remounts fresh (no
-// lingering frame) and unmount aborts the in-flight kick, which cancels the
-// RAW decode itself mid-flight — a skimmed frame costs at most the
-// uncancellable unpack, not a full render.
+// kicks ONE render for THIS photo AFTER a short dwell so a frame paused on
+// sharpens, and re-requests the warm file when that lands — cheap when the
+// background pre-render pass has already covered it. The dwell is what keeps
+// skimming free: the parent keys this by photo, so a switch remounts fresh and
+// the pending kick is cleared before it fires — a skimmed-past frame starts NO
+// decode at all (not even the uncancellable unpack). Only a deliberate pause
+// pays for a render.
 function FitImage({
   photo,
   level,
@@ -1627,17 +1633,25 @@ function FitImage({
     if (!missed) return;
     const img = new Image();
     let alive = true;
-    img.src = imgUrl(photo, level); // render-allowed: one render for this photo
-    img
-      .decode()
-      .then(() => {
-        if (!alive) return;
-        setMissed(false);
-        setWarmed((n) => n + 1);
-      })
-      .catch(() => {});
+    // Kick only after a dwell. The parent keys this by photo, so a skim
+    // remounts FitImage per frame and the timer is cleared before it fires —
+    // no RAW decode ever STARTS while skimming. Only a frame paused on for the
+    // dwell sharpens. Kicking immediately (one render per skimmed frame) fills
+    // the pool with uncancellable unpacks and is exactly what freezes cull.
+    const dwell = window.setTimeout(() => {
+      img.src = imgUrl(photo, level); // render-allowed: one render for this photo
+      img
+        .decode()
+        .then(() => {
+          if (!alive) return;
+          setMissed(false);
+          setWarmed((n) => n + 1);
+        })
+        .catch(() => {});
+    }, 350);
     return () => {
       alive = false;
+      window.clearTimeout(dwell);
       if (!img.complete) img.src = '';
     };
   }, [missed, photo, level]);

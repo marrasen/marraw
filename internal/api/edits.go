@@ -716,7 +716,12 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 		h := hash
 		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{{ID: photoID, EditHash: &h}})
 		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)
-		go e.deps.Cache.Ensure(context.Background(), p, "512", hash, decode.PriorityVisible)
+		// Prefetch, not Visible: this warm runs fire-and-forget on a detached
+		// context (no viewport to cancel it), so it must never outrank the photo
+		// the user is actually looking at. Quick-dial edits fire this DURING cull
+		// navigation — at Visible priority it competed head-to-head with the next
+		// frame's render for a pool worker and helped freeze the browse.
+		go e.deps.Cache.Ensure(context.Background(), p, "512", hash, decode.PriorityPrefetch)
 	}
 	return nil
 }
