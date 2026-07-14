@@ -261,6 +261,27 @@ func (c *Cache) EnsureTile(ctx context.Context, photo store.Photo, tx, ty int, e
 	return path, nil
 }
 
+// NewestLevel returns the freshest on-disk rendition of one photo+level
+// under ANY edit hash, or "" — the stale-while-revalidate source for the
+// loupe's low-res bridge (mtime ≈ last served, so "newest" is the rendition
+// the user saw most recently).
+func (c *Cache) NewestLevel(cacheKey, level string) string {
+	if cacheKey == "" {
+		return ""
+	}
+	pattern := filepath.Join(c.Dir(), cacheKey[:2],
+		fmt.Sprintf("%s_%s_*_%s.jpg", cacheKey, level, renderVersion))
+	matches, _ := filepath.Glob(pattern)
+	best := ""
+	var bestT time.Time
+	for _, m := range matches {
+		if info, err := os.Stat(m); err == nil && (best == "" || info.ModTime().After(bestT)) {
+			best, bestT = m, info.ModTime()
+		}
+	}
+	return best
+}
+
 // readLevel loads one cached rendition back as an RGBA, or nil when absent
 // or unreadable (the caller falls through to a real render).
 func (c *Cache) readLevel(cacheKey, level, editHash string) *image.RGBA {

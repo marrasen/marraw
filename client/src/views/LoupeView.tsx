@@ -959,7 +959,11 @@ export function CinemaImage({
                 pixels. Off during crop (rotated flat frame) and live edit (the
                 blob is the truth). */}
             {!cropUI && !previewUrl && (
-              <DecodedImage src={imgUrl(photo, '512')} className="absolute inset-0 size-full" />
+              // stale: a photo whose current-hash renders were never written
+              // (superseded settle, janitor eviction) must still show the
+              // RIGHT photo instantly — at a previous edit state if need be —
+              // instead of holding the previous photo while a decode runs.
+              <DecodedImage src={imgUrl(photo, '512', { stale: true })} className="absolute inset-0 size-full" />
             )}
             {!cropUI && !previewUrl && !wantTiles ? (
               // Fit: show the pre-rendered rendition the instant it exists and

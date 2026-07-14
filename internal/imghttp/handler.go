@@ -73,6 +73,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	path := h.Cache.PathFor(photo.CacheKey, level, editHash)
 	if _, err := os.Stat(path); err != nil {
+		// stale=1 callers (the loupe's low-res bridge) prefer the RIGHT PHOTO
+		// immediately over the right edit state: when the exact rendition is
+		// missing (a superseded commit settle never wrote it, the janitor
+		// evicted it), serve the photo's freshest rendition of this level
+		// under any edit hash instead of blocking on a RAW decode — the sharp
+		// layer revalidates against the exact hash on top. Served no-store:
+		// the URL names the exact state, and an immutably-cached stale body
+		// would impersonate it forever.
+		if r.URL.Query().Get("stale") != "" {
+			if alt := h.Cache.NewestLevel(photo.CacheKey, level); alt != "" {
+				h.serveFileHeaders(w, r, alt, "no-store")
+				return
+			}
+			// No rendition of this photo+level exists at all (fresh import):
+			// fall through to the ordinary render path.
+		}
 		// cacheOnly callers (the fit loupe) want the pre-rendered rendition or
 		// nothing — never an on-demand RAW decode. Browsing then paints the
 		// warm low-res underlay instead of blocking on a full render, and the
@@ -137,6 +153,10 @@ func (h *Handler) ServeTile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, path string) {
+	h.serveFileHeaders(w, r, path, "private, max-age=31536000, immutable")
+}
+
+func (h *Handler) serveFileHeaders(w http.ResponseWriter, r *http.Request, path, cacheControl string) {
 	f, err := os.Open(path)
 	if err != nil {
 		http.Error(w, "cache read failed", http.StatusInternalServerError)
@@ -148,7 +168,7 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, path string)
 	// the token, which rides in the URL, not the origin.
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("Cache-Control", cacheControl)
 	http.ServeContent(w, r, "", time.Time{}, f)
 	// mtime ≈ last served, so the janitor evicts cold files first.
 	now := time.Now()

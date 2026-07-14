@@ -38,12 +38,16 @@ const RENDER_VERSION = 'r8';
 export function imgUrl(
   p: ImgRef,
   level: Level,
-  opts?: { editHash?: string; cacheOnly?: boolean },
+  opts?: { editHash?: string; cacheOnly?: boolean; stale?: boolean },
 ): string {
   const e = opts?.editHash ?? p.editHash;
   const params = new URLSearchParams({ v: p.cacheKey, r: RENDER_VERSION });
   if (e && e !== 'base') params.set('e', e);
   if (opts?.cacheOnly) params.set('cacheOnly', '1');
+  // stale: when the exact rendition is missing, the server answers with the
+  // photo's freshest rendition of this level at ANY edit state (no-store)
+  // instead of blocking on a decode — right photo now, right pixels soon.
+  if (opts?.stale) params.set('stale', '1');
   if (backend.token) params.set('t', backend.token);
   return `${backend.http}/img/${p.id}/${level}?${params}`;
 }
