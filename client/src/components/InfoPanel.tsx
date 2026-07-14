@@ -35,6 +35,9 @@ export function InfoPanel({ photo }: { photo: Photo }) {
           {photo.sharpness != null && (
             <Row label="Focus score" value={String(Math.round(photo.sharpness))} />
           )}
+          {photo.subjectSharpness != null && (
+            <Row label="Subject focus" value={String(Math.round(photo.subjectSharpness))} />
+          )}
           {photo.metaLoaded ? (
             <>
               <Row label="Camera" value={[photo.make, photo.model].filter(Boolean).join(' ') || '—'} />

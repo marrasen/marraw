@@ -30,10 +30,15 @@ smaller stuff.
 
 - **Closed-eye detection + near-duplicate grouping.** The remaining culling
   aids from the roadmap; both want a small face model (license-vet first).
-- **Subject-aware sharpness.** Intersect the Laplacian map with the AI
-  subject matte so "background sharp, subject soft" scores as soft. Only
-  when a matte already exists — never trigger inference from the calibrate
-  pass.
+- ~~**Subject-aware sharpness.**~~ Done 2026-07-14:
+  `pyramid.SubjectSharpnessScore` (matte-weighted Laplacian variance, matte
+  reoriented from display to sensor frame), `subject_sharpness` column
+  (schema v9, -1 = no scoreable subject), backfilled by the calibrate pass
+  when a matte is already on disk and scored immediately by GenerateAIMap —
+  inference is never triggered by the pass. The grid badge and soft
+  threshold judge `subjectSharpness ?? sharpness`; InfoPanel shows a
+  "Subject focus" row. Verified by `node scripts/subjsharp-verify.mjs
+  <raw-folder>` (seeds synthetic mattes, no model download needed).
 
 ## Pre-existing (not from the ML work)
 

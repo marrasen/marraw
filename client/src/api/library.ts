@@ -77,6 +77,7 @@ export interface Photo {
     make: string;
     model: string;
     sharpness?: number;
+    subjectSharpness?: number;
 }
 
 export interface PhotoPatch {

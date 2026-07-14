@@ -10,13 +10,20 @@ import { PyramidImage } from '@/components/PyramidImage';
 import { rowLayout } from '@/lib/justify';
 import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
 
+// focusScore is the score the soft badge judges: the subject-weighted score
+// when the photo has an AI subject matte (so a sharp background can't hide a
+// soft subject), otherwise the whole-frame score.
+function focusScore(p: Photo): number | undefined {
+  return p.subjectSharpness ?? p.sharpness;
+}
+
 // softThreshold derives the soft-focus badge cutoff from the shoot itself:
 // sharpness scores are scene-dependent (low-texture scenes score low at
 // perfect focus), so a frame is "soft" when it sits far below its own
 // folder's median — the within-shoot comparison culling actually needs.
 // The 50 floor keeps uniformly-low-texture folders badge-free.
 function softThreshold(photos: Photo[]): number {
-  const vals = photos.map((p) => p.sharpness).filter((v): v is number => v != null).sort((a, b) => a - b);
+  const vals = photos.map(focusScore).filter((v): v is number => v != null).sort((a, b) => a - b);
   if (vals.length < 4) return 0; // too few measurements to call anything soft
   return Math.max(50, vals[Math.floor(vals.length / 2)] / 15);
 }
@@ -275,6 +282,7 @@ function GridCell({ photo, w, h, fitClass, softBelow }: { photo: Photo; w: numbe
   const [loaded, setLoaded] = useState(false);
   const level = w * window.devicePixelRatio > 256 ? '512' : '256';
   const isFocus = focusId === photo.id;
+  const score = focusScore(photo);
 
   return (
     <div
@@ -316,10 +324,10 @@ function GridCell({ photo, w, h, fitClass, softBelow }: { photo: Photo; w: numbe
           aria-label={photo.flag === 'pick' ? 'Pick' : 'Excluded'}
         />
       )}
-      {photo.sharpness != null && softBelow > 0 && photo.sharpness < softBelow && (
+      {score != null && softBelow > 0 && score < softBelow && (
         <div
           className="absolute bottom-[5px] right-[5px] rounded bg-black/50 px-[4px] py-0.5 text-[9px] text-amber-400"
-          title={`Soft focus (score ${Math.round(photo.sharpness)})`}
+          title={`${photo.subjectSharpness != null ? 'Soft subject' : 'Soft focus'} (score ${Math.round(score)})`}
           aria-label="Soft focus"
           data-testid="soft-badge"
         >

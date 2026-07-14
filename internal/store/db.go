@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 type DB struct {
 	*sql.DB
@@ -128,6 +128,16 @@ func (db *DB) migrate(ctx context.Context) error {
 			if _, err := tx.ExecContext(ctx,
 				`ALTER TABLE photos ADD COLUMN sharpness REAL`); err != nil {
 				return fmt.Errorf("store: migrate v8: %w", err)
+			}
+		}
+		if v < 9 {
+			// Subject-weighted sharpness (pyramid.SubjectSharpnessScore),
+			// measured only for photos whose AI subject matte already exists;
+			// NULL = not yet measured, -1 = measured but unscoreable (no
+			// meaningful subject coverage).
+			if _, err := tx.ExecContext(ctx,
+				`ALTER TABLE photos ADD COLUMN subject_sharpness REAL`); err != nil {
+				return fmt.Errorf("store: migrate v9: %w", err)
 			}
 		}
 	}

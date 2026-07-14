@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/jpeg"
 	"image/png"
 
 	"github.com/marrasen/aprot"
@@ -13,6 +14,7 @@ import (
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/pyramid"
+	"github.com/marrasen/marraw/internal/store"
 )
 
 // AIMapResult reports the generated (or already present) map's version tag;
@@ -83,6 +85,42 @@ func (e *Edits) MaskTintPreview(ctx context.Context, photoID int64, params edit.
 		return nil, err
 	}
 	return &aprot.Blob{ContentType: "image/png", Data: buf.Bytes()}, nil
+}
+
+// scoreSubjectSharpness measures the subject-weighted focus score the moment
+// a subject matte lands, then refreshes the folder's photo list so the grid's
+// soft badge reflects it without waiting for the next calibrate pass (which
+// owns the backfill for mattes that already existed). Best-effort: on any
+// failure the score stays NULL and the calibrate pass retries.
+func (e *Edits) scoreSubjectSharpness(ctx context.Context, photo store.Photo) {
+	ver, ok := aimask.MapVerFor(edit.AISubject)
+	if !ok {
+		return
+	}
+	matte := e.deps.Cache.AIMaps.Load(photo.CacheKey, edit.AISubject, ver)
+	if matte == nil {
+		return
+	}
+	proc, release, err := e.deps.Handles.Acquire(photo.ID, photo.Path())
+	if err != nil {
+		return
+	}
+	thumb, err := proc.EmbeddedThumb()
+	release()
+	if err != nil {
+		return
+	}
+	img, err := jpeg.Decode(bytes.NewReader(thumb))
+	if err != nil {
+		return
+	}
+	score, ok := pyramid.SubjectSharpnessScore(img, matte, photo.Orientation)
+	if !ok {
+		score = -1 // measured, no scoreable subject
+	}
+	if e.deps.DB.SetSubjectSharpness(context.WithoutCancel(ctx), photo.ID, score) == nil {
+		e.deps.TriggerRefresh(photosKey(photo.FolderID))
+	}
 }
 
 // categoriesFor computes the detected-category chips from a stored class map.
@@ -186,6 +224,9 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 	// the next render sees the map. A base-hash photo has no masks — skip.
 	if photo.EditHash != edit.BaseHash {
 		e.deps.Cache.InvalidateEdit(photo.CacheKey, photo.EditHash)
+	}
+	if kind == edit.AISubject {
+		e.scoreSubjectSharpness(ctx, photo)
 	}
 	if downloaded {
 		aprot.TriggerRefresh(ctx, modelsInfoKey) // Settings' model list is live

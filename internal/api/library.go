@@ -1,8 +1,8 @@
 package api
 
 import (
-	"database/sql"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -311,31 +311,41 @@ func (l *Library) ListPhotos(ctx context.Context, folderID int64) ([]Photo, erro
 
 func toAPIPhoto(p store.Photo) Photo {
 	return Photo{
-		ID:          p.ID,
-		FileName:    p.FileName,
-		CacheKey:    p.CacheKey,
-		EditHash:    p.EditHash,
-		Rating:      p.Rating,
-		Flag:        FlagFromInt(p.Flag),
-		MetaLoaded:  p.MetaLoaded,
-		FileSize:    p.FileSize,
-		BaseExpEV:   p.BaseExpEV.Float64, // sql.NullFloat64 zero-values to 0 when unmeasured
-		Width:       p.Width,
-		Height:      p.Height,
-		Orientation: p.Orientation,
-		ISO:         p.ISO,
-		Shutter:     p.Shutter,
-		Aperture:    p.Aperture,
-		FocalLen:    p.FocalLen,
-		TakenAt:     p.TakenAt,
-		Make:        p.Make,
-		Model:       p.Model,
-		Sharpness:   nullableFloat(p.Sharpness),
+		ID:               p.ID,
+		FileName:         p.FileName,
+		CacheKey:         p.CacheKey,
+		EditHash:         p.EditHash,
+		Rating:           p.Rating,
+		Flag:             FlagFromInt(p.Flag),
+		MetaLoaded:       p.MetaLoaded,
+		FileSize:         p.FileSize,
+		BaseExpEV:        p.BaseExpEV.Float64, // sql.NullFloat64 zero-values to 0 when unmeasured
+		Width:            p.Width,
+		Height:           p.Height,
+		Orientation:      p.Orientation,
+		ISO:              p.ISO,
+		Shutter:          p.Shutter,
+		Aperture:         p.Aperture,
+		FocalLen:         p.FocalLen,
+		TakenAt:          p.TakenAt,
+		Make:             p.Make,
+		Model:            p.Model,
+		Sharpness:        nullableFloat(p.Sharpness),
+		SubjectSharpness: nonNegativeFloat(p.SubjectSharpness),
 	}
 }
 
 func nullableFloat(v sql.NullFloat64) *float64 {
 	if !v.Valid {
+		return nil
+	}
+	return &v.Float64
+}
+
+// nonNegativeFloat additionally hides negative values — the store's
+// "measured but unscoreable" sentinel (Photo.SubjectSharpness).
+func nonNegativeFloat(v sql.NullFloat64) *float64 {
+	if !v.Valid || v.Float64 < 0 {
 		return nil
 	}
 	return &v.Float64

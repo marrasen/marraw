@@ -14,7 +14,9 @@ import (
 	"github.com/marrasen/aprot/tasks"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/decode"
+	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
@@ -138,19 +140,28 @@ func (l *Library) fullresPass(ctx context.Context, folderID int64, path string) 
 
 // calibratePass measures per-photo derived values that are missing: the base
 // look's auto-brighten lift (as an exposure EV, seeding the exposure dial so
-// the camera-mimic compensation is visible in the develop values) and the
+// the camera-mimic compensation is visible in the develop values), the
 // sharpness score (Laplacian variance of the embedded thumb, the grid's
-// soft-photo badge). Two demosaic-free half-size decodes plus a thumb read
-// per photo — much cheaper than the pre-render pass that follows.
+// soft-photo badge), and — only for photos whose AI subject matte is already
+// on disk — the subject-weighted sharpness score. The pass never runs
+// inference itself; a matte appears when the user first makes a subject
+// mask, and GenerateAIMap scores it immediately. Two demosaic-free half-size
+// decodes plus a thumb read per photo — much cheaper than the pre-render
+// pass that follows.
 func (l *Library) calibratePass(ctx context.Context, folderID int64, path string) {
 	name := filepath.Base(path)
 	photos, err := l.deps.DB.ListPhotos(ctx, folderID)
 	if err != nil {
 		return
 	}
+	subjVer, _ := aimask.MapVerFor(edit.AISubject)
+	needSubject := func(p store.Photo) bool {
+		return subjVer != "" && !p.SubjectSharpness.Valid &&
+			l.deps.Cache.AIMaps.Has(p.CacheKey, edit.AISubject, subjVer)
+	}
 	var work []store.Photo
 	for _, p := range photos {
-		if !p.BaseExpEV.Valid || !p.Sharpness.Valid {
+		if !p.BaseExpEV.Valid || !p.Sharpness.Valid || needSubject(p) {
 			work = append(work, p)
 		}
 	}
@@ -181,18 +192,31 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 					if err := proc.Open(p.Path()); err != nil {
 						return err
 					}
-					if !p.Sharpness.Valid {
+					if !p.Sharpness.Valid || needSubject(p) {
 						if thumb, err := proc.EmbeddedThumb(); err == nil {
 							if img, err := jpeg.Decode(bytes.NewReader(thumb)); err == nil {
-								score := pyramid.SharpnessScore(img)
-								if err := l.deps.DB.SetSharpness(context.WithoutCancel(jctx), p.ID, score); err != nil {
-									return err
+								if !p.Sharpness.Valid {
+									score := pyramid.SharpnessScore(img)
+									if err := l.deps.DB.SetSharpness(context.WithoutCancel(jctx), p.ID, score); err != nil {
+										return err
+									}
+								}
+								if needSubject(p) {
+									if matte := l.deps.Cache.AIMaps.Load(p.CacheKey, edit.AISubject, subjVer); matte != nil {
+										score, ok := pyramid.SubjectSharpnessScore(img, matte, p.Orientation)
+										if !ok {
+											score = -1 // measured, no scoreable subject
+										}
+										if err := l.deps.DB.SetSubjectSharpness(context.WithoutCancel(jctx), p.ID, score); err != nil {
+											return err
+										}
+									}
 								}
 							}
 						}
 					}
 					if p.BaseExpEV.Valid {
-						return nil // only the sharpness backfill was missing
+						return nil // only the thumb-based backfills were missing
 					}
 					ev, err := pyramid.MeasureAutoBrightEV(jctx, proc)
 					if err != nil {

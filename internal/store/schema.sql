@@ -34,6 +34,7 @@ CREATE TABLE photos (
     gps_lon     REAL,
     gps_alt     REAL,
     sharpness   REAL,
+    subject_sharpness REAL,
     UNIQUE(folder_id, file_name)
 );
 CREATE INDEX idx_photos_folder ON photos(folder_id, file_name);

@@ -134,6 +134,11 @@ type Photo struct {
 	// at a 512 px basis); the grid badges values below the soft threshold.
 	// Nil = not yet measured.
 	Sharpness *float64 `json:"sharpness,omitempty"`
+	// SubjectSharpness is the focus score over the AI subject matte alone,
+	// present only for photos with a generated subject map and a scoreable
+	// subject. When set it supersedes Sharpness for the soft badge, so a
+	// sharp background can't hide a soft subject.
+	SubjectSharpness *float64 `json:"subjectSharpness,omitempty"`
 }
 
 type DriveInfo struct {
