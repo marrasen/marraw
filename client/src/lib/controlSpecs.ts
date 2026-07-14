@@ -327,9 +327,11 @@ export const AI_CATEGORY_NAMES = [
 // window (1 = nearest); subject relies on the server defaults (threshold
 // 0.5, model edges); class masks get a light feather to soften the label
 // map's hard boundaries.
+export const DEPTH_WINDOW_DEFAULT = { depthLo: 0.6, depthHi: 1 } as const;
+
 export function aiMask(kind: 'subject' | 'depth', mapVer: string): Mask {
   if (kind === 'depth') {
-    return { type: 'ai', aiKind: kind, mapVer, depthLo: 0.6, depthHi: 1, feather: 0.3, adjust: {} };
+    return { type: 'ai', aiKind: kind, mapVer, ...DEPTH_WINDOW_DEFAULT, feather: 0.3, adjust: {} };
   }
   return { type: 'ai', aiKind: kind, mapVer, adjust: {} };
 }

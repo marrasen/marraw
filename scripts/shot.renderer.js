@@ -211,6 +211,35 @@ if (shot === 'cull') {
     chips: chips.map((c) => c.textContent),
     classMaskAdded: (es.getState().draft?.masks ?? []).some((m) => m.aiKind === 'class'),
   };
+} else if (shot === 'depthrange') {
+  // Depth window as ONE two-thumb range row: generate a depth mask via the
+  // real button, move the window through the store, and assert the "Depth
+  // range" slider renders two thumbs whose display mirrors the mask params.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  ui().setDevelopTab('masks');
+  await sleep(600);
+  mw.esUpdate({ masks: [] }); // idempotence: drop persisted masks first
+  mw.esCommit();
+  await sleep(800);
+  document.querySelector('[data-testid="ai-mask-depth"]')?.click();
+  await until(() => (es.getState().draft?.masks ?? []).some((m) => m.aiKind === 'depth'), 120000);
+  await sleep(500);
+  const idx = (es.getState().draft?.masks ?? []).findIndex((m) => m.aiKind === 'depth');
+  mw.esUpdateMask(idx, { depthLo: 0.35, depthHi: 0.8 });
+  mw.esCommit();
+  await sleep(500);
+  const row = [...document.querySelectorAll('span')]
+    .find((s) => s.textContent === 'Depth range')?.parentElement;
+  const mask = es.getState().draft?.masks?.[idx] ?? {};
+  window.__maskProbe = {
+    rowFound: !!row,
+    thumbCount: row?.querySelectorAll('[data-slot="slider-thumb"]').length ?? 0,
+    display: row?.querySelector('span.font-mono')?.textContent ?? '',
+    depthLo: mask.depthLo,
+    depthHi: mask.depthHi,
+  };
 } else if (shot.startsWith('browse')) {
   // Browse latency probe: arrow-step through the folder at a human culling
   // pace and measure how long the render chip stays busy per step. On a

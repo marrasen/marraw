@@ -14,6 +14,7 @@ import { aIModelStatus as aiModelStatus, applyBatchEdit, generateAIMap, type AIM
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import type { AIKindType, Mask, MaskAdjust, Params } from '@/api/edit';
 import {
+  DEPTH_WINDOW_DEFAULT,
   MASK_CONTROL_ORDER,
   MASK_CONTROL_SPECS,
   aiClassMask,
@@ -1182,10 +1183,18 @@ function AIShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; i
           slider must never land exactly on 0. */}
       {mask.aiKind === 'subject' && shapeSlider('Threshold', mask.threshold ?? 0, 0.5, (v) => ({ threshold: v }), 0.02)}
       {mask.aiKind === 'depth' && (
-        <>
-          {shapeSlider('Far edge', mask.depthLo ?? 0, 0, (v) => ({ depthLo: v }))}
-          {shapeSlider('Near edge', mask.depthHi ?? 0, 0, (v) => ({ depthHi: v }))}
-        </>
+        <EditRangeSlider
+          label="Depth range"
+          value={[(mask.depthLo ?? 0) * 100, (mask.depthHi ?? 0) * 100]}
+          display={`${Math.round((mask.depthLo ?? 0) * 100)}–${Math.round((mask.depthHi ?? 0) * 100)}`}
+          min={0}
+          max={100}
+          step={1}
+          neutral={[DEPTH_WINDOW_DEFAULT.depthLo * 100, DEPTH_WINDOW_DEFAULT.depthHi * 100]}
+          onChange={([lo, hi]) => patch({ depthLo: lo / 100, depthHi: hi / 100 })}
+          onCommit={([lo, hi]) => commit({ depthLo: lo / 100, depthHi: hi / 100 })}
+          onClear={() => commit({ ...DEPTH_WINDOW_DEFAULT })}
+        />
       )}
       {shapeSlider('Edge feather', mask.feather ?? 0, 0, (v) => ({ feather: v }))}
     </>
@@ -1629,6 +1638,88 @@ export function EditSlider({
           onValueCommitted={(v) => {
             setDragging(null);
             onCommit(v as number);
+          }}
+        />
+      </div>
+      <span className="w-[56px] shrink-0 text-right font-mono text-[11px] text-foreground tabular-nums">
+        {display}
+      </span>
+      {onClear && neutral != null ? (
+        <button
+          type="button"
+          className={cn(
+            'shrink-0 text-muted-foreground transition-colors hover:text-foreground',
+            !changed && 'invisible',
+          )}
+          title={`Reset ${label.toLowerCase()}`}
+          aria-label={`Reset ${label.toLowerCase()}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setDragging(null);
+            onClear();
+          }}
+        >
+          <RotateCcw className="size-3" />
+        </button>
+      ) : (
+        <span className="w-3 shrink-0" />
+      )}
+    </div>
+  );
+}
+
+// EditSlider's two-thumb sibling for window controls (the depth range): same
+// row plate, but the value is a [lo, hi] pair and the fill spans the kept
+// window between the thumbs.
+export function EditRangeSlider({
+  label,
+  value,
+  display,
+  min,
+  max,
+  step,
+  neutral,
+  onChange,
+  onCommit,
+  onClear,
+}: {
+  label: string;
+  value: [number, number];
+  display: string;
+  min: number;
+  max: number;
+  step: number;
+  /** Display-space default window; the clear button shows while the value differs from it. */
+  neutral?: [number, number];
+  onChange: (v: [number, number]) => void;
+  onCommit: (v: [number, number]) => void;
+  onClear?: () => void;
+}) {
+  const [dragging, setDragging] = useState<[number, number] | null>(null);
+  const shown = dragging ?? value;
+  const changed =
+    neutral != null &&
+    (Math.abs(value[0] - neutral[0]) > 1e-9 || Math.abs(value[1] - neutral[1]) > 1e-9);
+  return (
+    <div className="flex items-center gap-2.5 rounded-md">
+      <span className="w-[96px] shrink-0 truncate text-[11.5px] text-secondary-foreground">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1">
+        <Slider
+          value={shown}
+          min={min}
+          max={max}
+          step={step}
+          aria-label={label}
+          onValueChange={(v) => {
+            const pair = [...(v as number[])] as [number, number];
+            setDragging(pair);
+            onChange(pair);
+          }}
+          onValueCommitted={(v) => {
+            setDragging(null);
+            onCommit([...(v as number[])] as [number, number]);
           }}
         />
       </div>
