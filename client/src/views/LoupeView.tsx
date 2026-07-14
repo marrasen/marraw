@@ -234,6 +234,55 @@ function levelForPx(px: number): Level | 'tiles' {
   return 'tiles';
 }
 
+// useTilesWarm reports whether the photo's full-resolution tile set is
+// already rendered (tile (0,0) is the grid-complete sentinel), optionally
+// kicking ONE background render for the focused photo when it isn't. This is
+// what keeps high-DPI fit view browsable: on a 4K display the fit box
+// exceeds 2048 device pixels, so the loupe wants tiles for EVERY photo — but
+// the pre-render pass deliberately stops at 2048, and rendering the full
+// tile set on demand costs 1.5-2.5s per photo. So at fit, tiles engage only
+// once they exist; a cold photo shows the warm 2048 (upscaled — exactly what
+// was on screen before this hook existed) while the kicked render sharpens
+// it if the user pauses. Skimming past aborts the kick mid-decode.
+function useTilesWarm(photo: Photo, want: boolean, kick: boolean): boolean {
+  const [warm, setWarm] = useState(false);
+  useEffect(() => {
+    setWarm(false);
+    if (!want) return;
+    const ac = new AbortController();
+    let dwell = 0;
+    (async () => {
+      try {
+        const probe = await fetch(tileUrl(photo, 0, 0) + '&cacheOnly=1', { signal: ac.signal });
+        if (probe.ok) {
+          setWarm(true);
+          return;
+        }
+        if (!kick) return;
+        // Kick only after a real dwell: while the user is skimming, no full
+        // render ever STARTS — cheaper and more robust than starting one per
+        // step and racing to cancel it (a render that slips past its
+        // cancellation checkpoint blocks the pipeline for seconds).
+        dwell = window.setTimeout(async () => {
+          try {
+            const render = await fetch(tileUrl(photo, 0, 0), { signal: ac.signal });
+            if (render.ok) setWarm(true);
+          } catch {
+            // aborted: the user moved on mid-render
+          }
+        }, 350);
+      } catch {
+        // aborted: the user moved on
+      }
+    })();
+    return () => {
+      window.clearTimeout(dwell);
+      ac.abort();
+    };
+  }, [photo, want, kick]);
+  return warm;
+}
+
 // useTilePrefetch warms the photos adjacent to the focused one so stepping
 // through a burst stays instant. It pre-decodes their 2048 rendition — the
 // fit underlay AND the 1:1 bridge, and the single decode the backend runs for
@@ -534,15 +583,25 @@ export function CinemaImage({
   // underlay stretched into the box, and TileLayer sharpens the visible
   // region with full-resolution tiles on top; neighbors are warmed so
   // stepping through a burst stays instant.
-  const wantTiles = !previewUrl && level === 'tiles' && !cropping;
+  const tileDepth = !previewUrl && level === 'tiles' && !cropping;
+  // High-DPI fit reaches tile depth for every photo, but fit browsing must
+  // NEVER block on tile renders (pre-render stops at 2048 by design): tiles
+  // engage only when warm, with one skim-safe background render kicked for
+  // the focused photo. A deliberate 1:1 zoom keeps render-on-demand.
+  const atFit = zoom === 'fit';
+  const tilesWarm = useTilesWarm(photo, tileDepth && atFit, true);
+  const wantTiles = tileDepth && (!atFit || tilesWarm);
   const src = previewUrl ?? imgUrl(photo, level === 'tiles' ? '2048' : level);
   // The pyramid level fit displays (never 'tiles' in the fit branch below).
   const fitLevel: Level = level === 'tiles' ? '2048' : level;
   const [shownSrc, setShownSrc] = useState('');
   // Warm neighbours whenever the loupe is showing committed renditions (fit
   // included — that path has no tile layer to bridge a cold 2048); fire the
-  // full-res tile trigger only past pyramid depth.
-  useTilePrefetch(photos, photo, !previewUrl && !cropping && haveDims, wantTiles);
+  // full-res tile trigger only past pyramid depth AND only when the user
+  // deliberately zoomed in — at high-DPI fit, prefetching neighbours' tile
+  // sets renders a multi-second full decode per neighbour per step (the
+  // 2026-07-14 browse-stall log: bursts of level=full renders while culling).
+  useTilePrefetch(photos, photo, !previewUrl && !cropping && haveDims, tileDepth && !atFit);
 
   // Once a commit lands (the photo's editHash changes to the newly rendered
   // state) AND we're past pyramid depth, drop the live 2048 preview so the

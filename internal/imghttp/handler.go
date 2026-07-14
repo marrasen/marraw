@@ -132,6 +132,12 @@ func (h *Handler) ServeTile(w http.ResponseWriter, r *http.Request) {
 	}
 	path := h.Cache.PathForTile(photo.CacheKey, tx, ty, editHash)
 	if _, err := os.Stat(path); err != nil {
+		// cacheOnly: the fit loupe probing whether the tile set is warm —
+		// 404 means "not rendered", never a multi-second on-demand render.
+		if r.URL.Query().Get("cacheOnly") != "" {
+			http.Error(w, "not cached", http.StatusNotFound)
+			return
+		}
 		if !generatable(photo, editHash) {
 			http.Error(w, "unknown edit state", http.StatusNotFound)
 			return
