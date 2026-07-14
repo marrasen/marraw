@@ -12,3 +12,4 @@ go.work.sum
 build/ui-smoke.png
 build/packaged-smoke.png
 .idea/
+ui-verify-output.txt
