@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -72,7 +73,7 @@ func (m *Manager) Session(ctx context.Context, spec ModelSpec, progress Progress
 
 	// Download (or find) the weights outside the lock; singleflight keyed by
 	// file name so two callers never double-download one model.
-	v, err, _ := m.sf.Do(spec.fileName(), func() (any, error) {
+	v, err, _ := m.sf.Do(spec.FileName(), func() (any, error) {
 		return m.ensureModel(ctx, spec, progress)
 	})
 	if err != nil {
@@ -120,8 +121,68 @@ func (m *Manager) Session(ctx context.Context, spec ModelSpec, progress Progress
 // HasModel reports whether spec's weights are already on disk — the check
 // consent-gated callers make before a Session call that would download.
 func (m *Manager) HasModel(spec ModelSpec) bool {
-	_, err := os.Stat(filepath.Join(m.modelsDir, spec.fileName()))
+	_, err := os.Stat(filepath.Join(m.modelsDir, spec.FileName()))
 	return err == nil
+}
+
+// Dir is the models directory (<dataDir>/models).
+func (m *Manager) Dir() string {
+	return m.modelsDir
+}
+
+// InstalledModel is one model file on disk, spec-known or not (a version bump
+// leaves the old file behind until the user deletes it).
+type InstalledModel struct {
+	FileName string
+	Bytes    int64
+}
+
+// InstalledModels lists the model files on disk, ignoring in-flight ".part-*"
+// download temps. A missing models dir (nothing downloaded yet) is empty, not
+// an error.
+func (m *Manager) InstalledModels() ([]InstalledModel, error) {
+	entries, err := os.ReadDir(m.modelsDir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []InstalledModel
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".onnx") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue // deleted between ReadDir and Stat
+		}
+		out = append(out, InstalledModel{FileName: e.Name(), Bytes: info.Size()})
+	}
+	return out, nil
+}
+
+// DeleteModel removes one model file by its on-disk name, destroying any live
+// session backed by it first. Weights re-download on the feature's next use.
+func (m *Manager) DeleteModel(fileName string) error {
+	if fileName != filepath.Base(fileName) || !strings.HasSuffix(fileName, ".onnx") {
+		return fmt.Errorf("infer: invalid model file name %q", fileName)
+	}
+	m.mu.Lock()
+	// File names are "<id>-<version>.onnx"; evict by prefix so the OS-level
+	// delete never races a session holding the weights open.
+	for i := 0; i < len(m.order); {
+		id := m.order[i]
+		if strings.HasPrefix(fileName, string(id)+"-") {
+			m.sessions[id].destroy()
+			delete(m.sessions, id)
+			m.order = append(m.order[:i], m.order[i+1:]...)
+			continue
+		}
+		i++
+	}
+	m.mu.Unlock()
+	return os.Remove(filepath.Join(m.modelsDir, fileName))
 }
 
 // touch moves id to the most-recently-used end. Caller holds m.mu.

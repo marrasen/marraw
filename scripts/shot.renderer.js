@@ -282,6 +282,19 @@ if (shot === 'cull') {
   ui().setSettingsOpen(true);
   await sleep(300);
   [...document.querySelectorAll('button')].find((b) => b.textContent === 'Cache')?.click();
+} else if (shot === 'models') {
+  // Downloaded-models inventory: seed the models dir first (models-verify.mjs
+  // leaves three specs + one orphan behind), open Settings → Models, probe
+  // the rows the live GetModelsInfo subscription rendered.
+  ui().setSettingsOpen(true);
+  await sleep(300);
+  [...document.querySelectorAll('button')].find((b) => b.textContent === 'Models')?.click();
+  await sleep(800);
+  const dlg = document.querySelector('[role="dialog"]');
+  const rows = [...dlg.querySelectorAll('.text-sm.font-medium')]
+    .map((e) => e.textContent)
+    .filter((t) => t !== 'Downloaded models');
+  window.__modelsProbe = { rows, text: dlg.textContent.includes('Not used by this version') };
 } else if (shot === 'develop-light') {
   document.documentElement.classList.remove('dark');
   // setState on the mirror: shows the dials without persisting server-side.
@@ -509,6 +522,7 @@ window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 30
 await sleep(400);
 const probe =
   window.__wmProbe ??
+  window.__modelsProbe ??
   window.__maskProbe ??
   window.__cropProbe ??
   window.__renderProbe ??

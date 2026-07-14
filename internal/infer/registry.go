@@ -22,9 +22,9 @@ type ModelSpec struct {
 	PreferGPU bool
 }
 
-// fileName is the on-disk name under the models dir. Version is baked in so
+// FileName is the on-disk name under the models dir. Version is baked in so
 // a model upgrade never overwrites the file an existing edit references.
-func (s ModelSpec) fileName() string {
+func (s ModelSpec) FileName() string {
 	return fmt.Sprintf("%s-%s.onnx", s.ID, s.Version)
 }
 

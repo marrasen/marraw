@@ -21,7 +21,7 @@ var downloadClient = &http.Client{}
 // time — an existing file in the models dir is trusted (it is app-owned data;
 // re-hashing 100+ MB on every session open buys nothing).
 func (m *Manager) ensureModel(ctx context.Context, spec ModelSpec, progress Progress) (string, error) {
-	path := filepath.Join(m.modelsDir, spec.fileName())
+	path := filepath.Join(m.modelsDir, spec.FileName())
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
@@ -51,7 +51,7 @@ func (m *Manager) ensureModel(ctx context.Context, spec ModelSpec, progress Prog
 
 	// Stream to a temp file next to the final path (same volume → atomic
 	// rename), hashing as we go.
-	tmp, err := os.CreateTemp(m.modelsDir, spec.fileName()+".part-*")
+	tmp, err := os.CreateTemp(m.modelsDir, spec.FileName()+".part-*")
 	if err != nil {
 		return "", err
 	}

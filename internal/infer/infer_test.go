@@ -207,6 +207,63 @@ func TestEnsureModelNoURL(t *testing.T) {
 	}
 }
 
+func TestInstalledModels(t *testing.T) {
+	m := NewManager(filepath.Join(t.TempDir(), "models"))
+
+	// Missing dir (nothing downloaded yet) is empty, not an error.
+	got, err := m.InstalledModels()
+	if err != nil || len(got) != 0 {
+		t.Fatalf("InstalledModels on missing dir = %v, %v; want empty, nil", got, err)
+	}
+
+	if err := os.MkdirAll(m.modelsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, size := range map[string]int{"toy-1.onnx": 16, "toy-1.onnx.part-123": 4, "notes.txt": 2} {
+		if err := os.WriteFile(filepath.Join(m.modelsDir, name), make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err = m.InstalledModels()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].FileName != "toy-1.onnx" || got[0].Bytes != 16 {
+		t.Fatalf("InstalledModels = %v, want just toy-1.onnx (16 B)", got)
+	}
+}
+
+func TestDeleteModel(t *testing.T) {
+	requireRuntime(t)
+	dir := t.TempDir()
+	m := NewManager(dir)
+	spec := toySpec(t, dir)
+	if _, err := m.Session(context.Background(), spec, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, bad := range []string{"../toy-1.onnx", "toy-1.bin", "sub/toy-1.onnx"} {
+		if err := m.DeleteModel(bad); err == nil {
+			t.Errorf("DeleteModel(%q) succeeded, want validation error", bad)
+		}
+	}
+
+	if err := m.DeleteModel(spec.FileName()); err != nil {
+		t.Fatal(err)
+	}
+	if m.HasModel(spec) {
+		t.Error("model file still on disk after DeleteModel")
+	}
+	if _, ok := m.sessions[spec.ID]; ok {
+		t.Error("live session not evicted by DeleteModel")
+	}
+
+	// A fresh Session must re-materialize the weights, not serve a zombie.
+	if _, err := m.Session(context.Background(), spec, nil); err == nil {
+		t.Error("Session after delete succeeded without a URL to re-download from")
+	}
+}
+
 func TestRegistry(t *testing.T) {
 	spec := ModelSpec{ID: "reg-test", Version: "1"}
 	Register(spec)

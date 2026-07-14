@@ -16,6 +16,18 @@ export interface CacheInfo {
     capBytes: number;
 }
 
+export interface ModelFile {
+    fileName: string;
+    name?: string;
+    purpose?: string;
+    bytes: number;
+}
+
+export interface ModelsInfo {
+    dir: string;
+    models: ModelFile[];
+}
+
 
 export function clearCache(client: ApiClient, options?: RequestOptions): Promise<CacheInfo> {
     return client.request<CacheInfo>('System.ClearCache', [], options);
@@ -30,6 +42,19 @@ export function subscribeClearCache(client: ApiClient, callback: (data: CacheInf
 }
 
 
+export function deleteModel(client: ApiClient, fileName: string, options?: RequestOptions): Promise<ModelsInfo> {
+    return client.request<ModelsInfo>('System.DeleteModel', [fileName], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+deleteModel.method = 'System.DeleteModel' as const;
+
+export function subscribeDeleteModel(client: ApiClient, fileName: string, callback: (data: ModelsInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<ModelsInfo>('System.DeleteModel', [fileName], callback, onError, options);
+}
+
+
 export function getCacheInfo(client: ApiClient, options?: RequestOptions): Promise<CacheInfo> {
     return client.request<CacheInfo>('System.GetCacheInfo', [], options);
 }
@@ -40,6 +65,19 @@ getCacheInfo.method = 'System.GetCacheInfo' as const;
 
 export function subscribeGetCacheInfo(client: ApiClient, callback: (data: CacheInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<CacheInfo>('System.GetCacheInfo', [], callback, onError, options);
+}
+
+
+export function getModelsInfo(client: ApiClient, options?: RequestOptions): Promise<ModelsInfo> {
+    return client.request<ModelsInfo>('System.GetModelsInfo', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+getModelsInfo.method = 'System.GetModelsInfo' as const;
+
+export function subscribeGetModelsInfo(client: ApiClient, callback: (data: ModelsInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<ModelsInfo>('System.GetModelsInfo', [], callback, onError, options);
 }
 
 
@@ -85,6 +123,21 @@ export function useClearCache(options?: UseQueryOptions<CacheInfo>): UseQueryRes
 }
 
 /**
+ * Subscribes to `System.DeleteModel` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useDeleteModel(fileName: string, options?: UseQueryOptions<ModelsInfo>): UseQueryResult<ModelsInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, fileName: string) => deleteModel(client, fileName, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [fileName], _subscribe: { method: 'System.DeleteModel', params: [fileName] } });
+}
+
+/**
  * Subscribes to `System.GetCacheInfo` and re-renders automatically when the
  * server triggers a refresh. The subscription is cleaned up on unmount.
  * See {@link UseQueryResult} for return value details — including the
@@ -96,6 +149,20 @@ export function useGetCacheInfo(options?: UseQueryOptions<CacheInfo>): UseQueryR
         [],
     );
     return useQuery(wrappedFn, { ...options, _subscribe: { method: 'System.GetCacheInfo', params: [] } });
+}
+
+/**
+ * Subscribes to `System.GetModelsInfo` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useGetModelsInfo(options?: UseQueryOptions<ModelsInfo>): UseQueryResult<ModelsInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => getModelsInfo(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'System.GetModelsInfo', params: [] } });
 }
 
 /**

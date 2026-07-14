@@ -167,7 +167,9 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 
 	tctx, task := tasks.StartTask[TaskMeta](ctx, "AI mask: "+photo.FileName, tasks.Shared())
 	task.SetMeta(TaskMeta{Kind: "aimask"})
+	downloaded := false // progress only fires while weights download
 	gray, err := aimask.Generate(tctx, e.deps.Infer, kind, rgba, func(done, total int64) {
+		downloaded = true
 		task.Progress(int(done>>20), int(total>>20)) // model download, MB units
 	})
 	if err != nil {
@@ -184,6 +186,9 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 	// the next render sees the map. A base-hash photo has no masks — skip.
 	if photo.EditHash != edit.BaseHash {
 		e.deps.Cache.InvalidateEdit(photo.CacheKey, photo.EditHash)
+	}
+	if downloaded {
+		aprot.TriggerRefresh(ctx, modelsInfoKey) // Settings' model list is live
 	}
 	task.Err(nil)
 	res := &AIMapResult{MapVer: ver, Generated: true}

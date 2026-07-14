@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { X } from 'lucide-react';
 import { useGetAppSettings, setSidecarWrites } from '@/api/library';
-import { useGetCacheInfo, clearCache, setCacheCap, setCacheDir } from '@/api/system';
+import {
+  useGetCacheInfo,
+  clearCache,
+  setCacheCap,
+  setCacheDir,
+  useGetModelsInfo,
+  deleteModel,
+} from '@/api/system';
 import { useApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
@@ -47,7 +54,7 @@ function formatBytes(n: number): string {
   return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
 }
 
-const SECTIONS = ['General', 'Toolbars', 'Auto presets', 'Cache', 'Sidecars'] as const;
+const SECTIONS = ['General', 'Toolbars', 'Auto presets', 'Cache', 'Models', 'Sidecars'] as const;
 type Section = (typeof SECTIONS)[number];
 
 /**
@@ -96,6 +103,7 @@ export function SettingsDialog() {
             {open && section === 'Toolbars' && <ToolbarsSection />}
             {open && section === 'Auto presets' && <AutoPresetsSection />}
             {open && section === 'Cache' && <CacheSection />}
+            {open && section === 'Models' && <ModelsSection />}
             {open && section === 'Sidecars' && <SidecarSection />}
           </div>
         </div>
@@ -679,6 +687,115 @@ function CacheSection() {
           )
         }
       />
+    </div>
+  );
+}
+
+// ModelsSection: the AI model weights on disk. Features download their model
+// on first consented use and never clean up, so this is the inventory — and
+// the only in-app way to reclaim that space (~1.6 GB with all three).
+function ModelsSection() {
+  const client = useApiClient();
+  const { data: info } = useGetModelsInfo();
+  const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const models = info?.models ?? [];
+  const total = models.reduce((sum, m) => sum + m.bytes, 0);
+
+  const remove = (fileName: string) => {
+    setBusy(true);
+    deleteModel(client, fileName)
+      .then(() => toast.success('Model deleted'))
+      .catch((err) => toast.error((err as Error).message))
+      .finally(() => {
+        setBusy(false);
+        setConfirmDelete(null);
+      });
+  };
+
+  return (
+    <div className="flex flex-col">
+      <div className="pb-4">
+        <div className="text-sm font-medium">Downloaded models</div>
+        <div className="mt-0.5 text-xs leading-normal text-muted-foreground">
+          AI features fetch their model weights on first use, always after you confirm the
+          download. Deleting one frees disk space without touching your edits or generated masks —
+          it simply downloads again the next time a feature needs it.
+        </div>
+      </div>
+      {info && models.length === 0 && (
+        <SettingRow title="No models downloaded" description="Nothing on disk yet." />
+      )}
+      {models.map((m) => (
+        <SettingRow
+          key={m.fileName}
+          title={m.name || m.fileName}
+          description={
+            <div className="flex flex-col gap-0.5">
+              <span>{m.purpose || 'Not used by this version of marraw — safe to delete.'}</span>
+              <span className="font-mono text-[11px]">
+                {m.fileName} · <span className="text-foreground">{formatBytes(m.bytes)}</span>
+              </span>
+            </div>
+          }
+          control={
+            confirmDelete === m.fileName ? (
+              <div className="flex gap-1.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfirmDelete(null)}
+                  disabled={busy}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => remove(m.fileName)}
+                >
+                  Delete
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={busy}
+                onClick={() => setConfirmDelete(m.fileName)}
+              >
+                Delete
+              </Button>
+            )
+          }
+        />
+      ))}
+      {models.length > 0 && (
+        <SettingRow
+          title="On-disk usage"
+          description={
+            info?.dir ? (
+              <button
+                className="max-w-full truncate text-left font-mono text-[11px] underline-offset-2 hover:underline"
+                title={window.marraw ? `${info.dir} — click to reveal` : info.dir}
+                onClick={() => window.marraw?.revealInExplorer(info.dir)}
+              >
+                {info.dir}
+              </button>
+            ) : (
+              '…'
+            )
+          }
+          control={
+            <span className="font-mono text-[11.5px]">
+              <span className="text-foreground">{formatBytes(total)}</span> ·{' '}
+              {models.length === 1 ? '1 model' : `${models.length} models`}
+            </span>
+          }
+        />
+      )}
     </div>
   );
 }
