@@ -11,6 +11,7 @@ import (
 	"image"
 	"image/jpeg"
 	"io/fs"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -367,6 +368,14 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// Every RAW-route render is logged with its trigger: a client-visible
+	// decode against a supposedly warm cache is a bug, and this line is how
+	// it gets caught (see the browse-stall hunt, 2026-07-14).
+	rawStart := time.Now()
+	defer func() {
+		log.Printf("pyramid: RAW render %s level=%s hash=%s prio=%d took %s",
+			photo.FileName, level, editHash, prio, time.Since(rawStart).Round(time.Millisecond))
+	}()
 	params := edits.LibrawParams(level != "full")
 	if level == "full" && (edits == nil || edits.Demosaic == "") {
 		params.UserQual = libraw.DemosaicPPG

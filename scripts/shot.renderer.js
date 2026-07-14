@@ -211,6 +211,37 @@ if (shot === 'cull') {
     chips: chips.map((c) => c.textContent),
     classMaskAdded: (es.getState().draft?.masks ?? []).some((m) => m.aiKind === 'class'),
   };
+} else if (shot === 'browse') {
+  // Browse latency probe: arrow-step through the folder in develop at a
+  // human culling pace and measure how long the render chip stays busy per
+  // step. On a fully pre-rendered, unedited folder every number should be
+  // tens of ms — anything in the seconds is THE stall.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1500);
+  const chip = () => document.querySelector('[data-testid="render-chip"]');
+  const press = (key) =>
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+  const steps = [];
+  for (let i = 0; i < 30; i++) {
+    const t0 = performance.now();
+    press('ArrowRight');
+    await sleep(50); // give state a beat to flip busy
+    while (chip()?.dataset.busy === 'true' && performance.now() - t0 < 20000) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    steps.push(Math.round(performance.now() - t0));
+    await sleep(150); // culling pace
+  }
+  const sorted = [...steps].sort((a, b) => a - b);
+  window.__maskProbe = {
+    steps,
+    median: sorted[Math.floor(sorted.length / 2)],
+    p90: sorted[Math.floor(sorted.length * 0.9)],
+    max: sorted[sorted.length - 1],
+    over1s: steps.filter((s) => s > 1000).length,
+  };
 } else if (shot === 'addfolder') {
   ui().setAddFolderOpen(true);
 } else if (shot === 'shortcuts') {

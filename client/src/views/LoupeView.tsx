@@ -1073,6 +1073,8 @@ export function CinemaImage({
           busy ? 'opacity-100 delay-150' : 'opacity-0 delay-0',
         )}
         style={{ bottom: renderingBadgeBottom }}
+        data-testid="render-chip"
+        data-busy={busy ? 'true' : 'false'}
       >
         <ChipSpinner className="size-[19px]" />
         <div className="flex flex-col gap-0.5">
