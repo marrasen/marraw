@@ -8,10 +8,11 @@
 //
 // Seeds sparse fake weights in the daemon's real models dir (learned from
 // GetModelsInfo) and leaves them behind on success — `shot.mjs <f> models`
-// wants a populated list. Safe: fakes only ever share names with real
-// weights, and a real 170 MB+ model is never deleted by this script.
+// wants a populated list. The fakes share names with real weights, so the
+// clean-slate pass content-checks every file it would delete: real weights
+// (non-zero leading bytes) abort the run instead of being destroyed.
 
-import { openSync, closeSync, ftruncateSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { openSync, closeSync, ftruncateSync, existsSync, mkdirSync, rmSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ws = new WebSocket('ws://127.0.0.1:8483/ws');
@@ -81,14 +82,30 @@ const seed = (dir, f) => {
 let info = await call('System.GetModelsInfo', []);
 step(`models dir: ${info.dir}`);
 check(typeof info.dir === 'string' && info.dir.length > 0, 'GetModelsInfo reports the models dir');
-// Clean slate, deleting ONLY files this script seeds (by name). Anything
-// else in the dir — say real downloaded weights — aborts the run.
+// Clean slate, deleting ONLY files this script seeds. A fixture NAME is not
+// proof of fixture CONTENT — real downloaded weights carry these exact names.
+// Fakes are sparse zero-fill; anything with data in its leading bytes is a
+// real model and aborts the run instead of being deleted.
 const fakes = new Set([...SPECS, ORPHAN].map((f) => f.file));
-for (const m of info.models ?? []) {
-  if (!fakes.has(m.fileName)) {
-    throw new Error(`refusing to run: ${join(info.dir, m.fileName)} is not a fixture of this script`);
+const looksReal = (path) => {
+  const buf = Buffer.alloc(16);
+  const fd = openSync(path, 'r');
+  try {
+    readSync(fd, buf, 0, buf.length, 0);
+  } finally {
+    closeSync(fd);
   }
-  rmSync(join(info.dir, m.fileName), { force: true });
+  return buf.some((b) => b !== 0);
+};
+for (const m of info.models ?? []) {
+  const path = join(info.dir, m.fileName);
+  if (!fakes.has(m.fileName)) {
+    throw new Error(`refusing to run: ${path} is not a fixture of this script`);
+  }
+  if (looksReal(path)) {
+    throw new Error(`refusing to run: ${path} holds real weights (non-zero content) — move real models aside first`);
+  }
+  rmSync(path, { force: true });
 }
 info = await call('System.GetModelsInfo', []);
 check((info.models ?? []).length === 0, 'empty models dir lists nothing');

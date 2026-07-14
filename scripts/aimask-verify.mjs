@@ -144,7 +144,11 @@ check(Buffer.compare(Buffer.from(neutral.bytes), Buffer.from(plain2.bytes)) === 
 {
   const { renameSync, existsSync } = await import('node:fs');
   const { join } = await import('node:path');
-  const modelPath = join(process.env.APPDATA, 'marraw', 'models', 'isnet-1.onnx');
+  const { homedir } = await import('node:os');
+  const dataDir = process.env.APPDATA
+    ? join(process.env.APPDATA, 'marraw')
+    : join(homedir(), '.config', 'marraw');
+  const modelPath = join(dataDir, 'models', 'isnet-1.onnx');
   if (existsSync(modelPath)) {
     renameSync(modelPath, modelPath + '.bak');
     try {
