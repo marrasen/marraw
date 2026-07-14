@@ -34,7 +34,7 @@ import {
 } from '@/lib/library';
 import { updateLastSeenVersion, updateRailWidth, UISettingsSync } from '@/lib/uiSettings';
 import { entriesSince, type ChangelogEntry } from '@/lib/changelog';
-import { openFolder } from '@/api/library';
+import { openFolder, setFocus } from '@/api/library';
 import { useApiClient } from '@/api/client';
 import '@/lib/electron';
 
@@ -313,6 +313,17 @@ function Workspace({ folderId }: { folderId: number }) {
   const { all, visible } = usePhotos(folderId);
   const picked = all.filter((p) => p.flag === 'pick').length;
   const scan = useFolderScan(folderPath);
+  const client = useApiClient();
+
+  // Tell the backend which photo the viewport is centred on so its background
+  // pre-render pass warms the loupe-ready rendition outward from here first.
+  // Fire-and-forget; the pass re-reads focus on every claim, so this only needs
+  // to keep the hint current as the user navigates.
+  const focusId = useUIStore((s) => s.focusId);
+  useEffect(() => {
+    if (focusId == null) return;
+    setFocus(client, folderId, focusId).catch(() => {});
+  }, [client, folderId, focusId]);
 
   // ?loupe=1 jumps straight into loupe on the first photo (UI smoke test).
   useEffect(() => {

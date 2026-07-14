@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 
 	"github.com/marrasen/aprot"
@@ -98,12 +99,14 @@ func (l *Library) fullresPass(ctx context.Context, folderID int64, path string) 
 	if err != nil {
 		return
 	}
-	var work []store.Photo
-	for _, p := range photos {
+	idPos := make(map[int64]int, len(photos))
+	var work []focusItem
+	for i, p := range photos {
+		idPos[p.ID] = i
 		// Tile 0,0 exists iff the folder's full render has been done for this
 		// edit state — the cheap stand-in for the whole grid.
 		if _, err := os.Stat(l.deps.Cache.PathForTile(p.CacheKey, 0, 0, currentHash(p))); err != nil {
-			work = append(work, p)
+			work = append(work, focusItem{p: p, pos: i})
 		}
 	}
 	if len(work) == 0 {
@@ -116,26 +119,19 @@ func (l *Library) fullresPass(ctx context.Context, folderID int64, path string) 
 	task.Progress(0, total)
 
 	var done atomic.Int64
-	g, gctx := errgroup.WithContext(tctx)
 	// Same headroom as the pre-render pass: leave a couple of pool workers
 	// free so an interactive edit preview never waits out a full decode.
-	g.SetLimit(max(1, runtime.NumCPU()-2))
-	for _, p := range work {
-		g.Go(func() error {
-			if gctx.Err() != nil {
-				return gctx.Err()
-			}
+	err = l.scheduleOutwardFromFocus(tctx, work, idPos, max(1, runtime.NumCPU()-2),
+		func(gctx context.Context, p store.Photo) {
 			if _, err := l.deps.Cache.EnsureTile(gctx, p, 0, 0, currentHash(p), decode.PriorityBackground); err != nil {
 				if gctx.Err() != nil {
-					return gctx.Err()
+					return
 				}
 				task.Output(p.FileName + ": " + err.Error())
 			}
 			task.Progress(int(done.Add(1)), total)
-			return nil
 		})
-	}
-	task.Err(g.Wait())
+	task.Err(err)
 }
 
 // calibratePass measures per-photo derived values that are missing: the base
@@ -264,17 +260,21 @@ func (l *Library) metaPass(ctx context.Context, folderID int64, path string) {
 // prerenderPass renders the loupe-ready 2048 rendition (which also yields
 // every smaller level) for photos that don't have one yet, under a shared
 // cancellable task. Runs at background priority so visible/interactive
-// requests always preempt it in the decode pool.
+// requests always preempt it in the decode pool. Work is rendered outward
+// from the client's focused photo (SetFocus) so the rendition nearest where
+// the user is looking warms first, and the order tracks live navigation.
 func (l *Library) prerenderPass(ctx context.Context, folderID int64, path string) {
 	name := filepath.Base(path)
 	photos, err := l.deps.DB.ListPhotos(ctx, folderID)
 	if err != nil {
 		return
 	}
-	var work []store.Photo
-	for _, p := range photos {
+	idPos := make(map[int64]int, len(photos))
+	var work []focusItem
+	for i, p := range photos {
+		idPos[p.ID] = i
 		if _, err := os.Stat(l.deps.Cache.PathFor(p.CacheKey, "2048", currentHash(p))); err != nil {
-			work = append(work, p)
+			work = append(work, focusItem{p: p, pos: i})
 		}
 	}
 	if len(work) == 0 {
@@ -287,24 +287,78 @@ func (l *Library) prerenderPass(ctx context.Context, folderID int64, path string
 	task.Progress(0, total)
 
 	var done atomic.Int64
-	g, gctx := errgroup.WithContext(tctx)
 	// Leave a couple of pool workers free so an interactive edit preview
 	// never has to wait out a full background decode.
-	g.SetLimit(max(1, runtime.NumCPU()-2))
-	for _, p := range work {
-		g.Go(func() error {
-			if gctx.Err() != nil {
-				return gctx.Err()
-			}
+	err = l.scheduleOutwardFromFocus(tctx, work, idPos, max(1, runtime.NumCPU()-2),
+		func(gctx context.Context, p store.Photo) {
 			if _, err := l.deps.Cache.Ensure(gctx, p, "2048", currentHash(p), decode.PriorityBackground); err != nil {
 				if gctx.Err() != nil {
-					return gctx.Err()
+					return
 				}
 				task.Output(p.FileName + ": " + err.Error())
 			}
 			task.Progress(int(done.Add(1)), total)
-			return nil
+		})
+	task.Err(err)
+}
+
+// focusItem pairs a photo with its position in the folder's capture-time
+// ordering so the scheduler can rank remaining work by distance from focus.
+type focusItem struct {
+	p   store.Photo
+	pos int
+}
+
+// scheduleOutwardFromFocus runs n workers that each repeatedly claim the
+// remaining work item nearest the client's current focus position and hand it
+// to render, until the set drains or ctx is cancelled. idPos maps photo id to
+// folder position; the focus position is re-read from deps.focusPhotoID on
+// every claim, so the render order follows the user as they navigate rather
+// than being fixed when the pass starts. An unset or foreign focus id resolves
+// to position 0, preserving front-to-back order.
+func (l *Library) scheduleOutwardFromFocus(ctx context.Context, work []focusItem, idPos map[int64]int, n int, render func(context.Context, store.Photo)) error {
+	var mu sync.Mutex
+	remaining := work
+	claim := func() (store.Photo, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(remaining) == 0 {
+			return store.Photo{}, false
+		}
+		focus := idPos[l.deps.focusPhotoID.Load()]
+		best, bestDist := 0, focusDist(remaining[0].pos, focus)
+		for i := 1; i < len(remaining); i++ {
+			if d := focusDist(remaining[i].pos, focus); d < bestDist {
+				best, bestDist = i, d
+			}
+		}
+		p := remaining[best].p
+		// Swap-delete: order within remaining doesn't matter, we rank by pos.
+		remaining[best] = remaining[len(remaining)-1]
+		remaining = remaining[:len(remaining)-1]
+		return p, true
+	}
+	g, gctx := errgroup.WithContext(ctx)
+	for w := 0; w < n; w++ {
+		g.Go(func() error {
+			for {
+				if gctx.Err() != nil {
+					return gctx.Err()
+				}
+				p, ok := claim()
+				if !ok {
+					return nil
+				}
+				render(gctx, p)
+			}
 		})
 	}
-	task.Err(g.Wait())
+	return g.Wait()
+}
+
+func focusDist(pos, focus int) int {
+	if pos < focus {
+		return focus - pos
+	}
+	return pos - focus
 }

@@ -47,5 +47,12 @@ smaller stuff.
   pre-ML baseline 7bdff31, so they're machine/environment drift, not code
   regressions. The crop-reset fatal also leaves a stray 0.2 crop persisted
   on the probe photo. Needs its own debugging session.
-- **Focus-prioritized pre-render order** — the remaining fit-loupe lead:
-  background pre-render should prioritize outward from the focused photo.
+- ~~**Focus-prioritized pre-render order**~~ Done 2026-07-14: the background
+  `prerenderPass` (and opt-in `fullresPass`) now render outward from the
+  client's focused photo instead of front-to-back. New `Library.SetFocus`
+  RPC stores `Deps.focusPhotoID`; `scheduleOutwardFromFocus` runs the pool
+  workers off a shared remaining-set, each claim picking the uncached photo
+  nearest the current focus (re-read per claim, so the order tracks live
+  navigation). The frontend fires `setFocus` from `Workspace` whenever
+  `uiStore.focusId` changes. Unit-tested by the distance-non-decreasing
+  invariant in `jobs_test.go`.

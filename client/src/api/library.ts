@@ -334,6 +334,19 @@ export function subscribeSetFlag(client: ApiClient, ids: number[], flag: FlagTyp
 }
 
 
+export function setFocus(client: ApiClient, folderID: number, photoID: number, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Library.SetFocus', [folderID, photoID], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setFocus.method = 'Library.SetFocus' as const;
+
+export function subscribeSetFocus(client: ApiClient, folderID: number, photoID: number, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Library.SetFocus', [folderID, photoID], callback, onError, options);
+}
+
+
 export function setLibraryRoots(client: ApiClient, roots: LibraryRoot[], options?: RequestOptions): Promise<void> {
     return client.request<void>('Library.SetLibraryRoots', [roots], options);
 }
@@ -628,6 +641,21 @@ export function useSetFlag(ids: number[], flag: FlagType, options?: UseQueryOpti
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [ids, flag], _subscribe: { method: 'Library.SetFlag', params: [ids, flag] } });
+}
+
+/**
+ * Subscribes to `Library.SetFocus` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetFocus(folderID: number, photoID: number, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, folderID: number, photoID: number) => setFocus(client, folderID, photoID, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [folderID, photoID], _subscribe: { method: 'Library.SetFocus', params: [folderID, photoID] } });
 }
 
 /**

@@ -434,6 +434,16 @@ func (l *Library) SetVisible(ctx context.Context, folderID int64, ids []int64) e
 	return nil
 }
 
+// SetFocus hints which photo the client's viewport is centred on so the
+// background pre-render pass renders outward from it — the loupe-ready
+// rendition nearest where the user is looking warms first. Fire-and-forget;
+// folderID is accepted for symmetry with SetVisible but the single active
+// folder-jobs slot means the id alone suffices.
+func (l *Library) SetFocus(ctx context.Context, folderID int64, photoID int64) error {
+	l.deps.focusPhotoID.Store(photoID)
+	return nil
+}
+
 // currentHash is the edit hash the client will request for this photo.
 func currentHash(p store.Photo) string {
 	if p.EditHash == "" {

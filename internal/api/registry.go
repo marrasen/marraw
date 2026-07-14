@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/marrasen/aprot"
 	"github.com/marrasen/aprot/tasks"
@@ -52,6 +53,12 @@ type Deps struct {
 	// previous folder's metadata/pre-render passes.
 	jobMu            sync.Mutex
 	folderJobsCancel context.CancelFunc
+
+	// focusPhotoID is the photo the client's viewport is centred on, set by
+	// SetFocus. The pre-render pass renders outward from it so the loupe-ready
+	// rendition warms nearest where the user is looking first. Zero means no
+	// focus hint yet — the pass falls back to front-to-back order.
+	focusPhotoID atomic.Int64
 
 	// ingestMu guards the per-folder ingest state used by watcher-driven
 	// rescans, which deliberately run outside the folder-jobs slot.
