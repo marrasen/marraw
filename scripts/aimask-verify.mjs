@@ -172,6 +172,27 @@ const settled = await call('Edits.PreviewEdit', [p.id, { ...base, masks: [subjec
 check(settled.$binary && settled.bytes.length > 10_000, `2048 cache-backed render works (${settled.bytes.length}B)`);
 await call('Edits.SetEditParams', [p.id, base]); // restore
 
+// --- Cancelled decode leaves the cached handle healthy ---
+// A second connection fires a decode-forcing render (fresh NR threshold →
+// new decode key) and drops mid-flight; the connection close cancels the
+// request server-side and LibRaw aborts at its next checkpoint, recycling
+// the handle. The cancel path must re-Open it: a fresh decode of the SAME
+// photo on the main connection must then succeed, not inherit a dead handle.
+{
+  const ws2 = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+  await new Promise((res) => { ws2.onopen = res; });
+  ws2.send(JSON.stringify({
+    type: 'request', id: 'doomed', method: 'Edits.PreviewEdit',
+    params: [p.id, { ...base, nrThreshold: 100 }, 1024],
+  }));
+  await new Promise((s) => setTimeout(s, 150)); // let the decode start
+  ws2.close();
+  await new Promise((s) => setTimeout(s, 200)); // server notices the close
+  const after = await call('Edits.PreviewEdit', [p.id, { ...base, nrThreshold: 120 }, 1024]);
+  check(after.$binary && after.bytes.length > 10_000,
+    `decode after cancelled decode succeeds (${after.bytes?.length ?? 0}B)`);
+}
+
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECKS FAILED`);
 ws.close();
 process.exit(failures === 0 ? 0 : 1);

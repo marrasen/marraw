@@ -235,15 +235,31 @@ func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Ph
 		release()
 		return nil, ctx.Err() // superseded while waiting for the handle
 	}
-	// Deliberately NOT ctx: a cancelled Process leaves the handle recycled
-	// (file closed, unpacked data freed), which would silently break the
-	// HandleCache entry every later acquire reuses. Half-size decodes are
-	// short; the check above bounds the superseded case.
-	img, err := proc.Process(context.Background(), ep.LibrawParams(true))
-	release()
+	// Real ctx: LibRaw aborts at its next progress checkpoint, so a photo
+	// the user has already browsed away from stops burning its core mid-
+	// demosaic instead of blocking the handle for the full decode. The cancel
+	// path must then restore the HandleCache invariant — a cancelled Process
+	// leaves the handle recycled (stream closed, unpacked data freed) — by
+	// re-Opening the file (metadata-only, ~150 ms, paid only on abandonment).
+	// Same-photo drags never cancel: the client coalesces them to one render
+	// in flight, so a cancelled ctx here means a photo switch.
+	img, err := proc.Process(ctx, ep.LibrawParams(true))
 	if err != nil {
+		healthy := true
+		if ctx.Err() != nil {
+			healthy = proc.Open(photo.Path()) == nil
+			err = ctx.Err()
+		}
+		release()
+		if !healthy {
+			// Reopen failed (file gone/unreadable): drop the poisoned entry so
+			// the next acquire starts from a fresh handle instead of a recycled
+			// one that fails every Process.
+			e.deps.Handles.Invalidate(photoID)
+		}
 		return nil, err
 	}
+	release()
 	rgba, err := pyramid.FromLibraw(img)
 	if err != nil {
 		return nil, err
@@ -336,13 +352,21 @@ func (e *Edits) linearMaster(ctx context.Context, photoID int64, photo store.Pho
 	}
 	refMul := proc.CamMul()
 	camXYZ := proc.CamXYZ()
-	// Background, not ctx — same HandleCache-preservation reason as
-	// previewDecode.
-	img, err := proc.Process(context.Background(), ep.LinearRefLibrawParams())
-	release()
+	// Real ctx with reopen-on-cancel, exactly as previewDecode.
+	img, err := proc.Process(ctx, ep.LinearRefLibrawParams())
 	if err != nil {
+		healthy := true
+		if ctx.Err() != nil {
+			healthy = proc.Open(photo.Path()) == nil
+			err = ctx.Err()
+		}
+		release()
+		if !healthy {
+			e.deps.Handles.Invalidate(photoID)
+		}
 		return nil, err
 	}
+	release()
 	lin, err := pyramid.FromLibrawLinear(img)
 	if err != nil {
 		return nil, err
