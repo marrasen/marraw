@@ -215,7 +215,7 @@ func (c *Cache) Ensure(ctx context.Context, photo store.Photo, level, editHash s
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
-		return c.generate(jctx, proc, photo, level, editHash)
+		return c.generate(jctx, proc, photo, level, editHash, prio)
 	})
 	if err != nil {
 		return "", err
@@ -249,7 +249,7 @@ func (c *Cache) EnsureTile(ctx context.Context, photo store.Photo, tx, ty int, e
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
-		return c.generate(jctx, proc, photo, "full", editHash)
+		return c.generate(jctx, proc, photo, "full", editHash, prio)
 	})
 	if err != nil {
 		return "", err
@@ -259,6 +259,26 @@ func (c *Cache) EnsureTile(ctx context.Context, photo store.Photo, tx, ty int, e
 		return "", fs.ErrNotExist
 	}
 	return path, nil
+}
+
+// readLevel loads one cached rendition back as an RGBA, or nil when absent
+// or unreadable (the caller falls through to a real render).
+func (c *Cache) readLevel(cacheKey, level, editHash string) *image.RGBA {
+	f, err := os.Open(c.PathFor(cacheKey, level, editHash))
+	if err != nil {
+		return nil
+	}
+	img, err := jpeg.Decode(f)
+	f.Close()
+	if err != nil {
+		return nil
+	}
+	if rgba, ok := img.(*image.RGBA); ok {
+		return rgba
+	}
+	rgba := image.NewRGBA(img.Bounds())
+	xdraw.Copy(rgba, image.Point{}, img, img.Bounds(), xdraw.Src, nil)
+	return rgba
 }
 
 // editsForHash returns the parsed edit params identified by editHash, or nil
@@ -285,13 +305,25 @@ func editsForHash(photo store.Photo, editHash string) (*edit.Params, error) {
 // checkpoint); once the decode has been paid for, the write-out always
 // completes — the cache files stay useful for the next visit, and tile (0,0)
 // is never written without its siblings (it is the grid-complete sentinel).
-func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo store.Photo, level, editHash string) error {
+func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo store.Photo, level, editHash string, prio decode.Priority) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	edits, err := editsForHash(photo, editHash)
 	if err != nil {
 		return err
+	}
+
+	// Fast path: derive small levels from an existing 2048 rendition of the
+	// same edit state. The commit settle (WritePreview) writes ONLY the 2048,
+	// and the pre-render pass skips photos whose 2048 exists — so without
+	// this, an edited photo's 512 underlay / 1024 fit request costs a fresh
+	// ~2.5 s RAW decode on the first browse back to it, when a one-JPEG
+	// downscale (~30 ms) produces identical pixels.
+	if level != "full" && level != "2048" {
+		if src := c.readLevel(photo.CacheKey, "2048", editHash); src != nil {
+			return c.WriteLevels(src, photo.CacheKey, editHash, 1024, 512, 256)
+		}
 	}
 
 	if err := proc.Open(photo.Path()); err != nil {
@@ -319,10 +351,14 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		params.UserQual = libraw.DemosaicPPG
 	}
 	// Fraction budget across the whole render: decode 0–0.70, look/detail
-	// 0.70–0.90, tile write-out 0.90–1. Throttled here (not per source) so
-	// the parallel tile writers share one clock; the final 1 always goes out.
+	// 0.70–0.90, write-out 0.90–1. Throttled here (not per source) so the
+	// parallel tile writers share one clock; the final 1 always goes out.
+	// Full renders always report (the 1:1 loupe indicator); fixed levels
+	// report only when a client is actually waiting on them (interactive or
+	// visible priority — the browse loupe's "decoding RAW preview" wait), so
+	// the background pre-render pass stays silent as before.
 	report := func(float64) {}
-	if level == "full" && c.Progress != nil {
+	if c.Progress != nil && (level == "full" || prio >= decode.PriorityVisible) {
 		var mu sync.Mutex
 		var lastSent time.Time
 		report = func(frac float64) {
@@ -377,9 +413,15 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	}
 	// Downscale before applying the look: 4x fewer pixels, same result at
 	// these sizes.
+	report(0.75)
 	scaled := scaleToLongEdge(rgba, 2048)
 	ApplyFinish(scaled, gamma, edits, ai)
-	return c.WriteLevels(scaled, photo.CacheKey, editHash, 2048, 1024, 512, 256)
+	report(0.92)
+	if err := c.WriteLevels(scaled, photo.CacheKey, editHash, 2048, 1024, 512, 256); err != nil {
+		return err
+	}
+	report(1)
+	return nil
 }
 
 // healDimensions repairs stored photo dimensions against a full-resolution

@@ -297,7 +297,16 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: 
   }, [photos, photo, active, tiles]);
 }
 
-// useRenderProgress reports the backend's live 1:1 render progress for the
+// renderStage names what the backend is doing at a given progress fraction,
+// mirroring pyramid.generate's budget: LibRaw decode 0–0.70, look/masks/
+// detail 0.70–0.90, JPEG write-out from 0.90.
+function renderStage(frac: number): string {
+  if (frac < 0.72) return 'decoding RAW';
+  if (frac < 0.92) return 'developing';
+  return 'writing';
+}
+
+// useRenderProgress reports the backend's live render progress for the
 // focused photo as a 0..1 fraction, or null before the first event — the
 // decode's unpack phase reports nothing, so the indicator stays indeterminate
 // until LibRaw's pipeline starts checkpointing. Subscribed only while the
@@ -830,7 +839,6 @@ export function CinemaImage({
 
   // Rendering indicator: tiles mounted but not decoded yet.
   const rendering = wantTiles && pendingTiles[0] > 0;
-  const renderFrac = useRenderProgress(client, photo.id, rendering);
 
   // Photo-switch indicator: the shown pixels still belong to another photo.
   // Rapid culling outruns the decode pipeline and the double buffer keeps the
@@ -844,6 +852,10 @@ export function CinemaImage({
       (shownSrc.startsWith('blob:') && preview != null && preview.photoId === photo.id));
   const loadingPhoto = haveDims && shownSrc !== '' && !showsCurrent;
   const busy = rendering || loadingPhoto;
+  // Live progress for whichever render the chip is waiting on: 1:1 tiles OR
+  // an interactive level render during a photo switch — the server reports
+  // both (fixed levels only at visible/interactive priority).
+  const renderFrac = useRenderProgress(client, photo.id, busy);
 
   // Parents embed the zoom cluster in their own control bars.
   const onZoomInfoRef = useRef(onZoomInfo);
@@ -1040,8 +1052,9 @@ export function CinemaImage({
           busy ? 'opacity-100 delay-150' : 'opacity-0 delay-0',
         )}
       >
-        {rendering && renderFrac != null ? (
-          // Determinate: the backend streams 1:1 render progress.
+        {renderFrac != null ? (
+          // Determinate: the backend streams render progress (1:1 tiles and
+          // interactive level renders alike).
           <div
             className="absolute inset-y-0 left-0 bg-gradient-to-r from-primary/50 to-primary transition-[width] duration-150 ease-linear"
             style={{ width: `${Math.round(renderFrac * 100)}%` }}
@@ -1064,9 +1077,11 @@ export function CinemaImage({
           </span>
           <span className="font-mono text-[11px] text-muted-foreground">
             {loadingPhoto
-              ? 'decoding RAW preview'
+              ? renderFrac != null
+                ? `${renderStage(renderFrac)} · ${Math.round(renderFrac * 100)}%`
+                : 'decoding RAW preview'
               : renderFrac != null
-                ? `1:1 tile · ${Math.round(renderFrac * 100)}%`
+                ? `1:1 tile · ${renderStage(renderFrac)} · ${Math.round(renderFrac * 100)}%`
                 : '1:1 tile · decoding RAW'}
           </span>
         </div>
