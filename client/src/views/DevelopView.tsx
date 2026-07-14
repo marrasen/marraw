@@ -33,6 +33,7 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
   const activeControl = useEditSession((s) => s.activeControl);
   const idle = useIdle();
   const [scale, setScale] = useState(1);
+  const [panelHovered, setPanelHovered] = useState(false);
 
   const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
   const photo = photos.find((p) => p.id === focusId) ?? photos[0];
@@ -50,7 +51,10 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
   // active control so a stale keyAdjust can never hide the UI with nothing to
   // show.
   const adjusting = keyAdjust && activeControl != null;
-  const chromeHidden = idle || adjusting;
+  // A mouse resting still on the drawer emits no pointermove, so the idle timer
+  // would fade the panel out from under the cursor. Suppress the idle fade
+  // while the pointer is over the drawer (a +/- adjust still hides it).
+  const chromeHidden = (idle && !panelHovered) || adjusting;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -82,6 +86,8 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
           the edit-session lifecycle) and through the idle fade — only slid out
           of the way or faded, never unmounted. */}
       <div
+        onPointerEnter={() => setPanelHovered(true)}
+        onPointerLeave={() => setPanelHovered(false)}
         className={cn(
           'glass absolute top-16 right-4 bottom-4 z-30 flex w-[352px] flex-col overflow-hidden rounded-[13px] transition-[transform,opacity] duration-200',
           overlayActive && 'translate-x-[calc(100%+32px)]',
