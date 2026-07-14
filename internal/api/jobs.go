@@ -138,8 +138,10 @@ func (l *Library) fullresPass(ctx context.Context, folderID int64, path string) 
 // look's auto-brighten lift (as an exposure EV, seeding the exposure dial so
 // the camera-mimic compensation is visible in the develop values), the
 // sharpness score (Laplacian variance of the embedded thumb, the grid's
-// soft-photo badge), and — only for photos whose AI subject matte is already
-// on disk — the subject-weighted sharpness score. The pass never runs
+// soft-photo badge), the perceptual hash (pyramid.DHash of the same thumb,
+// feeding near-duplicate burst grouping at list time), and — only for photos
+// whose AI subject matte is already on disk — the subject-weighted sharpness
+// score. The pass never runs
 // inference itself; a matte appears when the user first makes a subject
 // mask, and GenerateAIMap scores it immediately. Two demosaic-free half-size
 // decodes plus a thumb read per photo — much cheaper than the pre-render
@@ -157,7 +159,7 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 	}
 	var work []store.Photo
 	for _, p := range photos {
-		if !p.BaseExpEV.Valid || !p.Sharpness.Valid || needSubject(p) {
+		if !p.BaseExpEV.Valid || !p.Sharpness.Valid || !p.PHash.Valid || needSubject(p) {
 			work = append(work, p)
 		}
 	}
@@ -188,13 +190,20 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 					if err := proc.Open(p.Path()); err != nil {
 						return err
 					}
-					if !p.Sharpness.Valid || needSubject(p) {
+					if !p.Sharpness.Valid || !p.PHash.Valid || needSubject(p) {
 						if thumb, err := proc.EmbeddedThumb(); err == nil {
 							if img, err := jpeg.Decode(bytes.NewReader(thumb)); err == nil {
 								if !p.Sharpness.Valid {
 									score := pyramid.SharpnessScore(img)
 									if err := l.deps.DB.SetSharpness(context.WithoutCancel(jctx), p.ID, score); err != nil {
 										return err
+									}
+								}
+								if !p.PHash.Valid {
+									if hash, ok := pyramid.DHash(img); ok {
+										if err := l.deps.DB.SetPHash(context.WithoutCancel(jctx), p.ID, hash); err != nil {
+											return err
+										}
 									}
 								}
 								if needSubject(p) {

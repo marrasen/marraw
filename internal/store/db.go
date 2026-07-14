@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 9
+const schemaVersion = 10
 
 type DB struct {
 	*sql.DB
@@ -138,6 +138,15 @@ func (db *DB) migrate(ctx context.Context) error {
 			if _, err := tx.ExecContext(ctx,
 				`ALTER TABLE photos ADD COLUMN subject_sharpness REAL`); err != nil {
 				return fmt.Errorf("store: migrate v9: %w", err)
+			}
+		}
+		if v < 10 {
+			// Perceptual hash (pyramid.DHash of the embedded thumb), measured
+			// by the calibrate pass; near-duplicate burst groups are derived
+			// from it at list time. NULL = not yet measured.
+			if _, err := tx.ExecContext(ctx,
+				`ALTER TABLE photos ADD COLUMN phash INTEGER`); err != nil {
+				return fmt.Errorf("store: migrate v10: %w", err)
 			}
 		}
 	}

@@ -501,6 +501,17 @@ if (shot === 'cull') {
   await sleep(1000);
   const backInA = view();
   window.__folderViewProbe = { inA, inB, backInA };
+} else if (shot === 'neardup') {
+  // Near-duplicate burst badges in the library grid: the fixture's identical
+  // copies must all carry the ⧉ badge, and exactly one per group must be
+  // highlighted as the sharpest frame.
+  await until(() => document.querySelector('[data-testid="burst-badge"]'), 60000);
+  const badges = [...document.querySelectorAll('[data-testid="burst-badge"]')];
+  window.__neardupProbe = {
+    badges: badges.length,
+    best: badges.filter((b) => b.dataset.best).length,
+    labels: [...new Set(badges.map((b) => b.textContent.trim()))],
+  };
 } else if (shot === 'watermark' || shot === 'watermark-portrait') {
   // Drive the editor like a user — create, rename, type — so every step
   // exercises the live-write path. React inputs need the native setter.
@@ -551,6 +562,7 @@ window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 30
 await sleep(400);
 const probe =
   window.__wmProbe ??
+  window.__neardupProbe ??
   window.__modelsProbe ??
   window.__maskProbe ??
   window.__cropProbe ??

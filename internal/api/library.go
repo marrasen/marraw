@@ -303,8 +303,12 @@ func (l *Library) ListPhotos(ctx context.Context, folderID int64) ([]Photo, erro
 		return nil, err
 	}
 	out := make([]Photo, len(rows))
+	groups := burstGroups(rows) // rows are capture-ordered, as burstGroups needs
 	for i, p := range rows {
 		out[i] = toAPIPhoto(p)
+		if id, ok := groups[p.ID]; ok {
+			out[i].GroupID = &id
+		}
 	}
 	return out, nil
 }

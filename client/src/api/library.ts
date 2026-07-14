@@ -78,6 +78,7 @@ export interface Photo {
     model: string;
     sharpness?: number;
     subjectSharpness?: number;
+    groupId?: number;
 }
 
 export interface PhotoPatch {

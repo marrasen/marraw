@@ -139,6 +139,11 @@ type Photo struct {
 	// subject. When set it supersedes Sharpness for the soft badge, so a
 	// sharp background can't hide a soft subject.
 	SubjectSharpness *float64 `json:"subjectSharpness,omitempty"`
+	// GroupID marks a near-duplicate burst: photos shot moments apart whose
+	// perceptual hashes match carry the same id (the group's first photo ID).
+	// Derived per list from stored hashes, never persisted. Nil = not part
+	// of any burst.
+	GroupID *int64 `json:"groupId,omitempty"`
 }
 
 type DriveInfo struct {

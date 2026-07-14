@@ -7,16 +7,10 @@ import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { useImgBust } from '@/lib/imgCacheBust';
 import { dayLabel, gapLabel, groupByGap, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
+import { burstFor, burstMap, focusScore, type BurstInfo } from '@/lib/bursts';
 import { PyramidImage } from '@/components/PyramidImage';
 import { rowLayout } from '@/lib/justify';
 import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
-
-// focusScore is the score the soft badge judges: the subject-weighted score
-// when the photo has an AI subject matte (so a sharp background can't hide a
-// soft subject), otherwise the whole-frame score.
-function focusScore(p: Photo): number | undefined {
-  return p.subjectSharpness ?? p.sharpness;
-}
 
 // softThreshold derives the soft-focus badge cutoff from the shoot itself:
 // sharpness scores are scene-dependent (low-texture scenes score low at
@@ -77,6 +71,7 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
   const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
   const grouped = gapMinutes != null && photos.length > 0;
   const softBelow = useMemo(() => softThreshold(photos), [photos]);
+  const bursts = useMemo(() => burstMap(photos), [photos]);
 
   // photoRow maps flat photo index -> row index (scroll-to-focus). rowStarts is
   // the nav row model (flat index each photos-row begins at); widths/centersX
@@ -230,6 +225,7 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
                     h={r.height}
                     fitClass={fitClass}
                     softBelow={softBelow}
+                    burst={burstFor(p, bursts)}
                   />
                 ))}
               </div>
@@ -276,7 +272,7 @@ function GroupHeaderRow({ group, multiDay, top }: { group: TimeGroup; multiDay: 
   );
 }
 
-function GridCell({ photo, w, h, fitClass, softBelow }: { photo: Photo; w: number; h: number; fitClass: string; softBelow: number }) {
+function GridCell({ photo, w, h, fitClass, softBelow, burst }: { photo: Photo; w: number; h: number; fitClass: string; softBelow: number; burst?: BurstInfo }) {
   const focusId = useUIStore((s) => s.focusId);
   const selected = useUIStore((s) => s.selection.has(photo.id));
   const multiSelect = useUIStore((s) => s.selection.size > 1);
@@ -326,6 +322,25 @@ function GridCell({ photo, w, h, fitClass, softBelow }: { photo: Photo; w: numbe
           )}
           aria-label={photo.flag === 'pick' ? 'Pick' : 'Excluded'}
         />
+      )}
+      {/* Burst badge shares the top-left corner with the multi-select check;
+          the check wins while it's shown. */}
+      {burst && !(multiSelect && selected) && (
+        <div
+          className={cn(
+            'absolute top-1.5 left-1.5 rounded bg-black/50 px-[5px] py-0.5 font-mono text-[9px]',
+            burst.bestId === photo.id ? 'text-success-text' : 'text-zinc-300',
+          )}
+          title={
+            burst.bestId === photo.id
+              ? `Burst of ${burst.count} — sharpest frame`
+              : `Burst of ${burst.count} near-duplicates`
+          }
+          data-testid="burst-badge"
+          data-best={burst.bestId === photo.id || undefined}
+        >
+          ⧉ {burst.count}
+        </div>
       )}
       {score != null && softBelow > 0 && score < softBelow && (
         <div

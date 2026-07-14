@@ -62,6 +62,11 @@ type Photo struct {
 	// "background sharp, subject soft" frames still badge. Invalid = not yet
 	// measured; -1 = measured but unscoreable (no meaningful subject).
 	SubjectSharpness sql.NullFloat64
+	// PHash is the 64-bit perceptual hash of the embedded thumb
+	// (pyramid.DHash bits as int64), measured by the calibrate pass.
+	// Near-duplicate burst groups are derived from it at list time.
+	// Invalid = not yet measured.
+	PHash sql.NullInt64
 }
 
 // Path returns the absolute file path of the photo.
@@ -266,7 +271,7 @@ const photoCols = `p.id, p.folder_id, f.path, p.file_name, p.file_size, p.mtime_
 	p.meta_loaded, p.width, p.height, p.orientation, p.make, p.model,
 	p.iso, p.shutter, p.aperture, p.focal_len, p.taken_at, p.rating, p.flag, p.edit_params, p.edit_hash,
 	p.look_gamma, p.base_exp_ev, p.updated_at, p.lens, p.gps_lat, p.gps_lon, p.gps_alt, p.sharpness,
-	p.subject_sharpness`
+	p.subject_sharpness, p.phash`
 
 func scanPhoto(row interface{ Scan(...any) error }) (Photo, error) {
 	var p Photo
@@ -274,7 +279,7 @@ func scanPhoto(row interface{ Scan(...any) error }) (Photo, error) {
 		&p.MetaLoaded, &p.Width, &p.Height, &p.Orientation, &p.Make, &p.Model,
 		&p.ISO, &p.Shutter, &p.Aperture, &p.FocalLen, &p.TakenAt, &p.Rating, &p.Flag, &p.EditParams, &p.EditHash,
 		&p.LookGamma, &p.BaseExpEV, &p.UpdatedAt, &p.Lens, &p.GPSLat, &p.GPSLon, &p.GPSAlt, &p.Sharpness,
-		&p.SubjectSharpness)
+		&p.SubjectSharpness, &p.PHash)
 	return p, err
 }
 
@@ -307,6 +312,13 @@ func (db *DB) SetSharpness(ctx context.Context, id int64, score float64) error {
 // (-1 = measured but unscoreable, see Photo.SubjectSharpness).
 func (db *DB) SetSubjectSharpness(ctx context.Context, id int64, score float64) error {
 	_, err := db.ExecContext(ctx, `UPDATE photos SET subject_sharpness = ? WHERE id = ?`, score, id)
+	return err
+}
+
+// SetPHash persists the perceptual hash of a photo's embedded thumb
+// (pyramid.DHash bits, stored as int64).
+func (db *DB) SetPHash(ctx context.Context, id int64, hash uint64) error {
+	_, err := db.ExecContext(ctx, `UPDATE photos SET phash = ? WHERE id = ?`, int64(hash), id)
 	return err
 }
 
