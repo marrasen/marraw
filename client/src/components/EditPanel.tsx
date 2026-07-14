@@ -885,7 +885,10 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
     try {
       const res = await generateAIMap(client, photoId, kind, allowDownload);
       if (mode === 'restore') {
-        esUpdate(client, {}); // repaint: the mask's map just came alive
+        // Repaint ONLY when a map actually regenerated: an unconditional
+        // nudge forces a transient (non-abortable) decode on every first
+        // visit to a masked photo — those piled up into browse stalls.
+        if (res.generated) esUpdate(client, {});
       } else if (kind === 'class') {
         // Scene detection adds no mask by itself — it offers one chip per
         // detected category; clicking a chip adds that category's mask.
@@ -929,7 +932,9 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
       if (aiRestoreFired.has(key)) continue;
       aiRestoreFired.add(key);
       generateAIMap(client, photoId, kind, false)
-        .then(() => esUpdate(client, {}))
+        .then((res) => {
+          if (res.generated) esUpdate(client, {});
+        })
         .catch(async (err) => {
           if (isModelNotDownloaded(err)) {
             const status = await aiModelStatus(client, kind).catch(() => null);

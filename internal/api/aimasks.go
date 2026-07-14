@@ -20,6 +20,12 @@ import (
 // generating model.
 type AIMapResult struct {
 	MapVer string `json:"mapVer"`
+	// Generated reports that inference actually ran (false = the map was
+	// already on disk). The client repaints only when true: nudging a render
+	// for an already-present map forces a transient decode that cannot be
+	// aborted (the HandleCache contract) — during rapid browsing those piled
+	// up into multi-second "decoding RAW preview" stalls.
+	Generated bool `json:"generated"`
 	// Categories lists what a class map detected (class kind only), largest
 	// area first — the UI offers one mask chip per entry.
 	Categories []AICategory `json:"categories,omitempty"`
@@ -180,7 +186,7 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 		e.deps.Cache.InvalidateEdit(photo.CacheKey, photo.EditHash)
 	}
 	task.Err(nil)
-	res := &AIMapResult{MapVer: ver}
+	res := &AIMapResult{MapVer: ver, Generated: true}
 	if kind == edit.AIClass {
 		res.Categories = e.categoriesFor(photo.CacheKey, ver)
 	}

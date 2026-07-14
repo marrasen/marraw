@@ -75,6 +75,7 @@ check(sub.mapVer === 'isnet-1', `subject mapVer is isnet-1 (${sub.mapVer})`);
 t = Date.now();
 const sub2 = await call('Edits.GenerateAIMap', [p.id, 'subject', true]);
 check(sub2.mapVer === sub.mapVer && Date.now() - t < 2000, `second call idempotent + fast (${Date.now() - t}ms)`);
+check(sub2.generated === false, `cached map reports generated=false (${sub2.generated}) — the client must not repaint`);
 
 // --- Depth map generation ---
 t = Date.now();

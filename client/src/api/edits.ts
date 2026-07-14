@@ -17,6 +17,7 @@ export interface AICategory {
 
 export interface AIMapResult {
     mapVer: string;
+    generated: boolean;
     categories?: AICategory[];
 }
 
