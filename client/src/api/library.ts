@@ -86,6 +86,7 @@ export interface PhotoPatch {
     rating: number | null;
     flag: FlagType | null;
     editHash: string | null;
+    subjectSharpness: number | null;
 }
 
 export interface PhotoPatchEvent {

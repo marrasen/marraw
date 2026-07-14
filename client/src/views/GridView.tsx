@@ -7,7 +7,8 @@ import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { useImgBust } from '@/lib/imgCacheBust';
 import { dayLabel, gapLabel, groupByGap, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
-import { burstFor, burstMap, focusScore, type BurstInfo } from '@/lib/bursts';
+import { burstFor, focusScore, type BurstInfo } from '@/lib/bursts';
+import { BurstBadge } from '@/components/BurstBadge';
 import { PyramidImage } from '@/components/PyramidImage';
 import { rowLayout } from '@/lib/justify';
 import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
@@ -17,8 +18,14 @@ import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
 // perfect focus), so a frame is "soft" when it sits far below its own
 // folder's median — the within-shoot comparison culling actually needs.
 // The 50 floor keeps uniformly-low-texture folders badge-free.
+//
+// The median must come from ONE population: whole-frame sharpness only. Mixing
+// in subject-only scores (systematically lower — subject-region variance) skews
+// the cutoff and false-badges masked frames. The per-cell badge still compares
+// its own focusScore against this threshold, so "background sharp, subject
+// soft" frames still trip it.
 function softThreshold(photos: Photo[]): number {
-  const vals = photos.map(focusScore).filter((v): v is number => v != null).sort((a, b) => a - b);
+  const vals = photos.map((p) => p.sharpness).filter((v): v is number => v != null).sort((a, b) => a - b);
   if (vals.length < 4) return 0; // too few measurements to call anything soft
   return Math.max(50, vals[Math.floor(vals.length / 2)] / 15);
 }
@@ -34,7 +41,15 @@ const HEADER_H = 40;
 type PhotosRow = { kind: 'photos'; start: number; count: number; height: number };
 type GridRow = { kind: 'header'; group: TimeGroup; multiDay: boolean } | PhotosRow;
 
-export function GridView({ photos, folderId }: { photos: Photo[]; folderId: number }) {
+export function GridView({
+  photos,
+  folderId,
+  bursts,
+}: {
+  photos: Photo[];
+  folderId: number;
+  bursts: Map<number, BurstInfo>;
+}) {
   const client = useApiClient();
   // Element state (not a ref) so measurement re-attaches whenever the
   // scroll container mounts — a plain ref + [] effect misses it when the
@@ -71,7 +86,6 @@ export function GridView({ photos, folderId }: { photos: Photo[]; folderId: numb
   const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
   const grouped = gapMinutes != null && photos.length > 0;
   const softBelow = useMemo(() => softThreshold(photos), [photos]);
-  const bursts = useMemo(() => burstMap(photos), [photos]);
 
   // photoRow maps flat photo index -> row index (scroll-to-focus). rowStarts is
   // the nav row model (flat index each photos-row begins at); widths/centersX
@@ -326,21 +340,7 @@ function GridCell({ photo, w, h, fitClass, softBelow, burst }: { photo: Photo; w
       {/* Burst badge shares the top-left corner with the multi-select check;
           the check wins while it's shown. */}
       {burst && !(multiSelect && selected) && (
-        <div
-          className={cn(
-            'absolute top-1.5 left-1.5 rounded bg-black/50 px-[5px] py-0.5 font-mono text-[9px]',
-            burst.bestId === photo.id ? 'text-success-text' : 'text-zinc-300',
-          )}
-          title={
-            burst.bestId === photo.id
-              ? `Burst of ${burst.count} — sharpest frame`
-              : `Burst of ${burst.count} near-duplicates`
-          }
-          data-testid="burst-badge"
-          data-best={burst.bestId === photo.id || undefined}
-        >
-          ⧉ {burst.count}
-        </div>
+        <BurstBadge burst={burst} photoId={photo.id} className="absolute top-1.5 left-1.5" />
       )}
       {score != null && softBelow > 0 && score < softBelow && (
         <div

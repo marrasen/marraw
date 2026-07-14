@@ -64,6 +64,14 @@ type Deps struct {
 	// rescans, which deliberately run outside the folder-jobs slot.
 	ingestMu sync.Mutex
 	ingest   map[int64]*ingestState
+
+	// warmMu guards warmCancels: the in-flight post-save 512 thumb warm per
+	// photo. A newer commit for the same photo cancels the previous warm
+	// mid-decode, so a burst of quick-dial edits (or a paste/reset across
+	// photos) supersedes stale warms instead of stacking uncancellable decodes
+	// on the pool — the context.Background() no-watcher footgun.
+	warmMu      sync.Mutex
+	warmCancels map[int64]*warmSlot
 }
 
 // ingestState serialises watcher-driven passes for one folder. A pass already

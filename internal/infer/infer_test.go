@@ -264,6 +264,97 @@ func TestDeleteModel(t *testing.T) {
 	}
 }
 
+// TestDeleteModelDuringRun deletes a model while a tight Run loop hammers its
+// session. destroy() must drain the in-flight pass rather than free the native
+// session under it — run with -race; without the mu guard this is a cgo
+// use-after-free. After the delete, Run returns the deleted-session error
+// instead of crashing.
+func TestDeleteModelDuringRun(t *testing.T) {
+	requireRuntime(t)
+	dir := t.TempDir()
+	m := NewManager(dir)
+	spec := toySpec(t, dir)
+	s, err := m.Session(context.Background(), spec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newTensor := func() *ort.Tensor[float32] {
+		in := make([]float32, toyLen)
+		tensor, err := ort.NewTensor(ort.NewShape(1, 3, 2, 2), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tensor
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	var sawDeleted atomic.Bool
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			tensor := newTensor()
+			outs, err := s.Run(context.Background(), tensor)
+			tensor.Destroy()
+			if err != nil {
+				sawDeleted.Store(true) // deleted mid-loop; keep looping safely
+				continue
+			}
+			for _, o := range outs {
+				o.Destroy()
+			}
+		}
+	}()
+
+	if err := m.DeleteModel(spec.FileName()); err != nil {
+		t.Fatal(err)
+	}
+	close(stop)
+	<-done
+
+	// A Run after the delete must fail cleanly, never crash.
+	tensor := newTensor()
+	if _, err := s.Run(context.Background(), tensor); err == nil {
+		t.Error("Run on a deleted session succeeded, want an error")
+	}
+	tensor.Destroy()
+	if !sawDeleted.Load() {
+		t.Log("delete landed after the run loop stopped (still valid: no crash)")
+	}
+}
+
+// TestDeleteModelOrphanKeepsLiveSession deletes an orphaned old-version file
+// whose name shares the live model's id prefix; the live session must survive.
+func TestDeleteModelOrphanKeepsLiveSession(t *testing.T) {
+	requireRuntime(t)
+	dir := t.TempDir()
+	m := NewManager(dir)
+	spec := toySpec(t, dir) // writes toy-1.onnx, loads the session
+	if _, err := m.Session(context.Background(), spec, nil); err != nil {
+		t.Fatal(err)
+	}
+	// An orphaned older version on disk, same id ("toy") prefix.
+	orphan := "toy-0.onnx"
+	if err := os.WriteFile(filepath.Join(dir, orphan), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.DeleteModel(orphan); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.sessions[spec.ID]; !ok {
+		t.Error("deleting the orphan evicted the live current-version session")
+	}
+	if m.HasModel(spec) == false {
+		t.Error("deleting the orphan removed the live model's file")
+	}
+}
+
 func TestRegistry(t *testing.T) {
 	spec := ModelSpec{ID: "reg-test", Version: "1"}
 	Register(spec)

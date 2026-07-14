@@ -46,8 +46,11 @@ export function MaskHoverTint({
   const client = useApiClient();
   const tintMask = useEditSession((s) => s.tintMask);
   const photoId = useEditSession((s) => s.photoId);
-  // The last hovered index stays mounted through the fade-out.
-  const [shown, setShown] = useState<number | null>(null);
+  // The last hovered index stays mounted through the fade-out. Seed from the
+  // live hover so a mount while a mask row is already hovered (e.g. toggling
+  // crop mode without moving the pointer remounts this) shows the tint
+  // immediately — the adjust-during-render below only fires on CHANGES.
+  const [shown, setShown] = useState<number | null>(tintMask);
   const [aiUrl, setAiUrl] = useState<string | null>(null);
   const fetchSeq = useRef(0);
 

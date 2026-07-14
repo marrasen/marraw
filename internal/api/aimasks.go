@@ -87,40 +87,65 @@ func (e *Edits) MaskTintPreview(ctx context.Context, photoID int64, params edit.
 	return &aprot.Blob{ContentType: "image/png", Data: buf.Bytes()}, nil
 }
 
-// scoreSubjectSharpness measures the subject-weighted focus score the moment
-// a subject matte lands, then refreshes the folder's photo list so the grid's
-// soft badge reflects it without waiting for the next calibrate pass (which
-// owns the backfill for mattes that already existed). Best-effort: on any
-// failure the score stays NULL and the calibrate pass retries.
-func (e *Edits) scoreSubjectSharpness(ctx context.Context, photo store.Photo) {
-	ver, ok := aimask.MapVerFor(edit.AISubject)
-	if !ok {
-		return
-	}
-	matte := e.deps.Cache.AIMaps.Load(photo.CacheKey, edit.AISubject, ver)
-	if matte == nil {
-		return
-	}
-	proc, release, err := e.deps.Handles.Acquire(photo.ID, photo.Path())
-	if err != nil {
-		return
-	}
-	thumb, err := proc.EmbeddedThumb()
-	release()
-	if err != nil {
-		return
-	}
-	img, err := jpeg.Decode(bytes.NewReader(thumb))
-	if err != nil {
-		return
-	}
-	score, ok := pyramid.SubjectSharpnessScore(img, matte, photo.Orientation)
+// scoreSubjectMatte computes photo's subject-weighted focus score from its
+// embedded thumb and subject matte, persists it (-1 = measured but no
+// scoreable subject, hidden from clients by nonNegativeFloat), and on a real
+// score pushes a granular per-photo patch rather than a full folder-list
+// refresh. Shared by the calibrate-pass backfill and GenerateAIMap's immediate
+// scoring so the sentinel convention and store call live in one place.
+// Best-effort: callers ignore the returned error (the calibrate pass retries).
+func (d *Deps) scoreSubjectMatte(ctx context.Context, photo store.Photo, thumb image.Image, matte *pyramid.AIMap) error {
+	score, ok := pyramid.SubjectSharpnessScore(thumb, matte, photo.Orientation)
 	if !ok {
 		score = -1 // measured, no scoreable subject
 	}
-	if e.deps.DB.SetSubjectSharpness(context.WithoutCancel(ctx), photo.ID, score) == nil {
-		e.deps.TriggerRefresh(photosKey(photo.FolderID))
+	if err := d.DB.SetSubjectSharpness(context.WithoutCancel(ctx), photo.ID, score); err != nil {
+		return err
 	}
+	if score >= 0 {
+		s := score
+		d.patchFolderPhotos(photo.FolderID, []PhotoPatch{{ID: photo.ID, SubjectSharpness: &s}})
+	}
+	return nil
+}
+
+// scoreSubjectSharpnessAsync scores photo's subject matte off the RPC path the
+// moment a subject map lands. It reuses the in-memory matte GenerateAIMap just
+// produced (Save evicts the decoded plane from the map cache, so a Load here
+// would be a guaranteed stat + PNG re-decode of pixels already in hand), and
+// runs in its own goroutine so the multi-second inference RPC the client
+// awaits to repaint the mask does not also block on a handle acquire, a
+// multi-megapixel thumb read, and a jpeg decode. Best-effort.
+func (e *Edits) scoreSubjectSharpnessAsync(photo store.Photo, matte *pyramid.AIMap) {
+	go func() {
+		ctx := context.Background()
+		proc, release, err := e.deps.Handles.Acquire(photo.ID, photo.Path())
+		if err != nil {
+			return
+		}
+		thumb, err := proc.EmbeddedThumb()
+		release()
+		if err != nil {
+			return
+		}
+		img, err := jpeg.Decode(bytes.NewReader(thumb))
+		if err != nil {
+			return
+		}
+		_ = e.deps.scoreSubjectMatte(ctx, photo, img, matte)
+	}()
+}
+
+// grayToAIMap views a freshly-generated grayscale map as an AIMap for scoring,
+// avoiding a round-trip through the PNG store. Returns nil if the plane is not
+// tightly packed from the origin (SubjectSharpnessScore's indexing assumes
+// stride == width), leaving the score to the calibrate pass's on-disk Load.
+func grayToAIMap(g *image.Gray) *pyramid.AIMap {
+	b := g.Bounds()
+	if b.Min.X != 0 || b.Min.Y != 0 || g.Stride != b.Dx() {
+		return nil
+	}
+	return &pyramid.AIMap{Pix: g.Pix, W: b.Dx(), H: b.Dy()}
 }
 
 // categoriesFor computes the detected-category chips from a stored class map.
@@ -226,7 +251,9 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 		e.deps.Cache.InvalidateEdit(photo.CacheKey, photo.EditHash)
 	}
 	if kind == edit.AISubject {
-		e.scoreSubjectSharpness(ctx, photo)
+		if m := grayToAIMap(gray); m != nil {
+			e.scoreSubjectSharpnessAsync(photo, m)
+		}
 	}
 	if downloaded {
 		aprot.TriggerRefresh(ctx, modelsInfoKey) // Settings' model list is live

@@ -18,19 +18,35 @@ export interface BurstInfo {
 // shot moments apart whose perceptual hashes match, photo.groupId): per
 // group, its size and its sharpest member — the frame the badges suggest
 // keeping.
+//
+// Rank each group by ONE metric so members stay comparable: the subject score
+// only when EVERY member has one (else a subject-region variance, which runs
+// lower for a smooth in-focus subject, would lose to a sibling's
+// background-inflated whole-frame score — crowning the softer frame). Feed it
+// the whole-folder photo list, not a filtered view, so the count and best
+// frame describe the real group.
 export function burstMap(photos: Photo[]): Map<number, BurstInfo> {
-  const map = new Map<number, BurstInfo>();
-  const bestScore = new Map<number, number>();
+  const members = new Map<number, Photo[]>();
   for (const p of photos) {
     if (p.groupId == null) continue;
-    const info = map.get(p.groupId) ?? { count: 0, bestId: null };
-    info.count++;
-    const score = focusScore(p);
-    if (score != null && score > (bestScore.get(p.groupId) ?? -Infinity)) {
-      bestScore.set(p.groupId, score);
-      info.bestId = p.id;
+    const list = members.get(p.groupId);
+    if (list) list.push(p);
+    else members.set(p.groupId, [p]);
+  }
+  const map = new Map<number, BurstInfo>();
+  for (const [groupId, list] of members) {
+    const allSubject = list.every((p) => p.subjectSharpness != null);
+    const metric = (p: Photo) => (allSubject ? p.subjectSharpness : p.sharpness);
+    let bestId: number | null = null;
+    let best = -Infinity;
+    for (const p of list) {
+      const score = metric(p);
+      if (score != null && score > best) {
+        best = score;
+        bestId = p.id;
+      }
     }
-    map.set(p.groupId, info);
+    map.set(groupId, { count: list.length, bestId });
   }
   return map;
 }

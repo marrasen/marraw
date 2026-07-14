@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FolderPlus, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
@@ -21,6 +21,7 @@ import { CullView } from '@/views/CullView';
 import { DevelopView } from '@/views/DevelopView';
 import { useKeyboard } from '@/lib/keyboard';
 import { usePhotos } from '@/lib/usePhotos';
+import { burstMap } from '@/lib/bursts';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { LibraryRoot } from '@/api/library';
 import {
@@ -311,6 +312,10 @@ function Workspace({ folderId }: { folderId: number }) {
   const folderPath = useUIStore((s) => s.folderPath);
   const showEditPanel = useUIStore((s) => s.showEditPanel);
   const { all, visible } = usePhotos(folderId);
+  // Burst groups are derived over the WHOLE folder, not the filtered `visible`
+  // list, so badge counts and the sharpest-frame pick describe the real group
+  // even when a filter hides some members.
+  const bursts = useMemo(() => burstMap(all), [all]);
   const picked = all.filter((p) => p.flag === 'pick').length;
   const scan = useFolderScan(folderPath);
   const client = useApiClient();
@@ -341,11 +346,11 @@ function Workspace({ folderId }: { folderId: number }) {
     <>
       <main className="flex min-w-0 flex-1 flex-col">
         {mode === 'cull' ? (
-          <CullView photos={visible} />
+          <CullView photos={visible} bursts={bursts} />
         ) : structured ? (
           <>
             <FilterBar />
-            <GridView photos={visible} folderId={folderId} />
+            <GridView photos={visible} folderId={folderId} bursts={bursts} />
             <StatusBar shown={visible.length} total={all.length} picked={picked} scan={scan} />
           </>
         ) : (

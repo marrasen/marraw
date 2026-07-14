@@ -716,12 +716,43 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 		h := hash
 		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{{ID: photoID, EditHash: &h}})
 		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)
-		// Prefetch, not Visible: this warm runs fire-and-forget on a detached
-		// context (no viewport to cancel it), so it must never outrank the photo
-		// the user is actually looking at. Quick-dial edits fire this DURING cull
-		// navigation — at Visible priority it competed head-to-head with the next
-		// frame's render for a pool worker and helped freeze the browse.
-		go e.deps.Cache.Ensure(context.Background(), p, "512", hash, decode.PriorityPrefetch)
+		e.deps.warmEdit(p, hash)
 	}
 	return nil
+}
+
+// warmSlot holds the cancel func of one in-flight post-save warm so a
+// superseding warm can be matched by pointer identity (func values are not
+// comparable).
+type warmSlot struct{ cancel context.CancelFunc }
+
+// warmEdit fires the post-save 512 thumb warm on a cancellable detached
+// context and supersedes any warm still running for the same photo. The warm
+// is fire-and-forget with no viewport to cancel it, so a plain
+// context.Background() decode, once a pool worker claims it, runs its full
+// duration uncancellably — a burst of quick-dial commits (or a paste/reset
+// sweep) would stack those and delay the visible frame. Cancelling the prior
+// warm lets libraw's progress-callback abort the superseded decode mid-flight.
+// Priority stays Prefetch so it never outranks the photo the user is viewing.
+func (d *Deps) warmEdit(p store.Photo, hash string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	slot := &warmSlot{cancel: cancel}
+	d.warmMu.Lock()
+	if d.warmCancels == nil {
+		d.warmCancels = map[int64]*warmSlot{}
+	}
+	if prev := d.warmCancels[p.ID]; prev != nil {
+		prev.cancel()
+	}
+	d.warmCancels[p.ID] = slot
+	d.warmMu.Unlock()
+	go func() {
+		d.Cache.Ensure(ctx, p, "512", hash, decode.PriorityPrefetch)
+		cancel()
+		d.warmMu.Lock()
+		if d.warmCancels[p.ID] == slot { // still ours: clear the slot
+			delete(d.warmCancels, p.ID)
+		}
+		d.warmMu.Unlock()
+	}()
 }

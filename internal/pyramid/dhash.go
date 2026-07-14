@@ -12,13 +12,13 @@ import (
 // It survives exposure drift and camera-JPEG re-encodes, which is exactly
 // what separates a burst re-frame from a new composition. The embedded
 // camera JPEG is the intended input, same as SharpnessScore — never a
-// RAW render. ok=false means the input is too small to hash meaningfully.
-func DHash(img image.Image) (hash uint64, ok bool) {
+// RAW render. The bilinear scaler resamples any decodable thumb onto the
+// 9×8 grid, so DHash is total: it hashes every input rather than refusing
+// tiny ones, which lets the calibrate pass reach a terminal phash state for
+// every photo (an ok=false path left sub-grid thumbs perpetually re-worked).
+func DHash(img image.Image) (hash uint64) {
 	const gw, gh = 9, 8
 	b := img.Bounds()
-	if b.Dx() < gw || b.Dy() < gh {
-		return 0, false
-	}
 	scaled := image.NewRGBA(image.Rect(0, 0, gw, gh))
 	xdraw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), img, b, xdraw.Src, nil)
 
@@ -38,7 +38,7 @@ func DHash(img image.Image) (hash uint64, ok bool) {
 			}
 		}
 	}
-	return hash, true
+	return hash
 }
 
 // HammingDist counts differing bits between two DHash values — the

@@ -153,14 +153,20 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 		return
 	}
 	subjVer, _ := aimask.MapVerFor(edit.AISubject)
+	// needSubject also gates work selection on the matte EXISTING on disk:
+	// without that gate a photo that will never have a subject mask would
+	// re-enter the pass on every folder open (its score stays NULL forever).
+	// Evaluate it once per photo here — a single os.Stat — and carry the
+	// result to the job so the inner passes don't re-Stat.
 	needSubject := func(p store.Photo) bool {
 		return subjVer != "" && !p.SubjectSharpness.Valid &&
 			l.deps.Cache.AIMaps.Has(p.CacheKey, edit.AISubject, subjVer)
 	}
-	var work []store.Photo
+	var work []calibItem
 	for _, p := range photos {
-		if !p.BaseExpEV.Valid || !p.Sharpness.Valid || !p.PHash.Valid || needSubject(p) {
-			work = append(work, p)
+		subj := needSubject(p)
+		if !p.BaseExpEV.Valid || !p.Sharpness.Valid || !p.PHash.Valid || subj {
+			work = append(work, calibItem{p: p, subject: subj})
 		}
 	}
 	if len(work) == 0 {
@@ -175,7 +181,8 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 	var done atomic.Int64
 	g, gctx := errgroup.WithContext(tctx)
 	g.SetLimit(max(1, runtime.NumCPU()-2))
-	for _, p := range work {
+	for _, it := range work {
+		p, needSubj := it.p, it.subject
 		g.Go(func() error {
 			if gctx.Err() != nil {
 				return gctx.Err()
@@ -190,7 +197,7 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 					if err := proc.Open(p.Path()); err != nil {
 						return err
 					}
-					if !p.Sharpness.Valid || !p.PHash.Valid || needSubject(p) {
+					if !p.Sharpness.Valid || !p.PHash.Valid || needSubj {
 						if thumb, err := proc.EmbeddedThumb(); err == nil {
 							if img, err := jpeg.Decode(bytes.NewReader(thumb)); err == nil {
 								if !p.Sharpness.Valid {
@@ -200,19 +207,15 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 									}
 								}
 								if !p.PHash.Valid {
-									if hash, ok := pyramid.DHash(img); ok {
-										if err := l.deps.DB.SetPHash(context.WithoutCancel(jctx), p.ID, hash); err != nil {
-											return err
-										}
+									// DHash is total — a value is always written,
+									// so !PHash.Valid reaches a terminal state.
+									if err := l.deps.DB.SetPHash(context.WithoutCancel(jctx), p.ID, pyramid.DHash(img)); err != nil {
+										return err
 									}
 								}
-								if needSubject(p) {
+								if needSubj {
 									if matte := l.deps.Cache.AIMaps.Load(p.CacheKey, edit.AISubject, subjVer); matte != nil {
-										score, ok := pyramid.SubjectSharpnessScore(img, matte, p.Orientation)
-										if !ok {
-											score = -1 // measured, no scoreable subject
-										}
-										if err := l.deps.DB.SetSubjectSharpness(context.WithoutCancel(jctx), p.ID, score); err != nil {
+										if err := l.deps.scoreSubjectMatte(jctx, p, img, matte); err != nil {
 											return err
 										}
 									}
@@ -316,6 +319,14 @@ func (l *Library) prerenderPass(ctx context.Context, folderID int64, path string
 type focusItem struct {
 	p   store.Photo
 	pos int
+}
+
+// calibItem is a calibrate-pass work item: the photo plus whether its subject
+// matte needs scoring, computed once at selection so the job's inner passes
+// don't re-Stat the matte file.
+type calibItem struct {
+	p       store.Photo
+	subject bool
 }
 
 // scheduleOutwardFromFocus runs n workers that each repeatedly claim the

@@ -259,6 +259,10 @@ type PhotoPatch struct {
 	Rating   *int    `json:"rating"`
 	Flag     *Flag   `json:"flag"`
 	EditHash *string `json:"editHash"`
+	// SubjectSharpness delivers a just-measured subject focus score to the grid
+	// without a full folder-list refresh. Only ever a real score — the "-1
+	// unscoreable" sentinel is client-invisible, so it is never patched.
+	SubjectSharpness *float64 `json:"subjectSharpness"`
 }
 
 // PhotoPatchEvent is broadcast when rating/flag/edits change so clients can

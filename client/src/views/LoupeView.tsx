@@ -295,7 +295,7 @@ function useTilesWarm(photo: Photo, want: boolean, kick: boolean): boolean {
 // render the whole tile set ahead of a 1:1 landing — only worth its cost past
 // pyramid depth. Underlay refs are held only for the current window so the
 // browser can evict older decodes.
-function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: boolean) {
+function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: boolean, fitLevel: Level) {
   const held = useRef<Map<string, HTMLImageElement>>(new Map());
   const triggered = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -316,15 +316,17 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: 
     for (const j of [i + 1, i - 1, i + 2]) {
       const p = photos[j];
       if (!p) continue;
-      // The 512 underlay warm is cacheOnly: pull it into the browser cache if
-      // it is already on disk, but NEVER let a neighbour trigger a RAW decode.
-      // A plain (render-allowed) warm fires a PriorityVisible render per cold
-      // neighbour, saturating the pool with long uncancellable unpacks and
-      // freezing the browse the instant the user skims onto an unrendered run.
-      // Cold neighbours are filled by the focus-first background pre-render
-      // pass instead. The heavy 2048 is warmed ONLY at tile depth (1:1), where
-      // browsing is deliberate and the on-demand render is the point.
-      warm(p, '512', true);
+      // Warm the neighbour's fit-level rendition, cacheOnly: pull it into the
+      // browser cache IF it is already on disk (the exact URL FitImage requests
+      // — imgUrl(p, fitLevel, {cacheOnly:true}) — so arrowing onto it is a
+      // cache hit at any viewport), but NEVER let a neighbour trigger a RAW
+      // decode. A plain (render-allowed) warm fires a PriorityVisible render
+      // per cold neighbour, saturating the pool with long uncancellable unpacks
+      // and freezing the browse the instant the user skims onto an unrendered
+      // run. Cold neighbours are filled by the focus-first background
+      // pre-render pass instead. The heavy 2048 is warmed ONLY at tile depth
+      // (1:1), where browsing is deliberate and the on-demand render is the point.
+      warm(p, fitLevel, true);
       if (!tiles) continue;
       warm(p, '2048');
       const tile = tileUrl(p, 0, 0);
@@ -344,7 +346,7 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: 
     // prefetched neighbor, the main image/tile layer re-requests it at
     // visible priority and the pool dedups against any run still going.
     return () => ac.abort();
-  }, [photos, photo, active, tiles]);
+  }, [photos, photo, active, tiles, fitLevel]);
 }
 
 // renderStage names what the backend is doing at a given progress fraction,
@@ -607,7 +609,7 @@ export function CinemaImage({
   // deliberately zoomed in — at high-DPI fit, prefetching neighbours' tile
   // sets renders a multi-second full decode per neighbour per step (the
   // 2026-07-14 browse-stall log: bursts of level=full renders while culling).
-  useTilePrefetch(photos, photo, !previewUrl && !cropping && haveDims, tileDepth && !atFit);
+  useTilePrefetch(photos, photo, !previewUrl && !cropping && haveDims, tileDepth && !atFit, fitLevel);
 
   // Once a commit lands (the photo's editHash changes to the newly rendered
   // state) AND we're past pyramid depth, drop the live 2048 preview so the
@@ -1039,10 +1041,12 @@ export function CinemaImage({
               // cacheOnly too: `stale` already serves the photo's freshest
               // rendition of this level at ANY edit state, so the ONLY time it
               // would fall through is a photo with zero renditions (never
-              // pre-rendered). Skimming must never block on a decode there —
-              // 404 and let the double-buffer hold the previous frame; the
-              // focus-first pre-render pass fills it. Prevents a cold cull
-              // frame from firing a second PriorityVisible RAW decode.
+              // pre-rendered). Skimming must never block on a decode there — it
+              // 404s, and DecodedImage keeps the previous frame shown on a load
+              // failure (naturalWidth stays 0), so the box holds the last photo
+              // rather than blanking; the focus-first pre-render pass fills this
+              // one. Prevents a cold cull frame from firing a PriorityVisible
+              // RAW decode.
               <DecodedImage src={imgUrl(photo, '512', { stale: true, cacheOnly: true })} className="absolute inset-0 size-full" />
             )}
             {!cropUI && !previewUrl && !wantTiles ? (
@@ -1591,7 +1595,12 @@ export function DecodedImage({
     img
       .decode()
       .then(() => alive && setShown(src))
-      .catch(() => alive && setShown(src)); // decode() can reject spuriously; let <img> retry
+      // decode() can reject spuriously on a fully-loaded image — swap to it so
+      // the <img> can retry. But a genuine load failure (a 404 from a cacheOnly
+      // src with no rendition on disk) leaves naturalWidth 0: keep the previous
+      // frame shown instead of swapping in a broken/blank <img>, so a cold
+      // skim holds the last photo until the pre-render pass fills this one.
+      .catch(() => alive && img.naturalWidth > 0 && setShown(src));
     return () => {
       alive = false;
       // A superseded rendition still downloading is dead weight — abort it

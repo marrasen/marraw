@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Photo } from '@/api/library';
+import type { BurstInfo } from '@/lib/bursts';
 import { useApiClient } from '@/api/client';
 import { CinemaImage } from '@/views/LoupeView';
 import { CinemaHUD } from '@/components/cinema/CinemaHUD';
@@ -18,7 +19,7 @@ import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
  * confirm bar (with its embedded zoom cluster) and the deck stay up whether
  * the photo sits at fit or 1:1.
  */
-export function CullView({ photos }: { photos: Photo[] }) {
+export function CullView({ photos, bursts }: { photos: Photo[]; bursts: Map<number, BurstInfo> }) {
   const client = useApiClient();
   const focusId = useUIStore((s) => s.focusId);
   const contactSheet = useUIStore((s) => s.contactSheet);
@@ -54,7 +55,7 @@ export function CullView({ photos }: { photos: Photo[] }) {
   }
 
   if (contactSheet) {
-    return <ContactSheet photos={photos} groups={groups} />;
+    return <ContactSheet photos={photos} groups={groups} bursts={bursts} />;
   }
 
   const idx = photos.findIndex((p) => p.id === photo.id);

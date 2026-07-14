@@ -43,11 +43,8 @@ func brightened(src *image.RGBA, delta int) *image.RGBA {
 
 func TestDHashStableUnderExposureAndScale(t *testing.T) {
 	base := gradientScene(300, 200, 90, 100, 40, false)
-	h1, ok := DHash(base)
-	if !ok {
-		t.Fatal("hash not computed")
-	}
-	if h2, _ := DHash(base); h2 != h1 {
+	h1 := DHash(base)
+	if h2 := DHash(base); h2 != h1 {
 		t.Fatalf("hash not deterministic: %x vs %x", h1, h2)
 	}
 	// Same scene rendered at a different thumb size (camera vs pyramid).
@@ -57,33 +54,38 @@ func TestDHashStableUnderExposureAndScale(t *testing.T) {
 			small.SetRGBA(x, y, base.RGBAAt(x*2, y*2))
 		}
 	}
-	hs, _ := DHash(small)
+	hs := DHash(small)
 	if d := HammingDist(h1, hs); d > 6 {
 		t.Errorf("rescale moved hash %d bits", d)
 	}
 	// Exposure drift between burst frames must not move the hash much.
-	hb, _ := DHash(brightened(base, 25))
+	hb := DHash(brightened(base, 25))
 	if d := HammingDist(h1, hb); d > 4 {
 		t.Errorf("brightening moved hash %d bits", d)
 	}
 }
 
 func TestDHashSeparatesCompositions(t *testing.T) {
-	a, _ := DHash(gradientScene(300, 200, 90, 100, 40, false))
+	a := DHash(gradientScene(300, 200, 90, 100, 40, false))
 	// Same scene, subject nudged slightly — a burst re-frame — stays close.
-	near, _ := DHash(gradientScene(300, 200, 100, 104, 40, false))
+	near := DHash(gradientScene(300, 200, 100, 104, 40, false))
 	if d := HammingDist(a, near); d > 10 {
 		t.Errorf("burst re-frame distance %d, want <= 10", d)
 	}
 	// Subject moved across the frame — a recomposition — lands far away.
-	far, _ := DHash(gradientScene(300, 200, 240, 40, 40, true))
+	far := DHash(gradientScene(300, 200, 240, 40, 40, true))
 	if d := HammingDist(a, far); d <= 10 {
 		t.Errorf("recomposition distance %d, want > 10", d)
 	}
 }
 
-func TestDHashDegenerate(t *testing.T) {
-	if _, ok := DHash(image.NewRGBA(image.Rect(0, 0, 4, 4))); ok {
-		t.Error("tiny image should not hash")
+func TestDHashTotal(t *testing.T) {
+	// DHash is total: even a sub-grid thumb hashes deterministically (the
+	// scaler upsamples it), so the calibrate pass reaches a terminal phash
+	// state instead of re-working tiny thumbs on every folder open.
+	tiny := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	tiny.SetRGBA(0, 0, color.RGBA{255, 255, 255, 255})
+	if DHash(tiny) != DHash(tiny) {
+		t.Error("tiny image did not hash deterministically")
 	}
 }

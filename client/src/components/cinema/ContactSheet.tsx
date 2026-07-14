@@ -5,7 +5,8 @@ import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { useImgBust } from '@/lib/imgCacheBust';
 import { rowLayout } from '@/lib/justify';
-import { burstFor, burstMap, type BurstInfo } from '@/lib/bursts';
+import { burstFor, type BurstInfo } from '@/lib/bursts';
+import { BurstBadge } from '@/components/BurstBadge';
 import { uniformRowStarts } from '@/lib/gridNav';
 import { gapLabel, rangeLabel, timeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { GapControl } from '@/components/cinema/GapControl';
@@ -26,7 +27,15 @@ const SHEET_COLS = 8;
  * The Cull contact sheet (G): the scrubber blown up into a full multi-row
  * grid, one section per time-gap group. Esc collapses back to the loupe.
  */
-export function ContactSheet({ photos, groups }: { photos: Photo[]; groups: TimeGroup[] }) {
+export function ContactSheet({
+  photos,
+  groups,
+  bursts,
+}: {
+  photos: Photo[];
+  groups: TimeGroup[];
+  bursts: Map<number, BurstInfo>;
+}) {
   const focusId = useUIStore((s) => s.focusId);
   const focus = useUIStore((s) => s.focus);
   const setContactSheet = useUIStore((s) => s.setContactSheet);
@@ -38,7 +47,6 @@ export function ContactSheet({ photos, groups }: { photos: Photo[]; groups: Time
   const { roots } = useLibraryRoots();
   const current = folderPath ? roots.find((r) => samePath(r.path, folderPath)) : undefined;
   const picked = photos.filter((p) => p.flag === 'pick').length;
-  const bursts = useMemo(() => burstMap(photos), [photos]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
 
@@ -311,21 +319,7 @@ function SheetCell({
         />
       )}
       {burst && (
-        <div
-          className={cn(
-            'absolute top-[3px] left-[3px] rounded-[3px] bg-black/55 px-1 py-px font-mono text-[9px]',
-            burst.bestId === photo.id ? 'text-success-text' : 'text-zinc-300',
-          )}
-          title={
-            burst.bestId === photo.id
-              ? `Burst of ${burst.count} — sharpest frame`
-              : `Burst of ${burst.count} near-duplicates`
-          }
-          data-testid="burst-badge"
-          data-best={burst.bestId === photo.id || undefined}
-        >
-          ⧉ {burst.count}
-        </div>
+        <BurstBadge burst={burst} photoId={photo.id} className="absolute top-[3px] left-[3px]" />
       )}
     </div>
   );

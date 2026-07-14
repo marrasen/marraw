@@ -81,6 +81,16 @@ func (m *Manager) Session(ctx context.Context, spec ModelSpec, progress Progress
 	}
 	path := v.(string)
 
+	// Victims evicted below are destroyed AFTER m.mu is released: destroy()
+	// blocks on any in-flight Run, and holding the manager lock across that
+	// drain would stall every other Session caller. The defer is registered
+	// before m.mu's so it runs after the unlock (defers are LIFO).
+	var victims []*Session
+	defer func() {
+		for _, v := range victims {
+			v.destroy()
+		}
+	}()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if s, ok := m.sessions[spec.ID]; ok { // lost a race; someone loaded it
@@ -95,7 +105,7 @@ func (m *Manager) Session(ctx context.Context, spec ModelSpec, progress Progress
 		for i := 0; i < len(m.order); {
 			id := m.order[i]
 			if other := m.sessions[id]; other.OnGPU {
-				other.destroy()
+				victims = append(victims, other)
 				delete(m.sessions, id)
 				m.order = append(m.order[:i], m.order[i+1:]...)
 				continue
@@ -112,7 +122,7 @@ func (m *Manager) Session(ctx context.Context, spec ModelSpec, progress Progress
 	for len(m.order) > maxCachedSessions {
 		evict := m.order[0]
 		m.order = m.order[1:]
-		m.sessions[evict].destroy()
+		victims = append(victims, m.sessions[evict])
 		delete(m.sessions, evict)
 	}
 	return s, nil
@@ -168,20 +178,25 @@ func (m *Manager) DeleteModel(fileName string) error {
 	if fileName != filepath.Base(fileName) || !strings.HasSuffix(fileName, ".onnx") {
 		return fmt.Errorf("infer: invalid model file name %q", fileName)
 	}
+	// Evict only the session loaded from THIS exact file, so deleting an
+	// orphaned old-version file (isnet-0.onnx) can't tear down the live
+	// current-version session (isnet-1.onnx) that shares the id prefix.
 	m.mu.Lock()
-	// File names are "<id>-<version>.onnx"; evict by prefix so the OS-level
-	// delete never races a session holding the weights open.
-	for i := 0; i < len(m.order); {
-		id := m.order[i]
-		if strings.HasPrefix(fileName, string(id)+"-") {
-			m.sessions[id].destroy()
+	var victim *Session
+	for i, id := range m.order {
+		if s := m.sessions[id]; s.file == fileName {
+			victim = s
 			delete(m.sessions, id)
 			m.order = append(m.order[:i], m.order[i+1:]...)
-			continue
+			break
 		}
-		i++
 	}
 	m.mu.Unlock()
+	// destroy() outside m.mu: it blocks until any in-flight Run drains, so the
+	// OS-level delete never races a session holding the weights open.
+	if victim != nil {
+		victim.destroy()
+	}
 	return os.Remove(filepath.Join(m.modelsDir, fileName))
 }
 
@@ -203,7 +218,16 @@ type Session struct {
 	// OnGPU reports whether the platform GPU execution provider is active
 	// (PreferGPU asked for it AND the loaded runtime supports it).
 	OnGPU bool
+	// file is the on-disk name (<id>-<version>.onnx) this session was loaded
+	// from, so DeleteModel can evict the session backing the exact file it
+	// deletes — not every session whose id shares a prefix.
+	file string
 
+	// mu guards sess against destroy() racing an in-flight Run: Run takes it
+	// RLock (concurrent passes stay allowed — ORT sessions are Run-safe),
+	// destroy() takes it Lock so it blocks until every pass drains before
+	// freeing the native session.
+	mu   sync.RWMutex
 	sess *ort.DynamicAdvancedSession
 }
 
@@ -226,7 +250,7 @@ func newSession(id ModelID, path string, preferGPU bool) (*Session, error) {
 			s, serr := ort.NewDynamicAdvancedSession(path, inNames, outNames, opts)
 			opts.Destroy()
 			if serr == nil {
-				return &Session{ID: id, Inputs: inputs, Outputs: outputs, OnGPU: true, sess: s}, nil
+				return &Session{ID: id, Inputs: inputs, Outputs: outputs, OnGPU: true, file: filepath.Base(path), sess: s}, nil
 			}
 			log.Printf("infer: GPU session for %s failed, falling back to CPU: %v", id, serr)
 		} else {
@@ -237,7 +261,7 @@ func newSession(id ModelID, path string, preferGPU bool) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("infer: loading model %s: %w", id, err)
 	}
-	return &Session{ID: id, Inputs: inputs, Outputs: outputs, sess: s}, nil
+	return &Session{ID: id, Inputs: inputs, Outputs: outputs, file: filepath.Base(path), sess: s}, nil
 }
 
 // gpuSessionOptions builds session options with the platform GPU execution
@@ -273,6 +297,13 @@ func (s *Session) Run(ctx context.Context, inputs ...ort.Value) ([]ort.Value, er
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// RLock for the whole pass so a concurrent DeleteModel/eviction destroy()
+	// cannot free the native session mid-Run (a cgo use-after-free crash).
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.sess == nil {
+		return nil, fmt.Errorf("infer: session %s was deleted", s.ID)
+	}
 	outputs := make([]ort.Value, len(s.Outputs))
 	if err := s.sess.Run(inputs, outputs); err != nil {
 		return nil, fmt.Errorf("infer: running %s: %w", s.ID, err)
@@ -280,7 +311,12 @@ func (s *Session) Run(ctx context.Context, inputs ...ort.Value) ([]ort.Value, er
 	return outputs, nil
 }
 
+// destroy frees the native session. It blocks on any in-flight Run (mu is
+// held Lock), so callers must NOT hold Manager.mu when calling it — collect
+// victims under Manager.mu, release it, then destroy.
 func (s *Session) destroy() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.sess != nil {
 		s.sess.Destroy()
 		s.sess = nil
