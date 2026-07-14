@@ -584,13 +584,16 @@ export function CinemaImage({
   // region with full-resolution tiles on top; neighbors are warmed so
   // stepping through a burst stays instant.
   const tileDepth = !previewUrl && level === 'tiles' && !cropping;
-  // High-DPI fit reaches tile depth for every photo, but fit browsing must
-  // NEVER block on tile renders (pre-render stops at 2048 by design): tiles
-  // engage only when warm, with one skim-safe background render kicked for
-  // the focused photo. A deliberate 1:1 zoom keeps render-on-demand.
+  // Tile depth must NEVER block browsing, at ANY zoom — on a high-DPI
+  // display even the fit box crosses it, and a numeric zoom (wheel, slider,
+  // 1:1) is one keypress away. Tiles engage only when the set is already on
+  // disk; a cold photo shows the warm 2048 immediately and one skim-safe
+  // render kicks after a 350ms dwell, surfaced through the progress chip.
+  // (The first fit-only version of this gate missed numeric zoom states —
+  // on 4K that left the old render-on-demand path live almost everywhere.)
   const atFit = zoom === 'fit';
-  const tilesWarm = useTilesWarm(photo, tileDepth && atFit, true);
-  const wantTiles = tileDepth && (!atFit || tilesWarm);
+  const tilesWarm = useTilesWarm(photo, tileDepth, true);
+  const wantTiles = tileDepth && tilesWarm;
   const src = previewUrl ?? imgUrl(photo, level === 'tiles' ? '2048' : level);
   // The pyramid level fit displays (never 'tiles' in the fit branch below).
   const fitLevel: Level = level === 'tiles' ? '2048' : level;
@@ -910,11 +913,19 @@ export function CinemaImage({
     (shownSrc.includes(`/img/${photo.id}/`) ||
       (shownSrc.startsWith('blob:') && preview != null && preview.photoId === photo.id));
   const loadingPhoto = haveDims && shownSrc !== '' && !showsCurrent;
-  const busy = rendering || loadingPhoto;
-  // Live progress for whichever render the chip is waiting on: 1:1 tiles OR
-  // an interactive level render during a photo switch — the server reports
-  // both (fixed levels only at visible/interactive priority).
-  const renderFrac = useRenderProgress(client, photo.id, busy);
+  // Live progress for whichever render the chip is waiting on: 1:1 tiles,
+  // an interactive level render during a photo switch, or the dwell-kicked
+  // tile render sharpening the current photo — the server reports all of
+  // them (fixed levels only at visible/interactive priority).
+  const renderFrac = useRenderProgress(
+    client,
+    photo.id,
+    rendering || loadingPhoto || (tileDepth && !tilesWarm),
+  );
+  // The dwell-kicked sharpening render shows the chip too — without it, a
+  // 1:1 zoom onto a cold photo would sharpen "mysteriously" seconds later.
+  const sharpening = tileDepth && !tilesWarm && renderFrac != null;
+  const busy = rendering || loadingPhoto || sharpening;
 
   // Parents embed the zoom cluster in their own control bars.
   const onZoomInfoRef = useRef(onZoomInfo);

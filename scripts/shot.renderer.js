@@ -211,20 +211,25 @@ if (shot === 'cull') {
     chips: chips.map((c) => c.textContent),
     classMaskAdded: (es.getState().draft?.masks ?? []).some((m) => m.aiKind === 'class'),
   };
-} else if (shot === 'browse' || shot === 'browse-hidpi') {
-  // Browse latency probe: arrow-step through the folder in develop at a
-  // human culling pace and measure how long the render chip stays busy per
-  // step. On a fully pre-rendered, unedited folder every number should be
-  // tens of ms — anything in the seconds is THE stall. browse-hidpi forces
-  // a 4K-class devicePixelRatio so the fit box crosses tile depth — the
-  // configuration that reproduced the 2026-07-14 culling stalls.
-  if (shot === 'browse-hidpi') {
+} else if (shot.startsWith('browse')) {
+  // Browse latency probe: arrow-step through the folder at a human culling
+  // pace and measure how long the render chip stays busy per step. On a
+  // fully pre-rendered, unedited folder every number should be tens of ms —
+  // anything in the seconds is THE stall. Variants: -hidpi forces a 4K-class
+  // devicePixelRatio (fit crosses tile depth — the config from the
+  // 2026-07-14 field log), -cull runs in cull mode, -zoomed at a numeric
+  // (non-'fit') zoom state.
+  if (shot.includes('hidpi')) {
     Object.defineProperty(window, 'devicePixelRatio', { value: 3, configurable: true });
   }
-  ui().setMode('develop');
+  ui().setMode(shot.includes('cull') ? 'cull' : 'develop');
   const es = mw.useEditSession;
-  await until(() => es.getState().draft != null);
+  if (!shot.includes('cull')) await until(() => es.getState().draft != null);
   await sleep(1500);
+  if (shot.includes('zoomed')) {
+    ui().setLoupeZoom(0.4);
+    await sleep(500);
+  }
   const chip = () => document.querySelector('[data-testid="render-chip"]');
   const press = (key) =>
     window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
