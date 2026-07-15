@@ -246,8 +246,14 @@ function levelForPx(px: number): Level | 'tiles' {
 // it if the user pauses. Skimming past aborts the kick mid-decode.
 function useTilesWarm(photo: Photo, want: boolean, kick: boolean): boolean {
   const [warm, setWarm] = useState(false);
+  // Key the probe on the tile URL, not the photo OBJECT: it encodes id +
+  // cacheKey + editHash, the only things that change which tiles exist. A
+  // background metadata/rating push hands down a fresh photo object with the
+  // same rendered state — resetting `warm` on that identity change would drop
+  // wantTiles false→true for a frame, flashing the tile layer off and on.
+  const url0 = tileUrl(photo, 0, 0);
   useEffect(() => {
-    // New photo starts cold before the async probe/kick below.
+    // New render state starts cold before the async probe/kick below.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setWarm(false);
     if (!want) return;
@@ -255,7 +261,7 @@ function useTilesWarm(photo: Photo, want: boolean, kick: boolean): boolean {
     let dwell = 0;
     (async () => {
       try {
-        const probe = await fetch(tileUrl(photo, 0, 0) + '&cacheOnly=1', { signal: ac.signal });
+        const probe = await fetch(url0 + '&cacheOnly=1', { signal: ac.signal });
         if (probe.ok) {
           setWarm(true);
           return;
@@ -267,7 +273,7 @@ function useTilesWarm(photo: Photo, want: boolean, kick: boolean): boolean {
         // cancellation checkpoint blocks the pipeline for seconds).
         dwell = window.setTimeout(async () => {
           try {
-            const render = await fetch(tileUrl(photo, 0, 0), { signal: ac.signal });
+            const render = await fetch(url0, { signal: ac.signal });
             if (render.ok) setWarm(true);
           } catch {
             // aborted: the user moved on mid-render
@@ -281,7 +287,7 @@ function useTilesWarm(photo: Photo, want: boolean, kick: boolean): boolean {
       window.clearTimeout(dwell);
       ac.abort();
     };
-  }, [photo, want, kick]);
+  }, [url0, want, kick]);
   return warm;
 }
 
@@ -317,9 +323,9 @@ function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: 
       const p = photos[j];
       if (!p) continue;
       // Warm the neighbour's fit-level rendition, cacheOnly: pull it into the
-      // browser cache IF it is already on disk (the exact URL FitImage requests
-      // — imgUrl(p, fitLevel, {cacheOnly:true}) — so arrowing onto it is a
-      // cache hit at any viewport), but NEVER let a neighbour trigger a RAW
+      // browser cache IF it is already on disk (the exact URL SharpImage requests
+      // while browsing — imgUrl(p, fitLevel, {cacheOnly:true}) — so arrowing onto
+      // it is a cache hit at any viewport), but NEVER let a neighbour trigger a RAW
       // decode. A plain (render-allowed) warm fires a PriorityVisible render
       // per cold neighbour, saturating the pool with long uncancellable unpacks
       // and freezing the browse the instant the user skims onto an unrendered
@@ -1049,32 +1055,24 @@ export function CinemaImage({
               // RAW decode.
               <DecodedImage src={imgUrl(photo, '512', { stale: true, cacheOnly: true })} className="absolute inset-0 size-full" />
             )}
-            {!cropUI && !previewUrl && !wantTiles ? (
-              // Fit: show the pre-rendered rendition the instant it exists and
-              // NEVER trigger an on-demand render just to browse — a not-yet-
-              // pre-rendered photo paints the 512 above with no stall. Keyed on
-              // the photo so a switch starts fresh (no lingering previous frame,
-              // nothing mid-decode to cancel).
-              <FitImage
-                key={`${photo.id}|${photo.editHash}`}
-                photo={photo}
-                level={fitLevel}
-                onShown={setShownSrc}
-                className="absolute inset-0 size-full"
-              />
-            ) : (
-              <DecodedImage
-                src={src}
-                onShown={setShownSrc}
-                className="absolute inset-0 size-full"
-                // While cropping, the straighten angle is a live client-side
-                // rotation of the flat frame — instant, full-resolution feedback
-                // — matched exactly by the backend crop on commit. Gated on the
-                // flat frame actually being up: rotating a crop-baked render
-                // would rotate the crop twice.
-                style={cropUI && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
-              />
-            )}
+            <SharpImage
+              photo={photo}
+              level={fitLevel}
+              previewUrl={previewUrl}
+              // Render-allowed only past pyramid depth, where a deliberate 1:1
+              // browse pays for an on-demand render; fit/intermediate zoom asks
+              // cacheOnly and dwell-kicks instead, so skimming never stalls on a
+              // RAW decode. previewUrl (a live blob) is shown as-is either way.
+              renderAllowed={wantTiles}
+              onShown={setShownSrc}
+              className="absolute inset-0 size-full"
+              // While cropping, the straighten angle is a live client-side
+              // rotation of the flat frame — instant, full-resolution feedback
+              // — matched exactly by the backend crop on commit. Gated on the
+              // flat frame actually being up: rotating a crop-baked render
+              // would rotate the crop twice.
+              style={cropUI && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
+            />
             {wantTiles && shownSrc.includes(`/img/${photo.id}/`) && (
               <TileLayer
                 key={`${photo.id}|${photo.cacheKey}|${photo.editHash}`}
@@ -1153,7 +1151,7 @@ export function CinemaImage({
       </div>
       <div
         className={cn(
-          'glass pointer-events-none absolute left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl px-[18px] py-[13px] transition-opacity duration-200',
+          'glass pointer-events-none absolute left-1/2 z-40 flex w-[252px] -translate-x-1/2 items-center gap-3 rounded-xl px-[18px] py-[13px] transition-opacity duration-200',
           busy ? 'opacity-100 delay-150' : 'opacity-0 delay-0',
         )}
         style={{ bottom: renderingBadgeBottom }}
@@ -1161,19 +1159,29 @@ export function CinemaImage({
         data-busy={busy ? 'true' : 'false'}
       >
         <ChipSpinner className="size-[19px]" />
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[13.5px] font-semibold text-foreground">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="truncate text-[13.5px] font-semibold text-foreground">
             {loadingPhoto ? 'Loading photo' : 'Rendering full resolution'}
           </span>
-          <span className="font-mono text-[11px] text-muted-foreground">
+          <span className="truncate font-mono text-[11px] text-muted-foreground">
             {loadingPhoto
               ? renderFrac != null
-                ? `${renderStage(renderFrac)} · ${Math.round(renderFrac * 100)}%`
+                ? renderStage(renderFrac)
                 : 'decoding RAW preview'
               : renderFrac != null
-                ? `1:1 tile · ${renderStage(renderFrac)} · ${Math.round(renderFrac * 100)}%`
+                ? `1:1 tile · ${renderStage(renderFrac)}`
                 : '1:1 tile · decoding RAW'}
           </span>
+          <div className="mt-0.5 h-[3px] w-full overflow-hidden rounded-full bg-white/10">
+            {renderFrac != null ? (
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-primary/50 to-primary transition-[width] duration-150 ease-linear"
+                style={{ width: `${Math.round(renderFrac * 100)}%` }}
+              />
+            ) : (
+              <div className="animate-chip-indeterminate h-full w-1/3 bg-gradient-to-r from-transparent via-primary to-[#aab0ff]/0" />
+            )}
+          </div>
         </div>
       </div>
 
@@ -1612,73 +1620,101 @@ export function DecodedImage({
   return <img src={shown} draggable={false} alt="" className={className} style={style} />;
 }
 
-// FitImage paints the fit-loupe sharp layer from the PRE-RENDERED pyramid only.
-// It requests the target level cacheOnly, so the server serves the warm file or
-// a 404 — it never kicks a blocking RAW decode just because the user browsed
-// onto the photo. A hit shows the sharp rendition instantly; a miss renders
-// nothing (returns null) and the always-warm 512 underlay behind shows through,
-// so a fast scan across not-yet-pre-rendered frames never stalls. On a miss it
-// kicks ONE render for THIS photo AFTER a short dwell so a frame paused on
-// sharpens, and re-requests the warm file when that lands — cheap when the
-// background pre-render pass has already covered it. The dwell is what keeps
-// skimming free: the parent keys this by photo, so a switch remounts fresh and
-// the pending kick is cleared before it fires — a skimmed-past frame starts NO
-// decode at all (not even the uncancellable unpack). Only a deliberate pause
-// pays for a render.
-function FitImage({
+// SharpImage is the loupe's single, persistent sharp layer. It fuses two jobs
+// that used to live in two SWAPPED components (a blank window opened every time
+// the swap fired):
+//
+//   • Double-buffering, from DecodedImage: the next rendition decodes off-screen
+//     and swaps in only when ready, so the previous frame stays up across photo
+//     switches, level upgrades, preview clears, and the fit⇄tiles transition —
+//     no flash through to the backdrop or a stale underlay.
+//   • The fit-browse no-decode rule, from the old FitImage: when render is not
+//     allowed it requests the pre-rendered file cacheOnly and, on a miss, keeps
+//     the current frame while dwell-kicking exactly ONE render — a skim never
+//     blocks on a RAW decode.
+//
+// Because it is NEVER unmounted or re-keyed across those transitions, each swap
+// reuses the frame already on screen instead of remounting a fresh <img> onto a
+// not-yet-loaded src. `renderAllowed` is true only past pyramid depth, where a
+// deliberate 1:1 browse pays for an on-demand render; a live `previewUrl` blob
+// is shown as-is. onShown reports every committed swap so the caller keeps the
+// tile layer and pixel sampler in lockstep with what is actually displayed.
+function SharpImage({
   photo,
   level,
+  previewUrl,
+  renderAllowed,
   onShown,
   className,
+  style,
 }: {
   photo: Photo;
   level: Level;
+  previewUrl: string | null;
+  renderAllowed: boolean;
   onShown?: (src: string) => void;
   className?: string;
+  style?: React.CSSProperties;
 }) {
-  const [missed, setMissed] = useState(false);
-  // Bumped once a settle-kicked render lands so the cacheOnly <img> re-requests
-  // the now-warm file; part of the <img> key so it remounts to refetch.
-  const [warmed, setWarmed] = useState(0);
-  const cacheUrl = imgUrl(photo, level, { cacheOnly: true });
+  const [shown, setShown] = useState('');
+  // The rendition we want up now: a live preview blob wins; otherwise the
+  // pre-rendered file — plain (render-allowed) past pyramid depth, cacheOnly
+  // while browsing so a cold frame never blocks on a decode.
+  const target = previewUrl ?? imgUrl(photo, level, renderAllowed ? undefined : { cacheOnly: true });
+  // Render-allowed URL for the dwell-kick that fills a missing cacheOnly file.
+  const renderUrl = previewUrl ?? imgUrl(photo, level);
+  const cacheOnly = !previewUrl && !renderAllowed;
+
+  // Depends on onShown too: the caller may attach it after mount, and shown may
+  // never change again after that.
+  useEffect(() => {
+    onShown?.(shown);
+  }, [shown, onShown]);
 
   useEffect(() => {
-    if (!missed) return;
-    const img = new Image();
     let alive = true;
-    // Kick only after a dwell. The parent keys this by photo, so a skim
-    // remounts FitImage per frame and the timer is cleared before it fires —
-    // no RAW decode ever STARTS while skimming. Only a frame paused on for the
-    // dwell sharpens. Kicking immediately (one render per skimmed frame) fills
-    // the pool with uncancellable unpacks and is exactly what freezes cull.
-    const dwell = window.setTimeout(() => {
-      img.src = imgUrl(photo, level); // render-allowed: one render for this photo
-      img
-        .decode()
-        .then(() => {
-          if (!alive) return;
-          setMissed(false);
-          setWarmed((n) => n + 1);
-        })
-        .catch(() => {});
-    }, 350);
+    let dwell = 0;
+    let kick: HTMLImageElement | null = null;
+    const img = new Image();
+    img.src = target;
+    img
+      .decode()
+      .then(() => alive && setShown(target))
+      .catch(() => {
+        if (!alive) return;
+        // decode() can reject spuriously on a fully-loaded image — swap anyway.
+        if (img.naturalWidth > 0) {
+          setShown(target);
+          return;
+        }
+        // Genuine miss. A render-allowed (plain) miss is a superseded/aborted
+        // render: keep the frame already up rather than blank. A cacheOnly miss
+        // (404, not warm yet) keeps the frame too AND dwell-kicks one render so
+        // a frame paused on sharpens — a skim changes `target` per photo, which
+        // re-runs this effect and clears the timer before it fires, so no RAW
+        // decode ever STARTS while skimming (not even the uncancellable unpack).
+        if (!cacheOnly) return;
+        dwell = window.setTimeout(() => {
+          kick = new Image();
+          kick.src = renderUrl; // render-allowed: one render for this photo
+          kick
+            .decode()
+            .then(() => alive && setShown(renderUrl))
+            .catch(() => {});
+        }, 350);
+      });
     return () => {
       alive = false;
       window.clearTimeout(dwell);
+      // A superseded rendition still downloading is dead weight — abort it so
+      // the server can cancel the render.
       if (!img.complete) img.src = '';
+      if (kick && !kick.complete) kick.src = '';
     };
-  }, [missed, photo, level]);
+  }, [target, renderUrl, cacheOnly]);
 
-  if (missed) return null;
-  return (
-    <img
-      key={warmed}
-      src={cacheUrl}
-      draggable={false}
-      alt=""
-      className={className}
-      onLoad={() => onShown?.(cacheUrl)}
-      onError={() => setMissed(true)}
-    />
-  );
+  // Only the very first mount, before anything has decoded, has no frame to
+  // hold; the always-warm 512 underlay behind shows through until then.
+  if (!shown) return null;
+  return <img src={shown} draggable={false} alt="" className={className} style={style} />;
 }

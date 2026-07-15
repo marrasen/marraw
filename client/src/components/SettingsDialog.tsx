@@ -535,7 +535,6 @@ function CacheSection() {
   const client = useApiClient();
   const { data: info } = useGetCacheInfo();
   const [busy, setBusy] = useState(false);
-  const [confirmClear, setConfirmClear] = useState(false);
   const [gb, setGb] = useState('');
   useEffect(() => {
     // Seed the editable field from fetched cache info. Keyed on the query
@@ -559,7 +558,6 @@ function CacheSection() {
       .catch((err) => toast.error((err as Error).message))
       .finally(() => {
         setBusy(false);
-        setConfirmClear(false);
       });
   };
 
@@ -664,30 +662,14 @@ function CacheSection() {
           </div>
         }
         control={
-          confirmClear ? (
-            <div className="flex gap-1.5">
-              <Button variant="ghost" size="sm" onClick={() => setConfirmClear(false)} disabled={busy}>
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                disabled={busy}
-                onClick={() => run(() => clearCache(client), 'Cache cleared')}
-              >
-                Clear
-              </Button>
-            </div>
-          ) : (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setConfirmClear(true)}
-              disabled={busy || !info || info.files === 0}
-            >
-              Clear cache
-            </Button>
-          )
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => run(() => clearCache(client), 'Cache cleared')}
+            disabled={busy || !info || info.files === 0}
+          >
+            Clear cache
+          </Button>
         }
       />
     </div>

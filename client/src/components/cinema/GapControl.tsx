@@ -38,9 +38,23 @@ export function GapControl({
     updateGapMinutes(client, min == null ? null : Math.max(1, Math.round(min)));
   const [custom, setCustom] = useState(String(gapMinutes ?? 6));
   const isPreset = gapMinutes != null && PRESETS.some((p) => p.min === gapMinutes);
+  // Parsed custom value (matching setGapMinutes' clamp), and whether it differs
+  // from the committed setting — drives the Apply affordance.
+  const customValue = (() => {
+    const n = Number(custom);
+    return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n)) : null;
+  })();
+  const customDirty = customValue != null && customValue !== gapMinutes;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={(open) => {
+        // Re-sync the custom field from the live setting each time the menu
+        // opens, so it never shows (or commits) a stale value from a prior
+        // session.
+        if (open) setCustom(String(gapMinutes ?? 6));
+      }}
+    >
       <DropdownMenuTrigger
         className={cn(
           'flex h-[34px] items-center gap-2 rounded-[9px] px-3 text-xs',
@@ -93,18 +107,25 @@ export function GapControl({
               onChange={(e) => setCustom(e.target.value)}
               onKeyDown={(e) => {
                 e.stopPropagation();
-                if (e.key === 'Enter') {
-                  const n = Number(custom);
-                  if (Number.isFinite(n) && n > 0) setGapMinutes(n);
-                }
-              }}
-              onBlur={() => {
-                const n = Number(custom);
-                if (Number.isFinite(n) && n > 0) setGapMinutes(n);
+                if (e.key === 'Enter' && customValue != null) setGapMinutes(customValue);
               }}
               aria-label="Custom gap minutes"
             />
             <span className="font-mono text-[11px] text-muted-foreground">min</span>
+            <button
+              type="button"
+              disabled={!customDirty}
+              onClick={() => customValue != null && setGapMinutes(customValue)}
+              className={cn(
+                'flex h-[26px] items-center gap-1 rounded-md px-1.5 font-mono text-[11px] transition-opacity',
+                customDirty
+                  ? 'bg-primary/20 text-accent-text'
+                  : 'pointer-events-none opacity-0',
+              )}
+              aria-label="Apply custom gap"
+            >
+              Apply <span className="opacity-70">↵</span>
+            </button>
           </div>
         </div>
         <DropdownMenuSeparator />
