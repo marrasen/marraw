@@ -7,6 +7,34 @@ export function focusScore(p: Photo): number | undefined {
   return p.subjectSharpness ?? p.sharpness;
 }
 
+// softThreshold derives the soft-focus cutoff from the shoot itself: sharpness
+// scores are scene-dependent (low-texture scenes score low at perfect focus),
+// so a frame is "soft" when it sits far below its own folder's median — the
+// within-shoot comparison culling actually needs. The 50 floor keeps
+// uniformly-low-texture folders badge-free. 0 means "can't call anything soft".
+//
+// The median must come from ONE population: whole-frame sharpness only. Mixing
+// in subject-only scores (systematically lower — subject-region variance) skews
+// the cutoff and false-badges masked frames. isSoft still compares each frame's
+// own focusScore, so "background sharp, subject soft" frames still trip it.
+//
+// Feed this the WHOLE folder (not a filtered view), so the cutoff and the
+// per-cell badges agree no matter which filters are active.
+export function softThreshold(photos: Photo[]): number {
+  const vals = photos.map((p) => p.sharpness).filter((v): v is number => v != null).sort((a, b) => a - b);
+  if (vals.length < 4) return 0; // too few measurements to call anything soft
+  return Math.max(50, vals[Math.floor(vals.length / 2)] / 15);
+}
+
+// isSoft: does this frame trip the soft-focus badge/filter — its own focusScore
+// below the shoot-relative cutoff. softBelow <= 0 disables it (too few
+// measurements, or a uniformly low-texture folder).
+export function isSoft(p: Photo, softBelow: number): boolean {
+  if (softBelow <= 0) return false;
+  const score = focusScore(p);
+  return score != null && score < softBelow;
+}
+
 export interface BurstInfo {
   count: number;
   // bestId is the group's sharpest member by focusScore; null until at least

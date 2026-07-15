@@ -13,23 +13,6 @@ import { PyramidImage } from '@/components/PyramidImage';
 import { rowLayout } from '@/lib/justify';
 import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
 
-// softThreshold derives the soft-focus badge cutoff from the shoot itself:
-// sharpness scores are scene-dependent (low-texture scenes score low at
-// perfect focus), so a frame is "soft" when it sits far below its own
-// folder's median — the within-shoot comparison culling actually needs.
-// The 50 floor keeps uniformly-low-texture folders badge-free.
-//
-// The median must come from ONE population: whole-frame sharpness only. Mixing
-// in subject-only scores (systematically lower — subject-region variance) skews
-// the cutoff and false-badges masked frames. The per-cell badge still compares
-// its own focusScore against this threshold, so "background sharp, subject
-// soft" frames still trip it.
-function softThreshold(photos: Photo[]): number {
-  const vals = photos.map((p) => p.sharpness).filter((v): v is number => v != null).sort((a, b) => a - b);
-  if (vals.length < 4) return 0; // too few measurements to call anything soft
-  return Math.max(50, vals[Math.floor(vals.length / 2)] / 15);
-}
-
 const CELL_GAP = 12;
 const HEADER_H = 40;
 
@@ -45,10 +28,12 @@ export function GridView({
   photos,
   folderId,
   bursts,
+  softBelow,
 }: {
   photos: Photo[];
   folderId: number;
   bursts: Map<number, BurstInfo>;
+  softBelow: number;
 }) {
   const client = useApiClient();
   // Element state (not a ref) so measurement re-attaches whenever the
@@ -85,7 +70,6 @@ export function GridView({
   const gapMinutes = useUIStore(selectGapMinutes);
   const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
   const grouped = gapMinutes != null && photos.length > 0;
-  const softBelow = useMemo(() => softThreshold(photos), [photos]);
 
   // photoRow maps flat photo index -> row index (scroll-to-focus). rowStarts is
   // the nav row model (flat index each photos-row begins at); widths/centersX

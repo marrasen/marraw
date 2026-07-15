@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowUpDown, LayoutGrid, PanelRight, Star, Trash2 } from 'lucide-react';
+import { ArrowUpDown, Contrast, LayoutGrid, PanelRight, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePhotos } from '@/api/library';
 import { resetEdits } from '@/api/edits';
@@ -43,11 +43,13 @@ const SORT_ITEMS: { value: LibrarySort; label: string }[] = [
   { value: 'nameDesc', label: 'File name · Z to A' },
 ];
 
-export function FilterBar() {
+export function FilterBar({ softBelow }: { softBelow: number }) {
   const client = useApiClient();
   const minRating = useUIStore((s) => s.minRating);
   const librarySort = useUIStore((s) => s.librarySort);
   const flagFilter = useUIStore((s) => s.flagFilter);
+  const softOnly = useUIStore((s) => s.softOnly);
+  const toggleSoftOnly = useUIStore((s) => s.toggleSoftOnly);
   const view = useUIStore((s) => s.view);
   const cellSize = useUIStore((s) => s.cellSize);
   const setCellSize = useUIStore((s) => s.setCellSize);
@@ -98,6 +100,32 @@ export function FilterBar() {
         onValueChange={(v) => updateFolderFilters(client, { flagFilter: v })}
         className="border-0 bg-secondary dark:bg-white/5"
       />
+
+      {/* Soft-focus filter: isolate the frames the grid badges as soft so they
+          can be picked through and rejected. Disabled until the folder has
+          enough sharpness scores to define a threshold (softBelow > 0). */}
+      <button
+        onClick={toggleSoftOnly}
+        disabled={softBelow <= 0}
+        className={cn(
+          'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11.5px] disabled:cursor-not-allowed disabled:opacity-40',
+          softOnly
+            ? 'bg-amber-400/15 text-amber-500 dark:text-amber-400'
+            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+        )}
+        title={
+          softBelow <= 0
+            ? 'No focus scores yet — soft frames can’t be detected'
+            : softOnly
+              ? 'Showing only soft-focus frames'
+              : 'Show only soft-focus frames'
+        }
+        aria-label="Show only soft-focus frames"
+        aria-pressed={softOnly}
+      >
+        <Contrast className="size-[13px]" strokeWidth={1.75} />
+        <span className="@max-[960px]:hidden">Soft</span>
+      </button>
 
       <div className="flex-1" />
 

@@ -245,6 +245,10 @@ interface UIState {
   // lib/uiSettings.ts). Folders with no entry show everything.
   minRating: number;
   flagFilter: FlagFilter;
+  // Soft-focus culling filter: show only frames the shoot-relative sharpness
+  // threshold calls soft. A transient toggle (not persisted per folder) —
+  // setFolder clears it so a leftover can't make a fresh folder look empty.
+  softOnly: boolean;
 
   // Optimistic patches applied on top of the subscribed photo list, so a
   // rating keystroke shows before the server round trip settles. Server
@@ -312,6 +316,7 @@ interface UIState {
   setExportOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setWatermarkEditorOpen: (open: boolean) => void;
+  toggleSoftOnly: () => void;
   setCellSize: (px: number) => void;
   setLoupeZoom: (z: 'fit' | number) => void;
   setLoupeFitScale: (scale: number) => void;
@@ -359,6 +364,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   selection: new Set<number>(),
   minRating: 0,
   flagFilter: 'all',
+  softOnly: false,
   overrides: new Map(),
   navRowStarts: [],
   navColCenters: null,
@@ -432,6 +438,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       // snapshot the map is empty and this yields defaults; the snapshot's
       // applyUISettings re-resolve then applies the saved view.
       ...resolveFolderView(get(), path),
+      // Transient cull filter, never carried across folders.
+      softOnly: false,
       view: 'grid',
       focusId: null,
       anchorId: null,
@@ -515,6 +523,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setExportOpen: (open) => set({ exportOpen: open }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setWatermarkEditorOpen: (open) => set({ watermarkEditorOpen: open }),
+  toggleSoftOnly: () => set((s) => ({ softOnly: !s.softOnly })),
   setCellSize: (px) => set({ cellSize: Math.min(400, Math.max(120, px)) }),
   // Entering fit always recenters — a photo panned away at 1:1 must not come
   // back off-center. Bumping the tick here (not at the call sites) covers the

@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useListPhotos, type Photo, type PhotoPatchEvent } from '@/api/library';
+import { isSoft, softThreshold } from '@/lib/bursts';
 import { useUIStore, type LibrarySort } from '@/stores/uiStore';
 
 // photoPatchReducer folds server-pushed subscription patches (aprot
@@ -25,6 +26,10 @@ function photoPatchReducer(data: Photo[], patch: unknown): Photo[] {
 export interface PhotoLists {
   all: Photo[];
   visible: Photo[];
+  // Soft-focus cutoff derived from the whole folder (0 = not enough scores to
+  // call anything soft). Shared with the grid so its badges and the soft-only
+  // filter agree.
+  softBelow: number;
   isLoading: boolean;
 }
 
@@ -65,6 +70,7 @@ export function usePhotos(folderId: number): PhotoLists {
   const overrides = useUIStore((s) => s.overrides);
   const minRating = useUIStore((s) => s.minRating);
   const flagFilter = useUIStore((s) => s.flagFilter);
+  const softOnly = useUIStore((s) => s.softOnly);
   const librarySort = useUIStore((s) => s.librarySort);
 
   // Sort before merging overrides: overrides never move a photo, so rating
@@ -79,10 +85,15 @@ export function usePhotos(folderId: number): PhotoLists {
     });
   }, [ordered, overrides]);
 
+  // Threshold from the FULL folder, so it (and the grid badges that reuse it)
+  // stays put when the soft-only filter narrows the visible set.
+  const softBelow = useMemo(() => softThreshold(all), [all]);
+
   const visible = useMemo(
     () =>
       all.filter((p) => {
         if (p.rating < minRating) return false;
+        if (softOnly && !isSoft(p, softBelow)) return false;
         switch (flagFilter) {
           case 'pick':
             return p.flag === 'pick';
@@ -94,7 +105,7 @@ export function usePhotos(folderId: number): PhotoLists {
             return true;
         }
       }),
-    [all, minRating, flagFilter],
+    [all, minRating, flagFilter, softOnly, softBelow],
   );
 
   // Keep keyboard navigation in sync with what is on screen.
@@ -110,5 +121,5 @@ export function usePhotos(folderId: number): PhotoLists {
     useUIStore.getState().setPhotoFlags(new Map(all.map((p) => [p.id, p.flag])));
   }, [all]);
 
-  return { all, visible, isLoading };
+  return { all, visible, softBelow, isLoading };
 }

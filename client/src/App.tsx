@@ -311,7 +311,7 @@ function Workspace({ folderId }: { folderId: number }) {
   const mode = useUIStore((s) => s.mode);
   const folderPath = useUIStore((s) => s.folderPath);
   const showEditPanel = useUIStore((s) => s.showEditPanel);
-  const { all, visible } = usePhotos(folderId);
+  const { all, visible, softBelow } = usePhotos(folderId);
   // Burst groups are derived over the WHOLE folder, not the filtered `visible`
   // list, so badge counts and the sharpest-frame pick describe the real group
   // even when a filter hides some members.
@@ -349,8 +349,8 @@ function Workspace({ folderId }: { folderId: number }) {
           <CullView photos={visible} bursts={bursts} />
         ) : structured ? (
           <>
-            <FilterBar />
-            <GridView photos={visible} folderId={folderId} bursts={bursts} />
+            <FilterBar softBelow={softBelow} />
+            <GridView photos={visible} folderId={folderId} bursts={bursts} softBelow={softBelow} />
             <StatusBar shown={visible.length} total={all.length} picked={picked} scan={scan} />
           </>
         ) : (
