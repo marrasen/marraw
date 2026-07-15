@@ -6,6 +6,7 @@ import { useImgBust } from '@/lib/imgCacheBust';
 import { gapLabel, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { aspectOf } from '@/lib/justify';
 import { PyramidImage } from '@/components/PyramidImage';
+import { SoftBadge } from '@/components/SoftBadge';
 import { useUIStore, type ThumbFit } from '@/stores/uiStore';
 
 // Filmstrip thumbnails are 40px tall. crop keeps the fixed 60px slot; fit and
@@ -27,12 +28,15 @@ export function ScrubberDeck({
   focusId,
   hidden,
   shifted,
+  softBelow = 0,
 }: {
   groups: TimeGroup[];
   focusId: number | null;
   hidden?: boolean;
   /** Center on the free canvas left of Develop's pinned drawer. */
   shifted?: boolean;
+  /** Soft-focus cutoff for the per-thumb soft badge; 0 hides it (Develop). */
+  softBelow?: number;
 }) {
   const focus = useUIStore((s) => s.focus);
   const thumbFit = useUIStore((s) => s.thumbFit);
@@ -134,9 +138,11 @@ export function ScrubberDeck({
         <span className="text-[9px] tracking-[.06em] text-muted-foreground uppercase">Groups</span>
         <span className="font-mono text-[13px] text-accent-text">{groups.length}</span>
       </div>
-      {/* py/-my slack: the focused thumb scales past the row height and the
-          scroll container would otherwise clip the overhang. */}
-      <div ref={scrollRef} className="no-scrollbar -my-1.5 flex items-stretch overflow-x-auto py-1.5">
+      {/* py/-my and px/-mx slack: the focused thumb scales past its slot and
+          the scroll container would otherwise clip the overhang — vertically
+          for every frame, horizontally for the first/last of the roll where
+          the enlarged frame and its border sit flush against the edge. */}
+      <div ref={scrollRef} className="no-scrollbar -mx-2 -my-1.5 flex items-stretch overflow-x-auto px-2 py-1.5">
         {groups.map((g, i) => (
           <div key={i} className="flex shrink-0 items-stretch">
             {g.gapBeforeMin != null && g.gapBeforeMin > 0 && (
@@ -162,6 +168,7 @@ export function ScrubberDeck({
                     focused={p.id === focusId}
                     onFocus={focus}
                     width={stripWidths[i][j]}
+                    softBelow={softBelow}
                   />
                 ))}
               </div>
@@ -182,11 +189,13 @@ const StripThumb = memo(function StripThumb({
   focused,
   onFocus,
   width,
+  softBelow,
 }: {
   photo: Photo;
   focused: boolean;
   onFocus: (id: number, opts?: { extend?: boolean; toggle?: boolean }) => void;
   width: number;
+  softBelow: number;
 }) {
   useImgBust(photo.id); // refetch when a restored AI map repaints this thumb
   return (
@@ -224,6 +233,11 @@ const StripThumb = memo(function StripThumb({
           <span className="text-white">{photo.rating}</span>
         </span>
       )}
+      <SoftBadge
+        photo={photo}
+        softBelow={softBelow}
+        className="absolute right-0.5 bottom-0.5 px-1 py-0 text-[8px] leading-none"
+      />
       {focused && <span className="absolute inset-0 rounded-[3px] border-2 border-primary" />}
     </button>
   );

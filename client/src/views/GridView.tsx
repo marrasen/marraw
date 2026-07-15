@@ -7,8 +7,9 @@ import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { useImgBust } from '@/lib/imgCacheBust';
 import { dayLabel, gapLabel, groupByGap, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
-import { burstFor, focusScore, type BurstInfo } from '@/lib/bursts';
+import { burstFor, type BurstInfo } from '@/lib/bursts';
 import { BurstBadge } from '@/components/BurstBadge';
+import { SoftBadge } from '@/components/SoftBadge';
 import { PyramidImage } from '@/components/PyramidImage';
 import { rowLayout } from '@/lib/justify';
 import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
@@ -279,7 +280,6 @@ function GridCell({ photo, w, h, fitClass, softBelow, burst }: { photo: Photo; w
   useImgBust(photo.id); // refetch this thumb when a restored AI map repaints it
   const level = w * window.devicePixelRatio > 256 ? '512' : '256';
   const isFocus = focusId === photo.id;
-  const score = focusScore(photo);
 
   return (
     <div
@@ -330,16 +330,7 @@ function GridCell({ photo, w, h, fitClass, softBelow, burst }: { photo: Photo; w
       {burst && !(multiSelect && selected) && (
         <BurstBadge burst={burst} photoId={photo.id} className="absolute top-1.5 left-1.5" />
       )}
-      {score != null && softBelow > 0 && score < softBelow && (
-        <div
-          className="absolute bottom-[5px] right-[5px] rounded bg-black/50 px-[4px] py-0.5 text-[9px] text-amber-400"
-          title={`${photo.subjectSharpness != null ? 'Soft subject' : 'Soft focus'} (score ${Math.round(score)})`}
-          aria-label="Soft focus"
-          data-testid="soft-badge"
-        >
-          ◐
-        </div>
-      )}
+      <SoftBadge photo={photo} softBelow={softBelow} className="absolute right-[5px] bottom-[5px]" />
       {multiSelect && selected && (
         <>
           <div className="pointer-events-none absolute inset-0 rounded border-2 border-primary" />

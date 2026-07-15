@@ -320,8 +320,11 @@ function Workspace({ folderId }: { folderId: number }) {
   // even when a filter hides some members.
   const bursts = useMemo(() => burstMap(all), [all]);
   const picked = all.filter((p) => p.flag === 'pick').length;
-  // Subject-aware coverage over the whole folder, for the toolbar scan control.
-  const subjectAware = all.filter((p) => p.subjectSharpness != null).length;
+  // Subject-analysis coverage over the whole folder, for the toolbar scan
+  // control. Counts frames that have been analyzed — including ones with no
+  // detectable subject (score-invisible) — so the indicator resolves instead of
+  // forever flagging subjectless frames as "the rest" to scan.
+  const subjectAnalyzed = all.filter((p) => p.subjectAnalyzed).length;
   const scan = useFolderScan(folderPath);
   const client = useApiClient();
 
@@ -351,10 +354,10 @@ function Workspace({ folderId }: { folderId: number }) {
     <>
       <main className="flex min-w-0 flex-1 flex-col">
         {mode === 'cull' ? (
-          <CullView photos={visible} bursts={bursts} />
+          <CullView photos={visible} bursts={bursts} softBelow={softBelow} />
         ) : structured ? (
           <>
-            <FilterBar softBelow={softBelow} subjectAware={subjectAware} photoCount={all.length} />
+            <FilterBar softBelow={softBelow} subjectAnalyzed={subjectAnalyzed} photoCount={all.length} />
             <GridView photos={visible} folderId={folderId} bursts={bursts} softBelow={softBelow} />
             <StatusBar shown={visible.length} total={all.length} picked={picked} scan={scan} />
           </>

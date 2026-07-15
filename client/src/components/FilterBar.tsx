@@ -45,13 +45,14 @@ const SORT_ITEMS: { value: LibrarySort; label: string }[] = [
 
 export function FilterBar({
   softBelow,
-  subjectAware,
+  subjectAnalyzed,
   photoCount,
 }: {
   softBelow: number;
-  // How many photos in the folder carry a subject-aware focus score, out of
-  // photoCount total — drives the subject-scan indicator's state and count.
-  subjectAware: number;
+  // How many photos in the folder have been analyzed for subjects (whether or
+  // not one was found), out of photoCount total — drives the subject-scan
+  // indicator's state and count.
+  subjectAnalyzed: number;
   photoCount: number;
 }) {
   const client = useApiClient();
@@ -146,21 +147,23 @@ export function FilterBar({
         disabled={photoCount === 0}
         className={cn(
           'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11.5px] disabled:cursor-not-allowed disabled:opacity-40',
-          subjectAware > 0
+          subjectAnalyzed > 0
             ? 'bg-amber-400/15 text-amber-500 dark:text-amber-400'
             : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
         )}
         title={
-          subjectAware > 0
-            ? `${subjectAware} of ${photoCount} photos scored subject-aware — click to analyze the rest`
-            : 'Focus uses whole-frame sharpness — click to analyze subjects & re-score focus'
+          subjectAnalyzed === 0
+            ? 'Focus uses whole-frame sharpness — click to analyze subjects & re-score focus'
+            : subjectAnalyzed < photoCount
+              ? `${subjectAnalyzed} of ${photoCount} photos analyzed for subjects — click to analyze the rest`
+              : `All ${photoCount} photos analyzed for subjects & re-scored`
         }
         aria-label="Analyze subjects and re-score focus"
         data-testid="subject-scan-button"
       >
         <Focus className="size-[13px]" strokeWidth={1.75} />
         <span className="@max-[960px]:hidden">
-          {subjectAware > 0 ? `${subjectAware}/${photoCount}` : 'Subjects'}
+          {subjectAnalyzed > 0 ? `${subjectAnalyzed}/${photoCount}` : 'Subjects'}
         </span>
       </button>
 

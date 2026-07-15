@@ -19,7 +19,17 @@ import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
  * confirm bar (with its embedded zoom cluster) and the deck stay up whether
  * the photo sits at fit or 1:1.
  */
-export function CullView({ photos, bursts }: { photos: Photo[]; bursts: Map<number, BurstInfo> }) {
+export function CullView({
+  photos,
+  bursts,
+  softBelow,
+}: {
+  photos: Photo[];
+  bursts: Map<number, BurstInfo>;
+  // Soft-focus cutoff (whole-folder), so the scrubber's soft badge agrees with
+  // the grid's.
+  softBelow: number;
+}) {
   const client = useApiClient();
   const focusId = useUIStore((s) => s.focusId);
   const contactSheet = useUIStore((s) => s.contactSheet);
@@ -82,7 +92,7 @@ export function CullView({ photos, bursts }: { photos: Photo[]; bursts: Map<numb
             right={<GapControl glass />}
           />
           <ConfirmBar photo={photo} hidden={idle} zoom={<ZoomCluster scale={scale} />} />
-          <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} />
+          <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} softBelow={softBelow} />
         </>
       )}
     </div>
