@@ -8,7 +8,7 @@ import type {
     UseQueryResult,
 } from './client';
 import type { AIKindType, Params } from './edit';
-import type { TaskRef } from './tasks';
+import type { TaskRef } from './tasks.types';
 
 export interface AICategory {
     id: number;

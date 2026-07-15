@@ -149,10 +149,6 @@ export function useTaskOutput(taskId: string): { lines: string[]; clear: () => v
     return { lines, clear };
 }
 
-
-export interface TaskMeta {
-    kind: string;
-    folder?: string;
-    folderPath?: string;
-    destDir?: string;
-}
+// Task meta interfaces are declared alongside the task types; re-exported
+// here so imports from './tasks' keep resolving.
+export type { TaskMeta } from './tasks-handler';

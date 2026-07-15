@@ -8,7 +8,7 @@ import type {
     UseQueryResult,
 } from './client';
 import type { ColorSpaceType, ExifModeType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
-import type { TaskRef } from './tasks';
+import type { TaskRef } from './tasks.types';
 
 export interface DestInfo {
     exists: boolean;
