@@ -304,6 +304,10 @@ function GridCell({ photo, w, h, fitClass, softBelow, burst }: { photo: Photo; w
         src={imgUrl(photo, level)}
         alt={photo.fileName}
         loading="lazy"
+        // Folder open can transiently 500/abort an on-demand render; retry the
+        // stable thumbnail URL so the cell heals instead of stranding on the
+        // skeleton until a remount.
+        retry={5}
         onLoad={() => setLoaded(true)}
         className={cn('size-full', fitClass, !loaded && 'opacity-0')}
       />
