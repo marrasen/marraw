@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Photo } from '@/api/library';
-import type { BurstInfo } from '@/lib/bursts';
+import { burstFor, type BurstInfo } from '@/lib/bursts';
+import { BurstBadge } from '@/components/BurstBadge';
 import { useApiClient } from '@/api/client';
 import { CinemaImage } from '@/views/LoupeView';
 import { CinemaHUD } from '@/components/cinema/CinemaHUD';
@@ -70,6 +71,7 @@ export function CullView({
 
   const idx = photos.findIndex((p) => p.id === photo.id);
   const overlayActive = cropping || wbPicking;
+  const burst = burstFor(photo, bursts);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -87,6 +89,13 @@ export function CullView({
             status={
               <span className="font-mono text-[11px] text-[#aab0ff]">
                 {photo.takenAt > 0 && `${timeLabel(photo.takenAt)} · `}frame {idx + 1}
+                {burst && (
+                  <BurstBadge
+                    burst={burst}
+                    photoId={photo.id}
+                    className="ml-2 inline-flex align-middle"
+                  />
+                )}
               </span>
             }
             right={<GapControl glass />}

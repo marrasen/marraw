@@ -198,6 +198,10 @@ interface UIState {
   // Pre-render 1:1 full-resolution tiles for opened folders (off by default;
   // large on disk).
   prerenderFullres: boolean;
+  // Near-duplicate burst grouping cutoff: max dHash bit distance for two
+  // adjacent frames to count as the same burst. Global (no per-folder
+  // override); the server re-clusters on change.
+  burstHamming: number;
   // How thumbnails are framed in the grids (crop 3:2 / fit square / natural
   // justified rows). Default fit — the whole frame is visible.
   thumbFit: ThumbFit;
@@ -350,6 +354,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   exportOptions: DEFAULT_EXPORT_OPTIONS,
   developTab: 'develop',
   prerenderFullres: false,
+  burstHamming: 18,
   thumbFit: 'fit',
   librarySort: 'captureAsc',
   globalLibrarySort: 'captureAsc',
@@ -424,6 +429,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       exportDir: s.exportDir,
       exportOptions: sanitizeExportOptions(s.exportOptions),
       prerenderFullres: s.prerenderFullres,
+      burstHamming: s.burstHamming,
       thumbFit: sanitizeThumbFit(s.thumbFit),
       shootSort: sanitizeShootSort(s.shootSort),
       shootGroup: sanitizeShootGroup(s.shootGroup),

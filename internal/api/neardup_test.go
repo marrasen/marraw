@@ -20,38 +20,52 @@ func TestBurstGroups(t *testing.T) {
 	// Base hash and a composition 32 bits away; h^1 etc. stay within
 	// Hamming 10. (Both non-negative — bp reserves negative for unhashed.)
 	const h, hFar = 0x0f0f_0f0f_0f0f_0f0f, 0x00ff_00ff_00ff_00ff
+	// hPose is 14 bits from h — an expressive pose shift: past the classic
+	// 10-bit cutoff but under the widened default of 18. XOR distance equals
+	// the mask's popcount, and 0x3fff has 14 set bits.
+	const hPose = h ^ 0x3fff
 	cases := []struct {
-		name   string
-		photos []store.Photo
-		want   map[int64]int64
+		name       string
+		photos     []store.Photo
+		maxHamming int
+		want       map[int64]int64
 	}{
-		{"empty", nil, map[int64]int64{}},
+		{"empty", nil, burstHammingDefault, map[int64]int64{}},
 		{"burst chains and takes lead id",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, h^1), bp(3, 103, h^3), bp(9, 300, h)},
-			map[int64]int64{1: 1, 2: 1, 3: 1}},
+			burstHammingDefault, map[int64]int64{1: 1, 2: 1, 3: 1}},
 		{"time gap splits identical hashes",
 			[]store.Photo{bp(1, 100, h), bp(2, 105, h)},
-			map[int64]int64{}},
+			burstHammingDefault, map[int64]int64{}},
 		{"hash distance splits adjacent frames",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, hFar)},
-			map[int64]int64{}},
+			burstHammingDefault, map[int64]int64{}},
 		{"two separate bursts",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, h), bp(3, 200, hFar), bp(4, 201, hFar)},
-			map[int64]int64{1: 1, 2: 1, 3: 3, 4: 3}},
+			burstHammingDefault, map[int64]int64{1: 1, 2: 1, 3: 3, 4: 3}},
 		{"untimed photos never group",
 			[]store.Photo{bp(1, 0, h), bp(2, 0, h)},
-			map[int64]int64{}},
+			burstHammingDefault, map[int64]int64{}},
 		{"unhashed photo breaks the chain",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, -1), bp(3, 102, h)},
-			map[int64]int64{}},
+			burstHammingDefault, map[int64]int64{}},
 		{"chain drift: each link close, ends far",
 			// 100→101→102 each within the gap; the middle frame bridges.
 			[]store.Photo{bp(1, 100, h), bp(2, 104, h^1), bp(3, 108, h^3)},
-			map[int64]int64{1: 1, 2: 1, 3: 1}},
+			burstHammingDefault, map[int64]int64{1: 1, 2: 1, 3: 1}},
+		{"pose shift (14 bits) splits at the classic 10 cutoff",
+			[]store.Photo{bp(1, 100, h), bp(2, 101, hPose)},
+			10, map[int64]int64{}},
+		{"pose shift (14 bits) groups at the widened default",
+			[]store.Photo{bp(1, 100, h), bp(2, 101, hPose)},
+			burstHammingDefault, map[int64]int64{1: 1, 2: 1}},
+		{"recompose (32 bits) still splits at the widened default",
+			[]store.Photo{bp(1, 100, h), bp(2, 101, hFar)},
+			burstHammingDefault, map[int64]int64{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := burstGroups(tc.photos)
+			got := burstGroups(tc.photos, tc.maxHamming)
 			if len(got) != len(tc.want) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}

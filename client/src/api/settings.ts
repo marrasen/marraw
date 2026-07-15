@@ -116,6 +116,7 @@ export interface FolderView {
 export interface UISettings {
     theme: ThemeType;
     gapMinutes: number;
+    burstHamming: number;
     cullDials: string[];
     quickDials: string[];
     autoPresets: AutoPreset[];
@@ -207,6 +208,19 @@ setAutoPresets.method = 'Settings.SetAutoPresets' as const;
 
 export function subscribeSetAutoPresets(client: ApiClient, presets: AutoPreset[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetAutoPresets', [presets], callback, onError, options);
+}
+
+
+export function setBurstHamming(client: ApiClient, n: number, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetBurstHamming', [n], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setBurstHamming.method = 'Settings.SetBurstHamming' as const;
+
+export function subscribeSetBurstHamming(client: ApiClient, n: number, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetBurstHamming', [n], callback, onError, options);
 }
 
 
@@ -513,6 +527,21 @@ export function useSetAutoPresets(presets: AutoPreset[], options?: UseQueryOptio
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [presets], _subscribe: { method: 'Settings.SetAutoPresets', params: [presets] } });
+}
+
+/**
+ * Subscribes to `Settings.SetBurstHamming` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetBurstHamming(n: number, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, n: number) => setBurstHamming(client, n, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [n], _subscribe: { method: 'Settings.SetBurstHamming', params: [n] } });
 }
 
 /**

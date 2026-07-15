@@ -7,6 +7,7 @@
 import { useEffect } from 'react';
 import {
   setAutoPresets,
+  setBurstHamming,
   setCullDials,
   setEditGroupOpen,
   setExportDir,
@@ -94,6 +95,13 @@ export function updateGapMinutes(client: ApiClient, min: number | null) {
   useUIStore.setState({ gapMinutes: min, globalGapMinutes: min });
   setGapMinutes(client, min ?? 0).catch(swallow);
   patchFolderView(client, { gapMinutes: min ?? 0 });
+}
+
+// Near-duplicate burst grouping cutoff (dHash bits). Global — no per-folder
+// override; the server re-clusters open folders on write.
+export function updateBurstHamming(client: ApiClient, n: number) {
+  useUIStore.setState({ burstHamming: n });
+  setBurstHamming(client, n).catch(swallow);
 }
 
 export function updateCullDials(client: ApiClient, dials: DialKey[]) {

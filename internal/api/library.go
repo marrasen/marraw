@@ -298,12 +298,14 @@ func (l *Library) savePathListSetting(ctx context.Context, key string, paths []s
 // subscription query: scan progress and structural changes push new results.
 func (l *Library) ListPhotos(ctx context.Context, folderID int64) ([]Photo, error) {
 	aprot.RegisterRefreshTrigger(ctx, photosKey(folderID))
+	aprot.RegisterRefreshTrigger(ctx, burstSettingsKey)
 	rows, err := l.deps.DB.ListPhotos(ctx, folderID)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Photo, len(rows))
-	groups := burstGroups(rows) // rows are capture-ordered, as burstGroups needs
+	// rows are capture-ordered, as burstGroups needs.
+	groups := burstGroups(rows, burstHammingSetting(ctx, l.deps.DB))
 	for i, p := range rows {
 		out[i] = toAPIPhoto(p)
 		if id, ok := groups[p.ID]; ok {

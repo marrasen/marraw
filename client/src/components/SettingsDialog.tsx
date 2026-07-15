@@ -32,6 +32,7 @@ import { CONTROL_SPECS, type ControlId } from '@/lib/controlSpecs';
 import type { AutoSection } from '@/lib/editSession';
 import {
   updateAutoPresets,
+  updateBurstHamming,
   updateCullDials,
   updatePrerenderFullres,
   updateQuickDials,
@@ -136,6 +137,11 @@ function GeneralSection() {
   const { theme, setTheme } = useTheme();
   const client = useApiClient();
   const thumbFit = useUIStore((s) => s.thumbFit);
+  const burstHamming = useUIStore((s) => s.burstHamming);
+  // Follow the thumb live during a drag; only commit to the server (which
+  // re-clusters open folders) on release — same pattern as OffsetSlider.
+  const [burstDrag, setBurstDrag] = useState<number | null>(null);
+  const burstShown = burstDrag ?? burstHamming;
   return (
     <div className="flex flex-col">
       <SettingRow
@@ -170,6 +176,31 @@ function GeneralSection() {
             value={thumbFit}
             onValueChange={(v) => updateThumbFit(client, v as 'crop' | 'fit' | 'natural')}
           />
+        }
+      />
+      <SettingRow
+        title="Burst grouping"
+        description="How different two frames can be and still group as a near-duplicate burst. Higher groups shots where the subject shifts pose between frames; lower groups only near-identical frames. Measured in dHash bits (of 64)."
+        control={
+          <div className="flex w-56 items-center gap-2.5">
+            <div className="min-w-0 flex-1">
+              <Slider
+                value={burstShown}
+                min={4}
+                max={30}
+                step={1}
+                aria-label="Burst grouping sensitivity"
+                onValueChange={(v) => setBurstDrag(v as number)}
+                onValueCommitted={(v) => {
+                  setBurstDrag(null);
+                  updateBurstHamming(client, v as number);
+                }}
+              />
+            </div>
+            <span className="w-6 shrink-0 text-right font-mono text-[11px] text-foreground tabular-nums">
+              {Math.round(burstShown)}
+            </span>
+          </div>
         }
       />
       <AutoUpdateRow />

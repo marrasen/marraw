@@ -219,10 +219,15 @@ func enumValid[T comparable](v T, values []T) bool {
 type UISettings struct {
 	Theme Theme `json:"theme"`
 	// GapMinutes is the cull time-gap grouping threshold; 0 = off.
-	GapMinutes  int          `json:"gapMinutes"`
-	CullDials   []string     `json:"cullDials"`
-	QuickDials  []string     `json:"quickDials"`
-	AutoPresets []AutoPreset `json:"autoPresets"`
+	GapMinutes int `json:"gapMinutes"`
+	// BurstHamming is the near-duplicate grouping cutoff: the max dHash bit
+	// distance (of 64) at which two adjacent frames count as the same burst.
+	// Higher groups frames that differ more (a subject changing pose); lower
+	// groups only near-identical frames.
+	BurstHamming int          `json:"burstHamming"`
+	CullDials    []string     `json:"cullDials"`
+	QuickDials   []string     `json:"quickDials"`
+	AutoPresets  []AutoPreset `json:"autoPresets"`
 	// UserPresets are saved develop looks (Presets tab → Save current look).
 	UserPresets []UserPreset `json:"userPresets"`
 	// Watermarks are the named export overlays (Export dialog → Watermark).
@@ -275,9 +280,15 @@ type Settings struct {
 
 const (
 	uiSettingsKey = "uiSettings"
+	// burstSettingsKey is a dedicated refresh trigger for the burst cutoff:
+	// ListPhotos subscribes to it so moving the "Burst grouping" slider
+	// re-clusters open folders live, without re-listing on every unrelated
+	// UI settings change.
+	burstSettingsKey = "burstSettings"
 
 	settingUITheme         = "ui:theme"
 	settingUIGapMinutes    = "ui:gapMinutes"
+	settingUIBurstHamming  = "ui:burstHamming"
 	settingUICullDials     = "ui:cullDials"
 	settingUIQuickDials    = "ui:quickDials"
 	settingUIAutoPresets   = "ui:autoPresets"
@@ -380,6 +391,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 	return &UISettings{
 		Theme:            theme,
 		GapMinutes:       gap,
+		BurstHamming:     burstHammingSetting(ctx, db),
 		CullDials:        jsonSetting(ctx, db, settingUICullDials, []string{}),
 		QuickDials:       jsonSetting(ctx, db, settingUIQuickDials, []string{}),
 		AutoPresets:      autoPresetsOrDefault(ctx, db),
@@ -416,6 +428,32 @@ func (u *Settings) SetGapMinutes(ctx context.Context, minutes int) error {
 		return aprot.ErrInvalidParams("gap minutes must be 0..1440")
 	}
 	return u.save(ctx, settingUIGapMinutes, strconv.Itoa(minutes))
+}
+
+// SetBurstHamming persists the near-duplicate grouping cutoff and re-triggers
+// the photo lists so open folders re-cluster live.
+func (u *Settings) SetBurstHamming(ctx context.Context, n int) error {
+	if n < burstHammingMin || n > burstHammingMax {
+		return aprot.ErrInvalidParams(fmt.Sprintf("burst hamming must be %d..%d", burstHammingMin, burstHammingMax))
+	}
+	if err := u.save(ctx, settingUIBurstHamming, strconv.Itoa(n)); err != nil {
+		return err
+	}
+	aprot.TriggerRefresh(ctx, burstSettingsKey)
+	return nil
+}
+
+// burstHammingSetting reads the near-duplicate grouping cutoff, falling back
+// to burstHammingDefault and clamping to the allowed range. Shared by
+// GetUISettings and ListPhotos so the read and the clustering agree.
+func burstHammingSetting(ctx context.Context, db *store.DB) int {
+	n := burstHammingDefault
+	if raw, _ := db.GetSetting(ctx, settingUIBurstHamming); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v >= burstHammingMin && v <= burstHammingMax {
+			n = v
+		}
+	}
+	return n
 }
 
 // SetCullDials replaces the Cull toolbar dial selection.
