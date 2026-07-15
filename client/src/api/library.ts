@@ -78,6 +78,7 @@ export interface Photo {
     model: string;
     sharpness?: number;
     subjectSharpness?: number;
+    subjectAnalyzed: boolean;
     groupId?: number;
 }
 
@@ -87,6 +88,7 @@ export interface PhotoPatch {
     flag: FlagType | null;
     editHash: string | null;
     subjectSharpness: number | null;
+    subjectAnalyzed: boolean | null;
 }
 
 export interface PhotoPatchEvent {

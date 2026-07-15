@@ -139,6 +139,13 @@ type Photo struct {
 	// subject. When set it supersedes Sharpness for the soft badge, so a
 	// sharp background can't hide a soft subject.
 	SubjectSharpness *float64 `json:"subjectSharpness,omitempty"`
+	// SubjectAnalyzed reports that the subject matte has been measured, whether
+	// or not it found a scoreable subject — so a frame with no detectable
+	// subject (its score is the client-invisible "-1" sentinel) still reads as
+	// done. Distinct from SubjectSharpness != null so the subject-scan
+	// indicator stops flagging subjectless frames as pending: re-analyzing them
+	// would never change anything.
+	SubjectAnalyzed bool `json:"subjectAnalyzed"`
 	// GroupID marks a near-duplicate burst: photos shot moments apart whose
 	// perceptual hashes match carry the same id (the group's first photo ID).
 	// Derived per list from stored hashes, never persisted. Nil = not part
@@ -261,8 +268,12 @@ type PhotoPatch struct {
 	EditHash *string `json:"editHash"`
 	// SubjectSharpness delivers a just-measured subject focus score to the grid
 	// without a full folder-list refresh. Only ever a real score — the "-1
-	// unscoreable" sentinel is client-invisible, so it is never patched.
+	// unscoreable" sentinel is client-invisible (see SubjectAnalyzed).
 	SubjectSharpness *float64 `json:"subjectSharpness"`
+	// SubjectAnalyzed flips the photo's analyzed flag the moment its matte is
+	// scored, even when there was no scoreable subject (score < 0), so the
+	// subject-scan indicator stops counting it as pending live during a scan.
+	SubjectAnalyzed *bool `json:"subjectAnalyzed"`
 }
 
 // PhotoPatchEvent is broadcast when rating/flag/edits change so clients can

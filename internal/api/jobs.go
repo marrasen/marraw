@@ -26,7 +26,7 @@ import (
 // TaskMeta is the typed metadata attached to shared background tasks so the
 // client task tray can render kind-specific UI (reveal export folder, …).
 type TaskMeta struct {
-	Kind string `json:"kind"` // "scan" | "calibrate" | "prerender" | "fullres" | "export"
+	Kind string `json:"kind"` // "scan" | "calibrate" | "prerender" | "fullres" | "export" | "aimask" | "subjects"
 	// Folder is the album's display name (base of FolderPath), shown in the
 	// tray sub-label.
 	Folder string `json:"folder,omitempty"`

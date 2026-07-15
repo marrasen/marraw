@@ -336,6 +336,7 @@ func toAPIPhoto(p store.Photo) Photo {
 		Model:            p.Model,
 		Sharpness:        nullableFloat(p.Sharpness),
 		SubjectSharpness: nonNegativeFloat(p.SubjectSharpness),
+		SubjectAnalyzed:  p.SubjectSharpness.Valid,
 	}
 }
 

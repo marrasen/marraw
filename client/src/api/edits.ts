@@ -8,6 +8,7 @@ import type {
     UseQueryResult,
 } from './client';
 import type { AIKindType, Params } from './edit';
+import type { TaskRef } from './tasks';
 
 export interface AICategory {
     id: number;
@@ -53,6 +54,19 @@ aIModelStatus.method = 'Edits.AIModelStatus' as const;
 
 export function subscribeAIModelStatus(client: ApiClient, kind: AIKindType, callback: (data: AIModelInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<AIModelInfo>('Edits.AIModelStatus', [kind], callback, onError, options);
+}
+
+
+export function analyzeSubjects(client: ApiClient, photoIDs: number[], allowDownload: boolean, options?: RequestOptions): Promise<TaskRef> {
+    return client.request<TaskRef>('Edits.AnalyzeSubjects', [photoIDs, allowDownload], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+analyzeSubjects.method = 'Edits.AnalyzeSubjects' as const;
+
+export function subscribeAnalyzeSubjects(client: ApiClient, photoIDs: number[], allowDownload: boolean, callback: (data: TaskRef) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<TaskRef>('Edits.AnalyzeSubjects', [photoIDs, allowDownload], callback, onError, options);
 }
 
 
@@ -200,6 +214,21 @@ export function useAIModelStatus(kind: AIKindType, options?: UseQueryOptions<AIM
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [kind], _subscribe: { method: 'Edits.AIModelStatus', params: [kind] } });
+}
+
+/**
+ * Subscribes to `Edits.AnalyzeSubjects` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useAnalyzeSubjects(photoIDs: number[], allowDownload: boolean, options?: UseQueryOptions<TaskRef>): UseQueryResult<TaskRef> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoIDs: number[], allowDownload: boolean) => analyzeSubjects(client, photoIDs, allowDownload, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoIDs, allowDownload], _subscribe: { method: 'Edits.AnalyzeSubjects', params: [photoIDs, allowDownload] } });
 }
 
 /**

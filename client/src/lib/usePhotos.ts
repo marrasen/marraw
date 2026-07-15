@@ -19,6 +19,7 @@ function photoPatchReducer(data: Photo[], patch: unknown): Photo[] {
     if (p.flag != null) next.flag = p.flag;
     if (p.editHash != null) next.editHash = p.editHash;
     if (p.subjectSharpness != null) next.subjectSharpness = p.subjectSharpness;
+    if (p.subjectAnalyzed != null) next.subjectAnalyzed = p.subjectAnalyzed;
     return next;
   });
 }

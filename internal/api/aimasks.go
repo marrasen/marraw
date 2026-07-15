@@ -7,9 +7,13 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"path/filepath"
+	"runtime"
+	"sync/atomic"
 
 	"github.com/marrasen/aprot"
 	"github.com/marrasen/aprot/tasks"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/edit"
@@ -89,11 +93,11 @@ func (e *Edits) MaskTintPreview(ctx context.Context, photoID int64, params edit.
 
 // scoreSubjectMatte computes photo's subject-weighted focus score from its
 // embedded thumb and subject matte, persists it (-1 = measured but no
-// scoreable subject, hidden from clients by nonNegativeFloat), and on a real
-// score pushes a granular per-photo patch rather than a full folder-list
-// refresh. Shared by the calibrate-pass backfill and GenerateAIMap's immediate
-// scoring so the sentinel convention and store call live in one place.
-// Best-effort: callers ignore the returned error (the calibrate pass retries).
+// scoreable subject, hidden from clients by nonNegativeFloat), and pushes a
+// granular per-photo patch rather than a full folder-list refresh. Shared by
+// the calibrate-pass backfill and GenerateAIMap's immediate scoring so the
+// sentinel convention and store call live in one place. Best-effort: callers
+// ignore the returned error (the calibrate pass retries).
 func (d *Deps) scoreSubjectMatte(ctx context.Context, photo store.Photo, thumb image.Image, matte *pyramid.AIMap) error {
 	score, ok := pyramid.SubjectSharpnessScore(thumb, matte, photo.Orientation)
 	if !ok {
@@ -102,10 +106,17 @@ func (d *Deps) scoreSubjectMatte(ctx context.Context, photo store.Photo, thumb i
 	if err := d.DB.SetSubjectSharpness(context.WithoutCancel(ctx), photo.ID, score); err != nil {
 		return err
 	}
+	// Always flip the analyzed flag so the subject-scan indicator stops
+	// counting this frame as pending — even when there was no subject to score
+	// (score < 0), where re-analyzing would forever change nothing. The numeric
+	// score rides along only when there is a subject.
+	analyzed := true
+	patch := PhotoPatch{ID: photo.ID, SubjectAnalyzed: &analyzed}
 	if score >= 0 {
 		s := score
-		d.patchFolderPhotos(photo.FolderID, []PhotoPatch{{ID: photo.ID, SubjectSharpness: &s}})
+		patch.SubjectSharpness = &s
 	}
+	d.patchFolderPhotos(photo.FolderID, []PhotoPatch{patch})
 	return nil
 }
 
@@ -196,52 +207,82 @@ const aiModelNotDownloadedMsg = "model not downloaded"
 // aborts both download and generation. Without consent a missing model fails
 // with aiModelNotDownloadedMsg so the client can ask.
 //
-// The inference input is a neutral base-orientation render, deliberately
-// independent of the current develop settings and crop, so the map never
-// shifts as the user edits.
+// This is the single-photo path and surfaces one "AI mask: <file>" task. The
+// folder-wide subject scan (AnalyzeSubjects) does NOT go through here — it
+// drives generateAIMap directly under one aggregate task, so a batch reports a
+// single task and toast rather than one per frame.
 func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKind, allowDownload bool) (*AIMapResult, error) {
-	ver, ok := aimask.MapVerFor(kind)
-	if !ok {
-		return nil, fmt.Errorf("ai masks: %q has no model available yet", kind)
-	}
-	store := e.deps.Cache.AIMaps
-	if store == nil || e.deps.Infer == nil {
-		return nil, fmt.Errorf("ai masks: inference is not configured")
-	}
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
 	if err != nil {
 		return nil, err
 	}
-	if store.Has(photo.CacheKey, kind, ver) {
+	// Fast path: an already-present map returns without opening a task, so the
+	// cheap sidecar-restore calls don't each spawn a task and a "done" toast.
+	if ver, ok := aimask.MapVerFor(kind); ok && e.deps.Cache.AIMaps != nil &&
+		e.deps.Cache.AIMaps.Has(photo.CacheKey, kind, ver) {
 		res := &AIMapResult{MapVer: ver}
 		if kind == edit.AIClass {
 			res.Categories = e.categoriesFor(photo.CacheKey, ver)
 		}
 		return res, nil
 	}
-	if spec, _ := aimask.SpecFor(kind); !allowDownload && !e.deps.Infer.HasModel(spec) {
-		return nil, fmt.Errorf("ai masks: %s", aiModelNotDownloadedMsg)
-	}
-
-	rgba, err := e.previewDecode(ctx, photoID, photo, nil)
-	if err != nil {
-		return nil, err
-	}
 
 	tctx, task := tasks.StartTask[TaskMeta](ctx, "AI mask: "+photo.FileName, tasks.Shared())
 	task.SetMeta(TaskMeta{Kind: "aimask"})
-	downloaded := false // progress only fires while weights download
-	gray, err := aimask.Generate(tctx, e.deps.Infer, kind, rgba, func(done, total int64) {
-		downloaded = true
+	res, _, err := e.generateAIMap(tctx, photo, kind, allowDownload, func(done, total int64) {
 		task.Progress(int(done>>20), int(total>>20)) // model download, MB units
 	})
+	task.Err(err)
+	return res, err
+}
+
+// generateAIMap ensures the model map for (photo, kind) exists on disk, scores
+// it when it's a subject matte, and returns its result. It opens NO task: the
+// caller owns progress reporting, so a folder-wide scan can report one
+// aggregate task instead of one per photo. onProgress fires only while model
+// weights download (nil to ignore); the second return reports whether a
+// download ran.
+//
+// The inference input is a neutral base-orientation render, deliberately
+// independent of the current develop settings and crop, so the map never
+// shifts as the user edits.
+func (e *Edits) generateAIMap(ctx context.Context, photo store.Photo, kind edit.AIKind, allowDownload bool, onProgress func(done, total int64)) (*AIMapResult, bool, error) {
+	ver, ok := aimask.MapVerFor(kind)
+	if !ok {
+		return nil, false, fmt.Errorf("ai masks: %q has no model available yet", kind)
+	}
+	store := e.deps.Cache.AIMaps
+	if store == nil || e.deps.Infer == nil {
+		return nil, false, fmt.Errorf("ai masks: inference is not configured")
+	}
+	if store.Has(photo.CacheKey, kind, ver) {
+		res := &AIMapResult{MapVer: ver}
+		if kind == edit.AIClass {
+			res.Categories = e.categoriesFor(photo.CacheKey, ver)
+		}
+		return res, false, nil
+	}
+	if spec, _ := aimask.SpecFor(kind); !allowDownload && !e.deps.Infer.HasModel(spec) {
+		return nil, false, fmt.Errorf("ai masks: %s", aiModelNotDownloadedMsg)
+	}
+
+	rgba, err := e.previewDecode(ctx, photo.ID, photo, nil)
 	if err != nil {
-		task.Err(err)
-		return nil, err
+		return nil, false, err
+	}
+
+	downloaded := false // progress only fires while weights download
+	gray, err := aimask.Generate(ctx, e.deps.Infer, kind, rgba, func(done, total int64) {
+		downloaded = true
+		if onProgress != nil {
+			onProgress(done, total)
+		}
+	})
+	if err != nil {
+		return nil, downloaded, err
 	}
 	if err := store.Save(photo.CacheKey, kind, ver, gray); err != nil {
-		task.Err(err)
-		return nil, err
+		return nil, downloaded, err
 	}
 	// A freshly (re)generated map changes pixels for any SAVED edit that
 	// already references it without changing that edit's hash (the restore
@@ -258,10 +299,88 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 	if downloaded {
 		aprot.TriggerRefresh(ctx, modelsInfoKey) // Settings' model list is live
 	}
-	task.Err(nil)
 	res := &AIMapResult{MapVer: ver, Generated: true}
 	if kind == edit.AIClass {
 		res.Categories = e.categoriesFor(photo.CacheKey, ver)
 	}
-	return res, nil
+	return res, downloaded, nil
+}
+
+// AnalyzeSubjects runs subject-matte inference across the given photos as one
+// shared, cancellable background task, scoring each frame into
+// subject_sharpness so the grid's focus badges re-evaluate subject-aware.
+//
+// It replaces the old client-side per-photo loop: the whole scan is a single
+// aggregate task — one progress bar, one cancel, one "done" toast — instead of
+// a per-photo "AI mask: <file>" task (and toast) for every frame. The pass
+// rides on a cancel-free context so navigating away doesn't abort it; the user
+// cancels from the task tray. Idempotent: already-scored frames are skipped and
+// generateAIMap short-circuits on an on-disk matte, so re-running a processed
+// folder is cheap.
+//
+// The first frame pays the one-time model download when allowDownload is set
+// (the client passes it after the consent dialog); without it a missing model
+// fails up front with aiModelNotDownloadedMsg so the client can ask. Returns a
+// nil ref when every frame is already scored — nothing to do.
+func (e *Edits) AnalyzeSubjects(ctx context.Context, photoIDs []int64, allowDownload bool) (*tasks.TaskRef, error) {
+	if e.deps.Cache.AIMaps == nil || e.deps.Infer == nil {
+		return nil, aprot.ErrInvalidParams("ai masks: inference is not configured")
+	}
+	photos, err := e.deps.DB.GetPhotos(ctx, photoIDs)
+	if err != nil {
+		return nil, err
+	}
+	// Work = frames without a subject-aware score yet. (An unscoreable frame
+	// reads the same and re-runs, but that hits generateAIMap's on-disk fast
+	// path, so it costs a decode-free round trip and no inference.)
+	var work []store.Photo
+	for _, p := range photos {
+		if !p.SubjectSharpness.Valid {
+			work = append(work, p)
+		}
+	}
+	if len(work) == 0 {
+		return nil, nil // nothing to do — the client just closes the dialog
+	}
+	if spec, _ := aimask.SpecFor(edit.AISubject); !allowDownload && !e.deps.Infer.HasModel(spec) {
+		return nil, aprot.ErrInvalidParams("ai masks: " + aiModelNotDownloadedMsg)
+	}
+	total := len(work)
+
+	// Light up the album this selection came from while the scan runs, the way
+	// export does. A folder-wide scan's frames share one folder.
+	meta := TaskMeta{Kind: "subjects", Folder: filepath.Base(work[0].FolderPath), FolderPath: work[0].FolderPath}
+	tctx, task := tasks.StartTask[TaskMeta](
+		context.WithoutCancel(ctx),
+		fmt.Sprintf("Analyzing subjects — %d photo%s", total, plural(total)),
+		tasks.Shared(),
+	)
+	task.SetMeta(meta)
+	task.Progress(0, total)
+
+	go func() {
+		var done atomic.Int64
+		g, gctx := errgroup.WithContext(tctx)
+		// Inference is heavy; leave a couple of cores free so an interactive
+		// edit preview never waits it out. The one-time model download is
+		// singleflighted, so concurrent workers share a single fetch.
+		g.SetLimit(max(1, runtime.NumCPU()-2))
+		for _, p := range work {
+			g.Go(func() error {
+				if gctx.Err() != nil {
+					return gctx.Err()
+				}
+				if _, _, err := e.generateAIMap(gctx, p, edit.AISubject, allowDownload, nil); err != nil {
+					if gctx.Err() != nil {
+						return gctx.Err() // cancelled — not a per-frame failure
+					}
+					task.Output(p.FileName + ": " + err.Error())
+				}
+				task.Progress(int(done.Add(1)), total)
+				return nil
+			})
+		}
+		task.Err(g.Wait())
+	}()
+	return &tasks.TaskRef{TaskID: task.ID()}, nil
 }
