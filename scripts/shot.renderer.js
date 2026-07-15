@@ -555,12 +555,34 @@ if (shot === 'cull') {
     textDrawn = br > 50 && tl === 0;
   }
   window.__wmProbe = { textDrawn, canvas: !!canvas };
+} else if (shot === 'subjects' || shot === 'subjectscan') {
+  // Library toolbar's subject-scan control ("Subjects", beside "Soft"). Hide
+  // the develop panel so the @container toolbar is wide enough to show labels.
+  ui().setMode('library');
+  ui().setView('grid');
+  ui().setShowEditPanel(false);
+  await sleep(400);
+  const scanBtn = document.querySelector('[data-testid="subject-scan-button"]');
+  if (shot === 'subjectscan') {
+    // Open the folder-wide "analyze subjects & re-score focus" dialog.
+    scanBtn?.click();
+    await until(() => document.querySelector('[data-testid="subject-scan-dialog"]'), 5000);
+  }
+  window.__subjectProbe = {
+    scanButton: !!scanBtn,
+    label: scanBtn?.textContent?.trim() ?? null,
+    dialogOpen: !!document.querySelector('[data-testid="subject-scan-dialog"]'),
+    startLabel:
+      [...document.querySelectorAll('[data-testid="subject-scan-start"]')][0]?.textContent?.trim() ??
+      null,
+  };
 }
 // Let previews decode, then wake the chrome (capture fires on resolve).
 await sleep(3600);
 window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
 await sleep(400);
 const probe =
+  window.__subjectProbe ??
   window.__wmProbe ??
   window.__neardupProbe ??
   window.__modelsProbe ??

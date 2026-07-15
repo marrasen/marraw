@@ -11,6 +11,7 @@ import { ShortcutsOverlay } from '@/components/ShortcutsOverlay';
 import { FilterBar } from '@/components/FilterBar';
 import { EditPanel } from '@/components/EditPanel';
 import { ExportDialog } from '@/components/ExportDialog';
+import { SubjectScanDialog } from '@/components/SubjectScanDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { WatermarkDialog } from '@/components/WatermarkDialog';
 import { StatusBar } from '@/components/StatusBar';
@@ -311,12 +312,16 @@ function Workspace({ folderId }: { folderId: number }) {
   const mode = useUIStore((s) => s.mode);
   const folderPath = useUIStore((s) => s.folderPath);
   const showEditPanel = useUIStore((s) => s.showEditPanel);
+  const subjectScanOpen = useUIStore((s) => s.subjectScanOpen);
+  const setSubjectScanOpen = useUIStore((s) => s.setSubjectScanOpen);
   const { all, visible, softBelow } = usePhotos(folderId);
   // Burst groups are derived over the WHOLE folder, not the filtered `visible`
   // list, so badge counts and the sharpest-frame pick describe the real group
   // even when a filter hides some members.
   const bursts = useMemo(() => burstMap(all), [all]);
   const picked = all.filter((p) => p.flag === 'pick').length;
+  // Subject-aware coverage over the whole folder, for the toolbar scan control.
+  const subjectAware = all.filter((p) => p.subjectSharpness != null).length;
   const scan = useFolderScan(folderPath);
   const client = useApiClient();
 
@@ -349,7 +354,7 @@ function Workspace({ folderId }: { folderId: number }) {
           <CullView photos={visible} bursts={bursts} />
         ) : structured ? (
           <>
-            <FilterBar softBelow={softBelow} />
+            <FilterBar softBelow={softBelow} subjectAware={subjectAware} photoCount={all.length} />
             <GridView photos={visible} folderId={folderId} bursts={bursts} softBelow={softBelow} />
             <StatusBar shown={visible.length} total={all.length} picked={picked} scan={scan} />
           </>
@@ -363,6 +368,11 @@ function Workspace({ folderId }: { folderId: number }) {
         </aside>
       )}
       <ExportDialog photos={visible} />
+      <SubjectScanDialog
+        photos={all}
+        open={subjectScanOpen}
+        onOpenChange={setSubjectScanOpen}
+      />
     </>
   );
 }

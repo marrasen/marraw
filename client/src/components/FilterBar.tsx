@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowUpDown, Contrast, LayoutGrid, PanelRight, Star, Trash2 } from 'lucide-react';
+import { ArrowUpDown, Contrast, Focus, LayoutGrid, PanelRight, Star, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePhotos } from '@/api/library';
 import { resetEdits } from '@/api/edits';
@@ -43,13 +43,24 @@ const SORT_ITEMS: { value: LibrarySort; label: string }[] = [
   { value: 'nameDesc', label: 'File name · Z to A' },
 ];
 
-export function FilterBar({ softBelow }: { softBelow: number }) {
+export function FilterBar({
+  softBelow,
+  subjectAware,
+  photoCount,
+}: {
+  softBelow: number;
+  // How many photos in the folder carry a subject-aware focus score, out of
+  // photoCount total — drives the subject-scan indicator's state and count.
+  subjectAware: number;
+  photoCount: number;
+}) {
   const client = useApiClient();
   const minRating = useUIStore((s) => s.minRating);
   const librarySort = useUIStore((s) => s.librarySort);
   const flagFilter = useUIStore((s) => s.flagFilter);
   const softOnly = useUIStore((s) => s.softOnly);
   const toggleSoftOnly = useUIStore((s) => s.toggleSoftOnly);
+  const setSubjectScanOpen = useUIStore((s) => s.setSubjectScanOpen);
   const view = useUIStore((s) => s.view);
   const cellSize = useUIStore((s) => s.cellSize);
   const setCellSize = useUIStore((s) => s.setCellSize);
@@ -125,6 +136,32 @@ export function FilterBar({ softBelow }: { softBelow: number }) {
       >
         <Contrast className="size-[13px]" strokeWidth={1.75} />
         <span className="@max-[960px]:hidden">Soft</span>
+      </button>
+
+      {/* Subject-aware focus: amber with a count once any frame is scored over
+          its AI subject matte, muted otherwise. Click opens the folder-wide
+          "analyze subjects & re-score focus" dialog. */}
+      <button
+        onClick={() => setSubjectScanOpen(true)}
+        disabled={photoCount === 0}
+        className={cn(
+          'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11.5px] disabled:cursor-not-allowed disabled:opacity-40',
+          subjectAware > 0
+            ? 'bg-amber-400/15 text-amber-500 dark:text-amber-400'
+            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+        )}
+        title={
+          subjectAware > 0
+            ? `${subjectAware} of ${photoCount} photos scored subject-aware — click to analyze the rest`
+            : 'Focus uses whole-frame sharpness — click to analyze subjects & re-score focus'
+        }
+        aria-label="Analyze subjects and re-score focus"
+        data-testid="subject-scan-button"
+      >
+        <Focus className="size-[13px]" strokeWidth={1.75} />
+        <span className="@max-[960px]:hidden">
+          {subjectAware > 0 ? `${subjectAware}/${photoCount}` : 'Subjects'}
+        </span>
       </button>
 
       <div className="flex-1" />
