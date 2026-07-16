@@ -38,6 +38,18 @@ func ApplyHeal(img *image.RGBA, e *edit.Params) {
 
 // applyHealSpot fills one circular spot from its source patch.
 func applyHealSpot(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edit.Spot) {
+	// Skip kinds and modes this build doesn't know — the newMaskEvaluator
+	// precedent. A sidecar from a newer version renders here without a
+	// Normalize pass (editsForHash parses stored JSON as-is), so a future
+	// "stroke" spot must be ignored, not misrendered as a circle.
+	if s.Kind != "" {
+		return
+	}
+	switch s.Mode {
+	case edit.SpotHeal, edit.SpotClone, "heal": // "heal" = un-normalized spelling of the default
+	default:
+		return
+	}
 	radPx := s.Radius * long
 	if radPx < 0.75 { // sub-pixel: invisible at every render size we generate
 		return

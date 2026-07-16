@@ -1,17 +1,22 @@
 import { useRef, useState } from 'react';
 import type { Params, Spot } from '@/api/edit';
 import type { ApiClient } from '@/api/client';
-import { cn } from '@/lib/utils';
-import { displayFromFrame, frameFromDisplay } from '@/lib/crop';
+import { displayFromFrame, frameFromDisplay, quant4 } from '@/lib/crop';
+import { Dot } from '@/components/MaskOverlay';
 import {
   SPOT_FEATHER_DEFAULT,
   esBeginSpot,
-  esCommitSpot,
+  esCommit,
   esFinishSpot,
   esSetActiveSpot,
   esUpdateSpot,
   useEditSession,
 } from '@/lib/editSession';
+
+// The server clamps Spot.Radius to this in Normalize (a fraction of the frame
+// long edge); the drags clamp to the same bound so a draft never previews a
+// larger disc than the commit will render.
+const SPOT_RADIUS_MAX = 0.5;
 
 // HealOverlay is the on-canvas editor for retouch spots: click (or click-drag
 // to size) places a spot, its destination and source circles are draggable,
@@ -46,7 +51,9 @@ export function HealOverlay({
   const L = Math.max(frameW, frameH);
   // Uniform frame-px → box-px scale (the crop is the same scale on both axes).
   const k = boxW / ((draft.cropW > 0 ? draft.cropW : 1) * frameW);
-  const q = (v: number) => Math.round(v * 1e4) / 1e4;
+  // Default radius for a new spot ≈ 20 CSS px at the current zoom (frame
+  // fraction of the long edge) — also the placement cursor's footprint.
+  const defRadius = Math.min(0.05, Math.max(0.003, 20 / (L * k)));
 
   const pointFrac = (e: React.PointerEvent): [number, number] => {
     const r = rootRef.current!.getBoundingClientRect();
@@ -58,9 +65,10 @@ export function HealOverlay({
     return [bx * boxW, by * boxH];
   };
   const radiusBoxPx = (spot: Spot) => Math.max(2, spot.radius * L * k);
+  const clampRadius = (r: number) => Math.min(SPOT_RADIUS_MAX, r);
 
   // --- placement (create + size drag) ---
-  const place = useRef<{ index: number; center: [number, number]; def: number } | null>(null);
+  const place = useRef<{ index: number; center: [number, number] } | null>(null);
   const beginCreate = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -71,21 +79,20 @@ export function HealOverlay({
     }
     const [bx, by] = pointFrac(e);
     const [cx, cy] = toFrame(bx, by);
-    // Default radius ≈ 20 CSS px at the current zoom (frame fraction of L).
-    const def = Math.min(0.05, Math.max(0.003, 20 / (L * k)));
     // Interim source: offset toward the frame center by 2.5 radii, so the live
     // preview shows a plausible fill until the server picks the real patch.
     const dx = 0.5 - cx;
     const dy = 0.5 - cy;
     const mag = Math.hypot(dx * frameW, dy * frameH) || 1;
-    const off = (2.5 * def * L) / mag;
+    const off = (2.5 * defRadius * L) / mag;
     const sx = Math.min(1, Math.max(0, cx + dx * off));
     const sy = Math.min(1, Math.max(0, cy + dy * off));
     const index = esBeginSpot(client, {
-      cx: q(cx), cy: q(cy), radius: q(def), sx: q(sx), sy: q(sy), feather: SPOT_FEATHER_DEFAULT,
+      cx: quant4(cx), cy: quant4(cy), radius: quant4(defRadius),
+      sx: quant4(sx), sy: quant4(sy), feather: SPOT_FEATHER_DEFAULT,
     });
     if (index < 0) return;
-    place.current = { index, center: [cx, cy], def };
+    place.current = { index, center: [cx, cy] };
     setDragging(true);
   };
   const placeMove = (e: React.PointerEvent) => {
@@ -96,7 +103,7 @@ export function HealOverlay({
     const [fx, fy] = toFrame(bx, by);
     // Drag beyond the default footprint grows the spot; a plain click keeps it.
     const dist = Math.hypot((fx - p.center[0]) * frameW, (fy - p.center[1]) * frameH) / L;
-    esUpdateSpot(client, p.index, { radius: q(Math.max(p.def, dist)) });
+    esUpdateSpot(client, p.index, { radius: quant4(clampRadius(Math.max(defRadius, dist))) });
   };
   const placeEnd = (e: React.PointerEvent) => {
     const p = place.current;
@@ -112,7 +119,11 @@ export function HealOverlay({
   };
 
   // --- handle drags (dest center, source center, radius) ---
-  const grip = useRef<{ kind: string; start: Spot; startFrame: [number, number] } | null>(null);
+  // The dragged spot's index lives in the ref, NOT in the render-scope
+  // activeSpot: grabbing an inactive spot selects it and drags in the same
+  // gesture, and the first pointermoves land before React re-renders with the
+  // new selection — routing them by activeSpot would move the old spot.
+  const grip = useRef<{ kind: string; index: number; start: Spot; startFrame: [number, number] } | null>(null);
   const beginGrip = (e: React.PointerEvent, kind: string, index: number) => {
     e.stopPropagation();
     e.preventDefault();
@@ -125,37 +136,37 @@ export function HealOverlay({
       // see beginCreate
     }
     const [bx, by] = pointFrac(e);
-    grip.current = { kind, start: spot, startFrame: toFrame(bx, by) };
+    grip.current = { kind, index, start: spot, startFrame: toFrame(bx, by) };
     setDragging(true);
   };
   const gripMove = (e: React.PointerEvent) => {
     const g = grip.current;
-    if (g == null || activeSpot == null) return;
+    if (g == null) return;
     const [bx, by] = pointFrac(e);
     const [fx, fy] = toFrame(bx, by);
     const s = g.start;
     let patch: Partial<Spot> | null = null;
     switch (g.kind) {
       case 'dest':
-        patch = { cx: q(s.cx + (fx - g.startFrame[0])), cy: q(s.cy + (fy - g.startFrame[1])) };
+        patch = { cx: quant4(s.cx + (fx - g.startFrame[0])), cy: quant4(s.cy + (fy - g.startFrame[1])) };
         break;
       case 'source':
-        patch = { sx: q(s.sx + (fx - g.startFrame[0])), sy: q(s.sy + (fy - g.startFrame[1])) };
+        patch = { sx: quant4(s.sx + (fx - g.startFrame[0])), sy: quant4(s.sy + (fy - g.startFrame[1])) };
         break;
       case 'radius': {
         const dist = Math.hypot((fx - s.cx) * frameW, (fy - s.cy) * frameH) / L;
-        patch = { radius: q(Math.max(0.002, dist)) };
+        patch = { radius: quant4(clampRadius(Math.max(0.002, dist))) };
         break;
       }
     }
-    if (patch) esUpdateSpot(client, activeSpot, patch);
+    if (patch) esUpdateSpot(client, g.index, patch);
   };
   const gripEnd = (e: React.PointerEvent) => {
     if (!grip.current) return;
     grip.current = null;
     setDragging(false);
     (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
-    esCommitSpot(client);
+    esCommit(client);
   };
 
   return (
@@ -183,6 +194,9 @@ export function HealOverlay({
                 fill="transparent" stroke="white" strokeOpacity=".55" strokeWidth={1.5}
                 className="pointer-events-auto cursor-pointer"
                 onPointerDown={(e) => beginGrip(e, 'dest', i)}
+                onPointerMove={gripMove}
+                onPointerUp={gripEnd}
+                onPointerCancel={gripEnd}
               />
             );
           }
@@ -214,8 +228,8 @@ export function HealOverlay({
         <div
           className="pointer-events-none absolute rounded-full border border-white/70"
           style={{
-            width: Math.min(0.05, Math.max(0.003, 20 / (L * k))) * L * k * 2,
-            height: Math.min(0.05, Math.max(0.003, 20 / (L * k))) * L * k * 2,
+            width: defRadius * L * k * 2,
+            height: defRadius * L * k * 2,
             left: cursor[0] * boxW,
             top: cursor[1] * boxH,
             transform: 'translate(-50%, -50%)',
@@ -228,7 +242,7 @@ export function HealOverlay({
 
 // ActiveHandles draws the grabbable dots for the selected spot: move the
 // destination, move the source, and resize (a dot on the destination ring's
-// east point).
+// east point). Reuses MaskOverlay's Dot so the grip styling can't drift.
 function ActiveHandles({
   spot,
   index,
@@ -249,45 +263,12 @@ function ActiveHandles({
   const [dcx, dcy] = toBoxPx(spot.cx, spot.cy);
   const [scx, scy] = toBoxPx(spot.sx, spot.sy);
   const r = radiusBoxPx(spot);
+  const beginAt = (e: React.PointerEvent, kind: string) => begin(e, kind, index);
   return (
     <>
-      <Dot at={[dcx, dcy]} cursor="move" kind="dest" index={index} begin={begin} move={move} end={end} title="Move fill" />
-      <Dot at={[scx, scy]} cursor="move" kind="source" index={index} begin={begin} move={move} end={end} title="Move source" />
-      <Dot at={[dcx + r, dcy]} cursor="ew-resize" kind="radius" index={index} begin={begin} move={move} end={end} title="Size" />
+      <Dot at={[dcx, dcy]} cursor="move" grip="dest" begin={beginAt} move={move} end={end} title="Move fill" />
+      <Dot at={[scx, scy]} cursor="move" grip="source" begin={beginAt} move={move} end={end} title="Move source" />
+      <Dot at={[dcx + r, dcy]} cursor="ew-resize" grip="radius" begin={beginAt} move={move} end={end} title="Size" />
     </>
-  );
-}
-
-function Dot({
-  at,
-  cursor,
-  kind,
-  index,
-  begin,
-  move,
-  end,
-  title,
-}: {
-  at: [number, number];
-  cursor: string;
-  kind: string;
-  index: number;
-  begin: (e: React.PointerEvent, kind: string, index: number) => void;
-  move: (e: React.PointerEvent) => void;
-  end: (e: React.PointerEvent) => void;
-  title?: string;
-}) {
-  return (
-    <div
-      className={cn(
-        'pointer-events-auto absolute z-10 size-4 touch-none rounded-full border-2 border-white bg-black/40 shadow-[0_0_0_1px_rgba(0,0,0,.4)]',
-      )}
-      style={{ left: at[0], top: at[1], transform: 'translate(-50%, -50%)', cursor }}
-      title={title}
-      onPointerDown={(e) => begin(e, kind, index)}
-      onPointerMove={move}
-      onPointerUp={end}
-      onPointerCancel={end}
-    />
   );
 }

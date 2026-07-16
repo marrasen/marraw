@@ -98,6 +98,38 @@ func TestApplyHealToneMatches(t *testing.T) {
 	}
 }
 
+// TestApplyHealSkipsUnknownKindsAndModes pins the forward-compat contract: a
+// sidecar written by a newer build renders here WITHOUT a Normalize pass, so
+// spot kinds/modes this build doesn't know must be ignored, never misrendered
+// as circles (the newMaskEvaluator unknown-type precedent).
+func TestApplyHealSkipsUnknownKindsAndModes(t *testing.T) {
+	img := gradientImage(120, 90)
+	before := clonePix(img)
+	ApplyHeal(img, &edit.Params{Spots: []edit.Spot{
+		{Kind: "stroke", CX: 0.5, CY: 0.5, Radius: 0.2, SX: 0.2, SY: 0.2},
+		{Mode: "fill", CX: 0.5, CY: 0.5, Radius: 0.2, SX: 0.2, SY: 0.2},
+	}})
+	for i := range before {
+		if img.Pix[i] != before[i] {
+			t.Fatalf("unknown kind/mode spot changed pixel %d: %d -> %d", i, before[i], img.Pix[i])
+		}
+	}
+	// The un-normalized "heal" spelling of the default mode still heals.
+	ApplyHeal(img, &edit.Params{Spots: []edit.Spot{
+		{Mode: "heal", CX: 0.5, CY: 0.5, Radius: 0.1, SX: 0.2, SY: 0.2, Feather: 0.1},
+	}})
+	changed := false
+	for i := range before {
+		if img.Pix[i] != before[i] {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		t.Error(`mode "heal" must render as the default heal, not be skipped`)
+	}
+}
+
 // TestApplyHealNearEdge must not panic or read out of bounds when a spot sits
 // against the frame edge.
 func TestApplyHealNearEdge(t *testing.T) {

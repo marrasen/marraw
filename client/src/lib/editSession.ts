@@ -553,7 +553,8 @@ export function esUpdateSpot(client: ApiClient, index: number, patch: Partial<Sp
 // esFinishSpot asks the backend for the best source patch for a just-placed
 // spot, applies it, and commits (one history entry). Falls back to committing
 // the interim source if the suggestion fails or is superseded. Guarded by
-// applyGen so a photo switch mid-request can't clobber the new draft.
+// applyGen so neither a photo switch nor a spot removal (which shifts the
+// indices this call patches by) can land the suggestion on the wrong spot.
 export async function esFinishSpot(client: ApiClient, index: number) {
   esFlushDraft();
   const s = useEditSession.getState();
@@ -575,21 +576,18 @@ export async function esFinishSpot(client: ApiClient, index: number) {
   }
 }
 
-// esRemoveSpot deletes a spot and commits.
+// esRemoveSpot deletes a spot and commits. Removal shifts the indices after
+// it, so it supersedes any esFinishSpot still awaiting its source suggestion
+// (applyGen) — a stale index must not patch whatever spot slid into its slot.
 export function esRemoveSpot(client: ApiClient, index: number) {
   esFlushDraft();
   const s = useEditSession.getState();
   const spots = s.draft?.spots;
   if (!spots || !spots[index]) return;
+  applyGen++;
   const next = spots.filter((_, i) => i !== index);
   setState({ activeSpot: null });
   esCommit(client, { spots: next });
-}
-
-// esCommitSpot commits the current draft after a spot handle drag (its
-// label comes from spotDiffLabel — "Move spot").
-export function esCommitSpot(client: ApiClient) {
-  esCommit(client);
 }
 
 // --- Local adjustment masks ---

@@ -299,6 +299,13 @@ export function displayFromFrame(
   return [(px - p!.cropX) / p!.cropW, (py - p!.cropY) / p!.cropH];
 }
 
+// quant4 rounds a fractional frame coordinate to 1e-4 — the client twin of the
+// server's quant4, so pointer-event float noise never churns edit hashes.
+// Shared by every overlay that writes frame-fraction geometry (masks, spots).
+export function quant4(v: number): number {
+  return Math.round(v * 1e4) / 1e4;
+}
+
 // Common aspect presets for the crop overlay. `null` ratio means freeform.
 export interface AspectPreset {
   key: string;

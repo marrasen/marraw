@@ -103,6 +103,13 @@ const previewLongEdge = 2048
 // stream of drag frames stays fast. The photo's unpacked handle is kept hot,
 // so repeated calls while dragging a slider skip file reading entirely.
 func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Params, longEdge int) (*aprot.Blob, error) {
+	// Render the normalized state, not the raw wire values: every cache key
+	// (Hash, the decode-subset hashes) is computed over normalized params, and
+	// saveEdit persists normalized params — so an out-of-range draft value
+	// (say a spot radius past the clamp) would otherwise render pixels that
+	// get cached under, and later served for, a hash whose committed render
+	// disagrees. Normalizing here makes preview and commit pixel-identical.
+	params.Normalize()
 	if longEdge <= 0 || longEdge >= previewLongEdge {
 		path, err := e.ensurePreview(ctx, photoID, params)
 		if err != nil {
@@ -179,6 +186,10 @@ func jpegBlob(img *image.RGBA) (*aprot.Blob, error) {
 // ensurePreview guarantees the 2048 rendition of the given (possibly
 // unsaved) edit state exists in the cache and returns its path.
 func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Params) (string, error) {
+	// Idempotent when the caller (PreviewEdit) already normalized; kept here
+	// too so the rendered pixels can never diverge from the hash they are
+	// cached under, whoever calls.
+	params.Normalize()
 	hash := params.Hash()
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
 	if err != nil {
@@ -223,6 +234,15 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 // otherwise it runs the (expensive) demosaic once and caches it for the next
 // drag frame.
 func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params) (*image.RGBA, error) {
+	return e.decodePreview(ctx, photoID, photo, ep, true)
+}
+
+// decodePreview is previewDecode with the single-entry cache store optional:
+// batch passes (the folder-wide subject scan) read the cache but never write
+// it, so a background scan can't evict the interactive editor's warm decode —
+// each scan frame would otherwise replace the entry and every look-stage
+// slider drag would pay a fresh ~400 ms demosaic while the scan runs.
+func (e *Edits) decodePreview(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params, cache bool) (*image.RGBA, error) {
 	libKey, noExpKey, expEV := decodeKeys(ep)
 	if rgba := e.cachedDecode(photoID, libKey); rgba != nil {
 		return rgba, nil
@@ -264,7 +284,9 @@ func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Ph
 	if err != nil {
 		return nil, err
 	}
-	e.storeDecode(photoID, libKey, noExpKey, expEV, rgba)
+	if cache {
+		e.storeDecode(photoID, libKey, noExpKey, expEV, rgba)
+	}
 	return rgba, nil
 }
 
@@ -577,6 +599,14 @@ func samplePatchLinearRef(img *image.RGBA64, x, y float64) (r, g, b float64) {
 func (e *Edits) SuggestHealSource(ctx context.Context, photoID int64, params edit.Params, spot edit.Spot) (*edit.Spot, error) {
 	if spot.Radius <= 0 {
 		return nil, aprot.ErrInvalidParams("spot radius must be positive")
+	}
+	// Suggest against the normalized state the renders will use (PreviewEdit
+	// normalizes too), with the spot clamped like normalizeSpots will clamp it
+	// on save — otherwise an out-of-range draft radius would pick a source for
+	// a different disc than the one that ends up rendering.
+	params.Normalize()
+	if spot.Radius > 0.5 {
+		spot.Radius = 0.5
 	}
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
 	if err != nil {

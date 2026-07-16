@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import type { Mask, Params, Stroke } from '@/api/edit';
 import type { ApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
-import { displayFromFrame, frameFromDisplay } from '@/lib/crop';
+import { displayFromFrame, frameFromDisplay, quant4 } from '@/lib/crop';
 import { esCommit, esUpdateMask, useEditSession } from '@/lib/editSession';
 
 // MaskOverlay is the on-canvas editor for the selected local-adjustment mask:
@@ -89,7 +89,7 @@ export function MaskOverlay({
     const dfx = fx - d.startFrame[0];
     const dfy = fy - d.startFrame[1];
     const s = d.start;
-    const q = (v: number) => Math.round(v * 1e4) / 1e4;
+    const q = quant4;
     let patch: Partial<Mask> | null = null;
     switch (d.grip) {
       case 'a':
@@ -156,7 +156,7 @@ export function MaskOverlay({
     }
     const [bx, by] = pointFrac(e);
     const [fx, fy] = toFrame(bx, by);
-    const q = (v: number) => Math.round(v * 1e4) / 1e4;
+    const q = quant4;
     // Snapshot the committed strokes NOW, before the first live update lands
     // in the draft — pushStroke re-sends [snapshot + live stroke] each move,
     // so reading the draft later would double-append the in-progress stroke.
@@ -184,7 +184,7 @@ export function MaskOverlay({
     const ly = st.pts[st.pts.length - 1];
     const dist = Math.hypot((fx - lx) * frameW, (fy - ly) * frameH);
     if (dist < (st.radius * L) / 4) return;
-    const q = (v: number) => Math.round(v * 1e4) / 1e4;
+    const q = quant4;
     st.pts.push(q(fx), q(fy));
     pushStroke();
   };
@@ -266,8 +266,9 @@ export function MaskOverlay({
   );
 }
 
-// Handle dot shared by both parametric shapes.
-function Dot({
+// Handle dot shared by both parametric mask shapes and the heal overlay's
+// spot handles (exported for HealOverlay so the grip styling can't drift).
+export function Dot({
   at,
   cursor,
   grip,

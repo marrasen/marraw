@@ -229,7 +229,7 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 
 	tctx, task := tasks.StartTask[TaskMeta](ctx, "AI mask: "+photo.FileName, tasks.Shared())
 	task.SetMeta(TaskMeta{Kind: "aimask"})
-	res, _, err := e.generateAIMap(tctx, photo, kind, allowDownload, func(done, total int64) {
+	res, _, err := e.generateAIMap(tctx, photo, kind, allowDownload, true, func(done, total int64) {
 		task.Progress(int(done>>20), int(total>>20)) // model download, MB units
 	})
 	task.Err(err)
@@ -245,8 +245,11 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 //
 // The inference input is a neutral base-orientation render, deliberately
 // independent of the current develop settings and crop, so the map never
-// shifts as the user edits.
-func (e *Edits) generateAIMap(ctx context.Context, photo store.Photo, kind edit.AIKind, allowDownload bool, onProgress func(done, total int64)) (*AIMapResult, bool, error) {
+// shifts as the user edits. cacheDecode gates the single-entry preview decode
+// cache: the user-initiated single-photo path warms it (the user is likely to
+// edit that photo next), while the folder-wide scan must not — each scanned
+// frame would evict the interactive editor's warm decode (see decodePreview).
+func (e *Edits) generateAIMap(ctx context.Context, photo store.Photo, kind edit.AIKind, allowDownload, cacheDecode bool, onProgress func(done, total int64)) (*AIMapResult, bool, error) {
 	ver, ok := aimask.MapVerFor(kind)
 	if !ok {
 		return nil, false, fmt.Errorf("ai masks: %q has no model available yet", kind)
@@ -266,7 +269,7 @@ func (e *Edits) generateAIMap(ctx context.Context, photo store.Photo, kind edit.
 		return nil, false, fmt.Errorf("ai masks: %s", aiModelNotDownloadedMsg)
 	}
 
-	rgba, err := e.previewDecode(ctx, photo.ID, photo, nil)
+	rgba, err := e.decodePreview(ctx, photo.ID, photo, nil, cacheDecode)
 	if err != nil {
 		return nil, false, err
 	}
@@ -361,16 +364,21 @@ func (e *Edits) AnalyzeSubjects(ctx context.Context, photoIDs []int64, allowDown
 	go func() {
 		var done atomic.Int64
 		g, gctx := errgroup.WithContext(tctx)
-		// Inference is heavy; leave a couple of cores free so an interactive
-		// edit preview never waits it out. The one-time model download is
+		// The binding resource is memory, not cores: every in-flight frame
+		// pins its own unpacked LibRaw handle (~100–200 MB for a 42 MP file)
+		// that the 3-entry HandleCache cannot evict while held, so a
+		// core-count limit would stack multi-GB spikes on many-core machines.
+		// Three workers match the handle cap, and ORT already parallelizes
+		// each inference across cores internally — while still leaving the
+		// interactive edit preview headroom. The one-time model download is
 		// singleflighted, so concurrent workers share a single fetch.
-		g.SetLimit(max(1, runtime.NumCPU()-2))
+		g.SetLimit(min(3, max(1, runtime.NumCPU()-2)))
 		for _, p := range work {
 			g.Go(func() error {
 				if gctx.Err() != nil {
 					return gctx.Err()
 				}
-				if _, _, err := e.generateAIMap(gctx, p, edit.AISubject, allowDownload, nil); err != nil {
+				if _, _, err := e.generateAIMap(gctx, p, edit.AISubject, allowDownload, false, nil); err != nil {
 					if gctx.Err() != nil {
 						return gctx.Err() // cancelled — not a per-frame failure
 					}
