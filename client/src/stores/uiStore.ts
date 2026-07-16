@@ -24,6 +24,12 @@ export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
 export type Mode = 'library' | 'cull' | 'develop';
 // Tabs of the develop drawer / library edit aside.
 export type DevelopTab = 'develop' | 'masks' | 'presets' | 'info';
+// Per-photo flag + rating as currently displayed (server rows merged with
+// optimistic overrides), for readers outside React.
+export interface PhotoMeta {
+  flag: FlagType;
+  rating: number;
+}
 
 export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   format: 'jpeg',
@@ -275,9 +281,10 @@ interface UIState {
   // Capture times parallel to visibleIds. Row navigation needs the same
   // time-gap group boundaries the grid draws headers at.
   visibleTakenAt: number[];
-  // Current flag per photo (kept fresh by usePhotos) so the P/X keys can
-  // toggle instead of blindly setting.
-  photoFlags: Map<number, FlagType>;
+  // Current flag + rating per photo (kept fresh by usePhotos) so the P/X keys
+  // can toggle instead of blindly setting and the flag/rating undo history
+  // can capture prior values.
+  photoMeta: Map<number, PhotoMeta>;
   // Burst membership per photo: its group's member ids (kept fresh by
   // usePhotos, whole folder) so Shift+P/X can judge the focused photo's
   // whole burst in one stroke.
@@ -323,7 +330,7 @@ interface UIState {
   applyLocal: (ids: number[], patch: Partial<Photo>) => void;
   setNavRowModel: (rowStarts: number[], colCenters?: number[] | null) => void;
   setVisibleIds: (ids: number[], takenAt: number[]) => void;
-  setPhotoFlags: (flags: Map<number, FlagType>) => void;
+  setPhotoMeta: (meta: Map<number, PhotoMeta>) => void;
   setBurstMembers: (members: Map<number, number[]>) => void;
   setClipboard: (p: Params | null) => void;
   setExportOpen: (open: boolean) => void;
@@ -386,7 +393,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   navColCenters: null,
   visibleIds: [],
   visibleTakenAt: [],
-  photoFlags: new Map<number, FlagType>(),
+  photoMeta: new Map<number, PhotoMeta>(),
   burstMembers: new Map<number, number[]>(),
   clipboard: null,
   exportOpen: false,
@@ -538,7 +545,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       return { visibleIds: ids, visibleTakenAt: takenAt };
     }),
 
-  setPhotoFlags: (flags) => set({ photoFlags: flags }),
+  setPhotoMeta: (meta) => set({ photoMeta: meta }),
   setBurstMembers: (members) => set({ burstMembers: members }),
   setClipboard: (p) => set({ clipboard: p }),
   setExportOpen: (open) => set({ exportOpen: open }),

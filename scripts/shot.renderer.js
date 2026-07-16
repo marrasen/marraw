@@ -576,6 +576,117 @@ if (shot === 'cull') {
       [...document.querySelectorAll('[data-testid="subject-scan-start"]')][0]?.textContent?.trim() ??
       null,
   };
+} else if (shot === 'cullundo') {
+  // Flag/rating undo history: P → Ctrl+Z → Ctrl+⇧Z round-trips, stacked
+  // rating undos, a burst judgement (⇧P) collapsing to ONE entry that
+  // restores mixed priors, and Develop-mode routing. Drives the real keymap
+  // via window keydown events.
+  const ch = mw.useCullHistory;
+  const press = (key, opts = {}) =>
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...opts }));
+  const undoKey = () => press('z', { ctrlKey: true });
+  const redoKey = () => press('z', { ctrlKey: true, shiftKey: true });
+  // Overrides-first like the action layer: photoMeta refreshes on render.
+  const metaOf = (id) => {
+    const s = ui();
+    const o = s.overrides.get(id) ?? {};
+    const m = s.photoMeta.get(id) ?? { flag: 'none', rating: 0 };
+    return { flag: o.flag ?? m.flag, rating: o.rating ?? m.rating };
+  };
+  // ⇧P needs burst grouping; the fixture's identical copies group once the
+  // phash scan lands.
+  await until(() => ui().burstMembers.size > 0, 60000);
+  // Idempotence: clear any persisted flags/ratings, then start fresh.
+  ui().selectAll(ui().visibleIds);
+  press('u');
+  press('0');
+  await sleep(600);
+  ch.setState({ stack: [], index: 0 });
+  const ids = ui().visibleIds;
+  const [a, b] = [ids[0], ids[1]];
+  const stackLen = () => ch.getState().stack.length;
+
+  // 1. Pick → undo → redo → undo (leaves A unflagged for the burst step).
+  ui().focus(a);
+  press('p');
+  const pickApplied = metaOf(a).flag === 'pick' && stackLen() === 1;
+  await sleep(250);
+  undoKey();
+  const pickUndone = metaOf(a).flag === 'none';
+  await sleep(250); // sonner renders on the next React pass
+  const undoToast = document.body.textContent.includes('Undid: Pick');
+  redoKey();
+  const pickRedone = metaOf(a).flag === 'pick';
+  await sleep(250);
+  undoKey();
+  await sleep(250);
+
+  // 2. Ratings stack: 3 then 5, two undos walk back to 0.
+  press('3');
+  await sleep(150);
+  press('5');
+  const rated = metaOf(a).rating === 5;
+  await sleep(250);
+  undoKey();
+  const ratingBack1 = metaOf(a).rating === 3;
+  await sleep(250);
+  undoKey();
+  const ratingBack0 = metaOf(a).rating === 0;
+  await sleep(250);
+
+  // 3. Burst judgement = ONE entry over mixed priors: B starts picked.
+  ui().focus(b);
+  press('p');
+  await sleep(250);
+  ui().focus(a);
+  const lenBefore = stackLen();
+  press('P', { shiftKey: true });
+  const members = ui().burstMembers.get(a) ?? [];
+  const judged =
+    members.length > 1 &&
+    metaOf(a).flag === 'pick' &&
+    members.filter((id) => id !== a).every((id) => metaOf(id).flag === 'exclude');
+  const oneEntry = stackLen() === lenBefore + 1;
+  const label = ch.getState().stack[stackLen() - 1]?.label;
+  await sleep(250);
+  // Repeat press: everything already carries its target flag — no new entry.
+  press('P', { shiftKey: true });
+  const repeatNoop = stackLen() === lenBefore + 1;
+  undoKey();
+  const burstUndone =
+    metaOf(a).flag === 'none' &&
+    metaOf(b).flag === 'pick' &&
+    members.filter((id) => id !== a && id !== b).every((id) => metaOf(id).flag === 'none');
+  await sleep(250);
+  const burstToast = document.body.textContent.includes('Undid: Best of burst');
+
+  // 4. Routing: in Develop, Ctrl+Z drives the edit history, not this stack.
+  ui().setMode('develop');
+  await until(() => mw.useEditSession.getState().draft != null);
+  const idxBefore = ch.getState().index;
+  undoKey();
+  const developRoutes = ch.getState().index === idxBefore;
+  ui().setMode('library');
+  await sleep(250);
+  // Leave the fixture clean for repeat runs and the server-truth check.
+  undoKey(); // B's pick
+  await sleep(400);
+  window.__cullUndoProbe = {
+    pickApplied,
+    pickUndone,
+    undoToast,
+    pickRedone,
+    rated,
+    ratingBack1,
+    ratingBack0,
+    judged,
+    oneEntry,
+    label,
+    repeatNoop,
+    burstUndone,
+    burstToast,
+    developRoutes,
+  };
 } else if (shot === 'heal') {
   // Retouch tool: activate healing, drop a spot in the middle of the frame,
   // and let the server pick its source so the overlay shows the destination
@@ -605,6 +716,7 @@ await sleep(3600);
 window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
 await sleep(400);
 const probe =
+  window.__cullUndoProbe ??
   window.__healProbe ??
   window.__subjectProbe ??
   window.__wmProbe ??

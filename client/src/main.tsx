@@ -23,10 +23,13 @@ if (import.meta.env.DEV) {
     import('@/api/export'),
     import('@/lib/changelog'),
     import('@/lib/library'),
-  ]).then(([ui, es, us, ex, cl, lib]) => {
+    import('@/lib/cullHistory'),
+  ]).then(([ui, es, us, ex, cl, lib, ch]) => {
     (window as unknown as Record<string, unknown>).__marraw = {
       useUIStore: ui.useUIStore,
       useEditSession: es.useEditSession,
+      // Flag/rating undo history (the `cullundo` shot surface probes it).
+      useCullHistory: ch.useCullHistory,
       // Action fns the scripted UI test drives directly (client-bound calls
       // like a crop drag are awkward to synthesize as raw pointer events).
       esUpdate: (patch: unknown) => es.esUpdate(client, patch as never),

@@ -3,7 +3,8 @@ import type { FlagType } from '@/api/library';
 import { getEditParams } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { toast } from 'sonner';
-import { applyRating as doRating, applyFlag as doFlag } from '@/lib/actions';
+import { applyRating as doRating, applyFlag as doFlag, applyFlagOps } from '@/lib/actions';
+import { chCanRedo, chCanUndo, chRedo, chUndo } from '@/lib/cullHistory';
 import { rowNeighbor } from '@/lib/gridNav';
 import { useUIStore, selectionOrFocus, type DevelopTab } from '@/stores/uiStore';
 import {
@@ -67,7 +68,8 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 //   Tab           in Develop, cycle the Develop/Local/Presets/Info tabs (⇧ backward);
 //                 elsewhere Tab is swallowed — native focus is useless here
 //   Ctrl+A/C/V    select all, copy/paste edit settings
-//   Ctrl+Z/Y      per-photo edit undo/redo
+//   Ctrl+Z/Y      undo/redo — per-photo edits in Develop; flags & ratings in
+//                 Library/Cull (falling back to edit history when empty)
 //   Ctrl+0        reset all develop settings
 //   Ctrl+E        export dialog
 //   Ctrl+U        auto dynamics (+Shift = auto colours, +Alt = auto everything)
@@ -118,21 +120,24 @@ export function useKeyboard() {
       // P/X toggle: pressing the key of the flag the focused photo already
       // carries clears it (for the whole selection).
       const applyFlag = (flag: FlagType) => {
-        const cur = s.focusId != null ? s.photoFlags.get(s.focusId) : undefined;
+        const cur = s.focusId != null ? s.photoMeta.get(s.focusId)?.flag : undefined;
         doFlag(client, selectionOrFocus(), flag !== 'none' && cur === flag ? 'none' : flag);
       };
       // Shift+P/X judge the focused photo's whole burst in one stroke: keep
       // this frame and exclude its near-duplicate siblings. P also picks the
       // kept frame; X leaves its flag untouched. No toggle semantics — a
       // second press is idempotent. Outside a burst there is nothing to
-      // reject, so the keys deliberately no-op instead of guessing.
+      // reject, so the keys deliberately no-op instead of guessing. The whole
+      // judgement is one undo entry: a single Ctrl+Z restores the burst.
       const judgeBurst = (pickKept: boolean) => {
         if (s.focusId == null) return;
         const members = s.burstMembers.get(s.focusId);
         if (!members) return;
         const rest = members.filter((id) => id !== s.focusId);
-        if (rest.length > 0) doFlag(client, rest, 'exclude');
-        if (pickKept) doFlag(client, [s.focusId], 'pick');
+        const ops: { ids: number[]; flag: FlagType }[] =
+          rest.length > 0 ? [{ ids: rest, flag: 'exclude' }] : [];
+        if (pickKept) ops.push({ ids: [s.focusId], flag: 'pick' });
+        applyFlagOps(client, ops, 'Best of burst');
       };
 
       const zoomStep = (factor: number) => {
@@ -165,14 +170,24 @@ export function useKeyboard() {
             toast.success('Edit settings pasted');
             return;
           }
+          // Outside Develop, Ctrl+Z works the flag/rating history first and
+          // falls back to the edit history when that stack is spent — the
+          // develop dials and edit panel stay usable in Library/Cull, so
+          // their undo must stay reachable there too.
           case 'z':
             e.preventDefault();
-            if (e.shiftKey) esRedo(client);
-            else esUndo(client);
+            if (e.shiftKey) {
+              if (s.mode !== 'develop' && chCanRedo()) chRedo(client);
+              else esRedo(client);
+            } else {
+              if (s.mode !== 'develop' && chCanUndo()) chUndo(client);
+              else esUndo(client);
+            }
             return;
           case 'y':
             e.preventDefault();
-            esRedo(client);
+            if (s.mode !== 'develop' && chCanRedo()) chRedo(client);
+            else esRedo(client);
             return;
           case 'e':
             e.preventDefault();

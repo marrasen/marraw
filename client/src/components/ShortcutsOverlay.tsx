@@ -20,6 +20,7 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
       ['Pick / exclude', 'P · X'],
       ['Best of burst (pick / keep)', '⇧P · ⇧X'],
       ['Unflag', 'U'],
+      ['Undo / redo', 'Ctrl+Z · Ctrl+⇧Z'],
     ],
   },
   {

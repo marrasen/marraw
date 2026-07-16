@@ -117,9 +117,12 @@ export function usePhotos(folderId: number): PhotoLists {
     );
   }, [visible]);
 
-  // Flags per photo so P/X can toggle against the current state.
+  // Flag + rating per photo, so P/X can toggle against the current state and
+  // the flag/rating undo history can capture prior values.
   useEffect(() => {
-    useUIStore.getState().setPhotoFlags(new Map(all.map((p) => [p.id, p.flag])));
+    useUIStore
+      .getState()
+      .setPhotoMeta(new Map(all.map((p) => [p.id, { flag: p.flag, rating: p.rating }])));
   }, [all]);
 
   // Burst membership (photo → its group's member ids) so Shift+P/X can judge
