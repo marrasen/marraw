@@ -28,6 +28,7 @@ import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, rotatedDims, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
 import { MaskOverlay } from '@/components/MaskOverlay';
+import { HealOverlay } from '@/components/HealOverlay';
 import { MaskHoverTint } from '@/components/MaskHoverTint';
 import type { Params } from '@/api/edit';
 
@@ -425,6 +426,7 @@ export function CinemaImage({
   const preview = useEditSession((s) => s.preview);
   const wbPicking = useEditSession((s) => s.wbPicking);
   const cropping = useEditSession((s) => s.cropping);
+  const healing = useEditSession((s) => s.healing);
   const activeMask = useEditSession((s) => s.activeMask);
   const uiMode = useUIStore((s) => s.mode);
   const draft = useEditSession((s) => s.draft);
@@ -453,11 +455,21 @@ export function CinemaImage({
     activeMask != null &&
     !cropping &&
     !wbPicking &&
+    !healing &&
     esPhotoId === photo.id &&
     !!draft?.masks?.[activeMask];
+  // The heal overlay places/edits retouch spots on the ordinary (cropped)
+  // Develop view — never during crop, WB picking or mask editing.
+  const healUI =
+    uiMode === 'develop' &&
+    healing &&
+    !cropping &&
+    !wbPicking &&
+    esPhotoId === photo.id &&
+    !!draft;
   // The hover tint needs no selected mask — hovering any Masks-panel row
   // shows that mask's weight over the ordinary Develop view.
-  const tintUI = uiMode === 'develop' && !cropping && !wbPicking && esPhotoId === photo.id;
+  const tintUI = uiMode === 'develop' && !cropping && !wbPicking && !healing && esPhotoId === photo.id;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -850,9 +862,9 @@ export function CinemaImage({
   const [dragging, setDragging] = useState(false);
   // Slack means there is nearly always somewhere to drag the photo, zoomed
   // in or not — only crop mode pins it.
-  const pannable = haveDims && !cropping;
+  const pannable = haveDims && !cropping && !healUI;
   const onPointerDown = (e: React.PointerEvent) => {
-    if (wbPicking || cropping || e.button !== 0 || !pannable) return;
+    if (wbPicking || cropping || healUI || e.button !== 0 || !pannable) return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -1107,6 +1119,16 @@ export function CinemaImage({
             )}
             {maskUI && draft && (
               <MaskOverlay
+                client={client}
+                draft={draft}
+                frameW={rfw}
+                frameH={rfh}
+                boxW={boxW}
+                boxH={boxH}
+              />
+            )}
+            {healUI && draft && (
+              <HealOverlay
                 client={client}
                 draft={draft}
                 frameW={rfw}

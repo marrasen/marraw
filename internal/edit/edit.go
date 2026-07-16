@@ -141,6 +141,40 @@ type Mask struct {
 	Adjust MaskAdjust `json:"adjust"`
 }
 
+// SpotMode selects how a retouch spot fills its destination. "" (the default)
+// heals: it copies the source patch's texture but tone-matches it to the
+// destination's surroundings, so a differently-lit source blends in. "clone"
+// copies the source verbatim (feathered at the edge).
+type SpotMode string
+
+const (
+	SpotHeal  SpotMode = ""      // canonical default: tone-matched
+	SpotClone SpotMode = "clone" // verbatim copy
+)
+
+// Spot is one retouch: a feathered circular destination filled from a source
+// patch elsewhere in the frame — the dust/blemish tool. Coordinates are
+// fractions of the oriented frame (the crop-rectangle space, like Mask), and
+// Radius is a fraction of the frame's long edge (the Stroke precedent), so
+// spots survive recrop/re-straighten and are resolution independent. Spots
+// apply in list order in a pre-look stage (pyramid.ApplyHeal) so healed pixels
+// develop identically to their source. Kind discriminates the region shape for
+// forward growth ("" = circle; a later "stroke" kind would carry Strokes, a
+// "fill" kind an ML inpaint) — Normalize drops kinds it doesn't know, the
+// unknown-mask-type precedent, so old builds ignore future spots gracefully.
+type Spot struct {
+	Kind    string   `json:"kind,omitempty"`
+	Mode    SpotMode `json:"mode,omitempty"`
+	CX      float64  `json:"cx"` // destination center, frame fractions
+	CY      float64  `json:"cy"`
+	Radius  float64  `json:"radius"` // fraction of the frame long edge
+	SX      float64  `json:"sx"`     // source center, frame fractions
+	SY      float64  `json:"sy"`
+	Feather float64  `json:"feather,omitempty"` // 0..1 of Radius (edge softness)
+	Opacity float64  `json:"opacity,omitempty"` // 0 = full (1.0), the Flow precedent
+	Strokes []Stroke `json:"strokes,omitempty"` // reserved for Kind "stroke"
+}
+
 // Params is the edit state, stored as JSON in photos.edit_params.
 // The zero value is the neutral edit. Every field's zero value must mean
 // "default" — IsNeutral and hashing rely on it, and it keeps stored JSON
@@ -247,6 +281,16 @@ type Params struct {
 	// on the warm decode. NOTE: the slice makes Params non-comparable —
 	// IsNeutral uses reflect.DeepEqual, never ==.
 	Masks []Mask `json:"masks,omitempty"`
+
+	// Spots are retouch fills (dust/blemish removal), applied in order in the
+	// pre-look stage (pyramid.ApplyHeal). Kept after Masks with omitempty for
+	// the same reason: spot-free edits marshal byte-identically to older
+	// builds so existing hashes stay stable, and the subset hashes
+	// (librawInputs/linearInputs) never copy this field, keeping spot edits on
+	// the warm decode. Like Masks, this makes Params non-comparable — IsNeutral
+	// uses reflect.DeepEqual — and Normalize (not the wire validator) clamps
+	// the spot fields.
+	Spots []Spot `json:"spots,omitempty"`
 }
 
 // RotateTurns returns the coarse rotation as canonical quarter turns
@@ -274,6 +318,11 @@ func (e *Params) HasHSL() bool {
 // HasMasks reports whether any local adjustment mask is present.
 func (e *Params) HasMasks() bool {
 	return e != nil && len(e.Masks) > 0
+}
+
+// HasSpots reports whether any retouch spot is present.
+func (e *Params) HasSpots() bool {
+	return e != nil && len(e.Spots) > 0
 }
 
 // HasCrop reports whether a crop rectangle is set (a straighten angle alone
@@ -345,6 +394,45 @@ func (e *Params) Normalize() {
 		e.HSLLum[i] = clamp(e.HSLLum[i], -1, 1)
 	}
 	e.normalizeMasks()
+	e.normalizeSpots()
+}
+
+// normalizeSpots clamps and canonicalizes retouch spots so equivalent states
+// hash identically: unknown Kinds and Modes are dropped, "heal" folds to the
+// canonical empty Mode, and geometry is quantized so pointer-event float noise
+// doesn't churn hashes. Like masks, spots are built into fresh slices — Hash
+// and IsNeutral normalize a shallow copy of the receiver, so mutating a shared
+// backing array here would corrupt the caller's spots.
+func (e *Params) normalizeSpots() {
+	if len(e.Spots) == 0 {
+		e.Spots = nil
+		return
+	}
+	kept := make([]Spot, 0, len(e.Spots))
+	for _, s := range e.Spots {
+		if s.Kind != "" { // only the circle kind exists today
+			continue
+		}
+		if s.Mode == "heal" {
+			s.Mode = SpotHeal // fold the explicit spelling to the canonical ""
+		}
+		switch s.Mode {
+		case SpotHeal, SpotClone:
+		default:
+			continue // unknown mode: drop, like an unknown mask type
+		}
+		s.Strokes = nil // reserved for future kinds
+		s.CX, s.CY = quant4(clampFrac(s.CX)), quant4(clampFrac(s.CY))
+		s.SX, s.SY = quant4(clampFrac(s.SX)), quant4(clampFrac(s.SY))
+		s.Radius = quant4(clamp(s.Radius, 0.0005, 0.5))
+		s.Feather = quant4(clamp(s.Feather, 0, 1))
+		s.Opacity = quant4(clamp(s.Opacity, 0, 1))
+		kept = append(kept, s)
+	}
+	if len(kept) == 0 {
+		kept = nil
+	}
+	e.Spots = kept
 }
 
 // normalizeMasks clamps and canonicalizes the local adjustment masks so

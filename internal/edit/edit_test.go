@@ -249,3 +249,95 @@ func TestMasksOmittedFromNoMaskJSON(t *testing.T) {
 		t.Errorf("mask-free params must omit the masks key, got %s", b)
 	}
 }
+
+func healSpot() Spot {
+	return Spot{CX: 0.4, CY: 0.4, Radius: 0.02, SX: 0.5, SY: 0.5, Feather: 0.5}
+}
+
+func TestSpotNormalize(t *testing.T) {
+	e := &Params{Spots: []Spot{
+		{Mode: SpotClone, CX: -3, CY: 0.5, Radius: 9, SX: 2, SY: 0.123456789, Feather: 3, Opacity: -1},
+		{Mode: "heal", CX: 0.3, CY: 0.3, Radius: 0.01, SX: 0.4, SY: 0.4}, // folds to ""
+		{Kind: "stroke", CX: 0.5, CY: 0.5, Radius: 0.02},                 // unknown kind: dropped
+		{Mode: "bogus", CX: 0.5, CY: 0.5, Radius: 0.02},                  // unknown mode: dropped
+	}}
+	e.Normalize()
+	if len(e.Spots) != 2 {
+		t.Fatalf("want unknown kind+mode dropped, got %d spots", len(e.Spots))
+	}
+	s := e.Spots[0]
+	if s.CX != -0.5 || s.SX != 1.5 {
+		t.Errorf("coords not clamped to frame overhang: %+v", s)
+	}
+	if s.Radius != 0.5 || s.Feather != 1 || s.Opacity != 0 {
+		t.Errorf("radius/feather/opacity not clamped: %+v", s)
+	}
+	if s.SY != 0.1235 {
+		t.Errorf("source coord not quantized: %v", s.SY)
+	}
+	if e.Spots[1].Mode != SpotHeal {
+		t.Errorf(`"heal" must fold to the canonical empty mode, got %q`, e.Spots[1].Mode)
+	}
+}
+
+func TestSpotHashing(t *testing.T) {
+	base := &Params{Spots: []Spot{healSpot()}}
+	moved := &Params{Spots: []Spot{healSpot()}}
+	moved.Spots[0].SX = 0.7
+	cloned := &Params{Spots: []Spot{healSpot()}}
+	cloned.Spots[0].Mode = SpotClone
+	if base.Hash() == moved.Hash() {
+		t.Error("moving the source must change the hash")
+	}
+	if base.Hash() == cloned.Hash() {
+		t.Error("changing the mode must change the hash")
+	}
+	// The decode-subset hashes must be spot-blind so spot edits reuse the warm
+	// decode and linear reference (spots are a post-decode pixel transplant).
+	plain := &Params{Contrast: 0.5}
+	spotted := &Params{Contrast: 0.5, Spots: []Spot{healSpot()}}
+	if plain.LibrawInputsHash() != spotted.LibrawInputsHash() {
+		t.Error("LibrawInputsHash must ignore spots")
+	}
+	if plain.LinearInputsHash() != spotted.LinearInputsHash() {
+		t.Error("LinearInputsHash must ignore spots")
+	}
+	l := spotted.librawInputs()
+	b, _ := json.Marshal(&l)
+	if bytes.Contains(b, []byte("spots")) {
+		t.Errorf("librawInputs must omit spots entirely, got %s", b)
+	}
+}
+
+func TestSpotNeutrality(t *testing.T) {
+	if !(&Params{Spots: []Spot{}}).IsNeutral() {
+		t.Error("an empty spot list must stay neutral")
+	}
+	if !(&Params{Spots: []Spot{{Kind: "stroke"}}}).IsNeutral() {
+		t.Error("unknown spot kinds must be dropped, leaving neutral")
+	}
+	if (&Params{Spots: []Spot{healSpot()}}).IsNeutral() {
+		t.Error("a real spot must not be neutral")
+	}
+}
+
+func TestSpotNormalizeDoesNotAliasCaller(t *testing.T) {
+	e := &Params{Spots: []Spot{
+		{Kind: "stroke"}, // dropped by Normalize — must not shift caller's slice
+		{CX: 0.123456789, CY: 0.2, Radius: 0.02, SX: 0.5, SY: 0.5},
+	}}
+	_ = e.Hash()
+	_ = e.IsNeutral()
+	if e.Spots[0].Kind != "stroke" || e.Spots[1].CX != 0.123456789 {
+		t.Errorf("Hash/IsNeutral mutated the receiver's spots: %+v", e.Spots)
+	}
+}
+
+func TestSpotsOmittedFromNoSpotJSON(t *testing.T) {
+	// omitempty is load-bearing: spot-free edits must marshal byte-identical to
+	// older builds so existing edit hashes stay stable.
+	b, _ := json.Marshal(&Params{Contrast: 0.5})
+	if bytes.Contains(b, []byte("spots")) {
+		t.Errorf("spot-free params must omit the spots key, got %s", b)
+	}
+}

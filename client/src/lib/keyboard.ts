@@ -16,8 +16,11 @@ import {
   esReset,
   esSetActive,
   esSetActiveMask,
+  esSetActiveSpot,
   esSetCropping,
+  esSetHealing,
   esSetWBPicking,
+  esRemoveSpot,
   esStep,
   esStepMask,
   esUndo,
@@ -209,6 +212,16 @@ export function useKeyboard() {
         return;
       }
 
+      // Q toggles the heal / spot-removal tool (like R for crop): its overlay
+      // lives on the cinema surface, so entering from Library switches to
+      // Develop for real.
+      if (e.key.toLowerCase() === 'q' && es.draft) {
+        e.preventDefault();
+        if (!es.healing && s.mode === 'library') s.setMode('develop');
+        esSetHealing(!es.healing);
+        return;
+      }
+
       const key = e.key.toLowerCase();
 
       // F11 = true fullscreen: even marraw's own chrome goes away.
@@ -311,6 +324,14 @@ export function useKeyboard() {
         case '5':
           applyRating(Number(e.key));
           break;
+        case 'Delete':
+        case 'Backspace':
+          // Delete the selected retouch spot while the heal tool is active.
+          if (es.healing && es.activeSpot != null) {
+            e.preventDefault();
+            esRemoveSpot(client, es.activeSpot);
+          }
+          break;
         case 'x':
         case 'X':
           applyFlag('exclude');
@@ -341,6 +362,10 @@ export function useKeyboard() {
             esSetCropping(client, false);
           } else if (es.wbPicking) {
             esWBPickCancel(client); // revert to the pre-picker draft
+          } else if (es.healing) {
+            // Drop a spot selection first, then exit the tool on a second Esc.
+            if (es.activeSpot != null) esSetActiveSpot(null);
+            else esSetHealing(false);
           } else if (es.activeMask != null || es.activeMaskControl != null) {
             esSetActiveMask(null); // drop mask selection + slider focus + overlay
           } else if (es.activeControl != null) {

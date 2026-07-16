@@ -104,6 +104,20 @@ export interface Params {
     cropH: number;
     cropAngle: number;
     masks?: Mask[];
+    spots?: Spot[];
+}
+
+export interface Spot {
+    kind?: string;
+    mode?: string;
+    cx: number;
+    cy: number;
+    radius: number;
+    sx: number;
+    sy: number;
+    feather?: number;
+    opacity?: number;
+    strokes?: Stroke[];
 }
 
 export interface Stroke {

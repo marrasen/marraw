@@ -576,12 +576,36 @@ if (shot === 'cull') {
       [...document.querySelectorAll('[data-testid="subject-scan-start"]')][0]?.textContent?.trim() ??
       null,
   };
+} else if (shot === 'heal') {
+  // Retouch tool: activate healing, drop a spot in the middle of the frame,
+  // and let the server pick its source so the overlay shows the destination
+  // ring, the dashed source ring, and the connector.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200); // initial preview settles
+  mw.esUpdate({ spots: [] }); // idempotence: drop any persisted spots
+  mw.esCommit();
+  await sleep(300);
+  mw.esSetHealing(true);
+  const idx = mw.esBeginSpot({ cx: 0.5, cy: 0.5, radius: 0.035, sx: 0.62, sy: 0.55, feather: 0.5 });
+  await mw.esFinishSpot(idx);
+  mw.esSetActiveSpot(idx);
+  await until(() => mw.esPreviewSettled(), 30000).catch(() => {});
+  await sleep(400);
+  window.__healProbe = {
+    healing: es.getState().healing,
+    spotCount: es.getState().draft?.spots?.length ?? 0,
+    overlay: !!document.querySelector('[data-testid="heal-overlay"]'),
+    activeSpot: es.getState().activeSpot,
+  };
 }
 // Let previews decode, then wake the chrome (capture fires on resolve).
 await sleep(3600);
 window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
 await sleep(400);
 const probe =
+  window.__healProbe ??
   window.__subjectProbe ??
   window.__wmProbe ??
   window.__neardupProbe ??

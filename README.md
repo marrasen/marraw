@@ -116,6 +116,12 @@ control, any preset.
 
 - **Geometry** — crop & straighten via an interactive overlay (±15°), 90°
   rotation and mirroring from the overlay toolbar.
+- **Retouch** — circular spot removal (`Q`): click a dust spot or blemish (drag
+  to size it) and it fills from a nearby patch marraw picks for you — heal
+  (source texture tone-matched to the surroundings) or clone (verbatim) — with a
+  draggable source and per-spot feather. Spots are anchored to image content, so
+  they survive recrops and re-straightens and render identically in previews,
+  1:1 tiles and exports.
 - **Local adjustments** — linear (graduated) filters, radial filters, and a
   feathered brush with flow and eraser, each carrying its own exposure,
   contrast, highlights/shadows, whites/blacks, temperature, tint and
@@ -183,7 +189,10 @@ them is load-bearing for your work, marraw is not ready for you yet.
 - ❌ **No tone curve.** Contrast and the whites/blacks/shadows/highlights
   sliders drive a fixed parametric curve. There is no point curve and no
   per-channel R/G/B curves.
-- ❌ **No healing, cloning or spot removal.** Dust gets fixed elsewhere.
+- ⚠️ **Spot removal is circular-only.** Click a dust spot or blemish and marraw
+  heals or clones it from an auto-picked (draggable) source patch — but there is
+  no brush-shaped healing, no content-aware/ML fill, and spots are not carried
+  into the RAW + XMP handoff.
 - ❌ **No lens profile corrections.** No distortion or vignetting profiles, no
   automatic defringe — only a manual CA slider and a creative vignette.
 - ❌ **No modern denoise.** You get LibRaw's wavelet/FBDD/median, not

@@ -568,6 +568,41 @@ func samplePatchLinearRef(img *image.RGBA64, x, y float64) (r, g, b float64) {
 	return r / n, g / n, b / n
 }
 
+// SuggestHealSource picks a source patch for a new retouch spot and returns
+// the spot with SX/SY filled in (oriented-frame fractions). The chosen source
+// is stored in the params so it stays stable and portable — computing it in
+// the render pipeline would let it drift with render size. It reuses the hot
+// preview decode (spot fields don't touch the LibRaw-input hash), so it is
+// typically instant during an editing session.
+func (e *Edits) SuggestHealSource(ctx context.Context, photoID int64, params edit.Params, spot edit.Spot) (*edit.Spot, error) {
+	if spot.Radius <= 0 {
+		return nil, aprot.ErrInvalidParams("spot radius must be positive")
+	}
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	var ep *edit.Params
+	if !params.IsNeutral() {
+		ep = &params
+	}
+	// The warm half-size decode (never mutated), taken to post-geometry space —
+	// the same space ApplyHeal fills in — so the source we pick matches the
+	// cropped/straightened frame the user is looking at. ApplyGeometry returns
+	// the shared decode unchanged for neutral geometry; SuggestHealSource only
+	// reads it, so no defensive copy is needed.
+	rgba, err := e.previewDecode(ctx, photoID, photo, ep)
+	if err != nil {
+		return nil, err
+	}
+	geo := pyramid.ApplyGeometry(rgba, ep)
+	// Pass &params (never nil) for the frame mapping: it carries the crop and
+	// rotation that place the fractional coordinates, and newMaskFrame derefs it.
+	out := spot
+	out.SX, out.SY = pyramid.SuggestHealSource(geo, &params, spot)
+	return &out, nil
+}
+
 // AutoAdjust computes automatic values for the requested sections ("tone",
 // "wb", "color", or "all") from the current decode and returns the caller's
 // params with only those sections replaced. Nothing is persisted — the

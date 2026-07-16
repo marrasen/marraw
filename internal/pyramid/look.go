@@ -95,14 +95,16 @@ func MeanLuma(img *image.RGBA) float64 {
 }
 
 // ApplyFinish runs the shared post-geometry stages in canonical order: the
-// global look, then the local adjustment masks over the developed color, then
-// the detail pass on the final tones. Every render path (pyramid levels,
-// tiles, interactive previews, export) must go through this order — the one
-// call site that can't use the helper (cache.generate's full-res path, which
-// interleaves progress reports) mirrors it stage for stage.
-// ai carries the photo's AI-mask maps (AIMapStore.SetFor); nil when the edit
-// has none or they are unavailable.
+// retouch spots (a pixel transplant, before the look so healed pixels develop
+// like their source), the global look, then the local adjustment masks over
+// the developed color, then the detail pass on the final tones. Every render
+// path (pyramid levels, tiles, interactive previews, export) must go through
+// this order — the one call site that can't use the helper (cache.generate's
+// full-res path, which interleaves progress reports) mirrors it stage for
+// stage. ai carries the photo's AI-mask maps (AIMapStore.SetFor); nil when the
+// edit has none or they are unavailable.
 func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet) {
+	ApplyHeal(img, e)
 	ApplyLook(img, gamma, e)
 	ApplyMasks(img, e, ai)
 	ApplyDetail(img, e)

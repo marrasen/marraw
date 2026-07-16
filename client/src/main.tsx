@@ -38,6 +38,12 @@ if (import.meta.env.DEV) {
       esAddMask: (type: unknown) => es.esAddMask(client, type as never),
       esUpdateMask: (i: number, patch: unknown) => es.esUpdateMask(client, i, patch as never),
       esSetActiveMask: (i: number | null) => es.esSetActiveMask(i),
+      // Retouch spots (the `heal` shot surface).
+      esSetHealing: (on: boolean) => es.esSetHealing(on),
+      esSetActiveSpot: (i: number | null) => es.esSetActiveSpot(i),
+      esBeginSpot: (spot: unknown) => es.esBeginSpot(client, spot as never),
+      esUpdateSpot: (i: number, patch: unknown) => es.esUpdateSpot(client, i, patch as never),
+      esFinishSpot: (i: number) => es.esFinishSpot(client, i),
       // Server-persisted UI settings (optimistic store write + server call).
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),

@@ -7,7 +7,7 @@ import type {
     UseQueryOptions,
     UseQueryResult,
 } from './client';
-import type { AIKindType, Params } from './edit';
+import type { AIKindType, Params, Spot } from './edit';
 import type { TaskRef } from './tasks.types';
 
 export interface AICategory {
@@ -199,6 +199,19 @@ export function subscribeSetEditParams(client: ApiClient, photoID: number, param
     return client.subscribe<void>('Edits.SetEditParams', [photoID, params], callback, onError, options);
 }
 
+
+export function suggestHealSource(client: ApiClient, photoID: number, params: Params, spot: Spot, options?: RequestOptions): Promise<Spot> {
+    return client.request<Spot>('Edits.SuggestHealSource', [photoID, params, spot], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+suggestHealSource.method = 'Edits.SuggestHealSource' as const;
+
+export function subscribeSuggestHealSource(client: ApiClient, photoID: number, params: Params, spot: Spot, callback: (data: Spot) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Spot>('Edits.SuggestHealSource', [photoID, params, spot], callback, onError, options);
+}
+
 // React Hooks for Edits
 
 /**
@@ -379,4 +392,19 @@ export function useSetEditParams(photoID: number, params: Params, options?: UseQ
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, params], _subscribe: { method: 'Edits.SetEditParams', params: [photoID, params] } });
+}
+
+/**
+ * Subscribes to `Edits.SuggestHealSource` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSuggestHealSource(photoID: number, params: Params, spot: Spot, options?: UseQueryOptions<Spot>): UseQueryResult<Spot> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, spot: Spot) => suggestHealSource(client, photoID, params, spot, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, spot], _subscribe: { method: 'Edits.SuggestHealSource', params: [photoID, params, spot] } });
 }

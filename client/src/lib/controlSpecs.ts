@@ -244,6 +244,7 @@ const PARAM_LABELS: Partial<Record<keyof Params, string>> = {
   cropW: 'Crop',
   cropH: 'Crop',
   cropAngle: 'Straighten',
+  spots: 'Retouch',
 };
 
 export function paramLabel(key: keyof Params): string {

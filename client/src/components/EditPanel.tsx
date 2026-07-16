@@ -12,7 +12,7 @@ import { applyRating, applyFlag } from '@/lib/actions';
 // (aprot's camelCasing lowercases exactly one leading character: aIModelStatus.)
 import { aIModelStatus as aiModelStatus, applyBatchEdit, generateAIMap, type AIMapResult, type Delta } from '@/api/edits';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
-import type { AIKindType, Mask, MaskAdjust, Params } from '@/api/edit';
+import type { AIKindType, Mask, MaskAdjust, Params, Spot } from '@/api/edit';
 import {
   DEPTH_WINDOW_DEFAULT,
   MASK_CONTROL_ORDER,
@@ -48,20 +48,26 @@ import {
   esSetActive,
   esSetActiveMask,
   esSetActiveMaskControl,
+  esSetActiveSpot,
+  esSetHealing,
+  esSetSpotMode,
   esSetTintMask,
   esSetApplyIds,
   esSetBrushTool,
   esSetCropping,
   esSetMaskPaint,
   esSetWBPicking,
+  esRemoveSpot,
   esUndo,
   esUpdate,
   esUpdateMask,
+  esUpdateSpot,
   esWBPickDone,
   useEditSession,
   NEUTRAL,
   type ControlId,
   type GroupId,
+  type SpotMode,
 } from '@/lib/editSession';
 
 const HIGHLIGHT_OPTIONS = [
@@ -315,6 +321,7 @@ function DevelopPanel({
 
   const changed = {
     crop: groupChanged(draft, ['rotate', 'flipH', 'cropX', 'cropY', 'cropW', 'cropH', 'cropAngle']),
+    retouch: (draft.spots?.length ?? 0) > 0,
     tone: groupChanged(draft, [
       'expEV', 'expPreserve', 'bright', 'gamma', 'shadow',
       'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
@@ -399,6 +406,10 @@ function DevelopPanel({
           // previews through the ordinary backend render path.
           {...num('cropAngle')}
         />
+      </Group>
+
+      <Group id="retouch" title="Retouch" changed={changed.retouch}>
+        <RetouchSection client={client} draft={draft} />
       </Group>
 
       <Group
@@ -816,6 +827,167 @@ function AutoButton({
 // MaskOverlay on the Develop loupe, driven by the same activeMask state.
 // Mirrors DevelopPanel's shell: held lastDraft through photo switches (inert
 // input meanwhile), undo/redo in the header.
+// RetouchSection is the Develop-tab Retouch group: the heal-tool toggle, the
+// clone/heal mode for newly placed spots, and the list of spots. Spots live in
+// draft.spots, so add/move/remove flow through the ordinary esUpdate/esCommit
+// path (history, copy/paste and persistence come for free).
+function RetouchSection({ client, draft }: { client: ApiClient; draft: Params }) {
+  const healing = useEditSession((s) => s.healing);
+  const activeSpot = useEditSession((s) => s.activeSpot);
+  const spotMode = useEditSession((s) => s.spotMode);
+  const setMode = useUIStore((s) => s.setMode);
+  const spots = draft.spots ?? [];
+  return (
+    <div className="flex flex-col gap-2">
+      <Button
+        size="sm"
+        variant={healing ? 'default' : 'outline'}
+        className="justify-start"
+        onClick={() => {
+          if (!healing) setMode('develop'); // the overlay lives on the Develop canvas
+          esSetHealing(!healing);
+        }}
+        title="Heal / spot removal (Q)"
+      >
+        <Focus data-icon="inline-start" />
+        {healing ? 'Done healing' : 'Heal spots'}
+        <span className="ml-auto flex items-center gap-1.5">
+          {spots.length > 0 && (
+            <span
+              className="rounded-[4px] bg-primary/18 px-1 py-px text-[9px] font-semibold tracking-[.05em] text-accent-text uppercase"
+              title={`${spots.length} spot${spots.length > 1 ? 's' : ''}`}
+            >
+              {spots.length}
+            </span>
+          )}
+          <kbd className="text-[10px] opacity-60">Q</kbd>
+        </span>
+      </Button>
+      {healing && (
+        <ToggleGroup
+          className="flex-1"
+          value={[spotMode]}
+          onValueChange={(g) => {
+            const v = (g as string[])[0];
+            if (v) esSetSpotMode(v as SpotMode);
+          }}
+          aria-label="New spot mode"
+        >
+          <ToggleGroupItem value="heal" className="flex-1" title="Match source texture to the destination">
+            Heal
+          </ToggleGroupItem>
+          <ToggleGroupItem value="clone" className="flex-1" title="Copy the source verbatim">
+            Clone
+          </ToggleGroupItem>
+        </ToggleGroup>
+      )}
+      {spots.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          {spots.map((spot, i) => (
+            <SpotRow
+              key={i}
+              client={client}
+              spot={spot}
+              index={i}
+              selected={i === activeSpot}
+              onSelect={() => esSetActiveSpot(i === activeSpot ? null : i)}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {healing
+            ? 'Click a dust spot or blemish on the photo; drag to size it. marraw fills it from a nearby patch — drag the dashed circle to choose a different source.'
+            : 'Remove sensor dust and blemishes. Spots stay anchored to image content through crops and straightens.'}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function SpotRow({
+  client,
+  spot,
+  index,
+  selected,
+  onSelect,
+}: {
+  client: ApiClient;
+  spot: Spot;
+  index: number;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const mode: SpotMode = spot.mode === 'clone' ? 'clone' : 'heal';
+  const feather = spot.feather ?? 0.5;
+  // Opacity 0 means "full" on the wire (the Flow precedent); show it as 100%.
+  const opacity = spot.opacity && spot.opacity > 0 ? spot.opacity : 1;
+  const commitPatch = (p: Partial<Spot>) => {
+    esUpdateSpot(client, index, p);
+    esCommit(client);
+  };
+  return (
+    <div className={cn('flex flex-col rounded-md border', selected ? 'border-primary/45' : 'border-border')}>
+      <div className="flex items-center gap-1.5 px-2 py-1.5">
+        <button type="button" className="flex flex-1 items-center gap-1.5 text-left" onClick={onSelect} aria-pressed={selected}>
+          <span className="text-[11.5px] text-secondary-foreground">
+            Spot {index + 1} · {mode}
+          </span>
+        </button>
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground"
+          title="Delete spot"
+          aria-label="Delete spot"
+          onClick={() => esRemoveSpot(client, index)}
+        >
+          <Trash2 className="size-3" />
+        </button>
+      </div>
+      {selected && (
+        <div className="flex flex-col gap-[7px] px-2 pb-2">
+          <ToggleGroup
+            className="flex-1"
+            value={[mode]}
+            onValueChange={(g) => {
+              const v = (g as string[])[0];
+              if (v) commitPatch({ mode: v === 'clone' ? 'clone' : undefined });
+            }}
+            aria-label="Spot mode"
+          >
+            <ToggleGroupItem value="heal" className="flex-1">Heal</ToggleGroupItem>
+            <ToggleGroupItem value="clone" className="flex-1">Clone</ToggleGroupItem>
+          </ToggleGroup>
+          <EditSlider
+            label="Feather"
+            value={feather * 100}
+            display={pct(feather)}
+            min={0}
+            max={100}
+            step={1}
+            neutral={50}
+            onChange={(v) => esUpdateSpot(client, index, { feather: v / 100 })}
+            onCommit={(v) => commitPatch({ feather: v / 100 })}
+            onClear={() => commitPatch({ feather: 0.5 })}
+          />
+          <EditSlider
+            label="Opacity"
+            value={opacity * 100}
+            display={`${Math.round(opacity * 100)}%`}
+            min={10}
+            max={100}
+            step={1}
+            neutral={100}
+            onChange={(v) => esUpdateSpot(client, index, { opacity: v >= 100 ? undefined : v / 100 })}
+            onCommit={(v) => commitPatch({ opacity: v >= 100 ? undefined : v / 100 })}
+            onClear={() => commitPatch({ opacity: undefined })}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MasksPanel({ client, targetCount }: { client: ApiClient; targetCount: number }) {
   const liveDraft = useEditSession((s) => s.draft);
   const draft = useEditSession((s) => s.draft ?? s.lastDraft);

@@ -16,8 +16,9 @@ import {
   previewEdit,
   resetEdits,
   setEditParams,
+  suggestHealSource,
 } from '@/api/edits';
-import type { Mask, Params } from '@/api/edit';
+import type { Mask, Params, Spot } from '@/api/edit';
 import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPresets';
 import {
   CONTROL_ORDER,
@@ -45,7 +46,14 @@ export type { ControlId } from '@/lib/controlSpecs';
 // holds each control. Selecting a control opens its group; Ctrl+↑/↓ skips
 // controls whose group is closed. Open state lives in uiStore.editGroups
 // (absent = open), server-persisted via updateEditGroupOpen.
-export type GroupId = 'crop' | 'tone' | 'presence' | 'wb' | 'color' | 'effects' | 'detail';
+export type GroupId = 'crop' | 'retouch' | 'tone' | 'presence' | 'wb' | 'color' | 'effects' | 'detail';
+
+// SpotMode is the retouch fill mode a new spot is created with (and the toggle
+// the panel offers per spot). Mirrors the server's edit.SpotMode ("" = heal).
+export type SpotMode = 'heal' | 'clone';
+
+// Default edge softness for a freshly placed spot (fraction of its radius).
+export const SPOT_FEATHER_DEFAULT = 0.5;
 
 const CONTROL_GROUP: Record<ControlId, GroupId> = {
   cropAngle: 'crop',
@@ -121,6 +129,15 @@ interface EditSessionState {
   // Reset/Cancel. Null when the picker is closed.
   wbPickBase: Params | null;
   cropping: boolean; // crop overlay active: loupe shows the uncropped frame
+  // Heal/retouch tool active: pointer-down on the loupe places or grabs a spot
+  // (draft.spots) instead of panning.
+  healing: boolean;
+  // The selected retouch spot (index into draft.spots): its dest+source circles
+  // and connector show on the loupe and its row expands in the Retouch group.
+  activeSpot: number | null;
+  // Fill mode a newly placed spot is created with (the panel's clone/heal
+  // toggle for new spots).
+  spotMode: SpotMode;
   // The selected local-adjustment mask (index into draft.masks): its overlay
   // handles show on the loupe and its sliders expand in the Masks tab.
   activeMask: number | null;
@@ -160,6 +177,9 @@ export const useEditSession = create<EditSessionState>(() => ({
   wbPicking: false,
   wbPickBase: null,
   cropping: false,
+  healing: false,
+  activeSpot: null,
+  spotMode: 'heal',
   activeMask: null,
   activeMaskControl: null,
   maskPaint: false,
@@ -314,6 +334,25 @@ function maskDiffLabel(prev: Mask[] | undefined, next: Mask[] | undefined): stri
   return 'Adjust mask';
 }
 
+// spotDiffLabel names a spots-only change: add/remove by count, otherwise by
+// what moved (a source/dest circle or radius, versus the mode/feather sliders).
+function spotDiffLabel(prev: Spot[] | undefined, next: Spot[] | undefined): string {
+  const a = prev ?? [];
+  const b = next ?? [];
+  if (b.length > a.length) return 'Add spot';
+  if (b.length < a.length) return 'Remove spot';
+  for (let i = 0; i < b.length; i++) {
+    if (JSON.stringify(a[i]) === JSON.stringify(b[i])) continue;
+    const p = a[i];
+    const n = b[i];
+    if (p.cx !== n.cx || p.cy !== n.cy || p.sx !== n.sx || p.sy !== n.sy || p.radius !== n.radius) {
+      return 'Move spot';
+    }
+    return 'Adjust spot';
+  }
+  return 'Adjust spot';
+}
+
 // labelForDiff names a commit from the params that changed between the
 // previous history head and the new snapshot: a single control by its label
 // (with Add/Remove for effect toggles), a mixed change as "Adjust".
@@ -325,6 +364,7 @@ function labelForDiff(prev: Params, next: Params): string {
   });
   if (keys.length === 0) return 'Edit';
   if (keys.length === 1 && keys[0] === 'masks') return maskDiffLabel(prev.masks, next.masks);
+  if (keys.length === 1 && keys[0] === 'spots') return spotDiffLabel(prev.spots, next.spots);
   const labels = new Set(keys.map((k) => paramLabel(k)));
   if (labels.size !== 1) return 'Adjust';
   const label = [...labels][0];
@@ -354,6 +394,8 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     wbPicking: false,
     wbPickBase: null,
     cropping: false,
+    healing: false,
+    activeSpot: null,
     activeMask: null,
     activeMaskControl: null,
     maskPaint: false,
@@ -407,13 +449,21 @@ export function esSetKeyAdjust(on: boolean) {
 useUIStore.subscribe((s, prev) => {
   if (s.mode === 'cull' && prev.mode !== 'cull') {
     const es = useEditSession.getState();
-    if (es.activeControl != null || es.activeMask != null || es.activeMaskControl != null || es.maskPaint) {
+    if (
+      es.activeControl != null ||
+      es.activeMask != null ||
+      es.activeMaskControl != null ||
+      es.maskPaint ||
+      es.healing
+    ) {
       setState({
         activeControl: null,
         keyAdjust: false,
         activeMask: null,
         activeMaskControl: null,
         maskPaint: false,
+        healing: false,
+        activeSpot: null,
       });
     }
   }
@@ -441,6 +491,105 @@ export function esSetCropping(client: ApiClient, on: boolean) {
   } else {
     schedulePreview(client, 'settle');
   }
+}
+
+// --- Retouch spots (heal / clone) ---
+// Spots live inside the draft (Params.spots) so history, copy/paste and
+// persistence handle them for free, exactly like masks. Placing/dragging goes
+// through esUpdate (coalesced draft frames) and commits on release, so one
+// gesture is one history entry; the source patch is chosen server-side once at
+// release (esFinishSpot) and stored in the spot, keeping it stable.
+
+// esSetHealing toggles the heal tool. Unlike crop it needs no flat re-render —
+// the ordinary (cropped) view is the heal canvas — so it only flips the flag
+// and drops any spot selection when leaving.
+export function esSetHealing(on: boolean) {
+  const s = useEditSession.getState();
+  if (s.healing === on) return;
+  if (on) useUIStore.getState().setDevelopTab('develop');
+  setState(on ? { healing: true } : { healing: false, activeSpot: null });
+}
+
+// esSetActiveSpot selects a spot (its overlay circles + expanded row).
+export function esSetActiveSpot(index: number | null) {
+  setState({ activeSpot: index });
+}
+
+// esSetSpotMode sets the fill mode for newly placed spots.
+export function esSetSpotMode(mode: SpotMode) {
+  setState({ spotMode: mode });
+}
+
+// esBeginSpot appends a spot to the draft (no commit yet) and selects it,
+// returning its index. The overlay drives the placement drag through
+// esUpdateSpot and finalizes on release with esFinishSpot — so the whole
+// gesture lands as one "Add spot" history entry. mode omits the canonical
+// "heal" so a heal spot marshals clean.
+export function esBeginSpot(client: ApiClient, spot: Omit<Spot, 'mode'>): number {
+  esFlushDraft();
+  const s = useEditSession.getState();
+  if (!s.draft || s.photoId == null) return -1;
+  const full: Spot = s.spotMode === 'clone' ? { ...spot, mode: 'clone' } : { ...spot };
+  const spots = [...(s.draft.spots ?? []), full];
+  const index = spots.length - 1;
+  setState({ activeSpot: index });
+  esUpdate(client, { spots });
+  return index;
+}
+
+// esUpdateSpot merges a patch into one spot during a placement or handle drag
+// (coalesced low-res preview; commit on release). Flushes first so back-to-back
+// updates in one frame don't clobber each other.
+export function esUpdateSpot(client: ApiClient, index: number, patch: Partial<Spot>) {
+  esFlushDraft();
+  const s = useEditSession.getState();
+  const spots = s.draft?.spots;
+  if (!spots || !spots[index]) return;
+  const next = spots.slice();
+  next[index] = { ...next[index], ...patch };
+  esUpdate(client, { spots: next });
+}
+
+// esFinishSpot asks the backend for the best source patch for a just-placed
+// spot, applies it, and commits (one history entry). Falls back to committing
+// the interim source if the suggestion fails or is superseded. Guarded by
+// applyGen so a photo switch mid-request can't clobber the new draft.
+export async function esFinishSpot(client: ApiClient, index: number) {
+  esFlushDraft();
+  const s = useEditSession.getState();
+  const spots = s.draft?.spots;
+  if (s.photoId == null || !s.draft || !spots || !spots[index]) return;
+  const gen = ++applyGen;
+  const pid = s.photoId;
+  try {
+    const suggested = await suggestHealSource(client, pid, s.draft, spots[index]);
+    if (applyGen === gen && useEditSession.getState().photoId === pid) {
+      esUpdateSpot(client, index, { sx: suggested.sx, sy: suggested.sy });
+    }
+  } catch {
+    // keep the interim source
+  } finally {
+    if (applyGen === gen && useEditSession.getState().photoId === pid) {
+      esCommit(client);
+    }
+  }
+}
+
+// esRemoveSpot deletes a spot and commits.
+export function esRemoveSpot(client: ApiClient, index: number) {
+  esFlushDraft();
+  const s = useEditSession.getState();
+  const spots = s.draft?.spots;
+  if (!spots || !spots[index]) return;
+  const next = spots.filter((_, i) => i !== index);
+  setState({ activeSpot: null });
+  esCommit(client, { spots: next });
+}
+
+// esCommitSpot commits the current draft after a spot handle drag (its
+// label comes from spotDiffLabel — "Move spot").
+export function esCommitSpot(client: ApiClient) {
+  esCommit(client);
 }
 
 // --- Local adjustment masks ---
