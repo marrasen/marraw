@@ -756,6 +756,53 @@ if (shot === 'cull') {
     overlay: !!document.querySelector('[data-testid="heal-overlay"]'),
     activeSpot: es.getState().activeSpot,
   };
+} else if (shot === 'healbrush') {
+  // Heal brush: paint a stroke-kind spot, let the server pick the source, and
+  // show the painted region + translated source copy + panel Brush row.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200);
+  mw.esUpdate({ spots: [] });
+  mw.esCommit();
+  await sleep(300);
+  mw.esSetHealing(true);
+  mw.esSetSpotTool('brush');
+  const idx = mw.esBeginSpot({
+    kind: 'stroke',
+    cx: 0.5, cy: 0.5, radius: 0, sx: 0.62, sy: 0.55,
+    strokes: [{ radius: 0.02, feather: 0.4, pts: [0.4, 0.48, 0.47, 0.52, 0.54, 0.5, 0.6, 0.53] }],
+  });
+  await mw.esFinishSpot(idx);
+  mw.esSetActiveSpot(idx);
+  await until(() => mw.esPreviewSettled(), 30000).catch(() => {});
+  await sleep(400);
+  const spot = es.getState().draft?.spots?.[idx];
+  window.__healProbe = {
+    healing: es.getState().healing,
+    kind: spot?.kind,
+    strokePts: spot?.strokes?.[0]?.pts?.length ?? 0,
+    destMoved: !!spot && Math.hypot(spot.sx - spot.cx, spot.sy - spot.cy) > 0.02,
+    overlay: !!document.querySelector('[data-testid="heal-overlay"]'),
+    activeSpot: es.getState().activeSpot,
+  };
+} else if (shot === 'spotvis') {
+  // Visualize spots: the high-pass dust view over the loupe while healing.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200);
+  mw.esSetHealing(true);
+  mw.esSetSpotVisualize(true);
+  await until(() => !!document.querySelector('[data-testid="spot-visualize"]'), 10000).catch(() => {});
+  await sleep(1500); // filter pass renders
+  const canvas = document.querySelector('[data-testid="spot-visualize"]');
+  window.__healProbe = {
+    healing: es.getState().healing,
+    visualize: es.getState().spotVisualize,
+    canvas: !!canvas,
+    canvasDrawn: !!canvas && canvas.width > 0,
+  };
 }
 // Let previews decode, then wake the chrome (capture fires on resolve).
 await sleep(3600);

@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw,
   Image as ImageIcon, Plus, Trash2, Paintbrush, Circle, Eraser,
-  Focus, Layers, Loader2, Shapes,
+  Focus, Layers, Loader2, Shapes, ScanSearch,
 } from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
@@ -52,6 +52,10 @@ import {
   esSetActiveSpot,
   esSetHealing,
   esSetSpotMode,
+  esSetSpotTool,
+  esSetSpotBrush,
+  esSetSpotVisualize,
+  esSetSpotVisualizeThreshold,
   esSetTintMask,
   esSetApplyIds,
   esSetBrushTool,
@@ -827,6 +831,11 @@ function RetouchSection({ client, draft }: { client: ApiClient; draft: Params })
   const healing = useEditSession((s) => s.healing);
   const activeSpot = useEditSession((s) => s.activeSpot);
   const spotMode = useEditSession((s) => s.spotMode);
+  const spotTool = useEditSession((s) => s.spotTool);
+  const brushRadius = useEditSession((s) => s.spotBrushRadius);
+  const brushFeather = useEditSession((s) => s.spotBrushFeather);
+  const visualize = useEditSession((s) => s.spotVisualize);
+  const visualizeThreshold = useEditSession((s) => s.spotVisualizeThreshold);
   const setMode = useUIStore((s) => s.setMode);
   const spots = draft.spots ?? [];
   return (
@@ -856,22 +865,89 @@ function RetouchSection({ client, draft }: { client: ApiClient; draft: Params })
         </span>
       </Button>
       {healing && (
-        <ToggleGroup
-          className="flex-1"
-          value={[spotMode]}
-          onValueChange={(g) => {
-            const v = (g as string[])[0];
-            if (v) esSetSpotMode(v as SpotMode);
-          }}
-          aria-label="New spot mode"
-        >
-          <ToggleGroupItem value="heal" className="flex-1" title="Match source texture to the destination">
-            Heal
-          </ToggleGroupItem>
-          <ToggleGroupItem value="clone" className="flex-1" title="Copy the source verbatim">
-            Clone
-          </ToggleGroupItem>
-        </ToggleGroup>
+        <>
+          <div className="flex items-center gap-1.5">
+            <ToggleGroup
+              className="flex-1"
+              value={[spotTool]}
+              onValueChange={(g) => {
+                const v = (g as string[])[0];
+                if (v) esSetSpotTool(v as 'spot' | 'brush');
+              }}
+              aria-label="Retouch tool"
+            >
+              <ToggleGroupItem value="spot" className="flex-1" title="Circular spot: click, or drag to size">
+                <Circle data-icon="inline-start" />
+                Spot
+              </ToggleGroupItem>
+              <ToggleGroupItem value="brush" className="flex-1" title="Paint an arbitrary region to heal">
+                <Paintbrush data-icon="inline-start" />
+                Brush
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <Button
+              size="icon-sm"
+              variant={visualize ? 'default' : 'outline'}
+              title="Visualize spots: high-pass dust view (A)"
+              aria-pressed={visualize}
+              onClick={() => esSetSpotVisualize(!visualize)}
+            >
+              <ScanSearch />
+            </Button>
+          </div>
+          <ToggleGroup
+            className="flex-1"
+            value={[spotMode]}
+            onValueChange={(g) => {
+              const v = (g as string[])[0];
+              if (v) esSetSpotMode(v as SpotMode);
+            }}
+            aria-label="New spot mode"
+          >
+            <ToggleGroupItem value="heal" className="flex-1" title="Match source texture to the destination">
+              Heal
+            </ToggleGroupItem>
+            <ToggleGroupItem value="clone" className="flex-1" title="Copy the source verbatim">
+              Clone
+            </ToggleGroupItem>
+          </ToggleGroup>
+          {spotTool === 'brush' && (
+            <>
+              <EditSlider
+                label="Size"
+                value={brushRadius * 100}
+                display={String(Math.round(brushRadius * 200))}
+                min={0.3}
+                max={15}
+                step={0.1}
+                onChange={(v) => esSetSpotBrush({ spotBrushRadius: v / 100 })}
+                onCommit={(v) => esSetSpotBrush({ spotBrushRadius: v / 100 })}
+              />
+              <EditSlider
+                label="Feather"
+                value={brushFeather * 100}
+                display={String(Math.round(brushFeather * 100))}
+                min={0}
+                max={100}
+                step={2}
+                onChange={(v) => esSetSpotBrush({ spotBrushFeather: v / 100 })}
+                onCommit={(v) => esSetSpotBrush({ spotBrushFeather: v / 100 })}
+              />
+            </>
+          )}
+          {visualize && (
+            <EditSlider
+              label="Sensitivity"
+              value={visualizeThreshold * 100}
+              display={String(Math.round(visualizeThreshold * 100))}
+              min={0}
+              max={100}
+              step={2}
+              onChange={(v) => esSetSpotVisualizeThreshold(v / 100)}
+              onCommit={(v) => esSetSpotVisualizeThreshold(v / 100)}
+            />
+          )}
+        </>
       )}
       {spots.length > 0 ? (
         <div className="flex flex-col gap-1.5">
@@ -889,7 +965,9 @@ function RetouchSection({ client, draft }: { client: ApiClient; draft: Params })
       ) : (
         <p className="text-xs text-muted-foreground">
           {healing
-            ? 'Click a dust spot or blemish on the photo; drag to size it. marraw fills it from a nearby patch — drag the dashed circle to choose a different source.'
+            ? spotTool === 'brush'
+              ? 'Paint over a blemish; marraw fills the painted region from a nearby patch — drag the dashed copy to choose a different source.'
+              : 'Click a dust spot or blemish on the photo; drag to size it. marraw fills it from a nearby patch — drag the dashed circle to choose a different source.'
             : 'Remove sensor dust and blemishes. Spots stay anchored to image content through crops and straightens.'}
         </p>
       )}
@@ -911,7 +989,14 @@ function SpotRow({
   onSelect: () => void;
 }) {
   const mode: SpotMode = spot.mode === 'clone' ? 'clone' : 'heal';
-  const feather = spot.feather ?? 0.5;
+  const stroke = spot.kind === 'stroke';
+  // A stroke spot's edge softness lives per-stroke; surface the first stroke's
+  // value and write changes back to every stroke in the region.
+  const feather = (stroke ? spot.strokes?.[0]?.feather : spot.feather) ?? 0.5;
+  const patchFeather = (v: number): Partial<Spot> =>
+    stroke
+      ? { strokes: (spot.strokes ?? []).map((st) => ({ ...st, feather: v })) }
+      : { feather: v };
   // Opacity 0 means "full" on the wire (the Flow precedent); show it as 100%.
   const opacity = spot.opacity && spot.opacity > 0 ? spot.opacity : 1;
   const commitPatch = (p: Partial<Spot>) => {
@@ -923,7 +1008,7 @@ function SpotRow({
       <div className="flex items-center gap-1.5 px-2 py-1.5">
         <button type="button" className="flex flex-1 items-center gap-1.5 text-left" onClick={onSelect} aria-pressed={selected}>
           <span className="text-[11.5px] text-secondary-foreground">
-            Spot {index + 1} · {mode}
+            {stroke ? 'Brush' : 'Spot'} {index + 1} · {mode}
           </span>
         </button>
         <button
@@ -958,9 +1043,9 @@ function SpotRow({
             max={100}
             step={1}
             neutral={50}
-            onChange={(v) => esUpdateSpot(client, index, { feather: v / 100 })}
-            onCommit={(v) => commitPatch({ feather: v / 100 })}
-            onClear={() => commitPatch({ feather: 0.5 })}
+            onChange={(v) => esUpdateSpot(client, index, patchFeather(v / 100))}
+            onCommit={(v) => commitPatch(patchFeather(v / 100))}
+            onClear={() => commitPatch(patchFeather(0.5))}
           />
           <EditSlider
             label="Opacity"

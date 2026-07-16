@@ -139,6 +139,16 @@ interface EditSessionState {
   // Fill mode a newly placed spot is created with (the panel's clone/heal
   // toggle for new spots).
   spotMode: SpotMode;
+  // Retouch region tool: 'spot' places circles (click / click-drag to size),
+  // 'brush' paints an arbitrary stroke region (Kind "stroke" spots).
+  spotTool: 'spot' | 'brush';
+  // Heal brush settings for the next stroke (the mask brush's twins; radius is
+  // a fraction of the frame long edge, the server's stroke model).
+  spotBrushRadius: number;
+  spotBrushFeather: number;
+  // Visualize spots: high-pass dust view over the loupe while healing (A key).
+  spotVisualize: boolean;
+  spotVisualizeThreshold: number; // 0..1, higher = more sensitive
   // The selected local-adjustment mask (index into draft.masks): its overlay
   // handles show on the loupe and its sliders expand in the Masks tab.
   activeMask: number | null;
@@ -181,6 +191,11 @@ export const useEditSession = create<EditSessionState>(() => ({
   healing: false,
   activeSpot: null,
   spotMode: 'heal',
+  spotTool: 'spot',
+  spotBrushRadius: 0.02,
+  spotBrushFeather: 0.5,
+  spotVisualize: false,
+  spotVisualizeThreshold: 0.4,
   activeMask: null,
   activeMaskControl: null,
   maskPaint: false,
@@ -397,6 +412,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     cropping: false,
     healing: false,
     activeSpot: null,
+    spotVisualize: false,
     activeMask: null,
     activeMaskControl: null,
     maskPaint: false,
@@ -465,6 +481,7 @@ useUIStore.subscribe((s, prev) => {
         maskPaint: false,
         healing: false,
         activeSpot: null,
+        spotVisualize: false,
       });
     }
   }
@@ -516,7 +533,7 @@ export function esSetHealing(on: boolean) {
   const s = useEditSession.getState();
   if (s.healing === on) return;
   if (on) useUIStore.getState().setDevelopTab('develop');
-  setState(on ? { healing: true } : { healing: false, activeSpot: null });
+  setState(on ? { healing: true } : { healing: false, activeSpot: null, spotVisualize: false });
 }
 
 // esSetActiveSpot selects a spot (its overlay circles + expanded row).
@@ -527,6 +544,27 @@ export function esSetActiveSpot(index: number | null) {
 // esSetSpotMode sets the fill mode for newly placed spots.
 export function esSetSpotMode(mode: SpotMode) {
   setState({ spotMode: mode });
+}
+
+// esSetSpotTool switches the retouch region tool (circle spots / heal brush).
+export function esSetSpotTool(tool: 'spot' | 'brush') {
+  setState({ spotTool: tool });
+}
+
+// esSetSpotBrush updates the heal brush settings for the next stroke.
+export function esSetSpotBrush(
+  patch: Partial<Pick<EditSessionState, 'spotBrushRadius' | 'spotBrushFeather'>>,
+) {
+  setState(patch);
+}
+
+// esSetSpotVisualize toggles the dust-visualization loupe view (A key while
+// healing); esSetSpotVisualizeThreshold tunes its sensitivity.
+export function esSetSpotVisualize(on: boolean) {
+  setState({ spotVisualize: on });
+}
+export function esSetSpotVisualizeThreshold(t: number) {
+  setState({ spotVisualizeThreshold: t });
 }
 
 // esBeginSpot appends a spot to the draft (no commit yet) and selects it,
@@ -574,7 +612,14 @@ export async function esFinishSpot(client: ApiClient, index: number) {
   try {
     const suggested = await suggestHealSource(client, pid, s.draft, spots[index]);
     if (applyGen === gen && useEditSession.getState().photoId === pid) {
-      esUpdateSpot(client, index, { sx: suggested.sx, sy: suggested.sy });
+      // A stroke spot's dest reference comes back too (the painted region's
+      // enclosing-circle center) — the source vector is relative to it, so
+      // both must be stored together.
+      const patch: Partial<Spot> =
+        spots[index].kind === 'stroke'
+          ? { cx: suggested.cx, cy: suggested.cy, sx: suggested.sx, sy: suggested.sy }
+          : { sx: suggested.sx, sy: suggested.sy };
+      esUpdateSpot(client, index, patch);
     }
   } catch {
     // keep the interim source

@@ -596,9 +596,23 @@ func samplePatchLinearRef(img *image.RGBA64, x, y float64) (r, g, b float64) {
 // the render pipeline would let it drift with render size. It reuses the hot
 // preview decode (spot fields don't touch the LibRaw-input hash), so it is
 // typically instant during an editing session.
+//
+// For a stroke spot the painted region is reduced to its enclosing circle for
+// the ring search, and CX/CY are ALSO returned (set to that circle's center):
+// the stored dest reference must match the point the source vector was chosen
+// against, so the caller persists both.
 func (e *Edits) SuggestHealSource(ctx context.Context, photoID int64, params edit.Params, spot edit.Spot) (*edit.Spot, error) {
-	if spot.Radius <= 0 {
-		return nil, aprot.ErrInvalidParams("spot radius must be positive")
+	switch spot.Kind {
+	case "":
+		if spot.Radius <= 0 {
+			return nil, aprot.ErrInvalidParams("spot radius must be positive")
+		}
+	case "stroke":
+		if len(spot.Strokes) == 0 {
+			return nil, aprot.ErrInvalidParams("stroke spot has no strokes")
+		}
+	default:
+		return nil, aprot.ErrInvalidParams("unknown spot kind")
 	}
 	// Suggest against the normalized state the renders will use (PreviewEdit
 	// normalizes too), with the spot clamped like normalizeSpots will clamp it
@@ -629,7 +643,18 @@ func (e *Edits) SuggestHealSource(ctx context.Context, photoID int64, params edi
 	// Pass &params (never nil) for the frame mapping: it carries the crop and
 	// rotation that place the fractional coordinates, and newMaskFrame derefs it.
 	out := spot
-	out.SX, out.SY = pyramid.SuggestHealSource(geo, &params, spot)
+	target := spot
+	if spot.Kind == "stroke" {
+		b := geo.Bounds()
+		cx, cy, rad := pyramid.StrokeSpotCircle(b.Dx(), b.Dy(), &params, &spot)
+		if rad <= 0 {
+			return nil, aprot.ErrInvalidParams("stroke spot region is empty")
+		}
+		out.CX, out.CY = cx, cy
+		// The search only needs the region's footprint; run it as a circle.
+		target = edit.Spot{Mode: spot.Mode, CX: cx, CY: cy, Radius: math.Min(rad, 0.5)}
+	}
+	out.SX, out.SY = pyramid.SuggestHealSource(geo, &params, target)
 	return &out, nil
 }
 

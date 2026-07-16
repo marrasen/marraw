@@ -12,6 +12,7 @@ import {
   esApplyParams,
   esApplyUserPreset,
   esAuto,
+  esCommit,
   esMoveActive,
   esMoveMaskActive,
   esRedo,
@@ -21,11 +22,13 @@ import {
   esSetActiveSpot,
   esSetCropping,
   esSetHealing,
+  esSetSpotVisualize,
   esSetWBPicking,
   esRemoveSpot,
   esStep,
   esStepMask,
   esUndo,
+  esUpdateSpot,
   esWBPickCancel,
   esWBPickDone,
   useEditSession,
@@ -63,6 +66,9 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 //   Enter · Esc   forward / back a mode: Library ⇄ Cull ⇄ Develop
 //   E B T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
 //   W             toggle the white-balance eyedropper (Enter keep · Esc cancel)
+//   Q             toggle the heal / spot-removal tool; while it's up A toggles
+//                 the visualize-spots dust view, and with a spot selected the
+//                 digits set its opacity (1-9 → 10-90%, 0 → 100%)
 //   Ctrl+↑/↓      focus the previous/next develop control (alias of plain ↑/↓)
 //   +/- / Z / Space   zoom (loupe, no control focused — Cull never focuses one;
 //                 Z/Space toggle 1:1↔fit)
@@ -277,6 +283,24 @@ export function useKeyboard() {
       }
 
       const key = e.key.toLowerCase();
+
+      // While the heal tool is up, A toggles the visualize-spots dust view
+      // (Lightroom's key) instead of focusing the Saturation slider.
+      if (key === 'a' && es.healing && es.draft) {
+        e.preventDefault();
+        esSetSpotVisualize(!es.spotVisualize);
+        return;
+      }
+
+      // While the heal tool is up with a spot selected, the digits set that
+      // spot's opacity (1-9 → 10-90%, 0 → 100%) instead of rating the photo.
+      if (es.healing && es.activeSpot != null && /^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        const n = Number(e.key);
+        esUpdateSpot(client, es.activeSpot, { opacity: n === 0 ? undefined : n / 10 });
+        esCommit(client);
+        return;
+      }
 
       // F11 = true fullscreen: even marraw's own chrome goes away.
       if (e.key === 'F11') {

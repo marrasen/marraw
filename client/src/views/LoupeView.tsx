@@ -33,6 +33,7 @@ import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialo
 import { isModelNotDownloaded } from '@/lib/aiConsent';
 import { MaskOverlay } from '@/components/MaskOverlay';
 import { HealOverlay } from '@/components/HealOverlay';
+import { SpotVisualizeLayer } from '@/components/SpotVisualize';
 import { MaskHoverTint } from '@/components/MaskHoverTint';
 import { AIKind, type Params } from '@/api/edit';
 
@@ -492,6 +493,10 @@ export function CinemaImage({
     !wbPicking &&
     esPhotoId === photo.id &&
     !!draft;
+  // Dust-hunting relief view (A while healing): filters the shown rendition
+  // client-side; the heal overlay stays on top so spots remain editable.
+  const spotVisualize = useEditSession((s) => s.spotVisualize);
+  const visualizeUI = healUI && spotVisualize;
   // The hover tint needs no selected mask — hovering any Masks-panel row
   // shows that mask's weight over the ordinary Develop view.
   const tintUI = uiMode === 'develop' && !cropping && !wbPicking && !healing && esPhotoId === photo.id;
@@ -1210,6 +1215,7 @@ export function CinemaImage({
                 boxH={boxH}
               />
             )}
+            {visualizeUI && <SpotVisualizeLayer src={shownSrc} boxW={boxW} boxH={boxH} />}
             {healUI && draft && (
               <HealOverlay
                 client={client}

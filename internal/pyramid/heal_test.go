@@ -106,8 +106,11 @@ func TestApplyHealSkipsUnknownKindsAndModes(t *testing.T) {
 	img := gradientImage(120, 90)
 	before := clonePix(img)
 	ApplyHeal(img, &edit.Params{Spots: []edit.Spot{
-		{Kind: "stroke", CX: 0.5, CY: 0.5, Radius: 0.2, SX: 0.2, SY: 0.2},
+		{Kind: "fill", CX: 0.5, CY: 0.5, Radius: 0.2, SX: 0.2, SY: 0.2},
 		{Mode: "fill", CX: 0.5, CY: 0.5, Radius: 0.2, SX: 0.2, SY: 0.2},
+		// A stroke spot with an unknown MODE must be skipped too.
+		{Kind: "stroke", Mode: "bogus", CX: 0.5, CY: 0.5, SX: 0.2, SY: 0.2,
+			Strokes: []edit.Stroke{{Radius: 0.05, Pts: []float64{0.4, 0.5, 0.6, 0.5}}}},
 	}})
 	for i := range before {
 		if img.Pix[i] != before[i] {
@@ -139,6 +142,122 @@ func TestApplyHealNearEdge(t *testing.T) {
 		{CX: 0.99, CY: 0.99, Radius: 0.08, SX: 0.5, SY: 0.5, Mode: edit.SpotClone},
 	}}
 	ApplyHeal(img, e) // just needs to survive
+}
+
+// strokeSpot paints a horizontal bar via one stroke: dest reference at
+// (cx,cy), source offset dx/dy to the right/down (frame fractions).
+func strokeSpot(cx, cy, dx, dy, rad float64, mode edit.SpotMode) edit.Spot {
+	return edit.Spot{
+		Kind: "stroke", Mode: mode,
+		CX: cx, CY: cy, SX: cx + dx, SY: cy + dy,
+		Strokes: []edit.Stroke{{
+			Radius: rad, Feather: 0.3,
+			Pts: []float64{cx - 0.08, cy, cx + 0.08, cy},
+		}},
+	}
+}
+
+// TestApplyHealStrokeClone copies the translated source region verbatim into
+// the painted region.
+func TestApplyHealStrokeClone(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 200, 200))
+	fillFlat(img, 100)
+	// Bright band where the translated source lands (dest row 100 → source row 160).
+	for y := 140; y < 180; y++ {
+		for x := range 200 {
+			i := img.PixOffset(x, y)
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2] = 200, 200, 200
+		}
+	}
+	e := &edit.Params{Spots: []edit.Spot{strokeSpot(0.5, 0.5, 0, 0.3, 0.04, edit.SpotClone)}}
+	ApplyHeal(img, e)
+	if got := lumaAt(img, 100, 100); got < 190 {
+		t.Errorf("stroke clone center should copy the bright source (~200), got %d", got)
+	}
+	// Well clear of the painted bar: untouched.
+	if got := lumaAt(img, 100, 60); got != 100 {
+		t.Errorf("stroke clone must not touch pixels outside the region, got %d", got)
+	}
+}
+
+// TestApplyHealStrokeToneMatches heals a dark blemish bar from a brighter
+// source region: the boundary-band membrane must pull the fill to the
+// destination surround, not the source brightness.
+func TestApplyHealStrokeToneMatches(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 200, 200))
+	fillFlat(img, 100)
+	for y := 140; y < 180; y++ { // bright source band
+		for x := range 200 {
+			i := img.PixOffset(x, y)
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2] = 200, 200, 200
+		}
+	}
+	for y := 96; y <= 104; y++ { // dark blemish bar under the stroke
+		for x := 84; x <= 116; x++ {
+			i := img.PixOffset(x, y)
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2] = 0, 0, 0
+		}
+	}
+	e := &edit.Params{Spots: []edit.Spot{strokeSpot(0.5, 0.5, 0, 0.3, 0.04, edit.SpotHeal)}}
+	ApplyHeal(img, e)
+	got := lumaAt(img, 100, 100)
+	if got < 85 || got > 115 {
+		t.Errorf("stroke heal should tone-match the ~100 surround, got %d", got)
+	}
+}
+
+// TestApplyHealStrokeNearEdge must survive strokes hugging (and overhanging)
+// the frame edge, where the source offset gets clamped onto the frame.
+func TestApplyHealStrokeNearEdge(t *testing.T) {
+	img := gradientImage(120, 90)
+	e := &edit.Params{Spots: []edit.Spot{
+		strokeSpot(0.02, 0.02, 0.5, 0.5, 0.06, edit.SpotHeal),
+		strokeSpot(0.98, 0.98, 0.5, 0.5, 0.06, edit.SpotClone),
+	}}
+	ApplyHeal(img, e) // just needs to survive
+}
+
+// TestApplyHealStrokeResolutionStable checks a stroke heals to the same tone
+// whether rendered large or downscaled — the fixed-resolution coverage plane
+// makes the region identical by construction.
+func TestApplyHealStrokeResolutionStable(t *testing.T) {
+	mk := func(w, h int) *image.RGBA {
+		img := image.NewRGBA(image.Rect(0, 0, w, h))
+		fillFlat(img, 120)
+		for y := int(0.7 * float64(h)); y < int(0.9*float64(h)); y++ {
+			for x := range w {
+				i := img.PixOffset(x, y)
+				img.Pix[i], img.Pix[i+1], img.Pix[i+2] = 210, 210, 210
+			}
+		}
+		return img
+	}
+	e := &edit.Params{Spots: []edit.Spot{strokeSpot(0.5, 0.5, 0, 0.3, 0.04, edit.SpotHeal)}}
+	big := mk(400, 300)
+	small := mk(200, 150)
+	ApplyHeal(big, e)
+	ApplyHeal(small, e)
+	gb := lumaAt(big, 200, 150)
+	gs := lumaAt(small, 100, 75)
+	if diff := gb - gs; diff < -12 || diff > 12 {
+		t.Errorf("stroke heal tone drifted across resolution: big=%d small=%d", gb, gs)
+	}
+}
+
+func TestStrokeSpotCircle(t *testing.T) {
+	s := strokeSpot(0.5, 0.5, 0, 0.3, 0.04, edit.SpotHeal)
+	cx, cy, rad := StrokeSpotCircle(200, 200, &edit.Params{}, &s)
+	if math.Abs(cx-0.5) > 0.001 || math.Abs(cy-0.5) > 0.001 {
+		t.Errorf("enclosing circle center should sit on the bar: (%v,%v)", cx, cy)
+	}
+	// Bar half-length 0.08 plus brush radius 0.04 → enclosing radius ≥ 0.12.
+	if rad < 0.11 || rad > 0.2 {
+		t.Errorf("enclosing radius out of range: %v", rad)
+	}
+	empty := edit.Spot{Kind: "stroke"}
+	if _, _, r := StrokeSpotCircle(200, 200, &edit.Params{}, &empty); r != 0 {
+		t.Errorf("empty stroke spot must report radius 0, got %v", r)
+	}
 }
 
 func TestSuggestHealSource(t *testing.T) {

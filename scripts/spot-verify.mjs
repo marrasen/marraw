@@ -115,11 +115,44 @@ const clone512 = await fetchImg(`http://127.0.0.1:8483/img/${photo.id}/512?v=${c
 check(isJpeg(clone512), 'clone-mode 512 renders');
 check(!clone512.equals(spot512), 'clone differs from heal (mode is honored)');
 
-// --- 5. The .marraw.json sidecar carries the spots. ---
+// --- 5. Stroke (brush) spots: suggestion returns the region's dest reference
+// too, the committed pipeline renders them, and unknown kinds stay dropped. ---
+const stroke = {
+  kind: 'stroke', cx: 0.5, cy: 0.5, radius: 0, sx: 0.5, sy: 0.5,
+  strokes: [{ radius: 0.02, feather: 0.4, pts: [0.42, 0.5, 0.5, 0.52, 0.58, 0.5] }],
+};
+const b1 = await call('Edits.SuggestHealSource', [photo.id, {}, stroke]);
+const b2 = await call('Edits.SuggestHealSource', [photo.id, {}, stroke]);
+step(`SuggestHealSource(stroke) -> dest (${b1.cx.toFixed(4)}, ${b1.cy.toFixed(4)}), src (${b1.sx.toFixed(4)}, ${b1.sy.toFixed(4)})`);
+check(b1.sx === b2.sx && b1.sy === b2.sy && b1.cx === b2.cx, 'stroke suggestion is deterministic');
+check(Math.abs(b1.cx - 0.5) < 0.02 && Math.abs(b1.cy - 0.5) < 0.03, 'stroke dest reference sits on the painted bar');
+check(b1.sx >= 0 && b1.sx <= 1 && b1.sy >= 0 && b1.sy <= 1, 'stroke source is in-frame');
+
+const strokeSpots = [{ ...stroke, cx: b1.cx, cy: b1.cy, sx: b1.sx, sy: b1.sy }];
+await call('Edits.SetEditParams', [photo.id, { spots: strokeSpots }]);
+cur = (await call('Library.ListPhotos', [info.folderId]))[0];
+const saved = await call('Edits.GetEditParams', [photo.id]);
+check(saved.spots?.length === 1 && saved.spots[0].kind === 'stroke', 'stroke spot survives Normalize');
+check((saved.spots[0].strokes?.[0]?.pts?.length ?? 0) === 6, 'stroke pts survive Normalize');
+const stroke512 = await fetchImg(`http://127.0.0.1:8483/img/${photo.id}/512?v=${cur.cacheKey}&e=${cur.editHash}`);
+check(isJpeg(stroke512), `stroke 512 renders (${stroke512.length} B)`);
+check(!stroke512.equals(base512), 'the stroke spot changes the 512 render vs baseline');
+const strokeTile = await fetchImg(`http://127.0.0.1:8483/img/${photo.id}/tile/0/0?v=${cur.cacheKey}&e=${cur.editHash}`);
+check(isJpeg(strokeTile), `stroke 1:1 tile (0,0) renders (${strokeTile.length} B)`);
+
+// An unknown future kind must be dropped by Normalize, not rendered.
+await call('Edits.SetEditParams', [photo.id, { spots: [{ ...stroke, kind: 'fill' }] }]);
+const dropped = await call('Edits.GetEditParams', [photo.id]);
+check(!dropped?.spots?.length, 'unknown spot kinds are dropped on save');
+// Restore the stroke spot for the sidecar check.
+await call('Edits.SetEditParams', [photo.id, { spots: strokeSpots }]);
+
+// --- 6. The .marraw.json sidecar carries the spots (strokes included). ---
 // Small settle so the sidecar write lands.
 await new Promise((r) => setTimeout(r, 500));
 const sidecar = readFileSync(join(FOLDER, `${photo.fileName}.marraw.json`), 'utf8');
 check(sidecar.includes('"spots"'), 'sidecar carries the spots array');
+check(sidecar.includes('"stroke"'), 'sidecar carries the stroke kind');
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECKS FAILED`);
 ws.close();

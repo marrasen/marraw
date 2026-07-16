@@ -152,27 +152,30 @@ const (
 	SpotClone SpotMode = "clone" // verbatim copy
 )
 
-// Spot is one retouch: a feathered circular destination filled from a source
+// Spot is one retouch: a feathered destination region filled from a source
 // patch elsewhere in the frame — the dust/blemish tool. Coordinates are
 // fractions of the oriented frame (the crop-rectangle space, like Mask), and
 // Radius is a fraction of the frame's long edge (the Stroke precedent), so
 // spots survive recrop/re-straighten and are resolution independent. Spots
 // apply in list order in a pre-look stage (pyramid.ApplyHeal) so healed pixels
-// develop identically to their source. Kind discriminates the region shape for
-// forward growth ("" = circle; a later "stroke" kind would carry Strokes, a
-// "fill" kind an ML inpaint) — Normalize drops kinds it doesn't know, the
+// develop identically to their source. Kind discriminates the region shape:
+// "" is a circle of Radius at (CX,CY); "stroke" is a painted region — the
+// union of Strokes (each with its own radius/feather), with (CX,CY) a
+// reference point on the region (its enclosing-circle center) and the fill
+// sourced from the region translated by (SX-CX, SY-CY). A future "fill" kind
+// would carry an ML inpaint. Normalize drops kinds it doesn't know, the
 // unknown-mask-type precedent, so old builds ignore future spots gracefully.
 type Spot struct {
 	Kind    string   `json:"kind,omitempty"`
 	Mode    SpotMode `json:"mode,omitempty"`
-	CX      float64  `json:"cx"` // destination center, frame fractions
+	CX      float64  `json:"cx"` // destination reference point, frame fractions
 	CY      float64  `json:"cy"`
-	Radius  float64  `json:"radius"` // fraction of the frame long edge
-	SX      float64  `json:"sx"`     // source center, frame fractions
+	Radius  float64  `json:"radius"` // fraction of the frame long edge (circle kind; 0 for strokes)
+	SX      float64  `json:"sx"`     // source reference point, frame fractions
 	SY      float64  `json:"sy"`
-	Feather float64  `json:"feather,omitempty"` // 0..1 of Radius (edge softness)
+	Feather float64  `json:"feather,omitempty"` // 0..1 of Radius (circle edge softness)
 	Opacity float64  `json:"opacity,omitempty"` // 0 = full (1.0), the Flow precedent
-	Strokes []Stroke `json:"strokes,omitempty"` // reserved for Kind "stroke"
+	Strokes []Stroke `json:"strokes,omitempty"` // the painted region for Kind "stroke"
 }
 
 // Params is the edit state, stored as JSON in photos.edit_params.
@@ -410,9 +413,6 @@ func (e *Params) normalizeSpots() {
 	}
 	kept := make([]Spot, 0, len(e.Spots))
 	for _, s := range e.Spots {
-		if s.Kind != "" { // only the circle kind exists today
-			continue
-		}
 		if s.Mode == "heal" {
 			s.Mode = SpotHeal // fold the explicit spelling to the canonical ""
 		}
@@ -421,11 +421,22 @@ func (e *Params) normalizeSpots() {
 		default:
 			continue // unknown mode: drop, like an unknown mask type
 		}
-		s.Strokes = nil // reserved for future kinds
+		switch s.Kind {
+		case "": // circle
+			s.Strokes = nil
+			s.Radius = quant4(clamp(s.Radius, 0.0005, 0.5))
+			s.Feather = quant4(clamp(s.Feather, 0, 1))
+		case "stroke": // painted region; radius/feather live per-stroke
+			s.Strokes = normalizeStrokes(s.Strokes)
+			if s.Strokes == nil {
+				continue // nothing painted: drop, like an empty brush mask
+			}
+			s.Radius, s.Feather = 0, 0
+		default:
+			continue // unknown kind: drop, like an unknown mask type
+		}
 		s.CX, s.CY = quant4(clampFrac(s.CX)), quant4(clampFrac(s.CY))
 		s.SX, s.SY = quant4(clampFrac(s.SX)), quant4(clampFrac(s.SY))
-		s.Radius = quant4(clamp(s.Radius, 0.0005, 0.5))
-		s.Feather = quant4(clamp(s.Feather, 0, 1))
 		s.Opacity = quant4(clamp(s.Opacity, 0, 1))
 		kept = append(kept, s)
 	}
@@ -433,6 +444,30 @@ func (e *Params) normalizeSpots() {
 		kept = nil
 	}
 	e.Spots = kept
+}
+
+// normalizeStrokes clamps and quantizes a stroke list into a fresh slice
+// (never mutating the caller's backing array — the normalizeMasks contract),
+// returning nil when nothing usable is painted. Shared by brush masks and
+// stroke-kind retouch spots.
+func normalizeStrokes(in []Stroke) []Stroke {
+	var strokes []Stroke
+	for _, s := range in {
+		n := len(s.Pts) &^ 1 // drop an odd trailing coordinate
+		if n < 2 {
+			continue
+		}
+		s.Radius = quant4(clamp(s.Radius, 0.001, 1))
+		s.Feather = quant4(clamp(s.Feather, 0, 1))
+		s.Flow = quant4(clamp(s.Flow, 0, 1))
+		pts := make([]float64, n)
+		for i := range n {
+			pts[i] = quant4(clampFrac(s.Pts[i]))
+		}
+		s.Pts = pts
+		strokes = append(strokes, s)
+	}
+	return strokes
 }
 
 // normalizeMasks clamps and canonicalizes the local adjustment masks so
@@ -472,26 +507,7 @@ func (e *Params) normalizeMasks() {
 			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
 			m.CX, m.CY, m.RX, m.RY, m.Angle, m.Feather = 0, 0, 0, 0, 0, 0
 			m.clearAI()
-			var strokes []Stroke
-			for _, s := range m.Strokes {
-				n := len(s.Pts) &^ 1 // drop an odd trailing coordinate
-				if n < 2 {
-					continue
-				}
-				s.Radius = quant4(clamp(s.Radius, 0.001, 1))
-				s.Feather = quant4(clamp(s.Feather, 0, 1))
-				s.Flow = quant4(clamp(s.Flow, 0, 1))
-				pts := make([]float64, n)
-				for i := range n {
-					pts[i] = quant4(clampFrac(s.Pts[i]))
-				}
-				s.Pts = pts
-				strokes = append(strokes, s)
-			}
-			if len(strokes) == 0 {
-				strokes = nil
-			}
-			m.Strokes = strokes
+			m.Strokes = normalizeStrokes(m.Strokes)
 		case MaskAI:
 			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
 			m.CX, m.CY, m.RX, m.RY, m.Angle = 0, 0, 0, 0, 0

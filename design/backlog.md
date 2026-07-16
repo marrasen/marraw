@@ -113,12 +113,18 @@ pre-look, all render paths), `SuggestHealSource`, HealOverlay + Retouch group,
 discriminates the region shape ("" = circle) and unknown kinds are skipped at
 render/normalize, so new kinds degrade gracefully in old builds.
 
-- **Brush-shaped heal (`Kind:"stroke"`).** Paint an arbitrary region; the
-  reserved `Spot.Strokes` field carries the polyline (reuse `edit.Stroke` +
-  `rasterStrokes`/`stampStroke` for the coverage plane). Needs arbitrary-shape
-  source matching and boundary blending — the annulus plane fit generalizes to
-  a boundary-band fit, or use the guided filter (`guided.go`) for edge-aware
-  seams.
+- ~~**Brush-shaped heal (`Kind:"stroke"`).**~~ Done 2026-07-16: paint an
+  arbitrary region (Retouch → Brush tool); `Spot.Strokes` carries the
+  polyline, rasterized through the shared brush-mask coverage plane
+  (`brushPlaneFor`/`brushEval`, so previews/tiles/export agree by
+  construction), and the annulus plane fit generalized to a boundary-band fit
+  (`fitStrokeBandPlanes`: separable dilation of the coverage at plane
+  resolution picks the clean ring just outside the paint; membranes fit on
+  dest + translated source). Source region = painted region translated by
+  (SX−CX, SY−CY); `SuggestHealSource` reduces the region to its enclosing
+  circle (`StrokeSpotCircle`) and returns CX/CY too. One paint gesture = one
+  spot; dest drag translates the strokes. Verified by `go test` stroke cases,
+  `scripts/spot-verify.mjs` section 5, and the `healbrush` shot surface.
 - **ML content-aware fill (`Kind:"fill"`).** LaMa-class inpainting ONNX model
   slotted into the existing `infer.RunTiled` + `ModelSpec` download/consent
   infra (the aimask.Generate pattern). Open questions: model licensing (the
@@ -128,10 +134,12 @@ render/normalize, so new kinds degrade gracefully in old builds.
 - **Spots in the RAW + XMP handoff.** Translate circular spots to Adobe
   `crs:RetouchAreas` (intent-level, like the existing slider mapping) in
   `internal/xmp` so Lightroom picks up the dust fixes.
-- **MVP polish candidates, after field testing:** per-spot opacity is plumbed
-  but has no keyboard path; the auto source picker only probes 3 rings × 16
-  angles (could search smarter on busy textures); no "visualize spots"
-  desaturated view for finding dust (Lightroom's A key).
+- **MVP polish candidates, after field testing:** the auto source picker only
+  probes 3 rings × 16 angles (could search smarter on busy textures).
+  ~~Per-spot opacity keyboard path~~ and ~~"visualize spots" dust view~~ done
+  2026-07-16: digits 1-9/0 set the selected spot's opacity while healing, and
+  A toggles `SpotVisualizeLayer` (client-side high-pass relief of the shown
+  rendition, sensitivity slider in the Retouch group; `spotvis` shot surface).
 
 ## Pre-existing (not from the ML work)
 

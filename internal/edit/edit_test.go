@@ -258,7 +258,7 @@ func TestSpotNormalize(t *testing.T) {
 	e := &Params{Spots: []Spot{
 		{Mode: SpotClone, CX: -3, CY: 0.5, Radius: 9, SX: 2, SY: 0.123456789, Feather: 3, Opacity: -1},
 		{Mode: "heal", CX: 0.3, CY: 0.3, Radius: 0.01, SX: 0.4, SY: 0.4}, // folds to ""
-		{Kind: "stroke", CX: 0.5, CY: 0.5, Radius: 0.02},                 // unknown kind: dropped
+		{Kind: "fill", CX: 0.5, CY: 0.5, Radius: 0.02},                   // unknown kind: dropped
 		{Mode: "bogus", CX: 0.5, CY: 0.5, Radius: 0.02},                  // unknown mode: dropped
 	}}
 	e.Normalize()
@@ -277,6 +277,37 @@ func TestSpotNormalize(t *testing.T) {
 	}
 	if e.Spots[1].Mode != SpotHeal {
 		t.Errorf(`"heal" must fold to the canonical empty mode, got %q`, e.Spots[1].Mode)
+	}
+}
+
+func TestSpotNormalizeStrokeKind(t *testing.T) {
+	e := &Params{Spots: []Spot{
+		{Kind: "stroke", CX: 0.5, CY: 0.5, Radius: 0.3, Feather: 0.7, SX: 0.7, SY: 0.5, Strokes: []Stroke{
+			{Radius: 0.02, Feather: 0.5, Pts: []float64{0.4123456789, 0.5, 0.45, 0.5, 0.99}}, // odd tail dropped
+			{Radius: 0.02, Pts: []float64{0.1}}, // degenerate: dropped
+		}},
+		{Kind: "stroke", CX: 0.5, CY: 0.5, SX: 0.7, SY: 0.5}, // nothing painted: dropped
+	}}
+	e.Normalize()
+	if len(e.Spots) != 1 {
+		t.Fatalf("want the empty stroke spot dropped, got %d spots", len(e.Spots))
+	}
+	s := e.Spots[0]
+	if s.Kind != "stroke" {
+		t.Fatalf("stroke kind must survive Normalize, got %q", s.Kind)
+	}
+	if s.Radius != 0 || s.Feather != 0 {
+		t.Errorf("stroke spots carry radius/feather per-stroke; spot fields must zero: %+v", s)
+	}
+	if len(s.Strokes) != 1 {
+		t.Fatalf("want 1 usable stroke, got %d", len(s.Strokes))
+	}
+	if got := s.Strokes[0].Pts; len(got) != 4 || got[0] != 0.4123 {
+		t.Errorf("stroke pts not quantized/trimmed: %v", got)
+	}
+	// A stroke spot with no usable geometry is neutral once normalized.
+	if !(&Params{Spots: []Spot{{Kind: "stroke", CX: 0.5, CY: 0.5}}}).IsNeutral() {
+		t.Error("a stroke spot with nothing painted must normalize to neutral")
 	}
 }
 
