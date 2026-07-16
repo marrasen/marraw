@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FolderPlus, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
@@ -12,6 +12,7 @@ import { FilterBar } from '@/components/FilterBar';
 import { EditPanel } from '@/components/EditPanel';
 import { ExportDialog } from '@/components/ExportDialog';
 import { SubjectScanDialog } from '@/components/SubjectScanDialog';
+import { EyeScanDialog } from '@/components/EyeScanDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { WatermarkDialog } from '@/components/WatermarkDialog';
 import { StatusBar } from '@/components/StatusBar';
@@ -22,7 +23,6 @@ import { CullView } from '@/views/CullView';
 import { DevelopView } from '@/views/DevelopView';
 import { useKeyboard } from '@/lib/keyboard';
 import { usePhotos } from '@/lib/usePhotos';
-import { burstMap } from '@/lib/bursts';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { LibraryRoot } from '@/api/library';
 import {
@@ -314,17 +314,16 @@ function Workspace({ folderId }: { folderId: number }) {
   const showEditPanel = useUIStore((s) => s.showEditPanel);
   const subjectScanOpen = useUIStore((s) => s.subjectScanOpen);
   const setSubjectScanOpen = useUIStore((s) => s.setSubjectScanOpen);
-  const { all, visible, softBelow } = usePhotos(folderId);
-  // Burst groups are derived over the WHOLE folder, not the filtered `visible`
-  // list, so badge counts and the sharpest-frame pick describe the real group
-  // even when a filter hides some members.
-  const bursts = useMemo(() => burstMap(all), [all]);
+  const eyeScanOpen = useUIStore((s) => s.eyeScanOpen);
+  const setEyeScanOpen = useUIStore((s) => s.setEyeScanOpen);
+  const { all, visible, softBelow, bursts } = usePhotos(folderId);
   const picked = all.filter((p) => p.flag === 'pick').length;
   // Subject-analysis coverage over the whole folder, for the toolbar scan
   // control. Counts frames that have been analyzed — including ones with no
   // detectable subject (score-invisible) — so the indicator resolves instead of
   // forever flagging subjectless frames as "the rest" to scan.
   const subjectAnalyzed = all.filter((p) => p.subjectAnalyzed).length;
+  const eyesAnalyzed = all.filter((p) => p.eyesAnalyzed).length;
   const scan = useFolderScan(folderPath);
   const client = useApiClient();
 
@@ -357,12 +356,12 @@ function Workspace({ folderId }: { folderId: number }) {
           <CullView photos={visible} bursts={bursts} softBelow={softBelow} />
         ) : structured ? (
           <>
-            <FilterBar softBelow={softBelow} subjectAnalyzed={subjectAnalyzed} photoCount={all.length} />
+            <FilterBar softBelow={softBelow} subjectAnalyzed={subjectAnalyzed} eyesAnalyzed={eyesAnalyzed} photoCount={all.length} bursts={bursts} />
             <GridView photos={visible} folderId={folderId} bursts={bursts} softBelow={softBelow} />
             <StatusBar shown={visible.length} total={all.length} picked={picked} scan={scan} />
           </>
         ) : (
-          <DevelopView photos={visible} all={all} />
+          <DevelopView photos={visible} all={all} bursts={bursts} />
         )}
       </main>
       {structured && showEditPanel && (
@@ -376,6 +375,7 @@ function Workspace({ folderId }: { folderId: number }) {
         open={subjectScanOpen}
         onOpenChange={setSubjectScanOpen}
       />
+      <EyeScanDialog photos={all} open={eyeScanOpen} onOpenChange={setEyeScanOpen} />
     </>
   );
 }

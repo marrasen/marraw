@@ -101,7 +101,7 @@ export function CullView({
             right={<GapControl glass />}
           />
           <ConfirmBar photo={photo} hidden={idle} zoom={<ZoomCluster scale={scale} />} />
-          <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} softBelow={softBelow} />
+          <ScrubberDeck groups={groups} focusId={photo.id} hidden={idle} softBelow={softBelow} bursts={bursts} />
         </>
       )}
     </div>

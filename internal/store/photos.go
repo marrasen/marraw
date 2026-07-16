@@ -67,6 +67,11 @@ type Photo struct {
 	// Near-duplicate burst groups are derived from it at list time.
 	// Invalid = not yet measured.
 	PHash sql.NullInt64
+	// EyesClosed is the highest closed-eye probability across the detected
+	// faces of the embedded thumb (eyes.Score), measured once the eye models
+	// are on disk. Invalid = not yet measured; -1 = measured but no
+	// judgeable face/eyes.
+	EyesClosed sql.NullFloat64
 }
 
 // Path returns the absolute file path of the photo.
@@ -271,7 +276,7 @@ const photoCols = `p.id, p.folder_id, f.path, p.file_name, p.file_size, p.mtime_
 	p.meta_loaded, p.width, p.height, p.orientation, p.make, p.model,
 	p.iso, p.shutter, p.aperture, p.focal_len, p.taken_at, p.rating, p.flag, p.edit_params, p.edit_hash,
 	p.look_gamma, p.base_exp_ev, p.updated_at, p.lens, p.gps_lat, p.gps_lon, p.gps_alt, p.sharpness,
-	p.subject_sharpness, p.phash`
+	p.subject_sharpness, p.phash, p.eyes_closed`
 
 func scanPhoto(row interface{ Scan(...any) error }) (Photo, error) {
 	var p Photo
@@ -279,7 +284,7 @@ func scanPhoto(row interface{ Scan(...any) error }) (Photo, error) {
 		&p.MetaLoaded, &p.Width, &p.Height, &p.Orientation, &p.Make, &p.Model,
 		&p.ISO, &p.Shutter, &p.Aperture, &p.FocalLen, &p.TakenAt, &p.Rating, &p.Flag, &p.EditParams, &p.EditHash,
 		&p.LookGamma, &p.BaseExpEV, &p.UpdatedAt, &p.Lens, &p.GPSLat, &p.GPSLon, &p.GPSAlt, &p.Sharpness,
-		&p.SubjectSharpness, &p.PHash)
+		&p.SubjectSharpness, &p.PHash, &p.EyesClosed)
 	return p, err
 }
 
@@ -312,6 +317,13 @@ func (db *DB) SetSharpness(ctx context.Context, id int64, score float64) error {
 // (-1 = measured but unscoreable, see Photo.SubjectSharpness).
 func (db *DB) SetSubjectSharpness(ctx context.Context, id int64, score float64) error {
 	_, err := db.ExecContext(ctx, `UPDATE photos SET subject_sharpness = ? WHERE id = ?`, score, id)
+	return err
+}
+
+// SetEyesClosed persists the closed-eye probability for a photo
+// (-1 = measured but no judgeable face/eyes, see Photo.EyesClosed).
+func (db *DB) SetEyesClosed(ctx context.Context, id int64, score float64) error {
+	_, err := db.ExecContext(ctx, `UPDATE photos SET eyes_closed = ? WHERE id = ?`, score, id)
 	return err
 }
 

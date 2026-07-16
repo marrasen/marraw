@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowUpDown, Contrast, Focus, LayoutGrid, PanelRight, Star, Trash2 } from 'lucide-react';
+import { ArrowUpDown, Contrast, Eye, Focus, Layers, LayoutGrid, PanelRight, Star, Trash2, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePhotos } from '@/api/library';
 import { resetEdits } from '@/api/edits';
@@ -24,7 +24,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { applyFlag, applyRating } from '@/lib/actions';
+import { applyFlag, applyRating, judgeAllBursts } from '@/lib/actions';
+import type { BurstInfo } from '@/lib/bursts';
 import { esApplyParams } from '@/lib/editSession';
 import { updateFolderFilters, updateLibrarySort } from '@/lib/uiSettings';
 import { useUIStore, type FlagFilter, type LibrarySort } from '@/stores/uiStore';
@@ -46,14 +47,22 @@ const SORT_ITEMS: { value: LibrarySort; label: string }[] = [
 export function FilterBar({
   softBelow,
   subjectAnalyzed,
+  eyesAnalyzed,
   photoCount,
+  bursts,
 }: {
   softBelow: number;
   // How many photos in the folder have been analyzed for subjects (whether or
   // not one was found), out of photoCount total — drives the subject-scan
   // indicator's state and count.
   subjectAnalyzed: number;
+  // How many photos have been checked for closed eyes (whether or not a face
+  // was found) — drives the eye-scan indicator, like subjectAnalyzed.
+  eyesAnalyzed: number;
   photoCount: number;
+  // The folder's near-duplicate groups (whole-folder, from usePhotos) —
+  // drives the collapse-bursts toggle and the auto-judge sweep.
+  bursts: Map<number, BurstInfo>;
 }) {
   const client = useApiClient();
   const minRating = useUIStore((s) => s.minRating);
@@ -61,7 +70,10 @@ export function FilterBar({
   const flagFilter = useUIStore((s) => s.flagFilter);
   const softOnly = useUIStore((s) => s.softOnly);
   const toggleSoftOnly = useUIStore((s) => s.toggleSoftOnly);
+  const collapseBursts = useUIStore((s) => s.collapseBursts);
+  const toggleCollapseBursts = useUIStore((s) => s.toggleCollapseBursts);
   const setSubjectScanOpen = useUIStore((s) => s.setSubjectScanOpen);
+  const setEyeScanOpen = useUIStore((s) => s.setEyeScanOpen);
   const view = useUIStore((s) => s.view);
   const cellSize = useUIStore((s) => s.cellSize);
   const setCellSize = useUIStore((s) => s.setCellSize);
@@ -139,6 +151,51 @@ export function FilterBar({
         <span className="@max-[960px]:hidden">Soft</span>
       </button>
 
+      {/* Collapse bursts: show one frame per near-duplicate group — the
+          sharpest member (or the lead frame until scores exist). Singles are
+          unaffected. Disabled when the folder has no bursts. */}
+      <button
+        onClick={toggleCollapseBursts}
+        disabled={bursts.size === 0}
+        className={cn(
+          'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11.5px] disabled:cursor-not-allowed disabled:opacity-40',
+          collapseBursts
+            ? 'bg-amber-400/15 text-amber-500 dark:text-amber-400'
+            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+        )}
+        title={
+          bursts.size === 0
+            ? 'No bursts in this folder'
+            : collapseBursts
+              ? 'Showing one frame per burst — the sharpest'
+              : 'Collapse each burst to its sharpest frame'
+        }
+        aria-label="Collapse bursts to their sharpest frame"
+        aria-pressed={collapseBursts}
+      >
+        <Layers className="size-[13px]" strokeWidth={1.75} />
+        <span className="@max-[960px]:hidden">Bursts</span>
+      </button>
+
+      {/* Auto-judge bursts: the folder-wide Shift+P — pick every burst's
+          sharpest frame, reject the rest, one undo entry. Skips unscored
+          bursts and bursts where a non-sharpest member is already picked. */}
+      <button
+        onClick={() => judgeAllBursts(client, bursts)}
+        disabled={![...bursts.values()].some((b) => b.bestId != null)}
+        className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11.5px] text-muted-foreground hover:bg-secondary hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        title={
+          bursts.size === 0
+            ? 'No bursts in this folder'
+            : 'Pick the sharpest frame of every burst and reject the rest (one undo). Bursts where you already picked a keeper are left alone.'
+        }
+        aria-label="Auto-judge bursts: pick the sharpest frame of every burst, reject the rest"
+        data-testid="auto-judge-bursts"
+      >
+        <Wand2 className="size-[13px]" strokeWidth={1.75} />
+        <span className="@max-[960px]:hidden">Auto-judge</span>
+      </button>
+
       {/* Subject-aware focus: amber with a count once any frame is scored over
           its AI subject matte, muted otherwise. Click opens the folder-wide
           "analyze subjects & re-score focus" dialog. */}
@@ -164,6 +221,34 @@ export function FilterBar({
         <Focus className="size-[13px]" strokeWidth={1.75} />
         <span className="@max-[960px]:hidden">
           {subjectAnalyzed > 0 ? `${subjectAnalyzed}/${photoCount}` : 'Subjects'}
+        </span>
+      </button>
+
+      {/* Closed-eye detection: amber with a count once any frame has been
+          checked, muted otherwise. Click opens the folder-wide "detect closed
+          eyes" dialog. */}
+      <button
+        onClick={() => setEyeScanOpen(true)}
+        disabled={photoCount === 0}
+        className={cn(
+          'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11.5px] disabled:cursor-not-allowed disabled:opacity-40',
+          eyesAnalyzed > 0
+            ? 'bg-amber-400/15 text-amber-500 dark:text-amber-400'
+            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+        )}
+        title={
+          eyesAnalyzed === 0
+            ? 'Click to detect closed eyes and badge the blinks'
+            : eyesAnalyzed < photoCount
+              ? `${eyesAnalyzed} of ${photoCount} photos checked for closed eyes — click to check the rest`
+              : `All ${photoCount} photos checked for closed eyes`
+        }
+        aria-label="Detect closed eyes"
+        data-testid="eye-scan-button"
+      >
+        <Eye className="size-[13px]" strokeWidth={1.75} />
+        <span className="@max-[960px]:hidden">
+          {eyesAnalyzed > 0 ? `${eyesAnalyzed}/${photoCount}` : 'Eyes'}
         </span>
       </button>
 

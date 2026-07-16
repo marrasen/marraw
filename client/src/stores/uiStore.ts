@@ -259,10 +259,16 @@ interface UIState {
   // threshold calls soft. A transient toggle (not persisted per folder) —
   // setFolder clears it so a leftover can't make a fresh folder look empty.
   softOnly: boolean;
+  // Collapse near-duplicate bursts to one frame each: hide burst members
+  // except the group's sharpest (or its lead frame until scores exist).
+  // Transient like softOnly — setFolder clears it.
+  collapseBursts: boolean;
   // Whether the folder-wide "analyze subjects & re-score focus" dialog is open.
   // Opened from a grid cell's subject-focus indicator; owned here so the deep
   // cell needn't thread a callback up to the folder-level controller.
   subjectScanOpen: boolean;
+  // Whether the folder-wide "detect closed eyes" dialog is open.
+  eyeScanOpen: boolean;
 
   // Optimistic patches applied on top of the subscribed photo list, so a
   // rating keystroke shows before the server round trip settles. Server
@@ -337,7 +343,9 @@ interface UIState {
   setSettingsOpen: (open: boolean) => void;
   setWatermarkEditorOpen: (open: boolean) => void;
   toggleSoftOnly: () => void;
+  toggleCollapseBursts: () => void;
   setSubjectScanOpen: (open: boolean) => void;
+  setEyeScanOpen: (open: boolean) => void;
   setCellSize: (px: number) => void;
   setLoupeZoom: (z: 'fit' | number) => void;
   setLoupeFitScale: (scale: number) => void;
@@ -387,7 +395,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   minRating: 0,
   flagFilter: 'all',
   softOnly: false,
+  collapseBursts: false,
   subjectScanOpen: false,
+  eyeScanOpen: false,
   overrides: new Map(),
   navRowStarts: [],
   navColCenters: null,
@@ -463,10 +473,12 @@ export const useUIStore = create<UIState>((set, get) => ({
       // snapshot the map is empty and this yields defaults; the snapshot's
       // applyUISettings re-resolve then applies the saved view.
       ...resolveFolderView(get(), path),
-      // Transient cull filter, never carried across folders.
+      // Transient cull filters, never carried across folders.
       softOnly: false,
+      collapseBursts: false,
       // Close a folder-scoped scan dialog left open on the old folder.
       subjectScanOpen: false,
+      eyeScanOpen: false,
       view: 'grid',
       focusId: null,
       anchorId: null,
@@ -552,7 +564,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setWatermarkEditorOpen: (open) => set({ watermarkEditorOpen: open }),
   toggleSoftOnly: () => set((s) => ({ softOnly: !s.softOnly })),
+  toggleCollapseBursts: () => set((s) => ({ collapseBursts: !s.collapseBursts })),
   setSubjectScanOpen: (open) => set({ subjectScanOpen: open }),
+  setEyeScanOpen: (open) => set({ eyeScanOpen: open }),
   setCellSize: (px) => set({ cellSize: Math.min(400, Math.max(120, px)) }),
   // Entering fit always recenters — a photo panned away at 1:1 must not come
   // back off-center. Bumping the tick here (not at the call sites) covers the

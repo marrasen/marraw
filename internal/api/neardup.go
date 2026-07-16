@@ -23,10 +23,14 @@ const (
 	// "Burst grouping" setting overrides it (see burstHammingSetting).
 	burstHammingDefault = 18
 	// burstHammingMin / burstHammingMax bound the tunable cutoff. Below the
-	// floor almost nothing groups; above the ceiling (~half of 64 bits, where
-	// dHash distance is essentially random) genuinely different frames merge.
+	// floor almost nothing groups. The ceiling is the full hash width: past
+	// ~32 bits dHash distance is essentially noise, so the top of the range
+	// shades from "similar frames" into "anything shot within the time
+	// window", and at 64 the similarity gate is fully open — grouping is
+	// purely temporal. That's a deliberate endpoint for shooters whose
+	// bursts recompose too much for dHash (expressive posed portraits).
 	burstHammingMin = 4
-	burstHammingMax = 30
+	burstHammingMax = 64
 )
 
 // burstGroups clusters a capture-ordered photo list into near-duplicate

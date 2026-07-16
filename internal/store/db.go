@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 10
+const schemaVersion = 11
 
 type DB struct {
 	*sql.DB
@@ -147,6 +147,15 @@ func (db *DB) migrate(ctx context.Context) error {
 			if _, err := tx.ExecContext(ctx,
 				`ALTER TABLE photos ADD COLUMN phash INTEGER`); err != nil {
 				return fmt.Errorf("store: migrate v10: %w", err)
+			}
+		}
+		if v < 11 {
+			// Closed-eye probability (eyes.Score over the embedded thumb),
+			// measured once the eye models are on disk; NULL = not yet
+			// measured, -1 = measured but no judgeable face/eyes.
+			if _, err := tx.ExecContext(ctx,
+				`ALTER TABLE photos ADD COLUMN eyes_closed REAL`); err != nil {
+				return fmt.Errorf("store: migrate v11: %w", err)
 			}
 		}
 	}

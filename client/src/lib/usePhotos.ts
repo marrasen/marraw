@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useListPhotos, type Photo, type PhotoPatchEvent } from '@/api/library';
-import { isSoft, softThreshold } from '@/lib/bursts';
+import { burstMap, isSoft, softThreshold, type BurstInfo } from '@/lib/bursts';
 import { useUIStore, type LibrarySort } from '@/stores/uiStore';
 
 // photoPatchReducer folds server-pushed subscription patches (aprot
@@ -20,6 +20,8 @@ function photoPatchReducer(data: Photo[], patch: unknown): Photo[] {
     if (p.editHash != null) next.editHash = p.editHash;
     if (p.subjectSharpness != null) next.subjectSharpness = p.subjectSharpness;
     if (p.subjectAnalyzed != null) next.subjectAnalyzed = p.subjectAnalyzed;
+    if (p.eyesClosed != null) next.eyesClosed = p.eyesClosed;
+    if (p.eyesAnalyzed != null) next.eyesAnalyzed = p.eyesAnalyzed;
     return next;
   });
 }
@@ -31,6 +33,10 @@ export interface PhotoLists {
   // call anything soft). Shared with the grid so its badges and the soft-only
   // filter agree.
   softBelow: number;
+  // Near-duplicate groups indexed from the whole folder — the badges and the
+  // collapse-bursts filter share one map so they can't disagree on the
+  // sharpest member.
+  bursts: Map<number, BurstInfo>;
   isLoading: boolean;
 }
 
@@ -72,6 +78,7 @@ export function usePhotos(folderId: number): PhotoLists {
   const minRating = useUIStore((s) => s.minRating);
   const flagFilter = useUIStore((s) => s.flagFilter);
   const softOnly = useUIStore((s) => s.softOnly);
+  const collapseBursts = useUIStore((s) => s.collapseBursts);
   const librarySort = useUIStore((s) => s.librarySort);
 
   // Sort before merging overrides: overrides never move a photo, so rating
@@ -90,11 +97,22 @@ export function usePhotos(folderId: number): PhotoLists {
   // stays put when the soft-only filter narrows the visible set.
   const softBelow = useMemo(() => softThreshold(all), [all]);
 
+  // Groups from the FULL folder (like softBelow), so a burst's count and best
+  // frame describe the real group even while filters hide members.
+  const bursts = useMemo(() => burstMap(all), [all]);
+
   const visible = useMemo(
     () =>
       all.filter((p) => {
         if (p.rating < minRating) return false;
         if (softOnly && !isSoft(p, softBelow)) return false;
+        if (collapseBursts && p.groupId != null) {
+          const b = bursts.get(p.groupId);
+          // Keep the sharpest member; until any member has a score, keep the
+          // lead frame (groupId is the lead's photo id) so a burst can't
+          // vanish outright.
+          if (b && (b.bestId ?? p.groupId) !== p.id) return false;
+        }
         switch (flagFilter) {
           case 'pick':
             return p.flag === 'pick';
@@ -106,7 +124,7 @@ export function usePhotos(folderId: number): PhotoLists {
             return true;
         }
       }),
-    [all, minRating, flagFilter, softOnly, softBelow],
+    [all, minRating, flagFilter, softOnly, softBelow, collapseBursts, bursts],
   );
 
   // Keep keyboard navigation in sync with what is on screen.
@@ -142,5 +160,5 @@ export function usePhotos(folderId: number): PhotoLists {
     useUIStore.getState().setBurstMembers(byPhoto);
   }, [all]);
 
-  return { all, visible, softBelow, isLoading };
+  return { all, visible, softBelow, bursts, isLoading };
 }

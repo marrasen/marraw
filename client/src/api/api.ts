@@ -38,3 +38,8 @@ export const SharpenTarget = {
 } as const;
 export type SharpenTargetType = typeof SharpenTarget[keyof typeof SharpenTarget];
 
+export interface AIModelInfo {
+    downloaded: boolean;
+    bytes: number;
+}
+

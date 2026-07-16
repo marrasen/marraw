@@ -180,14 +180,14 @@ function GeneralSection() {
       />
       <SettingRow
         title="Burst grouping"
-        description="How different two frames can be and still group as a near-duplicate burst. Higher groups shots where the subject shifts pose between frames; lower groups only near-identical frames. Measured in dHash bits (of 64)."
+        description="How different two frames can be and still group as a near-duplicate burst. Higher groups shots where the subject shifts pose between frames; lower groups only near-identical frames. Measured in dHash bits (of 64) — at 64 similarity is ignored and anything shot within the burst time window groups."
         control={
           <div className="flex w-56 items-center gap-2.5">
             <div className="min-w-0 flex-1">
               <Slider
                 value={burstShown}
                 min={4}
-                max={30}
+                max={64}
                 step={1}
                 aria-label="Burst grouping sensitivity"
                 onValueChange={(v) => setBurstDrag(v as number)}

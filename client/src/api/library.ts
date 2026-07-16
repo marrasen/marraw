@@ -9,6 +9,8 @@ import type {
     PushHandler,
     UsePushResult,
 } from './client';
+import type { AIModelInfo } from './api';
+import type { TaskRef } from './tasks.types';
 
 export const Flag = {
     None: "none",
@@ -80,6 +82,8 @@ export interface Photo {
     subjectSharpness?: number;
     subjectAnalyzed: boolean;
     groupId?: number;
+    eyesClosed?: number;
+    eyesAnalyzed: boolean;
 }
 
 export interface PhotoPatch {
@@ -89,6 +93,8 @@ export interface PhotoPatch {
     editHash: string | null;
     subjectSharpness: number | null;
     subjectAnalyzed: boolean | null;
+    eyesClosed: number | null;
+    eyesAnalyzed: boolean | null;
 }
 
 export interface PhotoPatchEvent {
@@ -130,6 +136,19 @@ export interface Shoot {
 }
 
 
+export function analyzeEyes(client: ApiClient, photoIDs: number[], allowDownload: boolean, options?: RequestOptions): Promise<TaskRef> {
+    return client.request<TaskRef>('Library.AnalyzeEyes', [photoIDs, allowDownload], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+analyzeEyes.method = 'Library.AnalyzeEyes' as const;
+
+export function subscribeAnalyzeEyes(client: ApiClient, photoIDs: number[], allowDownload: boolean, callback: (data: TaskRef) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<TaskRef>('Library.AnalyzeEyes', [photoIDs, allowDownload], callback, onError, options);
+}
+
+
 export function countRaws(client: ApiClient, paths: string[], recursive: boolean, options?: RequestOptions): Promise<RawTotal> {
     return client.request<RawTotal>('Library.CountRaws', [paths, recursive], options);
 }
@@ -153,6 +172,19 @@ deletePhotos.method = 'Library.DeletePhotos' as const;
 
 export function subscribeDeletePhotos(client: ApiClient, ids: number[], callback: (data: DeleteResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<DeleteResult>('Library.DeletePhotos', [ids], callback, onError, options);
+}
+
+
+export function eyeModelStatus(client: ApiClient, options?: RequestOptions): Promise<AIModelInfo> {
+    return client.request<AIModelInfo>('Library.EyeModelStatus', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+eyeModelStatus.method = 'Library.EyeModelStatus' as const;
+
+export function subscribeEyeModelStatus(client: ApiClient, callback: (data: AIModelInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<AIModelInfo>('Library.EyeModelStatus', [], callback, onError, options);
 }
 
 
@@ -413,6 +445,21 @@ export function onRenderProgressEvent(client: ApiClient, handler: PushHandler<Re
 // React Hooks for Library
 
 /**
+ * Subscribes to `Library.AnalyzeEyes` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useAnalyzeEyes(photoIDs: number[], allowDownload: boolean, options?: UseQueryOptions<TaskRef>): UseQueryResult<TaskRef> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoIDs: number[], allowDownload: boolean) => analyzeEyes(client, photoIDs, allowDownload, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoIDs, allowDownload], _subscribe: { method: 'Library.AnalyzeEyes', params: [photoIDs, allowDownload] } });
+}
+
+/**
  * Subscribes to `Library.CountRaws` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -440,6 +487,20 @@ export function useDeletePhotos(ids: number[], options?: UseQueryOptions<DeleteR
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [ids], _subscribe: { method: 'Library.DeletePhotos', params: [ids] } });
+}
+
+/**
+ * Subscribes to `Library.EyeModelStatus` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useEyeModelStatus(options?: UseQueryOptions<AIModelInfo>): UseQueryResult<AIModelInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => eyeModelStatus(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'Library.EyeModelStatus', params: [] } });
 }
 
 /**

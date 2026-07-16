@@ -108,13 +108,16 @@ MIT), whose shared library ships next to `marrawd`
 
 Model weights are **not** distributed with marraw — the app downloads them on
 first use from <https://github.com/marrasen/marraw-models> (or the pinned
-upstream), verifying each against a SHA-256 baked into `internal/aimask`:
+upstream), verifying each against a SHA-256 baked into `internal/aimask` and
+`internal/eyes`:
 
 | Weights | Purpose | Origin | License |
 |---|---|---|---|
 | ISNet general-use | Subject masks | [xuebinqin/DIS](https://github.com/xuebinqin/DIS) via [rembg](https://github.com/danielgatis/rembg) | Apache-2.0 |
 | Depth Anything V2 **Small** | Depth masks | [onnx-community/depth-anything-v2-small](https://huggingface.co/onnx-community/depth-anything-v2-small) | Apache-2.0 (only the Small variant — larger ones are CC-BY-NC and are not used) |
 | DPT-Large / ADE20K | Scene (semantic) masks | exported from [smp-hub/dpt-large-ade20k](https://huggingface.co/smp-hub/dpt-large-ade20k) (segmentation_models.pytorch) | MIT |
+| YuNet (2023mar) | Face + eye-landmark detection, for closed-eye culling | [opencv/opencv_zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) | MIT (the model README states MIT covers all files in the model directory, weights included) |
+| open-closed-eye-0001 | Eye open/closed classification, for closed-eye culling | [OpenVINO Open Model Zoo](https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/open-closed-eye-0001) | Apache-2.0 |
 
 ---
 

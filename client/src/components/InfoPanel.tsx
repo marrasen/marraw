@@ -3,6 +3,7 @@
 // always-visible drawer covers the floating canvas one), and the photo's
 // technical metadata — resolution, file size, camera/EXIF, capture time.
 import type { Photo } from '@/api/library';
+import { EYES_CLOSED_BADGE } from '@/components/EyesBadge';
 import { Histogram } from '@/components/Histogram';
 import { NavigatorMap } from '@/views/LoupeView';
 import { useLoupeNav } from '@/lib/loupeNav';
@@ -37,6 +38,18 @@ export function InfoPanel({ photo }: { photo: Photo }) {
           )}
           {photo.subjectSharpness != null && (
             <Row label="Subject focus" value={String(Math.round(photo.subjectSharpness))} />
+          )}
+          {photo.eyesAnalyzed && (
+            <Row
+              label="Eyes"
+              value={
+                photo.eyesClosed == null
+                  ? 'No face found'
+                  : photo.eyesClosed >= EYES_CLOSED_BADGE
+                    ? `Closed? (${Math.round(photo.eyesClosed * 100)}%)`
+                    : 'Open'
+              }
+            />
           )}
           {photo.metaLoaded ? (
             <>

@@ -36,6 +36,7 @@ CREATE TABLE photos (
     sharpness   REAL,
     subject_sharpness REAL,
     phash       INTEGER,
+    eyes_closed REAL,
     UNIQUE(folder_id, file_name)
 );
 CREATE INDEX idx_photos_folder ON photos(folder_id, file_name);

@@ -1,11 +1,14 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
 import type { Photo } from '@/api/library';
+import { burstFor, type BurstInfo } from '@/lib/bursts';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { useImgBust } from '@/lib/imgCacheBust';
 import { gapLabel, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { useHoverKeep } from '@/lib/useIdle';
 import { aspectOf } from '@/lib/justify';
+import { BurstBadge } from '@/components/BurstBadge';
+import { EyesBadge } from '@/components/EyesBadge';
 import { PyramidImage } from '@/components/PyramidImage';
 import { SoftBadge } from '@/components/SoftBadge';
 import { useUIStore, type ThumbFit } from '@/stores/uiStore';
@@ -30,6 +33,7 @@ export function ScrubberDeck({
   hidden,
   shifted,
   softBelow = 0,
+  bursts,
 }: {
   groups: TimeGroup[];
   focusId: number | null;
@@ -38,6 +42,8 @@ export function ScrubberDeck({
   shifted?: boolean;
   /** Soft-focus cutoff for the per-thumb soft badge; 0 hides it (Develop). */
   softBelow?: number;
+  /** Near-duplicate groups for the per-thumb burst badge; omitted hides it. */
+  bursts?: Map<number, BurstInfo>;
 }) {
   const focus = useUIStore((s) => s.focus);
   const thumbFit = useUIStore((s) => s.thumbFit);
@@ -176,6 +182,7 @@ export function ScrubberDeck({
                     onFocus={focus}
                     width={stripWidths[i][j]}
                     softBelow={softBelow}
+                    burst={bursts && burstFor(p, bursts)}
                   />
                 ))}
               </div>
@@ -197,12 +204,14 @@ const StripThumb = memo(function StripThumb({
   onFocus,
   width,
   softBelow,
+  burst,
 }: {
   photo: Photo;
   focused: boolean;
   onFocus: (id: number, opts?: { extend?: boolean; toggle?: boolean }) => void;
   width: number;
   softBelow: number;
+  burst?: BurstInfo;
 }) {
   useImgBust(photo.id); // refetch when a restored AI map repaints this thumb
   return (
@@ -240,11 +249,17 @@ const StripThumb = memo(function StripThumb({
           <span className="text-white">{photo.rating}</span>
         </span>
       )}
-      <SoftBadge
-        photo={photo}
-        softBelow={softBelow}
-        className="absolute right-0.5 bottom-0.5 px-1 py-0 text-[8px] leading-none"
-      />
+      <div className="absolute right-0.5 bottom-0.5 flex items-center gap-0.5">
+        <EyesBadge photo={photo} className="px-1 py-0 text-[8px] leading-none" />
+        <SoftBadge photo={photo} softBelow={softBelow} className="px-1 py-0 text-[8px] leading-none" />
+      </div>
+      {burst && (
+        <BurstBadge
+          burst={burst}
+          photoId={photo.id}
+          className="absolute top-0.5 left-0.5 px-1 py-0 text-[8px] leading-none"
+        />
+      )}
       {focused && <span className="absolute inset-0 rounded-[3px] border-2 border-primary" />}
     </button>
   );

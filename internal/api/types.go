@@ -151,6 +151,15 @@ type Photo struct {
 	// Derived per list from stored hashes, never persisted. Nil = not part
 	// of any burst.
 	GroupID *int64 `json:"groupId,omitempty"`
+	// EyesClosed is the highest closed-eye probability (0..1) across the
+	// frame's detected faces — a soft cull signal (sunglasses and profiles
+	// misfire). Present only for analyzed frames with a judgeable face; the
+	// "no face" sentinel is client-invisible (see EyesAnalyzed).
+	EyesClosed *float64 `json:"eyesClosed,omitempty"`
+	// EyesAnalyzed reports that closed-eye detection has run, whether or not
+	// a judgeable face was found — the eye-scan indicator's "done" state,
+	// mirroring SubjectAnalyzed.
+	EyesAnalyzed bool `json:"eyesAnalyzed"`
 }
 
 type DriveInfo struct {
@@ -274,6 +283,10 @@ type PhotoPatch struct {
 	// scored, even when there was no scoreable subject (score < 0), so the
 	// subject-scan indicator stops counting it as pending live during a scan.
 	SubjectAnalyzed *bool `json:"subjectAnalyzed"`
+	// EyesClosed / EyesAnalyzed deliver a just-measured closed-eye result the
+	// same way (the -1 "no face" sentinel stays client-invisible).
+	EyesClosed   *float64 `json:"eyesClosed"`
+	EyesAnalyzed *bool    `json:"eyesAnalyzed"`
 }
 
 // PhotoPatchEvent is broadcast when rating/flag/edits change so clients can

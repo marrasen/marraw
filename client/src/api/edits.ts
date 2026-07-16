@@ -7,6 +7,7 @@ import type {
     UseQueryOptions,
     UseQueryResult,
 } from './client';
+import type { AIModelInfo } from './api';
 import type { AIKindType, Params, Spot } from './edit';
 import type { TaskRef } from './tasks.types';
 
@@ -20,11 +21,6 @@ export interface AIMapResult {
     mapVer: string;
     generated: boolean;
     categories?: AICategory[];
-}
-
-export interface AIModelInfo {
-    downloaded: boolean;
-    bytes: number;
 }
 
 export interface Delta {

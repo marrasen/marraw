@@ -18,9 +18,10 @@ smaller stuff.
   into one People mask; "the person on the left" needs an instance/panoptic
   model (Mask2Former-class — heavier, and license needs vetting). Deferred
   in the roadmap.
-- **Depth range as a two-thumb slider.** Far edge / Near edge are two
-  separate sliders today; a proper range control reads better. The base-ui
-  Slider supports multiple thumbs — mostly UI work in AIShapeRows.
+- ~~**Depth range as a two-thumb slider.**~~ Done 2026-07-14 (commit
+  `e889169`): `EditRangeSlider` (EditSlider's two-thumb sibling), reset
+  returns to the seed window via `DEPTH_WINDOW_DEFAULT`. Verified by the
+  `depthrange` shot surface. (This entry was stale — marked done 2026-07-16.)
 - ~~**Grid thumbnails can stay stale after a map restore.**~~ Done 2026-07-14:
   a per-photo cache-buster (`imgCacheBust.ts`, `b` query param — server-ignored,
   so no img hot-path cost) advances whenever `Edits.GenerateAIMap` returns
@@ -33,8 +34,21 @@ smaller stuff.
 
 ## Culling
 
-- **Closed-eye detection.** License vetting done 2026-07-14; model pair
-  chosen:
+- ~~**Closed-eye detection.**~~ Done 2026-07-16: `internal/eyes` (YuNet face
+  + eye landmarks at a 640² letterbox, per-eye 32×32 crops → open/closed
+  classifier; photo score = max closed probability, `eyes_closed` column,
+  schema v11, -1 = no judgeable face). Both weights mirrored on
+  marrasen/marraw-models with SHA-256 pins; licenses recorded in
+  THIRD_PARTY_NOTICES.md. Scoring backfills in the calibrate pass only once
+  both models are on disk (never downloads uninvited); the consented
+  download rides on `Library.AnalyzeEyes` — FilterBar's Eyes control →
+  `EyeScanDialog`, the AnalyzeSubjects pattern. Client: `EyesBadge` (◡,
+  ≥0.5) in GridView + ScrubberDeck, an Eyes row in InfoPanel. Empirical
+  notes: the raw ONNX classifier output is **[closed, open]** — the OMZ
+  README documents the reverse; the 2023mar YuNet export is fixed 640×640.
+  Verified by `node scripts/eyes-verify.mjs /tmp/marraw-fixture` (consent
+  gate, download, scan, sentinel) and an opt-in live test
+  (`internal/eyes/live_test.go`, real portraits). Original vetting notes:
   - **YuNet** (`face_detection_yunet_2023mar.onnx`, ~350 KB) from
     [opencv_zoo](https://github.com/opencv/opencv_zoo/blob/main/models/face_detection_yunet/README.md)
     — **MIT** (README states MIT covers all files in the model dir, weights
@@ -52,8 +66,10 @@ smaller stuff.
     MediaPipe Face Landmarker (Apache-2.0 and higher quality via
     `eyeBlink*` blendshapes, but a 3-model TFLite bundle needing conversion
     — the fallback if the 32×32 classifier is too noisy).
-  - Remaining before implementation: mirror both weights on
-    marrasen/marraw-models with SHA-256 pins (Marcus).
+  - ~~Remaining before implementation: mirror both weights on
+    marrasen/marraw-models with SHA-256 pins (Marcus).~~ Mirrored 2026-07-16
+    (`yunet-2023mar.onnx`, `openclosedeye-0001.onnx` on the models-v1
+    release, hashes verified against upstream).
 - ~~**Near-duplicate grouping.**~~ Done 2026-07-14: `pyramid.DHash` (64-bit
   difference hash of the embedded thumb, computed by the calibrate pass in
   the same decode as sharpness — no extra I/O, no RAW decode), persisted as
@@ -65,8 +81,19 @@ smaller stuff.
   `subjectSharpness ?? sharpness`; GridView and ContactSheet badge burst
   members (`⧉ N`, sharpest tinted success). Verified by
   `node scripts/neardup-verify.mjs /tmp/marraw-fixture` (identical copies →
-  one burst of 3) and the `neardup` shot surface. Follow-ups if wanted:
-  ScrubberDeck badge, a "collapse bursts to sharpest" filter in FilterBar.
+  one burst of 3) and the `neardup` shot surface. ~~Follow-ups if wanted:
+  ScrubberDeck badge, a "collapse bursts to sharpest" filter in FilterBar.~~
+  Both done 2026-07-16: `BurstBadge` in ScrubberDeck thumbs, and a transient
+  `collapseBursts` toggle (FilterBar → usePhotos) that keeps each group's
+  sharpest member (lead frame until scores exist; `burstMap` moved into
+  usePhotos so badges and the filter share one map). Also the "Burst
+  grouping" slider ceiling was raised 30 → 64 dHash bits — at 64 the
+  similarity gate is fully open and grouping is purely the ≤4 s time window.
+  Plus "Auto-judge bursts" (FilterBar wand, `judgeAllBursts` in actions.ts):
+  the folder-wide Shift+P — picks every burst's sharpest frame and rejects
+  the rest as ONE cull-history undo entry, skipping unscored bursts and
+  bursts where a non-sharpest member is already picked (a hand judgement).
+  Feeds the "filter Excluded → delete" flow.
 - ~~**Subject-aware sharpness.**~~ Done 2026-07-14:
   `pyramid.SubjectSharpnessScore` (matte-weighted Laplacian variance, matte
   reoriented from display to sensor frame), `subject_sharpness` column

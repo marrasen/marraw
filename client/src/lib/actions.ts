@@ -1,6 +1,7 @@
 import { toast } from 'sonner';
 import type { FlagType } from '@/api/library';
 import type { ApiClient } from '@/api/client';
+import type { BurstInfo } from '@/lib/bursts';
 import { useUIStore } from '@/stores/uiStore';
 import { chPlay, chPush, chRevert, type CullEntry } from '@/lib/cullHistory';
 
@@ -73,6 +74,60 @@ export function applyFlagOps(
 
 export function applyFlag(client: ApiClient, ids: number[], flag: FlagType) {
   applyFlagOps(client, [{ ids, flag }]);
+}
+
+// judgeAllBursts sweeps every burst in the folder — the folder-wide Shift+P:
+// pick each group's sharpest member, exclude the rest, so "show excluded"
+// turns into a delete list. The whole sweep is ONE undo entry. A burst is
+// left alone when it has no sharpness scores yet (nothing to judge by), or
+// when the user already picked a non-sharpest member — an automatic sweep
+// must not reverse a hand judgement (the sharpest frame may be the blink).
+// Judges the WHOLE folder's bursts, not just the filtered view, like the
+// burst grouping itself.
+export function judgeAllBursts(client: ApiClient, bursts: Map<number, BurstInfo>) {
+  const s = useUIStore.getState();
+  const picks: number[] = [];
+  const rejects: number[] = [];
+  let handJudged = 0;
+  let unscored = 0;
+  for (const b of bursts.values()) {
+    const best = b.bestId;
+    if (best == null) {
+      unscored++;
+      continue;
+    }
+    if (b.members.some((id) => id !== best && priorFlag(s, id) === 'pick')) {
+      handJudged++;
+      continue;
+    }
+    picks.push(best);
+    rejects.push(...b.members.filter((id) => id !== best));
+  }
+  // Effective counts for the toast — applyFlagOps drops already-matching
+  // flags itself, but the message should say what actually changed.
+  const newRejects = rejects.filter((id) => priorFlag(s, id) !== 'exclude').length;
+  const newPicks = picks.filter((id) => priorFlag(s, id) !== 'pick').length;
+  if (newRejects + newPicks === 0) {
+    toast.info(bursts.size === 0 ? 'No bursts in this folder' : 'Every burst is already judged');
+    return;
+  }
+  applyFlagOps(
+    client,
+    [
+      { ids: rejects, flag: 'exclude' },
+      { ids: picks, flag: 'pick' },
+    ],
+    'Auto-judge bursts',
+  );
+  const skipped = [
+    handJudged > 0 ? `${handJudged} hand-judged` : '',
+    unscored > 0 ? `${unscored} unscored` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+  toast.success(
+    `Judged ${picks.length} burst${picks.length === 1 ? '' : 's'}: picked the sharpest, rejected ${newRejects} frame${newRejects === 1 ? '' : 's'}${skipped ? ` — skipped ${skipped}` : ''}. Ctrl+Z undoes it.`,
+  );
 }
 
 export function applyRating(client: ApiClient, ids: number[], rating: number) {

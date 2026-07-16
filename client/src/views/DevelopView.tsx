@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
+import { burstFor, type BurstInfo } from '@/lib/bursts';
 import { CinemaImage } from '@/views/LoupeView';
+import { BurstBadge } from '@/components/BurstBadge';
 import { CinemaHUD, PaletteChip } from '@/components/cinema/CinemaHUD';
 import { GapControl } from '@/components/cinema/GapControl';
 import { MiniCycle } from '@/components/cinema/MiniCycle';
@@ -24,7 +26,15 @@ import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
  * default — Settings → Toolbars), and the same time-gap camera roll as Cull
  * keeps the take in reach.
  */
-export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) {
+export function DevelopView({
+  photos,
+  all,
+  bursts,
+}: {
+  photos: Photo[];
+  all: Photo[];
+  bursts: Map<number, BurstInfo>;
+}) {
   const focusId = useUIStore((s) => s.focusId);
   const gapMinutes = useUIStore(selectGapMinutes);
   const cropping = useEditSession((s) => s.cropping);
@@ -46,6 +56,7 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
   }
 
   const overlayActive = cropping || wbPicking;
+  const burst = burstFor(photo, bursts);
   // Nudging a focused control with +/- floats a compact bottom readout and
   // hides the drawer + chrome (which the idle timer also does). Guarded on an
   // active control so a stale keyAdjust can never hide the UI with nothing to
@@ -71,6 +82,13 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
           status={
             <span className="font-mono text-[11px] text-[#aab0ff]">
               {photo.fileName.split(/[\\/]/).pop()}
+              {burst && (
+                <BurstBadge
+                  burst={burst}
+                  photoId={photo.id}
+                  className="ml-2 inline-flex align-middle"
+                />
+              )}
             </span>
           }
           right={
@@ -103,7 +121,7 @@ export function DevelopView({ photos, all }: { photos: Photo[]; all: Photo[] }) 
       {!overlayActive && (
         <>
           <QuickDock hidden={chromeHidden} shifted zoom={<ZoomCluster scale={scale} />} />
-          <ScrubberDeck groups={groups} focusId={photo.id} hidden={chromeHidden} shifted />
+          <ScrubberDeck groups={groups} focusId={photo.id} hidden={chromeHidden} shifted bursts={bursts} />
           {adjusting && <SliderHUD />}
         </>
       )}

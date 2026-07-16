@@ -9,6 +9,7 @@ import { useImgBust } from '@/lib/imgCacheBust';
 import { dayLabel, gapLabel, groupByGap, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { burstFor, type BurstInfo } from '@/lib/bursts';
 import { BurstBadge } from '@/components/BurstBadge';
+import { EyesBadge } from '@/components/EyesBadge';
 import { SoftBadge } from '@/components/SoftBadge';
 import { PyramidImage } from '@/components/PyramidImage';
 import { rowLayout } from '@/lib/justify';
@@ -330,7 +331,10 @@ function GridCell({ photo, w, h, fitClass, softBelow, burst }: { photo: Photo; w
       {burst && !(multiSelect && selected) && (
         <BurstBadge burst={burst} photoId={photo.id} className="absolute top-1.5 left-1.5" />
       )}
-      <SoftBadge photo={photo} softBelow={softBelow} className="absolute right-[5px] bottom-[5px]" />
+      <div className="absolute right-[5px] bottom-[5px] flex items-center gap-1">
+        <EyesBadge photo={photo} />
+        <SoftBadge photo={photo} softBelow={softBelow} />
+      </div>
       {multiSelect && selected && (
         <>
           <div className="pointer-events-none absolute inset-0 rounded border-2 border-primary" />
