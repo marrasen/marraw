@@ -10,6 +10,7 @@ import { useUIStore, selectionOrFocus, type DevelopTab } from '@/stores/uiStore'
 import {
   esApplyAutoPreset,
   esApplyParams,
+  esApplyUserPreset,
   esAuto,
   esMoveActive,
   esMoveMaskActive,
@@ -74,6 +75,7 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 //   Ctrl+E        export dialog
 //   Ctrl+U        auto dynamics (+Shift = auto colours, +Alt = auto everything)
 //   Ctrl+1..9     creative auto presets (Settings → Auto presets)
+//   Ctrl+⇧+1..9   saved "My presets" looks (Develop → Presets tab)
 export function useKeyboard() {
   const client = useApiClient();
 
@@ -87,6 +89,12 @@ export function useKeyboard() {
       // The Local tab (value 'masks') retargets the slider keys: ↑/↓ walk the
       // mask sliders (across masks) and +/- step the focused one.
       const masksTab = s.developTab === 'masks' && s.mode !== 'cull' && !!es.draft;
+      // While a canvas overlay (crop / WB pick) is up, the develop drawer is
+      // slid off-screen — walking its controls with ↑/↓ would move invisible
+      // focus and scroll the drawer back into view. The keys go dead instead
+      // of falling back to photo navigation: loupe photo-nav is ←/→'s job,
+      // and a surprise photo switch would silently end the crop session.
+      const overlayUp = es.cropping || es.wbPicking;
 
       const move = (delta: number) => {
         const ids = s.visibleIds;
@@ -149,6 +157,19 @@ export function useKeyboard() {
       };
 
       if (e.ctrlKey || e.metaKey) {
+        // Ctrl+Shift+1..9 apply the saved "My presets" looks by position.
+        // Matched on e.code: with Shift held, e.key is the shifted character
+        // ('!', '=', … layout-dependent), never the digit.
+        if (e.shiftKey) {
+          const digit = /^Digit([1-9])$/.exec(e.code);
+          if (digit) {
+            const preset = s.userPresets[Number(digit[1]) - 1];
+            if (!preset || !es.draft) return;
+            e.preventDefault();
+            esApplyUserPreset(client, preset);
+            return;
+          }
+        }
         switch (e.key.toLowerCase()) {
           case 'a':
             e.preventDefault();
@@ -220,7 +241,7 @@ export function useKeyboard() {
           // sliders when the Masks tab is up).
           case 'arrowup':
           case 'arrowdown': {
-            if (!es.draft || s.mode === 'cull') return;
+            if (!es.draft || s.mode === 'cull' || overlayUp) return;
             e.preventDefault();
             const dir = e.key === 'ArrowDown' ? 1 : -1;
             if (masksTab) esMoveMaskActive(dir);
@@ -339,15 +360,19 @@ export function useKeyboard() {
         // hotkeys.
         case 'ArrowUp':
           e.preventDefault();
-          if (masksTab && s.view === 'loupe') esMoveMaskActive(-1);
-          else if (es.draft && s.mode !== 'cull' && s.view === 'loupe') esMoveActive(-1);
-          else moveRow(-1);
+          if (masksTab && s.view === 'loupe') {
+            if (!overlayUp) esMoveMaskActive(-1);
+          } else if (es.draft && s.mode !== 'cull' && s.view === 'loupe') {
+            if (!overlayUp) esMoveActive(-1);
+          } else moveRow(-1);
           break;
         case 'ArrowDown':
           e.preventDefault();
-          if (masksTab && s.view === 'loupe') esMoveMaskActive(1);
-          else if (es.draft && s.mode !== 'cull' && s.view === 'loupe') esMoveActive(1);
-          else moveRow(1);
+          if (masksTab && s.view === 'loupe') {
+            if (!overlayUp) esMoveMaskActive(1);
+          } else if (es.draft && s.mode !== 'cull' && s.view === 'loupe') {
+            if (!overlayUp) esMoveActive(1);
+          } else moveRow(1);
           break;
         case '0':
         case '1':

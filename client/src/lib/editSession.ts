@@ -19,6 +19,7 @@ import {
   suggestHealSource,
 } from '@/api/edits';
 import type { Mask, Params, Spot } from '@/api/edit';
+import type { UserPreset } from '@/api/settings';
 import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPresets';
 import {
   CONTROL_ORDER,
@@ -476,7 +477,13 @@ useUIStore.subscribe((s, prev) => {
 export function esSetWBPicking(on: boolean) {
   const s = useEditSession.getState();
   if (on && !s.draft) return;
-  setState(on ? { wbPicking: true, wbPickBase: s.draft } : { wbPicking: false, wbPickBase: null });
+  // Opening slides the develop drawer away — drop any keyboard-focused
+  // control so +/- can't keep adjusting an invisible slider.
+  setState(
+    on
+      ? { wbPicking: true, wbPickBase: s.draft, activeControl: null, keyAdjust: false }
+      : { wbPicking: false, wbPickBase: null },
+  );
 }
 
 // esSetCropping toggles the crop overlay. Entering re-renders the preview
@@ -485,7 +492,9 @@ export function esSetWBPicking(on: boolean) {
 export function esSetCropping(client: ApiClient, on: boolean) {
   const s = useEditSession.getState();
   if (s.cropping === on) return;
-  setState({ cropping: on });
+  // Entering slides the develop drawer away — drop any keyboard-focused
+  // control so +/- can't keep adjusting an invisible slider.
+  setState(on ? { cropping: true, activeControl: null, keyAdjust: false } : { cropping: false });
   if (!on) {
     esCommit(client); // persist the crop; the commit re-renders the cropped frame
   } else {
@@ -1052,6 +1061,34 @@ export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
   } catch (err) {
     toast.error(`Auto adjust failed: ${(err as Error).message}`);
   }
+}
+
+// esApplyUserPreset lays a saved "My presets" look over the photo while
+// keeping the photo's own geometry and local adjustments: rotation, flip,
+// crop, straighten, masks and retouch spots stay untouched (a preset is a
+// look, not a crop). Shared by the Presets tab and the Ctrl+Shift+1..9
+// shortcuts.
+export function esApplyUserPreset(client: ApiClient, preset: UserPreset) {
+  const d = useEditSession.getState().draft;
+  if (!d) return;
+  esApplyParams(
+    client,
+    {
+      ...preset.params,
+      rotate: d.rotate,
+      flipH: d.flipH,
+      cropX: d.cropX,
+      cropY: d.cropY,
+      cropW: d.cropW,
+      cropH: d.cropH,
+      cropAngle: d.cropAngle,
+      // The photo keeps its own local adjustments (like its crop) — and a
+      // preset saved by an older build can't clobber them either.
+      masks: d.masks,
+      spots: d.spots,
+    },
+    { label: preset.name },
+  );
 }
 
 // computePresetParams resolves a creative-auto preset to concrete params for a

@@ -39,6 +39,14 @@ export interface Delta {
     vibrance: number | null;
 }
 
+export interface SubjectBoundsResult {
+    found: boolean;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+}
+
 
 export function aIModelStatus(client: ApiClient, kind: AIKindType, options?: RequestOptions): Promise<AIModelInfo> {
     return client.request<AIModelInfo>('Edits.AIModelStatus', [kind], options);
@@ -193,6 +201,19 @@ setEditParams.method = 'Edits.SetEditParams' as const;
 
 export function subscribeSetEditParams(client: ApiClient, photoID: number, params: Params, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Edits.SetEditParams', [photoID, params], callback, onError, options);
+}
+
+
+export function subjectBounds(client: ApiClient, photoID: number, params: Params, allowDownload: boolean, options?: RequestOptions): Promise<SubjectBoundsResult> {
+    return client.request<SubjectBoundsResult>('Edits.SubjectBounds', [photoID, params, allowDownload], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+subjectBounds.method = 'Edits.SubjectBounds' as const;
+
+export function subscribeSubjectBounds(client: ApiClient, photoID: number, params: Params, allowDownload: boolean, callback: (data: SubjectBoundsResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<SubjectBoundsResult>('Edits.SubjectBounds', [photoID, params, allowDownload], callback, onError, options);
 }
 
 
@@ -388,6 +409,21 @@ export function useSetEditParams(photoID: number, params: Params, options?: UseQ
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, params], _subscribe: { method: 'Edits.SetEditParams', params: [photoID, params] } });
+}
+
+/**
+ * Subscribes to `Edits.SubjectBounds` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSubjectBounds(photoID: number, params: Params, allowDownload: boolean, options?: UseQueryOptions<SubjectBoundsResult>): UseQueryResult<SubjectBoundsResult> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, allowDownload: boolean) => subjectBounds(client, photoID, params, allowDownload, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, allowDownload], _subscribe: { method: 'Edits.SubjectBounds', params: [photoID, params, allowDownload] } });
 }
 
 /**

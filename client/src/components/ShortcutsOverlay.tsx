@@ -43,6 +43,7 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
       ['Reset all', 'Ctrl+0'],
       ['Auto tone / colours / all', 'Ctrl+U · +⇧ · +Alt'],
       ['Auto presets', 'Ctrl+1–9'],
+      ['My presets', 'Ctrl+⇧+1–9'],
     ],
   },
   // Mirrors CONTROL_KEYS in lib/keyboard.ts — press to focus, +/- to adjust.

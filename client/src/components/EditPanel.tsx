@@ -12,6 +12,7 @@ import { applyRating, applyFlag } from '@/lib/actions';
 // (aprot's camelCasing lowercases exactly one leading character: aIModelStatus.)
 import { aIModelStatus as aiModelStatus, applyBatchEdit, generateAIMap, type AIMapResult, type Delta } from '@/api/edits';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
+import { isModelNotDownloaded } from '@/lib/aiConsent';
 import type { AIKindType, Mask, MaskAdjust, Params, Spot } from '@/api/edit';
 import {
   DEPTH_WINDOW_DEFAULT,
@@ -1031,10 +1032,6 @@ function LocalPanel({ client, targetCount }: { client: ApiClient; targetCount: n
 // StrictMode's double effect). A consent-declined kind stays in the set so
 // the dialog doesn't nag on every re-render; it re-asks next session.
 const aiRestoreFired = new Set<string>();
-
-// isModelNotDownloaded matches the server's consent sentinel (aimasks.go).
-const isModelNotDownloaded = (err: unknown) =>
-  err instanceof Error && err.message.includes('model not downloaded');
 
 function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   const activeMask = useEditSession((s) => s.activeMask);

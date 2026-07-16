@@ -19,6 +19,7 @@ import {
   computePresetParams,
   esApplyAutoPreset,
   esApplyParams,
+  esApplyUserPreset,
   esAuto,
   esJumpTo,
   esReset,
@@ -159,34 +160,15 @@ function UserPresetsSection({
       cropW: 0,
       cropH: 0,
       cropAngle: 0,
-      // Masks are local geometry tied to one photo's content, not a look.
+      // Masks and retouch spots are local geometry tied to one photo's
+      // content, not a look.
       masks: undefined,
+      spots: undefined,
     };
     updateUserPresets(client, [...presets, { id: crypto.randomUUID(), name: trimmed, params }]);
     setNaming(false);
     setName('');
     toast.success(`Saved preset “${trimmed}”`);
-  };
-
-  const apply = (p: UserPreset) => {
-    if (!draft) return;
-    esApplyParams(
-      client,
-      {
-        ...p.params,
-        rotate: draft.rotate,
-        flipH: draft.flipH,
-        cropX: draft.cropX,
-        cropY: draft.cropY,
-        cropW: draft.cropW,
-        cropH: draft.cropH,
-        cropAngle: draft.cropAngle,
-        // The photo keeps its own local adjustments (like its crop) — and a
-        // preset saved by an older build can't clobber them either.
-        masks: draft.masks,
-      },
-      { label: p.name },
-    );
   };
 
   const remove = (p: UserPreset) => {
@@ -198,12 +180,12 @@ function UserPresetsSection({
     <Section title="My presets">
       {presets.length > 0 && (
         <div className="grid grid-cols-2 gap-2">
-          {presets.map((p) => (
+          {presets.map((p, i) => (
             <div key={p.id} className="group relative">
               <button
                 className="flex w-full flex-col overflow-hidden rounded-lg border bg-inset text-left transition-colors hover:border-primary/50"
-                onClick={() => apply(p)}
-                title={`Apply ${p.name} (keeps the photo's crop)`}
+                onClick={() => esApplyUserPreset(client, p)}
+                title={`Apply ${p.name} (keeps the photo's crop)${i < 9 ? ` (Ctrl+Shift+${i + 1})` : ''}`}
               >
                 <div className="aspect-[3/2] w-full overflow-hidden bg-black/40">
                   {thumbs[p.id] ? (

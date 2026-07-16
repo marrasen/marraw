@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Crop as CropIcon, FlipHorizontal2, FlipVertical2, Pipette, RotateCcwSquare, RotateCwSquare } from 'lucide-react';
+import { Crop as CropIcon, FlipHorizontal2, FlipVertical2, Pipette, RotateCcwSquare, RotateCwSquare, Sparkles } from 'lucide-react';
+import { toast } from 'sonner';
 import { onRenderProgressEvent, type Photo } from '@/api/library';
+import { aIModelStatus, subjectBounds } from '@/api/edits';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -27,10 +29,12 @@ import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, rotatedDims, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
+import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
+import { isModelNotDownloaded } from '@/lib/aiConsent';
 import { MaskOverlay } from '@/components/MaskOverlay';
 import { HealOverlay } from '@/components/HealOverlay';
 import { MaskHoverTint } from '@/components/MaskHoverTint';
-import type { Params } from '@/api/edit';
+import { AIKind, type Params } from '@/api/edit';
 
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
 // fraction space (crop-width-fraction / crop-height-fraction), accounting for
@@ -51,11 +55,15 @@ function CropBar({
   aspectKey,
   angle,
   onPickAspect,
+  onAutoCrop,
+  autoCropBusy,
 }: {
   client: ApiClient;
   aspectKey: string;
   angle: number;
   onPickAspect: (k: string) => void;
+  onAutoCrop: () => void;
+  autoCropBusy: boolean;
 }) {
   const [dragging, setDragging] = useState<number | null>(null);
   const shown = dragging ?? angle;
@@ -69,6 +77,23 @@ function CropBar({
         onValueChange={onPickAspect}
         className="border-0 bg-white/5"
       />
+      {/* Auto crop: box the detected subject with a margin, in the selected
+          aspect ratio. */}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="text-muted-foreground"
+        disabled={autoCropBusy}
+        onClick={onAutoCrop}
+        title="Auto crop around the subject (uses the selected aspect ratio)"
+      >
+        {autoCropBusy ? (
+          <ChipSpinner className="size-[13px]" />
+        ) : (
+          <Sparkles data-icon="inline-start" />
+        )}
+        Auto
+      </Button>
       <div className="h-[26px] w-px bg-white/15" />
       <div className="flex items-center gap-2.5">
         <span className="text-[11.5px] text-muted-foreground">Straighten</span>
@@ -913,6 +938,64 @@ export function CinemaImage({
     esCommit(client);
   };
 
+  // Auto crop: the server boxes the subject's AI matte in oriented-frame
+  // fractions (generating the matte first if needed — same consent rules as
+  // the Subject mask); the box gets a breathing-room margin, grows to the
+  // selected aspect preset, and is clamped to the frame and the straighten
+  // angle's black-free region. One commit, so a stray result is one Ctrl+Z.
+  const [autoCropBusy, setAutoCropBusy] = useState(false);
+  const [pendingAI, setPendingAI] = useState<PendingAIDownload | null>(null);
+  const runAutoCrop = async (allowDownload: boolean) => {
+    const d = useEditSession.getState().draft;
+    if (!d || autoCropBusy) return;
+    setAutoCropBusy(true);
+    try {
+      const b = await subjectBounds(client, photo.id, d, allowDownload);
+      if (!b.found) {
+        toast.info('No subject detected — crop it by hand');
+        return;
+      }
+      // Margin: 12% of the subject's own size on each side.
+      const m = 0.12;
+      let w = b.w * (1 + 2 * m);
+      let h = b.h * (1 + 2 * m);
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      // Grow the short side out to the selected aspect; Free keeps the box.
+      const rf = aspectRatioFrac(aspectKey, rfw, rfh);
+      if (rf) {
+        if (w / h < rf) w = h * rf;
+        else h = w / rf;
+      }
+      // Larger than the frame: shrink about the subject centre (ratio kept),
+      // then slide fully inside; finally honor the straighten angle.
+      const scale = Math.min(1, 1 / w, 1 / h);
+      w *= scale;
+      h *= scale;
+      const rect = fitCropToRotation(
+        {
+          x: Math.min(Math.max(cx - w / 2, 0), 1 - w),
+          y: Math.min(Math.max(cy - h / 2, 0), 1 - h),
+          w,
+          h,
+        },
+        d.cropAngle,
+        rfw / rfh,
+      );
+      esUpdate(client, { cropX: rect.x, cropY: rect.y, cropW: rect.w, cropH: rect.h });
+      esCommit(client);
+    } catch (err) {
+      if (isModelNotDownloaded(err)) {
+        const status = await aIModelStatus(client, AIKind.Subject).catch(() => null);
+        if (status) setPendingAI({ kind: AIKind.Subject, bytes: status.bytes, mode: 'add' });
+        return;
+      }
+      toast.error(`Auto crop failed: ${(err as Error).message}`);
+    } finally {
+      setAutoCropBusy(false);
+    }
+  };
+
   const onImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!wbPicking) return;
     e.stopPropagation();
@@ -1220,12 +1303,24 @@ export function CinemaImage({
       {wbPicking && <WBBar client={client} />}
 
       {cropping ? (
-        <CropBar
-          client={client}
-          aspectKey={aspectKey}
-          angle={draft?.cropAngle ?? 0}
-          onPickAspect={applyAspect}
-        />
+        <>
+          <CropBar
+            client={client}
+            aspectKey={aspectKey}
+            angle={draft?.cropAngle ?? 0}
+            onPickAspect={applyAspect}
+            onAutoCrop={() => void runAutoCrop(false)}
+            autoCropBusy={autoCropBusy}
+          />
+          <AIModelDialog
+            pending={pendingAI}
+            onConfirm={() => {
+              setPendingAI(null);
+              void runAutoCrop(true);
+            }}
+            onCancel={() => setPendingAI(null)}
+          />
+        </>
       ) : (
         showNavigator && !wbPicking && (
           <NavigatorInset

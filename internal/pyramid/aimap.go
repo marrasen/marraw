@@ -194,6 +194,16 @@ func (s *AIMapStore) SetFor(photoKey string, e *edit.Params) AIMapSet {
 	return set
 }
 
+// LoadOriented returns the decoded map transformed into an edit's oriented
+// frame (the crop rectangle's space), or nil when absent/corrupt. The oriented
+// variant shares the decoded-plane LRU with SetFor's lookups.
+func (s *AIMapStore) LoadOriented(photoKey string, kind edit.AIKind, ver string, rot int, flip bool) *AIMap {
+	if s == nil {
+		return nil
+	}
+	return s.loadOriented(photoKey, kind, ver, rot, flip)
+}
+
 // loadOriented returns the map in the edit's oriented frame: the stored
 // display transform is FlipH∘RotateCW^rot (ApplyGeometry's order), applied to
 // the base map. Oriented variants share the decoded-plane LRU.

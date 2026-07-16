@@ -37,7 +37,13 @@ const CAP = 50;
 // SetFlag/SetRating call per distinct-value group.
 export function chPlay(client: ApiClient, op: CullOp): Promise<PromiseSettledResult<unknown>[]> {
   const { applyLocal } = useUIStore.getState();
-  for (const g of op.groups) applyLocal(g.ids, op.kind === 'flag' ? { flag: g.value } : { rating: g.value });
+  // Narrow the union before iterating: a group's `value` type follows the
+  // op kind, which TS can't correlate through a ternary on an extracted `g`.
+  if (op.kind === 'flag') {
+    for (const g of op.groups) applyLocal(g.ids, { flag: g.value });
+  } else {
+    for (const g of op.groups) applyLocal(g.ids, { rating: g.value });
+  }
   return Promise.allSettled(
     op.kind === 'flag'
       ? op.groups.map((g) => setFlag(client, g.ids, g.value))

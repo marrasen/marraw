@@ -44,6 +44,52 @@ if (shot === 'cull') {
     zoomAfterExit = ui().loupeZoom;
   }
   window.__cropProbe = { zoomBefore, zoomInCrop, fitInCrop, zoomAfterExit };
+} else if (shot === 'autocrop') {
+  // Subject auto crop: enter crop mode, pick 3:2, click the real Auto button,
+  // and assert the committed rect is a proper sub-frame crop whose pixel
+  // ratio matches the preset. Also regression-probes the crop-mode arrow-key
+  // fix: ↑ must neither focus a develop control nor leave crop / switch photo.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(800);
+  // Idempotence: reset the geometry a previous run committed.
+  mw.esUpdate({ rotate: 0, flipH: false, cropX: 0, cropY: 0, cropW: 0, cropH: 0, cropAngle: 0 });
+  mw.esCommit();
+  await sleep(300);
+  mw.esSetCropping(true);
+  await until(() => es.getState().preview?.flat);
+  await sleep(400);
+  const focusBefore = ui().focusId;
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+  await sleep(200);
+  const arrowStaysPut =
+    es.getState().cropping === true &&
+    es.getState().activeControl == null &&
+    ui().focusId === focusBefore;
+  const btn = (label) =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === label);
+  btn('3:2')?.click();
+  await sleep(600);
+  const before = { ...es.getState().draft };
+  btn('Auto')?.click();
+  await until(() => {
+    const d = es.getState().draft;
+    return d && (d.cropX !== before.cropX || d.cropW !== before.cropW || d.cropY !== before.cropY || d.cropH !== before.cropH);
+  }, 120000);
+  await sleep(600);
+  const d = es.getState().draft;
+  // The overlay's center pill shows "<ratio><W × H>" from the committed
+  // rect; its ratio label is the user-facing truth the preset was honored.
+  const pillText = document.querySelector('[data-testid="crop-overlay"]')?.textContent ?? '';
+  window.__autoCropProbe = {
+    arrowStaysPut,
+    crop: { x: +d.cropX.toFixed(4), y: +d.cropY.toFixed(4), w: +d.cropW.toFixed(4), h: +d.cropH.toFixed(4) },
+    subFrame: d.cropW > 0 && d.cropH > 0 && (d.cropW < 1 || d.cropH < 1),
+    insideFrame: d.cropX >= 0 && d.cropY >= 0 && d.cropX + d.cropW <= 1.0001 && d.cropY + d.cropH <= 1.0001,
+    pill: pillText,
+    ratioIs32: pillText.startsWith('3:2'),
+  };
 } else if (shot === 'wb') {
   ui().setMode('develop');
   await until(() => mw.useEditSession.getState().draft != null);
@@ -716,6 +762,7 @@ await sleep(3600);
 window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
 await sleep(400);
 const probe =
+  window.__autoCropProbe ??
   window.__cullUndoProbe ??
   window.__healProbe ??
   window.__subjectProbe ??

@@ -309,6 +309,91 @@ func (e *Edits) generateAIMap(ctx context.Context, photo store.Photo, kind edit.
 	return res, downloaded, nil
 }
 
+// SubjectBoundsResult is the subject's bounding box in fractions of the
+// edit's oriented frame — the space the crop rectangle lives in. Found is
+// false when the matte holds no confident subject.
+type SubjectBoundsResult struct {
+	Found bool    `json:"found"`
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+	W     float64 `json:"w"`
+	H     float64 `json:"h"`
+}
+
+// SubjectBounds locates the photo's subject as a bounding box for the crop
+// tool's auto crop. It ensures the subject matte exists first (same task and
+// download-consent rules as GenerateAIMap — a missing model without
+// allowDownload fails with aiModelNotDownloadedMsg), orients the matte into
+// the edit's frame (params carries the client's rotate/flip), and boxes the
+// confident pixels at the mask-default 0.5 threshold. Speckle rows/columns
+// (fewer than a handful of confident pixels) don't stretch the box; a matte
+// with no real subject reports Found=false, never an error.
+func (e *Edits) SubjectBounds(ctx context.Context, photoID int64, params edit.Params, allowDownload bool) (*SubjectBoundsResult, error) {
+	res, err := e.GenerateAIMap(ctx, photoID, edit.AISubject, allowDownload)
+	if err != nil {
+		return nil, err
+	}
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	m := e.deps.Cache.AIMaps.LoadOriented(photo.CacheKey, edit.AISubject, res.MapVer, params.RotateTurns(), params.FlipH)
+	if m == nil {
+		return &SubjectBoundsResult{}, nil
+	}
+
+	// Marginal profiles of confident (≥0.5) matte pixels. Boxing off the
+	// profiles instead of raw min/max keeps a stray speckle from dragging an
+	// edge across the frame: an edge row/column must carry at least minRun
+	// confident pixels to count.
+	const confident = 128
+	rows := make([]int, m.H)
+	cols := make([]int, m.W)
+	total := 0
+	for y := range m.H {
+		for x, v := range m.Pix[y*m.W : (y+1)*m.W] {
+			if v >= confident {
+				rows[y]++
+				cols[x]++
+				total++
+			}
+		}
+	}
+	minRun := max(2, max(m.W, m.H)/256)
+	x0, x1 := profileSpan(cols, minRun)
+	y0, y1 := profileSpan(rows, minRun)
+	// A subject smaller than ~64 confident pixels (on the ~megapixel matte) is
+	// noise, not something to crop to.
+	if total < 64 || x1 <= x0 || y1 <= y0 {
+		return &SubjectBoundsResult{}, nil
+	}
+	return &SubjectBoundsResult{
+		Found: true,
+		X:     float64(x0) / float64(m.W),
+		Y:     float64(y0) / float64(m.H),
+		W:     float64(x1-x0) / float64(m.W),
+		H:     float64(y1-y0) / float64(m.H),
+	}, nil
+}
+
+// profileSpan returns the [first, last+1) index range of profile entries at or
+// above threshold, or (0, 0) when none qualify.
+func profileSpan(profile []int, threshold int) (int, int) {
+	first, last := -1, -1
+	for i, n := range profile {
+		if n >= threshold {
+			if first < 0 {
+				first = i
+			}
+			last = i
+		}
+	}
+	if first < 0 {
+		return 0, 0
+	}
+	return first, last + 1
+}
+
 // AnalyzeSubjects runs subject-matte inference across the given photos as one
 // shared, cancellable background task, scoring each frame into
 // subject_sharpness so the grid's focus badges re-evaluate subject-aware.
