@@ -77,6 +77,35 @@ smaller stuff.
   "Subject focus" row. Verified by `node scripts/subjsharp-verify.mjs
   <raw-folder>` (seeds synthetic mattes, no model download needed).
 
+## Retouch (follow-ups to the 2026-07-16 spot-removal MVP)
+
+The circular clone/heal spot tool shipped 2026-07-16 (commits `cf27117` +
+review fixes `8c92509`): `Params.Spots`, `pyramid.ApplyHeal` (post-geometry,
+pre-look, all render paths), `SuggestHealSource`, HealOverlay + Retouch group,
+`Q` tool key. The data model was shaped for these next steps — `Spot.Kind`
+discriminates the region shape ("" = circle) and unknown kinds are skipped at
+render/normalize, so new kinds degrade gracefully in old builds.
+
+- **Brush-shaped heal (`Kind:"stroke"`).** Paint an arbitrary region; the
+  reserved `Spot.Strokes` field carries the polyline (reuse `edit.Stroke` +
+  `rasterStrokes`/`stampStroke` for the coverage plane). Needs arbitrary-shape
+  source matching and boundary blending — the annulus plane fit generalizes to
+  a boundary-band fit, or use the guided filter (`guided.go`) for edge-aware
+  seams.
+- **ML content-aware fill (`Kind:"fill"`).** LaMa-class inpainting ONNX model
+  slotted into the existing `infer.RunTiled` + `ModelSpec` download/consent
+  infra (the aimask.Generate pattern). Open questions: model licensing (the
+  RMBG trap — vet before mirroring), ~200 MB weights, and that fills are not
+  parametrically re-renderable — output must be cached per (photo, edit) like
+  AI maps (AIMapStore precedent), with a cache-buster on regenerate.
+- **Spots in the RAW + XMP handoff.** Translate circular spots to Adobe
+  `crs:RetouchAreas` (intent-level, like the existing slider mapping) in
+  `internal/xmp` so Lightroom picks up the dust fixes.
+- **MVP polish candidates, after field testing:** per-spot opacity is plumbed
+  but has no keyboard path; the auto source picker only probes 3 rings × 16
+  angles (could search smarter on busy textures); no "visualize spots"
+  desaturated view for finding dust (Lightroom's A key).
+
 ## Pre-existing (not from the ML work)
 
 - **5 environmental ui-verify failures** (thumbSliderWidth, contrastSteps,
