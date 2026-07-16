@@ -532,7 +532,7 @@ export function esSetCropping(client: ApiClient, on: boolean) {
 export function esSetHealing(on: boolean) {
   const s = useEditSession.getState();
   if (s.healing === on) return;
-  if (on) useUIStore.getState().setDevelopTab('develop');
+  if (on) useUIStore.getState().setDevelopTab('masks'); // the Retouch section lives on the Local tab
   setState(on ? { healing: true } : { healing: false, activeSpot: null, spotVisualize: false });
 }
 

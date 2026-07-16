@@ -270,14 +270,11 @@ export function useKeyboard() {
 
       // Q toggles the heal / spot-removal tool (like R for crop): its overlay
       // lives on the cinema surface, so entering from Library switches to
-      // Develop for real. Its panel section lives on the Local tab — reveal
-      // it so the spot list isn't hidden behind Develop/Presets/Info.
+      // Develop for real. esSetHealing reveals the Local tab (where the
+      // Retouch section lives) so the spot list isn't hidden.
       if (e.key.toLowerCase() === 'q' && es.draft) {
         e.preventDefault();
-        if (!es.healing) {
-          if (s.mode === 'library') s.setMode('develop');
-          s.setDevelopTab('masks');
-        }
+        if (!es.healing && s.mode === 'library') s.setMode('develop');
         esSetHealing(!es.healing);
         return;
       }
