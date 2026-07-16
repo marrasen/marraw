@@ -305,7 +305,7 @@ func (l *Library) ListPhotos(ctx context.Context, folderID int64) ([]Photo, erro
 	}
 	out := make([]Photo, len(rows))
 	// rows are capture-ordered, as burstGroups needs.
-	groups := burstGroups(rows, burstHammingSetting(ctx, l.deps.DB))
+	groups := burstGroups(rows, burstHammingSetting(ctx, l.deps.DB), burstGapSetting(ctx, l.deps.DB))
 	for i, p := range rows {
 		out[i] = toAPIPhoto(p)
 		if id, ok := groups[p.ID]; ok {

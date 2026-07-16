@@ -7,6 +7,7 @@
 import { useEffect } from 'react';
 import {
   setAutoPresets,
+  setBurstGapSeconds,
   setBurstHamming,
   setCullDials,
   setEditGroupOpen,
@@ -102,6 +103,12 @@ export function updateGapMinutes(client: ApiClient, min: number | null) {
 export function updateBurstHamming(client: ApiClient, n: number) {
   useUIStore.setState({ burstHamming: n });
   setBurstHamming(client, n).catch(swallow);
+}
+
+// Burst time window (seconds). Global like the cutoff above.
+export function updateBurstGapSeconds(client: ApiClient, n: number) {
+  useUIStore.setState({ burstGapSeconds: n });
+  setBurstGapSeconds(client, n).catch(swallow);
 }
 
 export function updateCullDials(client: ApiClient, dials: DialKey[]) {

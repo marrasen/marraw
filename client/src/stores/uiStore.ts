@@ -208,6 +208,10 @@ interface UIState {
   // adjacent frames to count as the same burst. Global (no per-folder
   // override); the server re-clusters on change.
   burstHamming: number;
+  // Burst time window: max whole-second gap for two adjacent frames to chain
+  // into the same burst. Global, server re-clusters on change (like
+  // burstHamming).
+  burstGapSeconds: number;
   // How thumbnails are framed in the grids (crop 3:2 / fit square / natural
   // justified rows). Default fit — the whole frame is visible.
   thumbFit: ThumbFit;
@@ -375,6 +379,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   developTab: 'develop',
   prerenderFullres: false,
   burstHamming: 18,
+  burstGapSeconds: 4,
   thumbFit: 'fit',
   librarySort: 'captureAsc',
   globalLibrarySort: 'captureAsc',
@@ -453,6 +458,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       exportOptions: sanitizeExportOptions(s.exportOptions),
       prerenderFullres: s.prerenderFullres,
       burstHamming: s.burstHamming,
+      burstGapSeconds: s.burstGapSeconds,
       thumbFit: sanitizeThumbFit(s.thumbFit),
       shootSort: sanitizeShootSort(s.shootSort),
       shootGroup: sanitizeShootGroup(s.shootGroup),

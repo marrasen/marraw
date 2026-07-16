@@ -32,6 +32,7 @@ import { CONTROL_SPECS, type ControlId } from '@/lib/controlSpecs';
 import type { AutoSection } from '@/lib/editSession';
 import {
   updateAutoPresets,
+  updateBurstGapSeconds,
   updateBurstHamming,
   updateCullDials,
   updatePrerenderFullres,
@@ -138,10 +139,13 @@ function GeneralSection() {
   const client = useApiClient();
   const thumbFit = useUIStore((s) => s.thumbFit);
   const burstHamming = useUIStore((s) => s.burstHamming);
+  const burstGapSeconds = useUIStore((s) => s.burstGapSeconds);
   // Follow the thumb live during a drag; only commit to the server (which
   // re-clusters open folders) on release — same pattern as OffsetSlider.
   const [burstDrag, setBurstDrag] = useState<number | null>(null);
   const burstShown = burstDrag ?? burstHamming;
+  const [gapDrag, setGapDrag] = useState<number | null>(null);
+  const gapShown = gapDrag ?? burstGapSeconds;
   return (
     <div className="flex flex-col">
       <SettingRow
@@ -180,7 +184,7 @@ function GeneralSection() {
       />
       <SettingRow
         title="Burst grouping"
-        description="How different two frames can be and still group as a near-duplicate burst. Higher groups shots where the subject shifts pose between frames; lower groups only near-identical frames. Measured in dHash bits (of 64) — at 64 similarity is ignored and anything shot within the burst time window groups."
+        description="How different two frames can be and still group as a near-duplicate burst. Higher groups shots where the subject shifts pose between frames; lower groups only near-identical frames. Measured in dHash bits (of 64) — at 64 similarity is ignored and anything shot within the time window below groups."
         control={
           <div className="flex w-56 items-center gap-2.5">
             <div className="min-w-0 flex-1">
@@ -199,6 +203,31 @@ function GeneralSection() {
             </div>
             <span className="w-6 shrink-0 text-right font-mono text-[11px] text-foreground tabular-nums">
               {Math.round(burstShown)}
+            </span>
+          </div>
+        }
+      />
+      <SettingRow
+        title="Burst time window"
+        description="How far apart in time two frames can be and still chain into the same burst. Capture times are whole seconds, so the window is loose by design — similarity does the discriminating. Widen it when grouping at 64 above, where time is the only gate."
+        control={
+          <div className="flex w-56 items-center gap-2.5">
+            <div className="min-w-0 flex-1">
+              <Slider
+                value={gapShown}
+                min={1}
+                max={30}
+                step={1}
+                aria-label="Burst time window"
+                onValueChange={(v) => setGapDrag(v as number)}
+                onValueCommitted={(v) => {
+                  setGapDrag(null);
+                  updateBurstGapSeconds(client, v as number);
+                }}
+              />
+            </div>
+            <span className="w-6 shrink-0 text-right font-mono text-[11px] text-foreground tabular-nums">
+              {Math.round(gapShown)}s
             </span>
           </div>
         }

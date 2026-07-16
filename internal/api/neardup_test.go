@@ -28,44 +28,51 @@ func TestBurstGroups(t *testing.T) {
 		name       string
 		photos     []store.Photo
 		maxHamming int
+		maxGap     int
 		want       map[int64]int64
 	}{
-		{"empty", nil, burstHammingDefault, map[int64]int64{}},
+		{"empty", nil, burstHammingDefault, burstGapDefault, map[int64]int64{}},
 		{"burst chains and takes lead id",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, h^1), bp(3, 103, h^3), bp(9, 300, h)},
-			burstHammingDefault, map[int64]int64{1: 1, 2: 1, 3: 1}},
+			burstHammingDefault, burstGapDefault, map[int64]int64{1: 1, 2: 1, 3: 1}},
 		{"time gap splits identical hashes",
 			[]store.Photo{bp(1, 100, h), bp(2, 105, h)},
-			burstHammingDefault, map[int64]int64{}},
+			burstHammingDefault, burstGapDefault, map[int64]int64{}},
+		{"widened window chains across the same gap",
+			[]store.Photo{bp(1, 100, h), bp(2, 105, h)},
+			burstHammingDefault, 10, map[int64]int64{1: 1, 2: 1}},
+		{"narrowed window splits a default-window burst",
+			[]store.Photo{bp(1, 100, h), bp(2, 103, h)},
+			burstHammingDefault, burstGapMin, map[int64]int64{}},
 		{"hash distance splits adjacent frames",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, hFar)},
-			burstHammingDefault, map[int64]int64{}},
+			burstHammingDefault, burstGapDefault, map[int64]int64{}},
 		{"two separate bursts",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, h), bp(3, 200, hFar), bp(4, 201, hFar)},
-			burstHammingDefault, map[int64]int64{1: 1, 2: 1, 3: 3, 4: 3}},
+			burstHammingDefault, burstGapDefault, map[int64]int64{1: 1, 2: 1, 3: 3, 4: 3}},
 		{"untimed photos never group",
 			[]store.Photo{bp(1, 0, h), bp(2, 0, h)},
-			burstHammingDefault, map[int64]int64{}},
+			burstHammingDefault, burstGapDefault, map[int64]int64{}},
 		{"unhashed photo breaks the chain",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, -1), bp(3, 102, h)},
-			burstHammingDefault, map[int64]int64{}},
+			burstHammingDefault, burstGapDefault, map[int64]int64{}},
 		{"chain drift: each link close, ends far",
 			// 100→101→102 each within the gap; the middle frame bridges.
 			[]store.Photo{bp(1, 100, h), bp(2, 104, h^1), bp(3, 108, h^3)},
-			burstHammingDefault, map[int64]int64{1: 1, 2: 1, 3: 1}},
+			burstHammingDefault, burstGapDefault, map[int64]int64{1: 1, 2: 1, 3: 1}},
 		{"pose shift (14 bits) splits at the classic 10 cutoff",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, hPose)},
-			10, map[int64]int64{}},
+			10, burstGapDefault, map[int64]int64{}},
 		{"pose shift (14 bits) groups at the widened default",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, hPose)},
-			burstHammingDefault, map[int64]int64{1: 1, 2: 1}},
+			burstHammingDefault, burstGapDefault, map[int64]int64{1: 1, 2: 1}},
 		{"recompose (32 bits) still splits at the widened default",
 			[]store.Photo{bp(1, 100, h), bp(2, 101, hFar)},
-			burstHammingDefault, map[int64]int64{}},
+			burstHammingDefault, burstGapDefault, map[int64]int64{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := burstGroups(tc.photos, tc.maxHamming)
+			got := burstGroups(tc.photos, tc.maxHamming, tc.maxGap)
 			if len(got) != len(tc.want) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}

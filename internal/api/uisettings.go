@@ -224,10 +224,13 @@ type UISettings struct {
 	// distance (of 64) at which two adjacent frames count as the same burst.
 	// Higher groups frames that differ more (a subject changing pose); lower
 	// groups only near-identical frames.
-	BurstHamming int          `json:"burstHamming"`
-	CullDials    []string     `json:"cullDials"`
-	QuickDials   []string     `json:"quickDials"`
-	AutoPresets  []AutoPreset `json:"autoPresets"`
+	BurstHamming int `json:"burstHamming"`
+	// BurstGapSeconds is the burst time window: the max whole-second gap at
+	// which two adjacent frames can still chain into the same burst.
+	BurstGapSeconds int          `json:"burstGapSeconds"`
+	CullDials       []string     `json:"cullDials"`
+	QuickDials      []string     `json:"quickDials"`
+	AutoPresets     []AutoPreset `json:"autoPresets"`
 	// UserPresets are saved develop looks (Presets tab → Save current look).
 	UserPresets []UserPreset `json:"userPresets"`
 	// Watermarks are the named export overlays (Export dialog → Watermark).
@@ -289,6 +292,7 @@ const (
 	settingUITheme         = "ui:theme"
 	settingUIGapMinutes    = "ui:gapMinutes"
 	settingUIBurstHamming  = "ui:burstHamming"
+	settingUIBurstGap      = "ui:burstGapSeconds"
 	settingUICullDials     = "ui:cullDials"
 	settingUIQuickDials    = "ui:quickDials"
 	settingUIAutoPresets   = "ui:autoPresets"
@@ -392,6 +396,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		Theme:            theme,
 		GapMinutes:       gap,
 		BurstHamming:     burstHammingSetting(ctx, db),
+		BurstGapSeconds:  burstGapSetting(ctx, db),
 		CullDials:        jsonSetting(ctx, db, settingUICullDials, []string{}),
 		QuickDials:       jsonSetting(ctx, db, settingUIQuickDials, []string{}),
 		AutoPresets:      autoPresetsOrDefault(ctx, db),
@@ -450,6 +455,32 @@ func burstHammingSetting(ctx context.Context, db *store.DB) int {
 	n := burstHammingDefault
 	if raw, _ := db.GetSetting(ctx, settingUIBurstHamming); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil && v >= burstHammingMin && v <= burstHammingMax {
+			n = v
+		}
+	}
+	return n
+}
+
+// SetBurstGapSeconds persists the burst time window and re-triggers the photo
+// lists so open folders re-cluster live.
+func (u *Settings) SetBurstGapSeconds(ctx context.Context, n int) error {
+	if n < burstGapMin || n > burstGapMax {
+		return aprot.ErrInvalidParams(fmt.Sprintf("burst gap seconds must be %d..%d", burstGapMin, burstGapMax))
+	}
+	if err := u.save(ctx, settingUIBurstGap, strconv.Itoa(n)); err != nil {
+		return err
+	}
+	aprot.TriggerRefresh(ctx, burstSettingsKey)
+	return nil
+}
+
+// burstGapSetting reads the burst time window, falling back to
+// burstGapDefault and clamping to the allowed range. Shared by GetUISettings
+// and ListPhotos so the read and the clustering agree.
+func burstGapSetting(ctx context.Context, db *store.DB) int {
+	n := burstGapDefault
+	if raw, _ := db.GetSetting(ctx, settingUIBurstGap); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v >= burstGapMin && v <= burstGapMax {
 			n = v
 		}
 	}

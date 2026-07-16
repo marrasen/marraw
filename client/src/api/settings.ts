@@ -117,6 +117,7 @@ export interface UISettings {
     theme: ThemeType;
     gapMinutes: number;
     burstHamming: number;
+    burstGapSeconds: number;
     cullDials: string[];
     quickDials: string[];
     autoPresets: AutoPreset[];
@@ -208,6 +209,19 @@ setAutoPresets.method = 'Settings.SetAutoPresets' as const;
 
 export function subscribeSetAutoPresets(client: ApiClient, presets: AutoPreset[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetAutoPresets', [presets], callback, onError, options);
+}
+
+
+export function setBurstGapSeconds(client: ApiClient, n: number, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetBurstGapSeconds', [n], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setBurstGapSeconds.method = 'Settings.SetBurstGapSeconds' as const;
+
+export function subscribeSetBurstGapSeconds(client: ApiClient, n: number, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetBurstGapSeconds', [n], callback, onError, options);
 }
 
 
@@ -527,6 +541,21 @@ export function useSetAutoPresets(presets: AutoPreset[], options?: UseQueryOptio
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [presets], _subscribe: { method: 'Settings.SetAutoPresets', params: [presets] } });
+}
+
+/**
+ * Subscribes to `Settings.SetBurstGapSeconds` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetBurstGapSeconds(n: number, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, n: number) => setBurstGapSeconds(client, n, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [n], _subscribe: { method: 'Settings.SetBurstGapSeconds', params: [n] } });
 }
 
 /**
