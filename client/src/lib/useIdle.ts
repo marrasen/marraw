@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 /**
  * useIdle reports whether the user has been inactive for `ms`. Cinema-mode
@@ -23,4 +23,25 @@ export function useIdle(ms = 2800): boolean {
     };
   }, [ms]);
   return idle;
+}
+
+/**
+ * useHoverKeep: chrome under the cursor must never fade away — a pointer
+ * resting on a control emits no events, so the idle timer alone would hide
+ * the very thing the user is about to click. Spread `bind` on the hoverable
+ * chrome and gate its `hidden` with `hovered` (hidden && !hovered).
+ */
+export function useHoverKeep(): {
+  hovered: boolean;
+  bind: { onPointerEnter: () => void; onPointerLeave: () => void };
+} {
+  const [hovered, setHovered] = useState(false);
+  const bind = useMemo(
+    () => ({
+      onPointerEnter: () => setHovered(true),
+      onPointerLeave: () => setHovered(false),
+    }),
+    [],
+  );
+  return { hovered, bind };
 }

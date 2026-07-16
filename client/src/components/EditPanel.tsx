@@ -135,12 +135,15 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
   return <SinglePhotoPanel client={client} photo={photo} targetCount={ids.length} />;
 }
 
-// SinglePhotoPanel: the identity/cull header, then the Develop / Presets /
-// Info tab strip and its content. Tab state is client-only (uiStore) so it
+// SinglePhotoPanel: the identity/cull header, then the Develop / Local /
+// Presets / Info tab strip and its content. Tab state is client-only (uiStore) so it
 // persists across the two mount sites (Develop drawer ⇄ Library aside).
 const TAB_ITEMS = [
   { value: 'develop' as const, label: 'Develop' },
-  { value: 'masks' as const, label: 'Masks' },
+  // "Local" holds the local, targeted corrections — masks and retouch spots —
+  // as opposed to Develop's global sliders. The value stays 'masks' (it is
+  // client-only uiStore state, but keyboard.ts and the palette key off it).
+  { value: 'masks' as const, label: 'Local' },
   { value: 'presets' as const, label: 'Presets' },
   { value: 'info' as const, label: 'Info' },
 ];
@@ -172,7 +175,7 @@ function SinglePhotoPanel({
         {tab === 'masks' && (
           <>
             {photo && <Histogram photo={photo} />}
-            <MasksPanel client={client} targetCount={targetCount} />
+            <LocalPanel client={client} targetCount={targetCount} />
           </>
         )}
         {tab === 'presets' && <PresetsPanel client={client} photo={photo} targetCount={targetCount} />}
@@ -321,7 +324,6 @@ function DevelopPanel({
 
   const changed = {
     crop: groupChanged(draft, ['rotate', 'flipH', 'cropX', 'cropY', 'cropW', 'cropH', 'cropAngle']),
-    retouch: (draft.spots?.length ?? 0) > 0,
     tone: groupChanged(draft, [
       'expEV', 'expPreserve', 'bright', 'gamma', 'shadow',
       'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
@@ -406,10 +408,6 @@ function DevelopPanel({
           // previews through the ordinary backend render path.
           {...num('cropAngle')}
         />
-      </Group>
-
-      <Group id="retouch" title="Retouch" changed={changed.retouch}>
-        <RetouchSection client={client} draft={draft} />
       </Group>
 
       <Group
@@ -820,14 +818,7 @@ function AutoButton({
   );
 }
 
-// MasksPanel is the Masks tab: add buttons, the mask list, and — for the
-// selected mask — its adjustment sliders (plus the brush tool row). Masks
-// live in draft.masks, so every change flows through the same
-// esUpdate/esCommit path as any slider; the on-canvas shape/paint overlay is
-// MaskOverlay on the Develop loupe, driven by the same activeMask state.
-// Mirrors DevelopPanel's shell: held lastDraft through photo switches (inert
-// input meanwhile), undo/redo in the header.
-// RetouchSection is the Develop-tab Retouch group: the heal-tool toggle, the
+// RetouchSection is the Local-tab Retouch group: the heal-tool toggle, the
 // clone/heal mode for newly placed spots, and the list of spots. Spots live in
 // draft.spots, so add/move/remove flow through the ordinary esUpdate/esCommit
 // path (history, copy/paste and persistence come for free).
@@ -988,7 +979,15 @@ function SpotRow({
   );
 }
 
-function MasksPanel({ client, targetCount }: { client: ApiClient; targetCount: number }) {
+// LocalPanel is the Local tab: the local, targeted corrections. Masks — add
+// buttons, the mask list, and the selected mask's adjustment sliders (plus
+// the brush tool row) — and the Retouch group (heal/clone spots). Masks live
+// in draft.masks, so every change flows through the same esUpdate/esCommit
+// path as any slider; the on-canvas shape/paint overlay is MaskOverlay on the
+// Develop loupe, driven by the same activeMask state. Mirrors DevelopPanel's
+// shell: held lastDraft through photo switches (inert input meanwhile),
+// undo/redo in the header.
+function LocalPanel({ client, targetCount }: { client: ApiClient; targetCount: number }) {
   const liveDraft = useEditSession((s) => s.draft);
   const draft = useEditSession((s) => s.draft ?? s.lastDraft);
   const canUndo = useEditSession(esCanUndo);
@@ -997,7 +996,7 @@ function MasksPanel({ client, targetCount }: { client: ApiClient; targetCount: n
   return (
     <div className={cn('flex flex-col px-4 pt-1 pb-3 text-sm', !liveDraft && 'pointer-events-none')}>
       <div className="mb-2 flex items-center gap-2">
-        <h2 className="text-[13px] font-medium">Masks</h2>
+        <h2 className="text-[13px] font-medium">Local</h2>
         {targetCount > 1 && (
           <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">
             applies to {targetCount} photos
@@ -1019,6 +1018,9 @@ function MasksPanel({ client, targetCount }: { client: ApiClient; targetCount: n
         and Depth run a local model once per photo; masks stay anchored to
         image content through crops and straightens.
       </p>
+      <Group id="retouch" title="Retouch" changed={(draft.spots?.length ?? 0) > 0}>
+        <RetouchSection client={client} draft={draft} />
+      </Group>
     </div>
   );
 }

@@ -278,6 +278,10 @@ interface UIState {
   // Current flag per photo (kept fresh by usePhotos) so the P/X keys can
   // toggle instead of blindly setting.
   photoFlags: Map<number, FlagType>;
+  // Burst membership per photo: its group's member ids (kept fresh by
+  // usePhotos, whole folder) so Shift+P/X can judge the focused photo's
+  // whole burst in one stroke.
+  burstMembers: Map<number, number[]>;
 
   clipboard: Params | null;
   exportOpen: boolean;
@@ -320,6 +324,7 @@ interface UIState {
   setNavRowModel: (rowStarts: number[], colCenters?: number[] | null) => void;
   setVisibleIds: (ids: number[], takenAt: number[]) => void;
   setPhotoFlags: (flags: Map<number, FlagType>) => void;
+  setBurstMembers: (members: Map<number, number[]>) => void;
   setClipboard: (p: Params | null) => void;
   setExportOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
@@ -382,6 +387,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   visibleIds: [],
   visibleTakenAt: [],
   photoFlags: new Map<number, FlagType>(),
+  burstMembers: new Map<number, number[]>(),
   clipboard: null,
   exportOpen: false,
   settingsOpen: false,
@@ -533,6 +539,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     }),
 
   setPhotoFlags: (flags) => set({ photoFlags: flags }),
+  setBurstMembers: (members) => set({ burstMembers: members }),
   setClipboard: (p) => set({ clipboard: p }),
   setExportOpen: (open) => set({ exportOpen: open }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),

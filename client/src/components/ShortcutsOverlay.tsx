@@ -18,6 +18,7 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
     rows: [
       ['Rate', '1–5 · 0'],
       ['Pick / exclude', 'P · X'],
+      ['Best of burst (pick / keep)', '⇧P · ⇧X'],
       ['Unflag', 'U'],
     ],
   },

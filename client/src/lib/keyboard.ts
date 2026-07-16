@@ -53,17 +53,18 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 // useKeyboard installs the app-wide keymap:
 //   arrows        navigate (Shift extends the selection; pans in a loupe);
 //                 in a develop loupe ↑/↓ focus the previous/next control
-//                 (on the Masks tab: the previous/next mask slider, walking
+//                 (on the Local tab: the previous/next mask slider, walking
 //                 across masks at the ends)
 //   1-5 / 0       set / clear rating
 //   P / X / U     pick / exclude / unflag
+//   ⇧P / ⇧X       keep this burst frame, exclude the rest (⇧P also picks it)
 //   Enter · Esc   forward / back a mode: Library ⇄ Cull ⇄ Develop
 //   E B T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
 //   W             toggle the white-balance eyedropper (Enter keep · Esc cancel)
 //   Ctrl+↑/↓      focus the previous/next develop control (alias of plain ↑/↓)
 //   +/- / Z / Space   zoom (loupe, no control focused — Cull never focuses one;
 //                 Z/Space toggle 1:1↔fit)
-//   Tab           in Develop, cycle the Develop/Masks/Presets/Info tabs (⇧ backward);
+//   Tab           in Develop, cycle the Develop/Local/Presets/Info tabs (⇧ backward);
 //                 elsewhere Tab is swallowed — native focus is useless here
 //   Ctrl+A/C/V    select all, copy/paste edit settings
 //   Ctrl+Z/Y      per-photo edit undo/redo
@@ -81,8 +82,8 @@ export function useKeyboard() {
       const s = useUIStore.getState();
       if (s.exportOpen) return;
       const es = useEditSession.getState();
-      // The Masks tab retargets the slider keys: ↑/↓ walk the mask sliders
-      // (across masks) and +/- step the focused one.
+      // The Local tab (value 'masks') retargets the slider keys: ↑/↓ walk the
+      // mask sliders (across masks) and +/- step the focused one.
       const masksTab = s.developTab === 'masks' && s.mode !== 'cull' && !!es.draft;
 
       const move = (delta: number) => {
@@ -119,6 +120,19 @@ export function useKeyboard() {
       const applyFlag = (flag: FlagType) => {
         const cur = s.focusId != null ? s.photoFlags.get(s.focusId) : undefined;
         doFlag(client, selectionOrFocus(), flag !== 'none' && cur === flag ? 'none' : flag);
+      };
+      // Shift+P/X judge the focused photo's whole burst in one stroke: keep
+      // this frame and exclude its near-duplicate siblings. P also picks the
+      // kept frame; X leaves its flag untouched. No toggle semantics — a
+      // second press is idempotent. Outside a burst there is nothing to
+      // reject, so the keys deliberately no-op instead of guessing.
+      const judgeBurst = (pickKept: boolean) => {
+        if (s.focusId == null) return;
+        const members = s.burstMembers.get(s.focusId);
+        if (!members) return;
+        const rest = members.filter((id) => id !== s.focusId);
+        if (rest.length > 0) doFlag(client, rest, 'exclude');
+        if (pickKept) doFlag(client, [s.focusId], 'pick');
       };
 
       const zoomStep = (factor: number) => {
@@ -214,10 +228,14 @@ export function useKeyboard() {
 
       // Q toggles the heal / spot-removal tool (like R for crop): its overlay
       // lives on the cinema surface, so entering from Library switches to
-      // Develop for real.
+      // Develop for real. Its panel section lives on the Local tab — reveal
+      // it so the spot list isn't hidden behind Develop/Presets/Info.
       if (e.key.toLowerCase() === 'q' && es.draft) {
         e.preventDefault();
-        if (!es.healing && s.mode === 'library') s.setMode('develop');
+        if (!es.healing) {
+          if (s.mode === 'library') s.setMode('develop');
+          s.setDevelopTab('masks');
+        }
         esSetHealing(!es.healing);
         return;
       }
@@ -241,8 +259,8 @@ export function useKeyboard() {
       // Tab is swallowed everywhere: native focus traversal is useless here
       // because Enter and Space are bound to actions, so a tab-focused control
       // can't be activated. Jump to any control or tab via ⌘K instead. In
-      // Develop, Tab still cycles the Develop/Presets/Info panel tabs (⇧
-      // backward). Open dialogs keep their own focus trap.
+      // Develop, Tab still cycles the Develop/Local/Presets/Info panel tabs
+      // (⇧ backward). Open dialogs keep their own focus trap.
       if (e.key === 'Tab') {
         if (s.settingsOpen || s.addFolderOpen || s.shortcutsOpen) return;
         e.preventDefault();
@@ -334,11 +352,13 @@ export function useKeyboard() {
           break;
         case 'x':
         case 'X':
-          applyFlag('exclude');
+          if (e.shiftKey) judgeBurst(false);
+          else applyFlag('exclude');
           break;
         case 'p':
         case 'P':
-          applyFlag('pick');
+          if (e.shiftKey) judgeBurst(true);
+          else applyFlag('pick');
           break;
         case 'u':
         case 'U':

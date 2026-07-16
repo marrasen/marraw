@@ -122,5 +122,22 @@ export function usePhotos(folderId: number): PhotoLists {
     useUIStore.getState().setPhotoFlags(new Map(all.map((p) => [p.id, p.flag])));
   }, [all]);
 
+  // Burst membership (photo → its group's member ids) so Shift+P/X can judge
+  // the focused photo's whole burst. From the FULL folder, like burstMap: the
+  // rest of a burst must be rejected even when a filter hides some of its
+  // members.
+  useEffect(() => {
+    const groups = new Map<number, number[]>();
+    for (const p of all) {
+      if (p.groupId == null) continue;
+      const list = groups.get(p.groupId);
+      if (list) list.push(p.id);
+      else groups.set(p.groupId, [p.id]);
+    }
+    const byPhoto = new Map<number, number[]>();
+    for (const ids of groups.values()) for (const id of ids) byPhoto.set(id, ids);
+    useUIStore.getState().setBurstMembers(byPhoto);
+  }, [all]);
+
   return { all, visible, softBelow, isLoading };
 }

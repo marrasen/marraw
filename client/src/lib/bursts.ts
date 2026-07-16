@@ -40,11 +40,15 @@ export interface BurstInfo {
   // bestId is the group's sharpest member by focusScore; null until at least
   // one member has a measured score.
   bestId: number | null;
+  // Member photo ids in the order of the list fed to burstMap (display
+  // order; capture order under the default sort), so a badge can say "2/4" —
+  // which frame of the burst this is, not just how big the burst is.
+  members: number[];
 }
 
 // burstMap indexes the near-duplicate groups the backend derives (frames
 // shot moments apart whose perceptual hashes match, photo.groupId): per
-// group, its size and its sharpest member — the frame the badges suggest
+// group, its members and its sharpest one — the frame the badges suggest
 // keeping.
 //
 // Rank each group by ONE metric so members stay comparable: the subject score
@@ -74,7 +78,7 @@ export function burstMap(photos: Photo[]): Map<number, BurstInfo> {
         bestId = p.id;
       }
     }
-    map.set(groupId, { count: list.length, bestId });
+    map.set(groupId, { count: list.length, bestId, members: list.map((p) => p.id) });
   }
   return map;
 }

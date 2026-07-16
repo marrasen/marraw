@@ -3,6 +3,7 @@ import { TaskTray } from '@/components/TaskTray';
 import { WindowControls } from '@/components/WindowControls';
 import { useConnection } from '@/api/client';
 import { modK } from '@/lib/platform';
+import { useHoverKeep } from '@/lib/useIdle';
 import { cn } from '@/lib/utils';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
 import { useUIStore, type Mode } from '@/stores/uiStore';
@@ -37,6 +38,10 @@ export function CinemaHUD({
   const { roots } = useLibraryRoots();
   const { state } = useConnection();
   const current = folderPath ? roots.find((r) => samePath(r.path, folderPath)) : undefined;
+  // A cluster the pointer rests on never fades — the idle timer alone would
+  // hide it out from under the cursor (no pointermove while resting).
+  const { hovered, bind } = useHoverKeep();
+  const conceal = hidden && !hovered;
 
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 z-30">
@@ -46,9 +51,10 @@ export function CinemaHUD({
           cluster) can stay visible while the rest of the chrome fades. */}
       <div className="pointer-events-auto absolute inset-x-0 top-0 h-12 [-webkit-app-region:drag]" />
       <div
+        {...bind}
         className={cn(
           'absolute top-4 left-[18px] transition-opacity duration-300 [-webkit-app-region:no-drag]',
-          hidden ? 'opacity-0' : 'pointer-events-auto',
+          conceal ? 'opacity-0' : 'pointer-events-auto',
         )}
       >
         <div className="glass flex items-center gap-2.5 rounded-[9px] px-3 py-[7px]">
@@ -69,9 +75,10 @@ export function CinemaHUD({
         </div>
       </div>
       <div
+        {...bind}
         className={cn(
           'absolute top-4 left-1/2 -translate-x-1/2 transition-opacity duration-300 [-webkit-app-region:no-drag]',
-          hidden ? 'opacity-0' : 'pointer-events-auto',
+          conceal ? 'opacity-0' : 'pointer-events-auto',
         )}
       >
         <Segmented
@@ -91,9 +98,10 @@ export function CinemaHUD({
       <div className="pointer-events-auto absolute top-4 right-[18px] flex items-center gap-3 [-webkit-app-region:no-drag]">
         <TaskTray />
         <div
+          {...bind}
           className={cn(
             'flex items-center gap-3 transition-opacity duration-300',
-            hidden && 'pointer-events-none opacity-0',
+            conceal && 'pointer-events-none opacity-0',
           )}
         >
           {right}

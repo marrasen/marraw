@@ -69,7 +69,7 @@ function buildCommands(
   if (hasFolder) {
     out.push(
       { id: 'tab-develop', label: 'Develop panel', group: 'Panels', hint: 'Tab', run: () => goDevelop('develop') },
-      { id: 'tab-masks', label: 'Masks panel', group: 'Panels', run: () => goDevelop('masks') },
+      { id: 'tab-masks', label: 'Local panel (masks & retouch)', group: 'Panels', run: () => goDevelop('masks') },
       { id: 'tab-presets', label: 'Presets panel', group: 'Panels', run: () => goDevelop('presets') },
       { id: 'tab-info', label: 'Info panel', group: 'Panels', run: () => goDevelop('info') },
       { id: 'crop', label: 'Crop & straighten', group: 'Develop', hint: 'R', run: (client) => {

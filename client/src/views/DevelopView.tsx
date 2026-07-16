@@ -13,7 +13,7 @@ import { EditPanel } from '@/components/EditPanel';
 import { DIALS } from '@/lib/dials';
 import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
 import { groupByGap } from '@/lib/timeGaps';
-import { useIdle } from '@/lib/useIdle';
+import { useHoverKeep, useIdle } from '@/lib/useIdle';
 import { cn } from '@/lib/utils';
 import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
 
@@ -129,19 +129,25 @@ function QuickDock({
   const dials = useUIStore((s) => s.quickDials);
   const draft = useEditSession((s) => s.draft);
   const shown = useEditSession((s) => s.draft ?? s.lastDraft);
+  // The dock never fades while the pointer rests on it (useHoverKeep); the
+  // handlers live on the glass pill — the outer wrapper spans the canvas and
+  // is pointer-events-none.
+  const { hovered, bind } = useHoverKeep();
+  const conceal = hidden && !hovered;
 
   return (
     <div
       className={cn(
         'pointer-events-none absolute bottom-[126px] left-4 z-30 flex justify-center transition-opacity duration-300',
         shifted ? 'right-[384px]' : 'right-4',
-        hidden && 'opacity-0',
+        conceal && 'opacity-0',
       )}
     >
     <div
+      {...bind}
       className={cn(
         'glass flex max-w-full items-center gap-3.5 overflow-x-auto rounded-[14px] px-[18px] py-3',
-        !hidden && 'pointer-events-auto',
+        !conceal && 'pointer-events-auto',
       )}
     >
       {dials.length > 0 && (

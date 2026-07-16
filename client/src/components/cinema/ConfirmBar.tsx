@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { applyFlag, applyRating } from '@/lib/actions';
 import { DIALS } from '@/lib/dials';
 import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
+import { useHoverKeep } from '@/lib/useIdle';
 import { MiniCycle } from '@/components/cinema/MiniCycle';
 import { MiniSlider } from '@/components/cinema/MiniSlider';
 import { useUIStore } from '@/stores/uiStore';
@@ -40,11 +41,15 @@ export function ConfirmBar({
   if (onDraft && draft && draft !== held) setHeld(draft);
   const shown = onDraft && draft ? draft : held;
 
+  // The bar never fades while the pointer rests on it (useHoverKeep).
+  const { hovered, bind } = useHoverKeep();
+
   return (
     <div
+      {...bind}
       className={cn(
         'glass absolute bottom-[126px] left-1/2 z-30 flex -translate-x-1/2 items-center gap-4 rounded-[14px] px-[18px] py-3 transition-opacity duration-300',
-        hidden && 'pointer-events-none opacity-0',
+        hidden && !hovered && 'pointer-events-none opacity-0',
       )}
     >
       <div className="flex flex-col gap-[5px]">

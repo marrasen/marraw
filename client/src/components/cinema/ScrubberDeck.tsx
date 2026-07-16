@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
 import { useImgBust } from '@/lib/imgCacheBust';
 import { gapLabel, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
+import { useHoverKeep } from '@/lib/useIdle';
 import { aspectOf } from '@/lib/justify';
 import { PyramidImage } from '@/components/PyramidImage';
 import { SoftBadge } from '@/components/SoftBadge';
@@ -40,6 +41,10 @@ export function ScrubberDeck({
 }) {
   const focus = useUIStore((s) => s.focus);
   const thumbFit = useUIStore((s) => s.thumbFit);
+  // The deck never fades while the pointer rests on it (useHoverKeep); the
+  // handlers live on the filmstrip itself — the outer wrapper spans the
+  // window width and is pointer-events-none.
+  const { hovered, bind } = useHoverKeep();
   const scrollRef = useRef<HTMLDivElement>(null);
   const centeredOnce = useRef(false);
   const anim = useRef(0);
@@ -118,20 +123,22 @@ export function ScrubberDeck({
     anim.current = requestAnimationFrame(step);
   }, [focusId, widthsKey]);
 
+  const conceal = hidden && !hovered;
   return (
     <div
       className={cn(
         'pointer-events-none absolute bottom-4 left-4 z-30 flex justify-center transition-opacity duration-300',
         shifted ? 'right-[384px]' : 'right-4',
-        hidden && 'opacity-0',
+        conceal && 'opacity-0',
       )}
     >
     <div
+      {...bind}
       data-testid="filmstrip"
       className={cn(
         'flex max-w-full items-stretch rounded-[11px] border border-glass-border px-3.5 py-2.5',
         'bg-white/75 backdrop-blur-2xl dark:bg-[rgba(10,12,16,.6)]',
-        !hidden && 'pointer-events-auto',
+        !conceal && 'pointer-events-auto',
       )}
     >
       <div className="mr-2 flex shrink-0 flex-col justify-center gap-[3px] border-r border-white/12 pr-3">
