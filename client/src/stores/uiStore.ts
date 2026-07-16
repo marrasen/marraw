@@ -267,6 +267,9 @@ interface UIState {
   // except the group's sharpest (or its lead frame until scores exist).
   // Transient like softOnly — setFolder clears it.
   collapseBursts: boolean;
+  // Blinks culling filter: show only frames closed-eye detection flagged.
+  // Transient like softOnly — setFolder clears it.
+  eyesClosedOnly: boolean;
   // Whether the folder-wide "analyze subjects & re-score focus" dialog is open.
   // Opened from a grid cell's subject-focus indicator; owned here so the deep
   // cell needn't thread a callback up to the folder-level controller.
@@ -348,6 +351,7 @@ interface UIState {
   setWatermarkEditorOpen: (open: boolean) => void;
   toggleSoftOnly: () => void;
   toggleCollapseBursts: () => void;
+  toggleEyesClosedOnly: () => void;
   setSubjectScanOpen: (open: boolean) => void;
   setEyeScanOpen: (open: boolean) => void;
   setCellSize: (px: number) => void;
@@ -401,6 +405,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   flagFilter: 'all',
   softOnly: false,
   collapseBursts: false,
+  eyesClosedOnly: false,
   subjectScanOpen: false,
   eyeScanOpen: false,
   overrides: new Map(),
@@ -482,6 +487,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       // Transient cull filters, never carried across folders.
       softOnly: false,
       collapseBursts: false,
+      eyesClosedOnly: false,
       // Close a folder-scoped scan dialog left open on the old folder.
       subjectScanOpen: false,
       eyeScanOpen: false,
@@ -571,6 +577,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setWatermarkEditorOpen: (open) => set({ watermarkEditorOpen: open }),
   toggleSoftOnly: () => set((s) => ({ softOnly: !s.softOnly })),
   toggleCollapseBursts: () => set((s) => ({ collapseBursts: !s.collapseBursts })),
+  toggleEyesClosedOnly: () => set((s) => ({ eyesClosedOnly: !s.eyesClosedOnly })),
   setSubjectScanOpen: (open) => set({ subjectScanOpen: open }),
   setEyeScanOpen: (open) => set({ eyeScanOpen: open }),
   setCellSize: (px) => set({ cellSize: Math.min(400, Math.max(120, px)) }),

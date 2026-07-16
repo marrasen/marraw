@@ -1,10 +1,6 @@
 import { cn } from '@/lib/utils';
 import type { Photo } from '@/api/library';
-
-// The closed-eye probability above which a frame gets flagged. 0.5 is the
-// classifier's own decision boundary; the score itself is the worst eye of
-// the frame's most confident faces (see internal/eyes).
-export const EYES_CLOSED_BADGE = 0.5;
+import { EYES_CLOSED_BADGE } from '@/lib/eyes';
 
 // EyesBadge is the blink marker (◡) shared by every thumbnail surface (grid,
 // cull scrubber): it shows when closed-eye detection flags a frame, so a cull

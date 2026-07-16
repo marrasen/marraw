@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useListPhotos, type Photo, type PhotoPatchEvent } from '@/api/library';
 import { burstMap, isSoft, softThreshold, type BurstInfo } from '@/lib/bursts';
+import { hasClosedEyes } from '@/lib/eyes';
 import { useUIStore, type LibrarySort } from '@/stores/uiStore';
 
 // photoPatchReducer folds server-pushed subscription patches (aprot
@@ -78,6 +79,7 @@ export function usePhotos(folderId: number): PhotoLists {
   const minRating = useUIStore((s) => s.minRating);
   const flagFilter = useUIStore((s) => s.flagFilter);
   const softOnly = useUIStore((s) => s.softOnly);
+  const eyesClosedOnly = useUIStore((s) => s.eyesClosedOnly);
   const collapseBursts = useUIStore((s) => s.collapseBursts);
   const librarySort = useUIStore((s) => s.librarySort);
 
@@ -106,6 +108,7 @@ export function usePhotos(folderId: number): PhotoLists {
       all.filter((p) => {
         if (p.rating < minRating) return false;
         if (softOnly && !isSoft(p, softBelow)) return false;
+        if (eyesClosedOnly && !hasClosedEyes(p)) return false;
         if (collapseBursts && p.groupId != null) {
           const b = bursts.get(p.groupId);
           // Keep the sharpest member; until any member has a score, keep the
@@ -124,7 +127,7 @@ export function usePhotos(folderId: number): PhotoLists {
             return true;
         }
       }),
-    [all, minRating, flagFilter, softOnly, softBelow, collapseBursts, bursts],
+    [all, minRating, flagFilter, softOnly, softBelow, eyesClosedOnly, collapseBursts, bursts],
   );
 
   // Keep keyboard navigation in sync with what is on screen.

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowUpDown, Contrast, Eye, Focus, Layers, LayoutGrid, PanelRight, Star, Trash2, Wand2 } from 'lucide-react';
+import { ArrowUpDown, Contrast, Eye, EyeOff, Focus, Layers, LayoutGrid, PanelRight, Star, Trash2, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePhotos } from '@/api/library';
 import { resetEdits } from '@/api/edits';
@@ -72,6 +72,8 @@ export function FilterBar({
   const toggleSoftOnly = useUIStore((s) => s.toggleSoftOnly);
   const collapseBursts = useUIStore((s) => s.collapseBursts);
   const toggleCollapseBursts = useUIStore((s) => s.toggleCollapseBursts);
+  const eyesClosedOnly = useUIStore((s) => s.eyesClosedOnly);
+  const toggleEyesClosedOnly = useUIStore((s) => s.toggleEyesClosedOnly);
   const setSubjectScanOpen = useUIStore((s) => s.setSubjectScanOpen);
   const setEyeScanOpen = useUIStore((s) => s.setEyeScanOpen);
   const view = useUIStore((s) => s.view);
@@ -178,6 +180,33 @@ export function FilterBar({
       >
         <Layers className="size-[13px]" strokeWidth={1.75} />
         <span className="@max-[1440px]:hidden">Bursts</span>
+      </button>
+
+      {/* Blinks filter: isolate the frames closed-eye detection badges (◡) so
+          they can be reviewed and rejected in one sweep. Disabled until the
+          folder has eye scores — the Eyes button runs the scan. */}
+      <button
+        onClick={toggleEyesClosedOnly}
+        disabled={eyesAnalyzed === 0}
+        className={cn(
+          'flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[11.5px] disabled:cursor-not-allowed disabled:opacity-40',
+          eyesClosedOnly
+            ? 'bg-amber-400/15 text-amber-500 dark:text-amber-400'
+            : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+        )}
+        title={
+          eyesAnalyzed === 0
+            ? 'No eye scores yet — run "Eyes" to detect closed eyes'
+            : eyesClosedOnly
+              ? 'Showing only closed-eye frames'
+              : 'Show only closed-eye frames'
+        }
+        aria-label="Show only closed-eye frames"
+        aria-pressed={eyesClosedOnly}
+        data-testid="blinks-filter"
+      >
+        <EyeOff className="size-[13px]" strokeWidth={1.75} />
+        <span className="@max-[1440px]:hidden">Blinks</span>
       </button>
 
       {/* Auto-judge bursts: the folder-wide Shift+P — pick every burst's

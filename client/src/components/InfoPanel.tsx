@@ -3,7 +3,7 @@
 // always-visible drawer covers the floating canvas one), and the photo's
 // technical metadata — resolution, file size, camera/EXIF, capture time.
 import type { Photo } from '@/api/library';
-import { EYES_CLOSED_BADGE } from '@/components/EyesBadge';
+import { EYES_CLOSED_BADGE } from '@/lib/eyes';
 import { Histogram } from '@/components/Histogram';
 import { NavigatorMap } from '@/views/LoupeView';
 import { useLoupeNav } from '@/lib/loupeNav';

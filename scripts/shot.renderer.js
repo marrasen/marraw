@@ -624,6 +624,53 @@ if (shot === 'cull') {
       [...document.querySelectorAll('[data-testid="subject-scan-start"]')][0]?.textContent?.trim() ??
       null,
   };
+} else if (shot === 'blinks') {
+  // Blinks filter (FilterBar): the fixture is faceless, so the real scan
+  // leaves every frame analyzed but unflagged. Overrides then drive the
+  // states: masking eyesAnalyzed must disable the button; a fake closed-eye
+  // score on one photo must make the filter isolate exactly that frame (with
+  // its ◡ badge); toggling off must restore the full grid.
+  ui().setMode('library');
+  ui().setView('grid');
+  ui().setShowEditPanel(false);
+  await sleep(400);
+  const btn = () => document.querySelector('[data-testid="blinks-filter"]');
+  // The calibrate pass backfills eye scores once the models are installed
+  // (eyes-verify downloads them) — wait for the button to leave disabled.
+  await until(() => btn() && !btn().disabled, 60000);
+  const ids = ui().visibleIds;
+  const total = ids.length;
+
+  // Disabled probe: mask every frame's analysis via overrides → count 0.
+  const mask = new Map(ids.map((id) => [id, { eyesAnalyzed: false }]));
+  mw.useUIStore.setState({ overrides: mask });
+  await sleep(300);
+  const disabledWithoutScores = btn()?.disabled === true;
+
+  // Flag one frame as a blink and filter down to it.
+  mw.useUIStore.setState({
+    overrides: new Map([[ids[0], { eyesClosed: 0.92, eyesAnalyzed: true }]]),
+  });
+  await sleep(300);
+  btn()?.click();
+  await sleep(400);
+  const filtered = ui().visibleIds;
+  const stateOn = ui().eyesClosedOnly === true;
+  const badges = document.querySelectorAll('[data-testid="eyes-badge"]').length;
+  btn()?.click();
+  await sleep(400);
+  const restored = ui().visibleIds.length;
+  btn()?.click(); // back on for the capture
+  await sleep(400);
+  window.__blinksProbe = {
+    total,
+    disabledWithoutScores,
+    stateOn,
+    filteredCount: filtered.length,
+    filteredIsFlagged: filtered.length === 1 && filtered[0] === ids[0],
+    badges,
+    restored,
+  };
 } else if (shot === 'cullundo') {
   // Flag/rating undo history: P → Ctrl+Z → Ctrl+⇧Z round-trips, stacked
   // rating undos, a burst judgement (⇧P) collapsing to ONE entry that
@@ -812,6 +859,7 @@ window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 30
 await sleep(400);
 const probe =
   window.__autoCropProbe ??
+  window.__blinksProbe ??
   window.__cullUndoProbe ??
   window.__healProbe ??
   window.__subjectProbe ??
