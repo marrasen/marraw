@@ -89,9 +89,12 @@ export function FilterBar({
     // (rail is user-resizable, so a viewport breakpoint would misjudge space).
     // overflow-hidden is a hard backstop against any control spilling into the
     // develop panel. The live shown/total count lives in the StatusBar below.
-    <div className="@container flex h-[47px] shrink-0 items-center gap-4 overflow-hidden border-b px-[18px] @max-[700px]:gap-2">
+    // Collapse cascade (container px, tuned against measured content widths):
+    // <1440 button labels → icons, <1120 gap label, <1040 slider → icon,
+    // <900 gap control gone, <780 slider gone + tighter gaps.
+    <div className="@container flex h-[47px] shrink-0 items-center gap-3 overflow-hidden border-b px-[18px] @max-[780px]:gap-2">
       <div className="flex items-center gap-2" role="group" aria-label="Minimum rating filter">
-        <span className="text-[11.5px] text-muted-foreground @max-[960px]:hidden">Rating</span>
+        <span className="text-[11.5px] text-muted-foreground @max-[1440px]:hidden">Rating</span>
         <div className="flex gap-px">
           {[1, 2, 3, 4, 5].map((n) => (
             <button
@@ -111,7 +114,7 @@ export function FilterBar({
             </button>
           ))}
         </div>
-        <span className="text-[11px] text-muted-foreground @max-[960px]:hidden">&amp; up</span>
+        <span className="text-[11px] text-muted-foreground @max-[1440px]:hidden">&amp; up</span>
       </div>
 
       <div className="h-5 w-px bg-border" />
@@ -148,7 +151,7 @@ export function FilterBar({
         aria-pressed={softOnly}
       >
         <Contrast className="size-[13px]" strokeWidth={1.75} />
-        <span className="@max-[960px]:hidden">Soft</span>
+        <span className="@max-[1440px]:hidden">Soft</span>
       </button>
 
       {/* Collapse bursts: show one frame per near-duplicate group — the
@@ -174,7 +177,7 @@ export function FilterBar({
         aria-pressed={collapseBursts}
       >
         <Layers className="size-[13px]" strokeWidth={1.75} />
-        <span className="@max-[960px]:hidden">Bursts</span>
+        <span className="@max-[1440px]:hidden">Bursts</span>
       </button>
 
       {/* Auto-judge bursts: the folder-wide Shift+P — pick every burst's
@@ -193,7 +196,7 @@ export function FilterBar({
         data-testid="auto-judge-bursts"
       >
         <Wand2 className="size-[13px]" strokeWidth={1.75} />
-        <span className="@max-[960px]:hidden">Auto-judge</span>
+        <span className="@max-[1440px]:hidden">Auto-judge</span>
       </button>
 
       {/* Subject-aware focus: amber with a count once any frame is scored over
@@ -219,7 +222,7 @@ export function FilterBar({
         data-testid="subject-scan-button"
       >
         <Focus className="size-[13px]" strokeWidth={1.75} />
-        <span className="@max-[960px]:hidden">
+        <span className="@max-[1440px]:hidden">
           {subjectAnalyzed > 0 ? `${subjectAnalyzed}/${photoCount}` : 'Subjects'}
         </span>
       </button>
@@ -247,7 +250,7 @@ export function FilterBar({
         data-testid="eye-scan-button"
       >
         <Eye className="size-[13px]" strokeWidth={1.75} />
-        <span className="@max-[960px]:hidden">
+        <span className="@max-[1440px]:hidden">
           {eyesAnalyzed > 0 ? `${eyesAnalyzed}/${photoCount}` : 'Eyes'}
         </span>
       </button>
@@ -258,15 +261,15 @@ export function FilterBar({
         <>
           {/* Group-by-gap — a secondary control; drops out first when tight so
               the flag filter and panel toggle keep their room. */}
-          <div className="flex items-center gap-4 @max-[700px]:gap-2 @max-[720px]:hidden">
-            <GapControl labelClassName="@max-[880px]:hidden" />
+          <div className="flex items-center gap-3 @max-[780px]:gap-2 @max-[900px]:hidden">
+            <GapControl labelClassName="@max-[1120px]:hidden" />
             <div className="h-5 w-px bg-border" />
           </div>
 
           {/* Thumbnail size: inline slider on a roomy bar, folded behind the
               grid icon as it tightens, then gone entirely on the narrowest. */}
-          <div className="flex items-center gap-4 @max-[700px]:gap-2 @max-[640px]:hidden">
-            <div className="flex items-center gap-2 @max-[780px]:hidden" title="Thumbnail size">
+          <div className="flex items-center gap-3 @max-[780px]:hidden">
+            <div className="flex items-center gap-2 @max-[1040px]:hidden" title="Thumbnail size">
               <LayoutGrid
                 className="size-[13px] shrink-0 text-muted-foreground"
                 strokeWidth={1.5}
@@ -290,7 +293,7 @@ export function FilterBar({
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger
-                className="hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground @max-[780px]:flex"
+                className="hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground @max-[1040px]:flex"
                 title="Thumbnail size"
                 aria-label="Thumbnail size"
               >

@@ -602,8 +602,10 @@ if (shot === 'cull') {
   }
   window.__wmProbe = { textDrawn, canvas: !!canvas };
 } else if (shot === 'subjects' || shot === 'subjectscan') {
-  // Library toolbar's subject-scan control ("Subjects", beside "Soft"). Hide
-  // the develop panel so the @container toolbar is wide enough to show labels.
+  // Library toolbar's subject-scan control (beside "Soft"). Hide the develop
+  // panel for maximum toolbar width; on a 1500px window the @container is
+  // still below the 1440px label tier, so the buttons render icon-only (the
+  // probe's `label` reads textContent, which includes the hidden span).
   ui().setMode('library');
   ui().setView('grid');
   ui().setShowEditPanel(false);
