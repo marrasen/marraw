@@ -5,6 +5,25 @@ Only two constructs are parsed (client/src/lib/changelog.ts): `## X.Y.Z - YYYY-M
 version headers and `-` bullets; everything else is ignored. Newest release first.
 When cutting a release: bump the version in package.json and add a section here.
 
+## 0.4.0 - 2026-07-16
+
+- Retouch: spot removal — click or drag a circle over dust and blemishes; heal (tone-matched) and clone modes, with the source patch picked automatically and draggable (Q)
+- Retouch: heal brush — paint over any shape to remove it; the fill comes from a matching movable source region
+- Retouch: visualize spots (A) — a high-contrast dust view with a sensitivity slider, for hunting sensor spots
+- Retouch: with a spot selected, 1–9 and 0 set its opacity
+- AI masks: Subject, Depth and Scene selections in the Local tab — models download only after consent, and mask edges refine automatically at high zoom
+- AI masks: the depth window is a two-thumb range slider, and hovering a mask row tints its region on the photo
+- Develop: the Local tab gathers masks and retouch; the panel drawer stays visible while hovered
+- Auto: subject-aware auto-tone, and an auto-crop that frames the detected subject
+- Presets: Ctrl+⇧+1–9 apply your saved presets by position
+- Cull: closed-eye detection — scan a folder and filter or badge photos where eyes are closed
+- Cull: sharpness and subject-focus scores, a "Soft" filter for reject sweeps, and a folder-wide analyze control
+- Cull: burst grouping — near-duplicate series collapse to their sharpest frame, with badges, auto-judge, and ⇧P/⇧X best-of-burst keys
+- Cull: flags and ratings have undo history — one Ctrl+Z per culling stroke
+- Cull: browsing never stalls on a RAW decode, and background rendering works outward from the photo you're on
+- Settings: Models section shows downloaded AI weights and lets you delete them
+- Grid: thumbnails recover from transient load errors and refresh immediately after AI analysis
+
 ## 0.3.0 - 2026-07-13
 
 - Local adjustments: linear, radial and brush masks, in their own Masks tab
