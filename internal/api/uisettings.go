@@ -123,14 +123,33 @@ type AutoPreset struct {
 	Offsets  map[string]float64 `json:"offsets"`
 }
 
-// UserPreset is one saved develop look: an absolute Params snapshot taken
-// from the current draft (geometry stripped by the client — a preset is a
-// look, not a crop). Unmarshalling through edit.Params means presets stored
-// by older builds gain new fields as neutral zeros on read.
+// UserPreset is one saved develop look: a Params snapshot taken from the
+// current draft (geometry stripped by the client — a preset is a look, not a
+// crop). Params is always the FULL struct — Sections filters at apply time,
+// so the re-marshal through edit.Params never has to represent sparse
+// fields. Unmarshalling through edit.Params means presets stored by older
+// builds gain new fields as neutral zeros on read; presets saved before the
+// Sections/Relative/BaseExpEV/AutoSections fields existed read back as
+// nil/false/0, which the client treats as "all sections, absolute, no
+// exposure re-anchor" — exactly the old apply behavior.
 type UserPreset struct {
 	ID     string      `json:"id"`
 	Name   string      `json:"name"`
 	Params edit.Params `json:"params"`
+	// Sections is the look groups this preset carries (client group ids,
+	// e.g. "tone", "color"); empty means all of them (legacy presets).
+	Sections []string `json:"sections,omitempty"`
+	// Relative applies the params as deltas from neutral on top of the
+	// photo's current edits instead of absolute values.
+	Relative bool `json:"relative,omitempty"`
+	// BaseExpEV is the source photo's measured camera-mimic baseline at
+	// save time; the client re-anchors ExpEV to the target photo's
+	// baseline with it. 0 = unknown (legacy preset or unmeasured photo).
+	BaseExpEV float64 `json:"baseExpEV,omitempty"`
+	// AutoSections makes the preset adaptive: the client runs these auto
+	// sections ("tone"/"wb"/"color") on the target photo first and lays
+	// the (relative) params on top of the result.
+	AutoSections []string `json:"autoSections,omitempty"`
 }
 
 // ExportOptions is the last-used state of the export dialog, persisted as
@@ -507,7 +526,10 @@ func (u *Settings) SetAutoPresets(ctx context.Context, presets []AutoPreset) err
 }
 
 // SetUserPresets replaces the saved develop looks (add, remove, and rename
-// are all "send the new list", like the auto presets).
+// are all "send the new list", like the auto presets). Sections and
+// AutoSections are stored as sent — like AutoPreset, unknown ids from
+// older/newer builds survive as stored and the client sanitizes on read
+// (an unknown section id simply matches no fields at apply time).
 func (u *Settings) SetUserPresets(ctx context.Context, presets []UserPreset) error {
 	if presets == nil {
 		presets = []UserPreset{}

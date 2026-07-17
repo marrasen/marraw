@@ -48,7 +48,8 @@ export function CullView({
   // this photo (mode switch) is kept — reloading would reset overlay state.
   useEffect(() => {
     if (!photo) return;
-    if (useEditSession.getState().photoId !== photo.id) void esLoad(client, photo.id, [photo.id]);
+    if (useEditSession.getState().photoId !== photo.id)
+      void esLoad(client, photo.id, [photo.id], photo.baseExpEV ?? 0);
     else esSetApplyIds([photo.id]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, photo?.id]);

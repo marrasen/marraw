@@ -26,6 +26,13 @@ import {
   NEUTRAL,
   useEditSession,
 } from '@/lib/editSession';
+import {
+  applyUserPreset,
+  PRESET_GROUPS,
+  presetSections,
+  stripToLook,
+  type PresetGroup,
+} from '@/lib/presetSections';
 import { useUIStore } from '@/stores/uiStore';
 
 const THUMB_PX = 168;
@@ -131,8 +138,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 // UserPresetsSection is the saved-looks library: saving snapshots the current
-// draft minus geometry (a preset is a look, not a crop), applying lays the
-// look over the photo while keeping its own rotation/flip/crop/straighten.
+// draft minus geometry and local adjustments (a preset is a look, not a
+// crop), with a section picker choosing which look groups the preset
+// carries. Applying overlays only those sections onto the photo's draft.
 // Cards carry a live low-res render of the look on the focused photo.
 function UserPresetsSection({
   client,
@@ -146,26 +154,23 @@ function UserPresetsSection({
   const presets = useUIStore((s) => s.userPresets);
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState('');
+  const [sections, setSections] = useState<PresetGroup[]>(PRESET_GROUPS.map((g) => g.id));
   const thumbs = useUserPresetThumbs(client, photo, presets);
 
   const save = () => {
     const trimmed = name.trim();
-    if (!draft || !trimmed) return;
-    const params: Params = {
-      ...draft,
-      rotate: 0,
-      flipH: false,
-      cropX: 0,
-      cropY: 0,
-      cropW: 0,
-      cropH: 0,
-      cropAngle: 0,
+    if (!draft || !trimmed || sections.length === 0) return;
+    const preset: UserPreset = {
+      id: crypto.randomUUID(),
+      name: trimmed,
       // Masks and retouch spots are local geometry tied to one photo's
-      // content, not a look.
-      masks: undefined,
-      spots: undefined,
+      // content, not a look; geometry stays with the photo too.
+      params: stripToLook(draft),
+      // All sections checked stores as "all" (empty) — the legacy shape,
+      // and new sections added by future builds stay included.
+      sections: sections.length === PRESET_GROUPS.length ? undefined : sections,
     };
-    updateUserPresets(client, [...presets, { id: crypto.randomUUID(), name: trimmed, params }]);
+    updateUserPresets(client, [...presets, preset]);
     setNaming(false);
     setName('');
     toast.success(`Saved preset “${trimmed}”`);
@@ -194,7 +199,19 @@ function UserPresetsSection({
                     <div className="h-full w-full animate-pulse bg-white/5" />
                   )}
                 </div>
-                <span className="truncate px-2 py-1.5 text-[12px] group-hover:text-foreground">{p.name}</span>
+                <span className="flex items-baseline gap-1.5 truncate px-2 py-1.5">
+                  <span className="truncate text-[12px] group-hover:text-foreground">{p.name}</span>
+                  {(p.sections?.length ?? 0) > 0 && (
+                    <span
+                      className="shrink-0 text-[9px] tracking-[.05em] text-muted-foreground uppercase"
+                      title={`Partial preset: ${presetSections(p)
+                        .map((id) => PRESET_GROUPS.find((g) => g.id === id)?.label ?? id)
+                        .join(', ')}`}
+                    >
+                      {presetSections(p).length}/{PRESET_GROUPS.length}
+                    </span>
+                  )}
+                </span>
               </button>
               <button
                 className="absolute top-1 right-1 hidden size-5 items-center justify-center rounded-md bg-black/60 text-white/80 group-hover:flex hover:bg-black/80 hover:text-white"
@@ -209,24 +226,53 @@ function UserPresetsSection({
         </div>
       )}
       {naming ? (
-        <div className="flex items-center gap-2">
-          <input
-            autoFocus
-            className="h-[30px] min-w-0 flex-1 rounded-lg border border-input bg-secondary px-2.5 text-xs text-secondary-foreground outline-none focus:border-ring dark:bg-white/5"
-            placeholder="Preset name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            // Stop the global keyboard map from rating/flagging while typing.
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter') save();
-              if (e.key === 'Escape') setNaming(false);
-            }}
-            aria-label="Preset name"
-          />
-          <Button size="sm" onClick={save} disabled={!name.trim()}>
-            Save
-          </Button>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              className="h-[30px] min-w-0 flex-1 rounded-lg border border-input bg-secondary px-2.5 text-xs text-secondary-foreground outline-none focus:border-ring dark:bg-white/5"
+              placeholder="Preset name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              // Stop the global keyboard map from rating/flagging while typing.
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') save();
+                if (e.key === 'Escape') setNaming(false);
+              }}
+              aria-label="Preset name"
+            />
+            <Button size="sm" onClick={save} disabled={!name.trim() || sections.length === 0}>
+              Save
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {PRESET_GROUPS.map((g) => {
+              const on = sections.includes(g.id);
+              return (
+                <button
+                  key={g.id}
+                  className={cn(
+                    'rounded-md border px-1.5 py-0.5 text-[11px] transition-colors',
+                    on
+                      ? 'border-primary/50 bg-primary/15 text-accent-text'
+                      : 'border-input text-muted-foreground hover:text-foreground',
+                  )}
+                  onClick={() =>
+                    setSections((cur) =>
+                      // Keep catalog order so the stored list reads stably.
+                      on
+                        ? cur.filter((s) => s !== g.id)
+                        : PRESET_GROUPS.map((x) => x.id).filter((id) => id === g.id || cur.includes(id)),
+                    )
+                  }
+                  title={on ? `Exclude ${g.label} from the preset` : `Include ${g.label} in the preset`}
+                >
+                  {g.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       ) : (
         <Button size="sm" variant="outline" className="w-fit" disabled={!draft} onClick={() => setNaming(true)}>
@@ -239,24 +285,30 @@ function UserPresetsSection({
 }
 
 // useUserPresetThumbs renders a small preview of each saved look applied to
-// the focused photo. Same lifecycle rules as usePresetThumbs, minus the
-// autoAdjust round trip — the params are already absolute.
+// the focused photo — through the same merge clicking would run (sections
+// filter, relative deltas, exposure re-anchor), so a partial preset's thumb
+// shows what applying it to the CURRENT draft actually produces. Same
+// lifecycle rules as usePresetThumbs, minus the autoAdjust round trip.
 function useUserPresetThumbs(client: ApiClient, photo: Photo | undefined, presets: UserPreset[]) {
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
-  const presetsKey = JSON.stringify(presets.map((p) => p.id));
+  const presetsKey = JSON.stringify(presets.map((p) => [p.id, p.sections, p.relative]));
   const photoId = photo?.id;
 
   useEffect(() => {
     if (!photo || presets.length === 0) return;
     let alive = true;
     const urls: string[] = [];
+    // Snapshot the base ONCE, like usePresetThumbs: thumbnails stay a stable
+    // function of photo × preset instead of re-rendering per commit.
+    const base = useEditSession.getState().draft ?? { ...NEUTRAL };
+    const baseEV = photo.baseExpEV ?? 0;
     // Clear stale thumbs before the async regen loop below.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setThumbs({});
     (async () => {
       for (const p of presets) {
         try {
-          const blob = await previewEdit(client, photo.id, p.params, THUMB_PX);
+          const blob = await previewEdit(client, photo.id, applyUserPreset(base, p, baseEV), THUMB_PX);
           if (!alive) return;
           const url = URL.createObjectURL(blob);
           urls.push(url);

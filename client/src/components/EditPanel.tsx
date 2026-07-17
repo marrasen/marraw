@@ -118,7 +118,7 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
   // the crop overlay in the very click that opened it from Library.
   useEffect(() => {
     if (focusId != null && useEditSession.getState().photoId !== focusId)
-      void esLoad(client, focusId, ids);
+      void esLoad(client, focusId, ids, photos.find((p) => p.id === focusId)?.baseExpEV ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, focusId]);
   const idsKey = ids.join(',');

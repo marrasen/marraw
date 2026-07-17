@@ -21,6 +21,7 @@ import {
 import type { Mask, Params, Spot } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPresets';
+import { applyUserPreset } from '@/lib/presetSections';
 import {
   CONTROL_ORDER,
   CONTROL_SPECS,
@@ -115,6 +116,9 @@ interface HistoryEntry {
 interface EditSessionState {
   photoId: number | null;
   applyIds: number[]; // commit targets; >1 when multiple photos selected
+  // The focused photo's measured camera-mimic exposure baseline
+  // (photo.baseExpEV; 0 = unmeasured). Presets re-anchor exposure to it.
+  baseExpEV: number;
   draft: Params | null;
   // The previous photo's draft, kept through esLoad's null gap so panels can
   // stay rendered (values snap when the new params land) instead of flashing
@@ -178,6 +182,7 @@ interface EditSessionState {
 export const useEditSession = create<EditSessionState>(() => ({
   photoId: null,
   applyIds: [],
+  baseExpEV: 0,
   draft: null,
   lastDraft: null,
   loading: false,
@@ -393,8 +398,10 @@ function labelForDiff(prev: Params, next: Params): string {
   return label;
 }
 
-// esLoad opens an edit session for the newly focused photo.
-export async function esLoad(client: ApiClient, photoId: number, applyIds: number[]) {
+// esLoad opens an edit session for the newly focused photo. baseExpEV is
+// the photo's measured camera-mimic baseline (photo.baseExpEV; 0 when
+// unmeasured or the caller doesn't have the payload at hand).
+export async function esLoad(client: ApiClient, photoId: number, applyIds: number[], baseExpEV = 0) {
   window.clearTimeout(commitTimer);
   applyGen++; // supersede any autoAdjust still in flight for the old photo
   pending = null; // BEFORE the abort: its finally must not refire for the old photo
@@ -404,6 +411,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
   setState((s) => ({
     photoId,
     applyIds,
+    baseExpEV,
     draft: null,
     lastDraft: s.draft ?? s.lastDraft,
     loading: true,
@@ -1108,32 +1116,16 @@ export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
   }
 }
 
-// esApplyUserPreset lays a saved "My presets" look over the photo while
-// keeping the photo's own geometry and local adjustments: rotation, flip,
-// crop, straighten, masks and retouch spots stay untouched (a preset is a
-// look, not a crop). Shared by the Presets tab and the Ctrl+Shift+1..9
-// shortcuts.
+// esApplyUserPreset lays a saved "My presets" look over the photo's current
+// draft: only the preset's included sections move (applyUserPreset —
+// sections filter, relative deltas, exposure re-anchored to the photo's
+// calibrated baseline), so geometry, masks, retouch spots, and every
+// section the preset doesn't carry keep the photo's own values. Shared by
+// the Presets tab and the Ctrl+Shift+1..9 shortcuts.
 export function esApplyUserPreset(client: ApiClient, preset: UserPreset) {
-  const d = useEditSession.getState().draft;
-  if (!d) return;
-  esApplyParams(
-    client,
-    {
-      ...preset.params,
-      rotate: d.rotate,
-      flipH: d.flipH,
-      cropX: d.cropX,
-      cropY: d.cropY,
-      cropW: d.cropW,
-      cropH: d.cropH,
-      cropAngle: d.cropAngle,
-      // The photo keeps its own local adjustments (like its crop) — and a
-      // preset saved by an older build can't clobber them either.
-      masks: d.masks,
-      spots: d.spots,
-    },
-    { label: preset.name },
-  );
+  const s = useEditSession.getState();
+  if (!s.draft) return;
+  esApplyParams(client, applyUserPreset(s.draft, preset, s.baseExpEV), { label: preset.name });
 }
 
 // computePresetParams resolves a creative-auto preset to concrete params for a

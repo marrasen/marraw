@@ -143,6 +143,10 @@ export interface UserPreset {
     id: string;
     name: string;
     params: Params;
+    sections?: string[];
+    relative?: boolean;
+    baseExpEV?: number;
+    autoSections?: string[];
 }
 
 export interface Watermark {
