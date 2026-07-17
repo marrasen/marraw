@@ -262,6 +262,15 @@ async function createWindow(opts = {}) {
     if (process.env.MARRAW_OPEN_FOLDER && !query.openFolder) query.openFolder = process.env.MARRAW_OPEN_FOLDER;
     if (process.env.MARRAW_LOUPE) query.loupe = '1';
     if (process.env.MARRAW_SHOT) query.shot = process.env.MARRAW_SHOT; // scripts/shot.mjs
+    // Focus a specific frame (by file name) before the shot runs — lets a
+    // capture aim at a chosen photo instead of the renderer's default.
+    if (process.env.MARRAW_SHOT_FOCUS) query.shotFocus = process.env.MARRAW_SHOT_FOCUS;
+    // Override the time-gap grouping (minutes) for the capture session.
+    if (process.env.MARRAW_SHOT_GAP) query.shotGap = process.env.MARRAW_SHOT_GAP;
+    // Leave the auto-hiding chrome (filmstrip deck) hidden in the capture.
+    if (process.env.MARRAW_SHOT_NO_WAKE) query.shotNoWake = '1';
+    // AI mask kind for the aitint shot (subject|depth|scene).
+    if (process.env.MARRAW_SHOT_AI) query.shotAI = process.env.MARRAW_SHOT_AI;
     // Seed for the `welcome` shot: an old version makes the "What's new"
     // card render ("" = fresh-install state).
     if (process.env.MARRAW_SEED_LAST_SEEN != null)

@@ -6,10 +6,10 @@ keep a little, and want the boring part to be over quickly.
 marraw is a desktop app: a Go daemon that talks to LibRaw does the pixel work,
 a React front-end does the rest, and Electron holds it together.
 
-![Cull mode: a full-bleed photo of a Spitfire on an airfield, a pick/reject bar below it, and a filmstrip deck along the bottom broken into time-gap groups](screenshots/marraw_cull.jpg)
+![Cull mode: a full-bleed aerial photo of an archipelago village, a pick/reject bar below it, and a filmstrip deck along the bottom](screenshots/marraw_cull.jpg)
 
-<sup>Cull mode. The scrubber deck has already broken 191 frames into 31 groups —
-note the `+6 min gap`, `+3 min gap` dividers between runs.</sup>
+<sup>Cull mode. A 191-frame flight already sliced into 17 groups by shooting
+gaps; the full-bleed loupe keeps your zoom and pan as you arrow through.</sup>
 
 > **Status: early.**
 > marraw is usable daily, and the scope has been growing fast — smart culling
@@ -62,7 +62,7 @@ moments you actually shot, without stacks to expand, albums to build, or a
 single click. The Cull contact sheet (`G`) shows the same groups as sections,
 so you can see a whole day's structure at once.
 
-![The contact sheet: a dark grid of aerial photos under a header reading 10:04 – 10:06, 46 frames, with a +2 min gap before badge on the right](screenshots/marraw_contact_sheet.jpg)
+![The contact sheet: a dark grid of aerial photos under a header reading 10:10 – 10:19, 52 frames, with a +2 min gap before badge on the right](screenshots/marraw_contact_sheet.jpg)
 
 <sup>The contact sheet (`G`). Each section header carries its time range, its
 frame count, and how long the dead time before it was.</sup>
@@ -116,7 +116,7 @@ its own crop).
 **`Ctrl+K` jumps to anything** — any mode, any panel, any single develop
 control, any preset.
 
-![A command palette floating over a dimmed Develop window, prompting Jump to any mode, control, or action, listing Go to Library, Go to Cull, Go to Develop, Contact sheet, Export, Add folder to library, Settings, Keyboard shortcuts](screenshots/marraw_jump.jpg)
+![A command palette floating over a dimmed Develop window, prompting Jump to any mode, control, or action, listing Go to Library, Go to Cull, Go to Develop, Contact sheet, Export, Copy image to clipboard, Add folder to library, Settings](screenshots/marraw_jump.jpg)
 
 ---
 
@@ -129,10 +129,10 @@ control, any preset.
 | **Develop** | Darkroom canvas, pinnable panel, floating quick-dials you choose, crop and white-balance overlays. |
 | **Export** | JPEG, lossless TIFF / PNG, or RAW + XMP handoff — batched across every core. |
 
-![Develop mode: the photo on a darkroom canvas, a floating quick-dial strip beneath it, and a right-hand panel with an RGB histogram over crop, tone, presence and white-balance sliders](screenshots/marraw_develop.jpg)
+![Develop mode: an aerial village photo on a darkroom canvas, a floating quick-dial strip beneath it, and a right-hand panel with an RGB histogram over crop, tone, presence and white-balance sliders](screenshots/marraw_develop.jpg)
 
 <sup>Develop mode. The panel is pinned open; the quick-dials under the canvas
-(exposure, shadows, vibrance) are the three controls you chose to keep at hand.</sup>
+are the controls you chose to keep at hand.</sup>
 
 ### Editing tools
 
@@ -166,6 +166,18 @@ control, any preset.
 - **Detail** — sharpen, highlight recovery (clip/unclip/blend/rebuild), noise
   reduction, FBDD denoise, median passes, demosaic algorithm (VNG/PPG/AHD/DHT),
   manual chromatic-aberration correction.
+
+![Develop mode with the Local tab open: a red tint hugging the cockpit frame of an aerial photo, and a Depth mask row with a two-thumb depth-range slider in the panel](screenshots/marraw_masks.jpg)
+
+<sup>An AI Depth mask on the Local tab. The two-thumb slider windows the
+near-to-far range — here the cockpit and wing — and hovering the mask row
+tints its region on the photo.</sup>
+
+![Develop mode with the heal brush active: a painted region over an aerial village, connected by a dashed line to its source region, with brush size and feather controls in the panel](screenshots/marraw_retouch.jpg)
+
+<sup>The heal brush. Paint over anything; the fill comes from a matching,
+movable source region — the overlay shows the painted area, its source, and
+the connector between them.</sup>
 
 Every slider has a letter shortcut: press it, then `+`/`-` to adjust
 (`Shift` for a big step), `Esc` to release. Press `?` for the full list.

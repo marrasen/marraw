@@ -17,7 +17,16 @@ const ui = () => mw.useUIStore.getState();
 await until(() => ui().visibleIds.length > 0);
 const shot = new URLSearchParams(location.search).get('shot') || 'cull';
 
-ui().focus(ui().visibleIds[6] ?? ui().visibleIds[0]);
+// ?shotFocus=<n> aims the capture at the n-th visible frame (capture order)
+// instead of the default 7th — used to keep chosen subjects in the frame.
+// ?shotGap=<min> overrides the time-gap grouping for the capture session.
+const params = new URLSearchParams(location.search);
+const focusIdx = Number(params.get('shotFocus') ?? 6);
+if (params.get('shotGap')) {
+  mw.setGapMinutes(Number(params.get('shotGap')));
+  await sleep(800); // server write + regroup round-trip
+}
+ui().focus(ui().visibleIds[focusIdx] ?? ui().visibleIds[6] ?? ui().visibleIds[0]);
 await sleep(300);
 if (shot === 'cull') {
   ui().setMode('cull');
@@ -192,9 +201,12 @@ if (shot === 'cull') {
     escCleared: es.getState().activeMask == null && es.getState().activeMaskControl == null,
   };
 } else if (shot === 'aitint') {
-  // AI mask hover tint: generate a subject mask via the real button, hover
-  // its row header, and assert the server-rendered red tint appears over the
-  // loupe (the only visualization an AI mask has).
+  // AI mask hover tint: generate an AI mask via the real button (subject by
+  // default; ?shotAI=depth|scene picks another kind), hover its row header,
+  // and assert the server-rendered red tint appears over the loupe (the only
+  // visualization an AI mask has).
+  const aiKind = params.get('shotAI') || 'subject';
+  const aiRow = { subject: 'Subject ', depth: 'Depth ', scene: 'Scene ' }[aiKind] ?? 'Subject ';
   ui().setMode('develop');
   const es = mw.useEditSession;
   await until(() => es.getState().draft != null);
@@ -203,13 +215,13 @@ if (shot === 'cull') {
   mw.esUpdate({ masks: [] }); // idempotence: drop persisted masks first
   mw.esCommit();
   await sleep(800);
-  document.querySelector('[data-testid="ai-mask-subject"]')?.click();
+  document.querySelector(`[data-testid="ai-mask-${aiKind}"]`)?.click();
   // Generation runs a local model (seconds warm; the map may also already
   // exist from a previous run) and adds the mask on success.
   await until(() => (es.getState().draft?.masks ?? []).some((m) => m.type === 'ai'), 120000);
   await sleep(500);
   // Hover the mask row header (React onMouseEnter listens to mouseover).
-  const row = [...document.querySelectorAll('span')].find((s) => s.textContent.startsWith('Subject '));
+  const row = [...document.querySelectorAll('span')].find((s) => s.textContent.startsWith(aiRow));
   row?.parentElement?.parentElement?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
   const tintImg = () => document.querySelector('[data-testid="mask-hover-tint"] img');
   await until(() => tintImg()?.complete && tintImg()?.naturalWidth > 0, 15000);
@@ -334,6 +346,9 @@ if (shot === 'cull') {
 } else if (shot === 'light') {
   document.documentElement.classList.remove('dark');
 } else if (shot === 'palette') {
+  // Over Develop, like the README's jump shot — not over the startup grid.
+  ui().setMode('develop');
+  await sleep(1500);
   ui().setPaletteOpen(true);
 } else if (shot === 'export') {
   ui().setExportOpen(true);
@@ -909,8 +924,11 @@ if (shot === 'cull') {
   };
 }
 // Let previews decode, then wake the chrome (capture fires on resolve).
+// ?shotNoWake=1 leaves the auto-hiding chrome (filmstrip deck) hidden.
 await sleep(3600);
-window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
+if (!params.get('shotNoWake')) {
+  window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 300 }));
+}
 await sleep(400);
 const probe =
   window.__autoCropProbe ??
