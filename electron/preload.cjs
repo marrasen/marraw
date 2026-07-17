@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('marraw', {
     (process.platform === 'linux' && !!process.env.APPIMAGE),
   getAutoUpdate: () => ipcRenderer.invoke('marraw:get-auto-update'),
   setAutoUpdate: (on) => ipcRenderer.invoke('marraw:set-auto-update', on),
+  // Beta-channel opt-in (GitHub pre-releases). Unset follows the running
+  // version; see main.cjs betaChannelEnabled.
+  getBetaChannel: () => ipcRenderer.invoke('marraw:get-beta-channel'),
+  setBetaChannel: (on) => ipcRenderer.invoke('marraw:set-beta-channel', on),
 });
 
 // Frameless-window controls (diff handoff "frameless window + baked-in controls").

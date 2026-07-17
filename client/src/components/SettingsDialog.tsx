@@ -233,6 +233,7 @@ function GeneralSection() {
         }
       />
       <AutoUpdateRow />
+      <BetaChannelRow />
     </div>
   );
 }
@@ -274,6 +275,46 @@ function AutoUpdateRow() {
       control={
         <Switch checked={enabled} onCheckedChange={toggle} aria-label="Automatic updates" />
       }
+    />
+  );
+}
+
+/**
+ * Beta-channel opt-in, stored next to the auto-update pref in the shell's
+ * preferences.json. Left untouched it follows the running version (a beta
+ * install tracks its cycle's betas); flipping the switch pins the choice
+ * across updates.
+ */
+function BetaChannelRow() {
+  const bridge = window.marraw;
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    bridge?.getBetaChannel?.().then((v) => live && setEnabled(v), () => {});
+    return () => {
+      live = false;
+    };
+  }, [bridge]);
+
+  if (!bridge?.getBetaChannel || !bridge.updatesSupported || enabled === null) return null;
+
+  const toggle = (on: boolean) => {
+    setEnabled(on); // optimistic: the switch must not lag the pointer
+    bridge.setBetaChannel?.(on).then(
+      (v) => setEnabled(v),
+      (err: Error) => {
+        setEnabled(!on);
+        toast.error(err.message);
+      },
+    );
+  };
+
+  return (
+    <SettingRow
+      title="Beta versions"
+      description="Update to beta releases as well as stable ones. Betas are for trying features early; a beta always moves on to the final stable release when it ships."
+      control={<Switch checked={enabled} onCheckedChange={toggle} aria-label="Beta versions" />}
     />
   );
 }

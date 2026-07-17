@@ -13,6 +13,9 @@ declare global {
       updatesSupported?: boolean;
       getAutoUpdate?: () => Promise<boolean>;
       setAutoUpdate?: (on: boolean) => Promise<boolean>;
+      // Absent on builds predating the beta-channel setting — feature-check.
+      getBetaChannel?: () => Promise<boolean>;
+      setBetaChannel?: (on: boolean) => Promise<boolean>;
     };
     win?: {
       minimize: () => void;

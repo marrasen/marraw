@@ -70,6 +70,17 @@ function writePrefs(prefs) {
 // Opt-out, not opt-in: an unsigned app that silently goes stale is worse than
 // one that updates itself.
 const autoUpdateEnabled = () => readPrefs().autoUpdate !== false;
+// Beta channel is tri-state: unset defers to electron-updater's own default
+// (prereleases only when the running version is itself a prerelease, so a
+// beta install tracks its cycle with nothing stored), while an explicit
+// choice pins the channel across updates — including past the stable release
+// that would otherwise drop a beta install back to the stable channel.
+const IS_PRERELEASE = app.getVersion().includes('-');
+const betaChannelEnabled = () => readPrefs().betaChannel ?? IS_PRERELEASE;
+function applyUpdateChannel() {
+  const beta = readPrefs().betaChannel;
+  if (beta != null) autoUpdater.allowPrerelease = !!beta;
+}
 
 // Check GitHub Releases on launch, download a newer version in the background,
 // swap it in on quit. Draft releases are invisible here, so an unpublished
@@ -90,6 +101,7 @@ function initAutoUpdater() {
   if (autoUpdater) {
     // Re-enabled mid-session: the listeners are already attached, just look.
     autoUpdater.autoInstallOnAppQuit = true;
+    applyUpdateChannel();
     autoUpdater.checkForUpdatesAndNotify().catch(() => {});
     return;
   }
@@ -99,6 +111,7 @@ function initAutoUpdater() {
     console.error(`[updater] unavailable: ${err.message}`);
     return;
   }
+  applyUpdateChannel();
   autoUpdater.on('error', (err) => console.error(`[updater] ${err?.message ?? err}`));
   autoUpdater.on('update-available', (i) => console.log(`[updater] ${i.version} available`));
   autoUpdater.on('update-not-available', () => console.log('[updater] up to date'));
@@ -121,6 +134,23 @@ ipcMain.handle('marraw:set-auto-update', (_ev, on) => {
     autoUpdater.autoInstallOnAppQuit = false;
   }
   return prefs.autoUpdate;
+});
+
+ipcMain.handle('marraw:get-beta-channel', () => betaChannelEnabled());
+ipcMain.handle('marraw:set-beta-channel', (_ev, on) => {
+  const prefs = readPrefs();
+  prefs.betaChannel = !!on;
+  writePrefs(prefs);
+  if (autoUpdater) {
+    autoUpdater.allowPrerelease = prefs.betaChannel;
+    // Joining the channel should surface a pending beta now, not next launch.
+    // Leaving it only affects future checks: a beta already downloaded still
+    // installs on quit (there is no API to discard a staged update).
+    if (prefs.betaChannel && autoUpdateEnabled()) {
+      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+    }
+  }
+  return prefs.betaChannel;
 });
 
 async function startDaemon() {
