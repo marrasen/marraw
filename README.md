@@ -6,10 +6,11 @@ keep a little, and want the boring part to be over quickly.
 marraw is a desktop app: a Go daemon that talks to LibRaw does the pixel work,
 a React front-end does the rest, and Electron holds it together.
 
-![Cull mode: a full-bleed aerial photo of an archipelago village, a pick/reject bar below it, and a filmstrip deck along the bottom](screenshots/marraw_cull.jpg)
+![Cull mode: a full-bleed aerial photo of a harbor village with a church, a pick/reject bar below it, and a filmstrip deck along the bottom with a group header and gap divider](screenshots/marraw_cull.jpg)
 
 <sup>Cull mode. A 191-frame flight already sliced into 17 groups by shooting
-gaps; the full-bleed loupe keeps your zoom and pan as you arrow through.</sup>
+gaps — note the `+2 min gap` divider in the deck; the full-bleed loupe keeps
+your zoom and pan as you arrow through.</sup>
 
 > **Status: early.**
 > marraw is usable daily, and the scope has been growing fast — smart culling

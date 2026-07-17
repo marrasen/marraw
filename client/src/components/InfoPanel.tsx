@@ -7,12 +7,15 @@ import { EYES_CLOSED_BADGE } from '@/lib/eyes';
 import { Histogram } from '@/components/Histogram';
 import { NavigatorMap } from '@/views/LoupeView';
 import { useLoupeNav } from '@/lib/loupeNav';
+import { useUIStore } from '@/stores/uiStore';
 import { formatAperture, formatBytes, formatCaptured, formatResolution, formatShutter } from '@/lib/exif';
 
 export function InfoPanel({ photo }: { photo: Photo }) {
   const viewport = useLoupeNav((s) => s.viewport);
   const scale = useLoupeNav((s) => s.scale);
   const panTo = useLoupeNav((s) => s.panTo);
+  // The HUD and top bar show only the folder NAME; the full path lives here.
+  const folderPath = useUIStore((s) => s.folderPath);
 
   const fileName = photo.fileName.split(/[\\/]/).pop() ?? photo.fileName;
 
@@ -31,6 +34,7 @@ export function InfoPanel({ photo }: { photo: Photo }) {
       <Section title="Info">
         <dl className="flex flex-col gap-1.5">
           <Row label="File" value={fileName} title={photo.fileName} />
+          {folderPath && <Row label="Folder" value={folderPath} />}
           <Row label="Resolution" value={formatResolution(photo.width, photo.height)} />
           <Row label="File size" value={formatBytes(photo.fileSize)} />
           {photo.sharpness != null && (

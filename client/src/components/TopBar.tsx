@@ -4,7 +4,7 @@ import { TaskTray } from '@/components/TaskTray';
 import { WindowControls } from '@/components/WindowControls';
 import { modK } from '@/lib/platform';
 import { useUIStore, type Mode } from '@/stores/uiStore';
-import { rootName, samePath, useLibraryRoots } from '@/lib/library';
+import { baseName, rootName, samePath, useLibraryRoots } from '@/lib/library';
 import '@/lib/electron';
 
 const MODE_ITEMS: { value: Mode | 'export'; label: string }[] = [
@@ -28,7 +28,8 @@ export function TopBar() {
   const { roots } = useLibraryRoots();
 
   const current = folderPath ? roots.find((r) => samePath(r.path, folderPath)) : undefined;
-  const shootName = current ? rootName(current) : folderPath ? folderPath : 'marraw';
+  // Folder NAME only (the tooltip carries the full path) — matches CinemaHUD.
+  const shootName = current ? rootName(current) : folderPath ? baseName(folderPath) : 'marraw';
   const hasFolder = folderPath != null;
 
   // The whole bar is the frameless window's move handle; every interactive

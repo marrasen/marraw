@@ -5,7 +5,7 @@ import { useConnection } from '@/api/client';
 import { modK } from '@/lib/platform';
 import { useHoverKeep } from '@/lib/useIdle';
 import { cn } from '@/lib/utils';
-import { rootName, samePath, useLibraryRoots } from '@/lib/library';
+import { baseName, rootName, samePath, useLibraryRoots } from '@/lib/library';
 import { useUIStore, type Mode } from '@/stores/uiStore';
 
 const MODE_ITEMS: { value: Mode | 'export'; label: string }[] = [
@@ -61,8 +61,10 @@ export function CinemaHUD({
           <div className="flex size-[18px] items-center justify-center rounded-[5px] bg-primary text-[11px] font-bold text-primary-foreground">
             m
           </div>
-          <span className="text-[12.5px] font-semibold">
-            {current ? rootName(current) : (folderPath ?? 'marraw')}
+          {/* Folder NAME only — a full path collides with the centered mode
+              control; the full path lives in the Info tab (and the tooltip). */}
+          <span className="text-[12.5px] font-semibold" title={folderPath ?? undefined}>
+            {current ? rootName(current) : folderPath ? baseName(folderPath) : 'marraw'}
           </span>
           {status}
           <span
