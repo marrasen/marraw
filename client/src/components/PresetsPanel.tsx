@@ -155,6 +155,7 @@ function UserPresetsSection({
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState('');
   const [sections, setSections] = useState<PresetGroup[]>(PRESET_GROUPS.map((g) => g.id));
+  const [relative, setRelative] = useState(false);
   const thumbs = useUserPresetThumbs(client, photo, presets);
 
   const save = () => {
@@ -169,6 +170,12 @@ function UserPresetsSection({
       // All sections checked stores as "all" (empty) — the legacy shape,
       // and new sections added by future builds stay included.
       sections: sections.length === PRESET_GROUPS.length ? undefined : sections,
+      relative: relative || undefined,
+      // The source photo's calibrated exposure baseline: apply re-anchors
+      // the look's creative exposure to the target photo's baseline, so a
+      // preset saved on a +1.3 EV-compensated shot doesn't drag that
+      // compensation onto differently calibrated photos.
+      baseExpEV: photo?.baseExpEV || undefined,
     };
     updateUserPresets(client, [...presets, preset]);
     setNaming(false);
@@ -201,14 +208,15 @@ function UserPresetsSection({
                 </div>
                 <span className="flex items-baseline gap-1.5 truncate px-2 py-1.5">
                   <span className="truncate text-[12px] group-hover:text-foreground">{p.name}</span>
-                  {(p.sections?.length ?? 0) > 0 && (
+                  {((p.sections?.length ?? 0) > 0 || p.relative) && (
                     <span
                       className="shrink-0 text-[9px] tracking-[.05em] text-muted-foreground uppercase"
-                      title={`Partial preset: ${presetSections(p)
+                      title={`${p.relative ? 'Relative preset (stacks on existing edits)' : 'Partial preset'}: ${presetSections(p)
                         .map((id) => PRESET_GROUPS.find((g) => g.id === id)?.label ?? id)
                         .join(', ')}`}
                     >
-                      {presetSections(p).length}/{PRESET_GROUPS.length}
+                      {p.relative ? '± ' : ''}
+                      {(p.sections?.length ?? 0) > 0 ? `${presetSections(p).length}/${PRESET_GROUPS.length}` : ''}
                     </span>
                   )}
                 </span>
@@ -246,7 +254,20 @@ function UserPresetsSection({
               Save
             </Button>
           </div>
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap items-center gap-1">
+            <button
+              className={cn(
+                'rounded-md border px-1.5 py-0.5 text-[11px] transition-colors',
+                relative
+                  ? 'border-primary/50 bg-primary/15 text-accent-text'
+                  : 'border-input text-muted-foreground hover:text-foreground',
+              )}
+              onClick={() => setRelative((r) => !r)}
+              title="Relative: apply the look as offsets on top of a photo's existing edits instead of replacing them"
+            >
+              ± Relative
+            </button>
+            <span className="mx-0.5 h-3.5 w-px bg-border" />
             {PRESET_GROUPS.map((g) => {
               const on = sections.includes(g.id);
               return (
