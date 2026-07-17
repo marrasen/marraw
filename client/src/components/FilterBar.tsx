@@ -228,9 +228,10 @@ export function FilterBar({
         <span className="@max-[1440px]:hidden">Auto-judge</span>
       </button>
 
-      {/* Subject-aware focus: amber with a count once any frame is scored over
-          its AI subject matte, muted otherwise. Click opens the folder-wide
-          "analyze subjects & re-score focus" dialog. */}
+      {/* Subject-aware focus: amber once any frame is scored over its AI
+          subject matte (with a count while partially scanned), muted
+          otherwise. Click opens the folder-wide "analyze subjects & re-score
+          focus" dialog. */}
       <button
         onClick={() => setSubjectScanOpen(true)}
         disabled={photoCount === 0}
@@ -252,13 +253,15 @@ export function FilterBar({
       >
         <Focus className="size-[13px]" strokeWidth={1.75} />
         <span className="@max-[1440px]:hidden">
-          {subjectAnalyzed > 0 ? `${subjectAnalyzed}/${photoCount}` : 'Subjects'}
+          {subjectAnalyzed > 0 && subjectAnalyzed < photoCount
+            ? `${subjectAnalyzed}/${photoCount}`
+            : 'Subjects'}
         </span>
       </button>
 
-      {/* Closed-eye detection: amber with a count once any frame has been
-          checked, muted otherwise. Click opens the folder-wide "detect closed
-          eyes" dialog. */}
+      {/* Closed-eye detection: amber once any frame has been checked (with a
+          count while partially scanned), muted otherwise. Click opens the
+          folder-wide "detect closed eyes" dialog. */}
       <button
         onClick={() => setEyeScanOpen(true)}
         disabled={photoCount === 0}
@@ -280,7 +283,7 @@ export function FilterBar({
       >
         <Eye className="size-[13px]" strokeWidth={1.75} />
         <span className="@max-[1440px]:hidden">
-          {eyesAnalyzed > 0 ? `${eyesAnalyzed}/${photoCount}` : 'Eyes'}
+          {eyesAnalyzed > 0 && eyesAnalyzed < photoCount ? `${eyesAnalyzed}/${photoCount}` : 'Eyes'}
         </span>
       </button>
 

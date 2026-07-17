@@ -23,16 +23,16 @@ import (
 // Closed-eye detection: a cull-side soft signal, not an edit feature. The
 // scoring itself (YuNet face detection + a per-eye open/closed classifier
 // over the embedded thumb) lives in internal/eyes; this file wires it to the
-// store, the granular patch channel, and the on-demand folder scan. The
-// background calibrate pass (jobs.go) backfills scores only once both
-// models are on disk — it never downloads; the one-time download rides on
-// AnalyzeEyes after the client's consent dialog, like AnalyzeSubjects.
+// store, the granular patch channel, and the on-demand folder scan. Scoring
+// runs only through AnalyzeEyes after the client's consent dialog, like
+// AnalyzeSubjects — the one-time model download rides on that consent too;
+// nothing scores eyes uninvited.
 
 // scoreEyes measures photo's closed-eye probability from its embedded thumb,
 // persists it (-1 = measured but no judgeable face/eyes, hidden from clients
 // by nonNegativeFloat), and pushes a granular per-photo patch rather than a
-// full folder-list refresh. Shared by the calibrate-pass backfill and
-// AnalyzeEyes so the sentinel convention and store call live in one place.
+// full folder-list refresh. Split out of AnalyzeEyes so the sentinel
+// convention and store call live in one place.
 func (d *Deps) scoreEyes(ctx context.Context, photo store.Photo, thumb image.Image) error {
 	score, ok, err := eyes.Score(ctx, d.Infer, thumb, nil)
 	if err != nil {

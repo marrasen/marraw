@@ -635,8 +635,9 @@ if (shot === 'cull') {
   ui().setShowEditPanel(false);
   await sleep(400);
   const btn = () => document.querySelector('[data-testid="blinks-filter"]');
-  // The calibrate pass backfills eye scores once the models are installed
-  // (eyes-verify downloads them) — wait for the button to leave disabled.
+  // Eye scores exist only after a user-initiated scan (the calibrate pass no
+  // longer backfills) — run eyes-verify against this fixture first, then the
+  // button leaves disabled as the persisted scores stream in.
   await until(() => btn() && !btn().disabled, 60000);
   const ids = ui().visibleIds;
   const total = ids.length;
@@ -671,6 +672,36 @@ if (shot === 'cull') {
     badges,
     restored,
   };
+} else if (shot === 'scanlabels') {
+  // FilterBar scan-button labels: the N/M fraction shows only while a folder
+  // is PARTIALLY scanned — fully scanned folders show the plain word. Point
+  // this at a folder whose eyes scan has completed (eyes-noauto-verify leaves
+  // one behind) so the eyes-complete case rides real server data; overrides
+  // then drive the subjects-complete and both-partial cases.
+  ui().setMode('library');
+  ui().setView('grid');
+  ui().setShowEditPanel(false);
+  await sleep(400);
+  const label = (tid) =>
+    document.querySelector(`[data-testid="${tid}"]`)?.textContent?.trim() ?? null;
+  const ids = ui().visibleIds;
+  // Real state: eyes fully scanned server-side, subjects never scanned.
+  const real = { eyes: label('eye-scan-button'), subjects: label('subject-scan-button') };
+  // Fully scanned on both axes.
+  mw.useUIStore.setState({
+    overrides: new Map(ids.map((id) => [id, { eyesAnalyzed: true, subjectAnalyzed: true }])),
+  });
+  await sleep(300);
+  const full = { eyes: label('eye-scan-button'), subjects: label('subject-scan-button') };
+  // One frame unscanned on each axis → the fraction returns.
+  mw.useUIStore.setState({
+    overrides: new Map(ids.map((id, i) => [id, { eyesAnalyzed: i > 0, subjectAnalyzed: i > 0 }])),
+  });
+  await sleep(300);
+  const part = { eyes: label('eye-scan-button'), subjects: label('subject-scan-button') };
+  mw.useUIStore.setState({ overrides: new Map() });
+  await sleep(300);
+  window.__scanLabelsProbe = { total: ids.length, real, full, part };
 } else if (shot === 'cullundo') {
   // Flag/rating undo history: P → Ctrl+Z → Ctrl+⇧Z round-trips, stacked
   // rating undos, a burst judgement (⇧P) collapsing to ONE entry that
@@ -860,6 +891,7 @@ await sleep(400);
 const probe =
   window.__autoCropProbe ??
   window.__blinksProbe ??
+  window.__scanLabelsProbe ??
   window.__cullUndoProbe ??
   window.__healProbe ??
   window.__subjectProbe ??

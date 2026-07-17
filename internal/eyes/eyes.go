@@ -51,8 +51,8 @@ var (
 func DetectSpec() infer.ModelSpec { return detectModel }
 func StateSpec() infer.ModelSpec  { return stateModel }
 
-// ModelsInstalled reports whether both weights are on disk — the gate the
-// background calibrate pass uses so it never downloads anything itself.
+// ModelsInstalled reports whether both weights are on disk — the gate
+// AnalyzeEyes uses to decide whether a scan needs download consent.
 func ModelsInstalled(mgr *infer.Manager) bool {
 	return mgr.HasModel(detectModel) && mgr.HasModel(stateModel)
 }
@@ -87,8 +87,8 @@ const (
 func Score(ctx context.Context, mgr *infer.Manager, src image.Image, progress infer.Progress) (float64, bool, error) {
 	// The classifier session comes first even though it may go unused (a
 	// faceless frame): a consented scan must leave BOTH weights installed,
-	// or the calibrate pass's ModelsInstalled gate would stay closed for
-	// every photo ingested after a faceless first scan.
+	// or ModelsInstalled would stay false after a faceless first scan and
+	// the client would keep asking for download consent it already gave.
 	sess, err := mgr.Session(ctx, stateModel, progress)
 	if err != nil {
 		return 0, false, err

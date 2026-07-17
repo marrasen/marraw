@@ -18,7 +18,6 @@ import (
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
-	"github.com/marrasen/marraw/internal/eyes"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
@@ -163,17 +162,11 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 		return subjVer != "" && !p.SubjectSharpness.Valid &&
 			l.deps.Cache.AIMaps.Has(p.CacheKey, edit.AISubject, subjVer)
 	}
-	// Closed-eye detection follows the same never-run-inference-uninvited
-	// rule with a different gate: the pass backfills only once BOTH eye
-	// models are already on disk (AnalyzeEyes did the consented download);
-	// until then eyes_closed stays NULL and the photo doesn't re-enter.
-	eyesReady := l.deps.Infer != nil && eyes.ModelsInstalled(l.deps.Infer)
 	var work []calibItem
 	for _, p := range photos {
 		subj := needSubject(p)
-		eye := eyesReady && !p.EyesClosed.Valid
-		if !p.BaseExpEV.Valid || !p.Sharpness.Valid || !p.PHash.Valid || subj || eye {
-			work = append(work, calibItem{p: p, subject: subj, eyes: eye})
+		if !p.BaseExpEV.Valid || !p.Sharpness.Valid || !p.PHash.Valid || subj {
+			work = append(work, calibItem{p: p, subject: subj})
 		}
 	}
 	if len(work) == 0 {
@@ -189,7 +182,7 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 	g, gctx := errgroup.WithContext(tctx)
 	g.SetLimit(max(1, runtime.NumCPU()-2))
 	for _, it := range work {
-		p, needSubj, needEyes := it.p, it.subject, it.eyes
+		p, needSubj := it.p, it.subject
 		g.Go(func() error {
 			if gctx.Err() != nil {
 				return gctx.Err()
@@ -204,7 +197,7 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 					if err := proc.Open(p.Path()); err != nil {
 						return err
 					}
-					if !p.Sharpness.Valid || !p.PHash.Valid || needSubj || needEyes {
+					if !p.Sharpness.Valid || !p.PHash.Valid || needSubj {
 						if thumb, err := proc.EmbeddedThumb(); err == nil {
 							if img, err := jpeg.Decode(bytes.NewReader(thumb)); err == nil {
 								if !p.Sharpness.Valid {
@@ -225,11 +218,6 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 										if err := l.deps.scoreSubjectMatte(jctx, p, img, matte); err != nil {
 											return err
 										}
-									}
-								}
-								if needEyes {
-									if err := l.deps.scoreEyes(jctx, p, img); err != nil {
-										return err
 									}
 								}
 							}
@@ -335,11 +323,10 @@ type focusItem struct {
 
 // calibItem is a calibrate-pass work item: the photo plus whether its subject
 // matte needs scoring (computed once at selection so the job's inner passes
-// don't re-Stat the matte file) and whether closed-eye detection is due.
+// don't re-Stat the matte file).
 type calibItem struct {
 	p       store.Photo
 	subject bool
-	eyes    bool
 }
 
 // scheduleOutwardFromFocus runs n workers that each repeatedly claim the
