@@ -12,7 +12,7 @@ a React front-end does the rest, and Electron holds it together.
 note the `+6 min gap`, `+3 min gap` dividers between runs.</sup>
 
 > **Status: early. Windows only.**
-> Version 0.1 is usable daily but the feature set is deliberately narrow — read
+> marraw is usable daily but the feature set is deliberately narrow — read
 > [What marraw does *not* do](#what-marraw-does-not-do) before you invest time
 > in it. Nothing is stopping a macOS/Linux build except work; see
 > [DEVELOPER.md](DEVELOPER.md#porting-to-macos-and-linux).
