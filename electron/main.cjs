@@ -224,8 +224,10 @@ async function createWindow(opts = {}) {
   }
 
   const win = new BrowserWindow({
+    // 3:2, matching the photos — full-bleed frames fill the window cleanly
+    // (and screenshots of the app read like photographs).
     width: 1500,
-    height: 950,
+    height: 1000,
     minWidth: 1280, // the handoff's "minimum comfortable window"
     frame: false, // no native title bar — marraw draws its own controls
     backgroundColor: '#0c0d0f',

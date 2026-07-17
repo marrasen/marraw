@@ -14,7 +14,7 @@ import { PyramidImage } from '@/components/PyramidImage';
 import { WindowControls } from '@/components/WindowControls';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
-import { rootName, samePath, useLibraryRoots } from '@/lib/library';
+import { baseName, rootName, samePath, useLibraryRoots } from '@/lib/library';
 
 // The sheet's outer padding (p-5) and inter-cell gap (gap-2), needed to size
 // the justified natural layout to the exact content width.
@@ -175,8 +175,9 @@ export function ContactSheet({
         <div className="flex size-6 items-center justify-center rounded-[7px] bg-primary text-sm font-bold text-primary-foreground">
           m
         </div>
-        <span className="text-[13px] font-semibold">
-          {current ? rootName(current) : (folderPath ?? '')}
+        {/* Folder NAME only, like CinemaHUD — the full path is in the Info tab. */}
+        <span className="text-[13px] font-semibold" title={folderPath ?? undefined}>
+          {current ? rootName(current) : folderPath ? baseName(folderPath) : ''}
         </span>
         <span className="text-[12.5px] text-muted-foreground">Contact sheet</span>
         <div className="flex-1" />
