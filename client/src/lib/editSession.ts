@@ -1158,12 +1158,56 @@ export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
 export function esApplyUserPreset(client: ApiClient, preset: UserPreset) {
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
-  const base = s.draft;
-  const result = applyUserPreset(base, preset, s.baseExpEV);
-  esApplyParams(client, result, { label: preset.name });
-  // AFTER esApplyParams — it clears lastPresetApply (any whole-draft
-  // replacement invalidates a stale scrubber).
-  setState({ lastPresetApply: { photoId: s.photoId, base, result, name: preset.name, amount: 1 } });
+  const autoSecs = presetAutoSections(preset);
+  if (autoSecs.length === 0) {
+    const base = s.draft;
+    const result = applyUserPreset(base, preset, s.baseExpEV);
+    esApplyParams(client, result, { label: preset.name });
+    // AFTER esApplyParams — it clears lastPresetApply (any whole-draft
+    // replacement invalidates a stale scrubber).
+    setState({ lastPresetApply: { photoId: s.photoId, base, result, name: preset.name, amount: 1 } });
+    return;
+  }
+  // Adaptive preset: the backend computes the photo's own auto for the
+  // preset's sections first, then the stored creative diff lands on top
+  // (relative overlay). Same supersede guard + instant-preview pattern as
+  // esApplyAutoPreset.
+  esFlushDraft();
+  const gen = ++applyGen;
+  const pid = s.photoId;
+  const base = useEditSession.getState().draft!;
+  void (async () => {
+    try {
+      const resolved = await autoAdjust(client, pid, base, autoSecs);
+      const cur = useEditSession.getState();
+      if (applyGen !== gen || cur.photoId !== pid) return; // superseded
+      const result = applyUserPreset(resolved, preset, cur.baseExpEV);
+      esApplyParamsPreview(client, result, preset.name);
+      setState({ lastPresetApply: { photoId: pid, base, result, name: preset.name, amount: 1 } });
+    } catch (err) {
+      toast.error(`Auto adjust failed: ${(err as Error).message}`);
+    }
+  })();
+}
+
+// resolveUserPreset computes the params applying `preset` to the current
+// draft would produce — including the autoAdjust round trip for adaptive
+// presets. Shared by the hover preview and the preset thumbnails.
+export async function resolveUserPreset(
+  client: ApiClient,
+  photoId: number,
+  draft: Params,
+  preset: UserPreset,
+  baseExpEV: number,
+): Promise<Params> {
+  const autoSecs = presetAutoSections(preset);
+  const base = autoSecs.length > 0 ? await autoAdjust(client, photoId, draft, autoSecs) : draft;
+  return applyUserPreset(base, preset, baseExpEV);
+}
+
+function presetAutoSections(preset: UserPreset): AutoSection[] {
+  const known: AutoSection[] = ['tone', 'wb', 'color'];
+  return known.filter((s) => (preset.autoSections ?? []).includes(s));
 }
 
 // esHoverPreset previews a preset on the loupe while its card is hovered:
@@ -1171,8 +1215,9 @@ export function esApplyUserPreset(client: ApiClient, preset: UserPreset) {
 // the merged params land in hoverParams — a pure render override; draft,
 // history, and persistence stay untouched. Suppressed while a modal-ish
 // tool owns the loupe (WB picker, crop, heal, mask paint, keyboard adjust).
+// Adaptive presets resolve their autoAdjust inside the debounce.
 export function esHoverPreset(client: ApiClient, preset: UserPreset) {
-  hoverStart(client, (cur) => applyUserPreset(cur.draft!, preset, cur.baseExpEV));
+  hoverStart(client, (cur) => resolveUserPreset(client, cur.photoId!, cur.draft!, preset, cur.baseExpEV));
 }
 
 // esHoverAutoPreset is esHoverPreset for creative-auto presets: the debounce

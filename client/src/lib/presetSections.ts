@@ -216,6 +216,37 @@ function presetExpEV(draft: Params, preset: UserPreset, targetBaseExpEV: number)
   return targetBaseExpEV + creative;
 }
 
+// adaptiveLookDiff converts a hand-made look into the params of an ADAPTIVE
+// preset: `auto` is the backend's auto result for the same photo, and the
+// stored params carry the CREATIVE DIFFERENCE — for smooth numerics, the
+// neutral-anchored delta `draft − auto` (so a relative apply on top of a
+// fresh auto reproduces the look adapted to the target photo); position
+// numerics, cycle values and the WB multipliers keep the draft's value
+// as-is (they land absolutely, and only when non-neutral). Exposure's diff
+// needs no baseline: it rides the per-photo auto result, so the preset
+// stores baseExpEV = 0.
+export function adaptiveLookDiff(draft: Params, auto: Params): Params {
+  const out: Params = { ...stripToLook(draft) };
+  for (const key of LOOK_KEYS) {
+    const { mode } = PRESET_FIELDS[key];
+    if (key === 'hslHue' || key === 'hslSat' || key === 'hslLum') {
+      out[key] = draft[key].map((v, i) => v - auto[key][i]) as Params['hslHue'];
+      continue;
+    }
+    if (key === 'wbMul' || mode === 'enum' || mode === 'absolute') continue; // keep draft's value
+    const delta = effective(key, draft) - effective(key, auto);
+    let stored = Math.round((effective(key, NEUTRAL) + delta) * 1000) / 1000;
+    // A nonzero delta must never round to a stored 0 — for sentinel-default
+    // fields that would read as "untouched" and drop the delta.
+    if (stored === 0 && delta !== 0) stored = delta > 0 ? 0.001 : -0.001;
+    // Store the sentinel when the delta is zero so the field reads as
+    // untouched (and a relative apply skips it).
+    (out as unknown as Record<string, number>)[key] =
+      delta === 0 ? (NEUTRAL as unknown as Record<string, number>)[key] : stored;
+  }
+  return out;
+}
+
 // lerpPresetAmount re-derives a preset apply at strength t: 0 = the
 // pre-apply draft (base), 1 = the preset result as applied, up to 2 =
 // doubled, clamped per-field to the control ranges. Smooth numerics lerp

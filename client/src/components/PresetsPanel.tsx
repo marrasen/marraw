@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Copy, ClipboardPaste, CopyPlus, Download, Pencil, Plus, RefreshCw, RotateCcw, Upload, X } from 'lucide-react';
 import type { Photo } from '@/api/library';
-import { previewEdit } from '@/api/edits';
+import { autoAdjust, previewEdit } from '@/api/edits';
 import type { Params } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import type { ApiClient } from '@/api/client';
@@ -30,10 +30,12 @@ import {
   esReset,
   esSetPresetAmount,
   NEUTRAL,
+  resolveUserPreset,
   useEditSession,
+  type AutoSection,
 } from '@/lib/editSession';
 import {
-  applyUserPreset,
+  adaptiveLookDiff,
   PRESET_GROUPS,
   presetSections,
   stripToLook,
@@ -206,27 +208,51 @@ function UserPresetsSection({
   const [relative, setRelative] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState('');
+  const [autoSecs, setAutoSecs] = useState<AutoSection[]>([]);
   const importInput = useRef<HTMLInputElement>(null);
   const thumbs = useUserPresetThumbs(client, photo, presets);
 
-  const save = () => {
+  const save = async () => {
     const trimmed = name.trim();
     if (!draft || !trimmed || sections.length === 0) return;
+    // Adaptive auto sections only make sense for look groups the preset
+    // carries (their names coincide with the group ids by design).
+    const autos = autoSecs.filter((a) => sections.includes(a));
+    // Masks and retouch spots are local geometry tied to one photo's
+    // content, not a look; geometry stays with the photo too.
+    let params = stripToLook(draft);
+    let rel = relative;
+    // The source photo's calibrated exposure baseline: apply re-anchors
+    // the look's creative exposure to the target photo's baseline, so a
+    // preset saved on a +1.3 EV-compensated shot doesn't drag that
+    // compensation onto differently calibrated photos.
+    let baseEV = photo?.baseExpEV || undefined;
+    if (autos.length > 0 && photo) {
+      // Adaptive save: the preset stores the CREATIVE DIFFERENCE between
+      // this look and the photo's own auto — applying re-runs the auto on
+      // the target and lays the diff on top, so the look adapts per photo.
+      let auto: Params;
+      try {
+        auto = await autoAdjust(client, photo.id, draft, autos);
+      } catch (err) {
+        toast.error(`Auto adjust failed: ${(err as Error).message}`);
+        return;
+      }
+      params = adaptiveLookDiff(draft, auto);
+      rel = true;
+      // Exposure rides the per-photo auto result; no baseline to anchor.
+      baseEV = undefined;
+    }
     const preset: UserPreset = {
       id: crypto.randomUUID(),
       name: trimmed,
-      // Masks and retouch spots are local geometry tied to one photo's
-      // content, not a look; geometry stays with the photo too.
-      params: stripToLook(draft),
+      params,
       // All sections checked stores as "all" (empty) — the legacy shape,
       // and new sections added by future builds stay included.
       sections: sections.length === PRESET_GROUPS.length ? undefined : sections,
-      relative: relative || undefined,
-      // The source photo's calibrated exposure baseline: apply re-anchors
-      // the look's creative exposure to the target photo's baseline, so a
-      // preset saved on a +1.3 EV-compensated shot doesn't drag that
-      // compensation onto differently calibrated photos.
-      baseExpEV: photo?.baseExpEV || undefined,
+      relative: rel || undefined,
+      baseExpEV: baseEV,
+      autoSections: autos.length > 0 ? autos : undefined,
     };
     updateUserPresets(client, [...presets, preset]);
     setNaming(false);
@@ -361,14 +387,20 @@ function UserPresetsSection({
                 ) : (
                   <span className="flex items-baseline gap-1.5 truncate px-2 py-1.5">
                     <span className="truncate text-[12px] group-hover:text-foreground">{p.name}</span>
-                    {((p.sections?.length ?? 0) > 0 || p.relative) && (
+                    {((p.sections?.length ?? 0) > 0 || p.relative || (p.autoSections?.length ?? 0) > 0) && (
                       <span
                         className="shrink-0 text-[9px] tracking-[.05em] text-muted-foreground uppercase"
-                        title={`${p.relative ? 'Relative preset (stacks on existing edits)' : 'Partial preset'}: ${presetSections(p)
+                        title={`${
+                          (p.autoSections?.length ?? 0) > 0
+                            ? 'Adaptive preset (re-runs auto per photo)'
+                            : p.relative
+                              ? 'Relative preset (stacks on existing edits)'
+                              : 'Partial preset'
+                        }: ${presetSections(p)
                           .map((id) => PRESET_GROUPS.find((g) => g.id === id)?.label ?? id)
                           .join(', ')}`}
                       >
-                        {p.relative ? '± ' : ''}
+                        {(p.autoSections?.length ?? 0) > 0 ? 'auto ' : p.relative ? '± ' : ''}
                         {(p.sections?.length ?? 0) > 0 ? `${presetSections(p).length}/${PRESET_GROUPS.length}` : ''}
                       </span>
                     )}
@@ -417,12 +449,12 @@ function UserPresetsSection({
               // Stop the global keyboard map from rating/flagging while typing.
               onKeyDown={(e) => {
                 e.stopPropagation();
-                if (e.key === 'Enter') save();
+                if (e.key === 'Enter') void save();
                 if (e.key === 'Escape') setNaming(false);
               }}
               aria-label="Preset name"
             />
-            <Button size="sm" onClick={save} disabled={!name.trim() || sections.length === 0}>
+            <Button size="sm" onClick={() => void save()} disabled={!name.trim() || sections.length === 0}>
               Save
             </Button>
           </div>
@@ -430,12 +462,18 @@ function UserPresetsSection({
             <button
               className={cn(
                 'rounded-md border px-1.5 py-0.5 text-[11px] transition-colors',
-                relative
+                (relative || autoSecs.length > 0)
                   ? 'border-primary/50 bg-primary/15 text-accent-text'
                   : 'border-input text-muted-foreground hover:text-foreground',
+                autoSecs.length > 0 && 'opacity-60',
               )}
+              disabled={autoSecs.length > 0}
               onClick={() => setRelative((r) => !r)}
-              title="Relative: apply the look as offsets on top of a photo's existing edits instead of replacing them"
+              title={
+                autoSecs.length > 0
+                  ? 'Adaptive presets are always relative — the diff lands on each photo’s own auto'
+                  : 'Relative: apply the look as offsets on top of a photo’s existing edits instead of replacing them'
+              }
             >
               ± Relative
             </button>
@@ -462,6 +500,47 @@ function UserPresetsSection({
                   title={on ? `Exclude ${g.label} from the preset` : `Include ${g.label} in the preset`}
                 >
                   {g.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            <span
+              className="text-[10px] tracking-[.05em] text-muted-foreground uppercase"
+              title="Adaptive: the preset re-runs these autos on each photo and applies your look as the difference from this photo's auto"
+            >
+              Adapts
+            </span>
+            {(
+              [
+                { id: 'tone', label: 'Auto tone' },
+                { id: 'wb', label: 'Auto WB' },
+                { id: 'color', label: 'Auto colour' },
+              ] as { id: AutoSection; label: string }[]
+            ).map((a) => {
+              const on = autoSecs.includes(a.id);
+              const inSections = sections.includes(a.id);
+              return (
+                <button
+                  key={a.id}
+                  className={cn(
+                    'rounded-md border px-1.5 py-0.5 text-[11px] transition-colors',
+                    on && inSections
+                      ? 'border-primary/50 bg-primary/15 text-accent-text'
+                      : 'border-input text-muted-foreground hover:text-foreground',
+                    !inSections && 'opacity-50',
+                  )}
+                  disabled={!photo || !inSections}
+                  onClick={() => setAutoSecs((cur) => (on ? cur.filter((x) => x !== a.id) : [...cur, a.id]))}
+                  title={
+                    !inSections
+                      ? `Include the ${a.id} section to adapt it`
+                      : on
+                        ? `Don't re-run ${a.label.toLowerCase()} per photo`
+                        : `Re-run ${a.label.toLowerCase()} on each photo and layer this look's difference on top`
+                  }
+                >
+                  {a.label}
                 </button>
               );
             })}
@@ -556,7 +635,7 @@ function uniqueName(base: string, taken: { name: string }[], keepBase = false): 
 // lifecycle rules as usePresetThumbs, minus the autoAdjust round trip.
 function useUserPresetThumbs(client: ApiClient, photo: Photo | undefined, presets: UserPreset[]) {
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
-  const presetsKey = JSON.stringify(presets.map((p) => [p.id, p.sections, p.relative]));
+  const presetsKey = JSON.stringify(presets.map((p) => [p.id, p.sections, p.relative, p.autoSections]));
   const photoId = photo?.id;
 
   useEffect(() => {
@@ -573,7 +652,8 @@ function useUserPresetThumbs(client: ApiClient, photo: Photo | undefined, preset
     (async () => {
       for (const p of presets) {
         try {
-          const blob = await previewEdit(client, photo.id, applyUserPreset(base, p, baseEV), THUMB_PX);
+          const params = await resolveUserPreset(client, photo.id, base, p, baseEV);
+          const blob = await previewEdit(client, photo.id, params, THUMB_PX);
           if (!alive) return;
           const url = URL.createObjectURL(blob);
           urls.push(url);
