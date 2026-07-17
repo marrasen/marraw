@@ -251,6 +251,9 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, phot
 	// The LibRaw copy is fully transcribed into rgba; drop it now so the GC
 	// can reclaim ~3 B/px before geometry/detail allocate their own planes.
 	img.Data = nil
+	// Exposure stops beyond LibRaw's exp_shift range fold in post-decode,
+	// exactly as the pyramid renders do.
+	pyramid.ApplyExposureEV(rgba, params.ResidualExpEV(), params)
 	rgba = pyramid.ApplyGeometry(rgba, params)
 	pyramid.ApplyFinish(rgba, lookGamma, params, req.AIMaps.SetFor(photo.CacheKey, params))
 	out := resizeRGBA(rgba, req.LongEdge)

@@ -108,7 +108,7 @@ interface CycleSpec {
 type ControlSpec = NumericSpec | CycleSpec;
 
 export const CONTROL_SPECS: Record<ControlId, ControlSpec> = {
-  expEV: { kind: 'numeric', min: -2, max: 3, step: 0.05, bigStep: 0.25, get: (p) => p.expEV, set: (v) => ({ expEV: v }) },
+  expEV: { kind: 'numeric', min: -5, max: 5, step: 0.05, bigStep: 0.25, get: (p) => p.expEV, set: (v) => ({ expEV: v }) },
   expPreserve: { kind: 'numeric', min: 0, max: 1, step: 0.05, bigStep: 0.2, get: (p) => p.expPreserve, set: (v) => ({ expPreserve: v }) },
   bright: {
     kind: 'numeric', min: 0.25, max: 4, step: 0.05, bigStep: 0.25,

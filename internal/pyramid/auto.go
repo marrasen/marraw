@@ -140,7 +140,10 @@ func autoTone(hist *[256]int, n int, subjHist *[256]int, subjTotal int, p *edit.
 	// so a display-domain ratio maps to EV via the 2.222 power.
 	dEV := 2.222 * math.Log2(autoMedianTarget/med)
 	dEV = math.Round(clampF(dEV, -autoEVLimit, autoEVLimit)/0.05) * 0.05
-	p.ExpEV = clampF(p.ExpEV+dEV, -2, 3)
+	// The histogram was measured on the decode, which carries BakedExpEV (the
+	// residual beyond LibRaw's exp_shift range folds in at render time), so
+	// the move lands relative to that — not to the nominal dial value.
+	p.ExpEV = clampF(p.BakedExpEV()+dEV, edit.MinExpEV, edit.MaxExpEV)
 
 	// Rescale the percentiles by the exposure move so the remaining sliders
 	// judge the histogram as it will look after the EV lands.

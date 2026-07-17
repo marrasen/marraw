@@ -82,6 +82,44 @@ func TestLibrawParamsMapping(t *testing.T) {
 	}
 }
 
+// TestExposureBakedResidualSplit: the dial spans MinExpEV..MaxExpEV but LibRaw
+// only bakes LibrawMinExpEV..LibrawMaxExpEV; the split must cover the whole
+// range with baked+residual == ExpEV and residual zero inside the baked range.
+func TestExposureBakedResidualSplit(t *testing.T) {
+	cases := []struct{ ev, baked, residual float64 }{
+		{0, 0, 0},
+		{2.5, 2.5, 0},
+		{-1.5, -1.5, 0},
+		{4, 3, 1},
+		{-3, -2, -1},
+		{MaxExpEV, LibrawMaxExpEV, MaxExpEV - LibrawMaxExpEV},
+		{MinExpEV, LibrawMinExpEV, MinExpEV - LibrawMinExpEV},
+	}
+	for _, c := range cases {
+		e := &Params{ExpEV: c.ev}
+		if e.BakedExpEV() != c.baked || e.ResidualExpEV() != c.residual {
+			t.Errorf("ExpEV %v: baked %v residual %v, want %v/%v",
+				c.ev, e.BakedExpEV(), e.ResidualExpEV(), c.baked, c.residual)
+		}
+	}
+	var nilP *Params
+	if nilP.BakedExpEV() != 0 || nilP.ResidualExpEV() != 0 {
+		t.Error("nil params must split as 0/0")
+	}
+}
+
+// TestLibrawParamsExpShiftClamped: the exp_shift handed to LibRaw stays within
+// its hard 0.25..8 range even at the dial extremes — the stops beyond render
+// via ResidualExpEV, never by asking LibRaw for an out-of-range shift.
+func TestLibrawParamsExpShiftClamped(t *testing.T) {
+	if got := (&Params{ExpEV: MaxExpEV}).LibrawParams(true).ExpShift; got != 8 {
+		t.Errorf("ExpShift at +%d EV = %v, want 8", MaxExpEV, got)
+	}
+	if got := (&Params{ExpEV: MinExpEV}).LibrawParams(true).ExpShift; got != 0.25 {
+		t.Errorf("ExpShift at %d EV = %v, want 0.25", MinExpEV, got)
+	}
+}
+
 func TestDeltaLookFields(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	e := &Params{Contrast: 0.9, Saturation: -0.9}

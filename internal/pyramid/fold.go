@@ -82,11 +82,10 @@ func gammaTable(pwr, ts float64) *[65536]uint8 {
 	return t
 }
 
-// dcrawGammaEncoder returns the forward (linear→encoded, 0..1) gamma function
-// LibRaw/dcraw bakes into its output, for output power pwr and toe slope ts.
-// Reproducing it here keeps a folded transient frame matching the re-decoded
-// settle. Mirrors dcraw's gamma_curve coefficient solve.
-func dcrawGammaEncoder(pwr, ts float64) func(float64) float64 {
+// dcrawGammaCoeffs solves dcraw's gamma_curve coefficients for output power
+// pwr and toe slope ts: g[2] is the toe/power crossover in encoded domain,
+// g[3] the same in linear domain, g[4] the power-segment offset.
+func dcrawGammaCoeffs(pwr, ts float64) [5]float64 {
 	var g [5]float64
 	g[0], g[1] = pwr, ts
 	bnd := [2]float64{}
@@ -113,6 +112,15 @@ func dcrawGammaEncoder(pwr, ts float64) func(float64) float64 {
 			g[4] = g[2]*(1/pwr) - g[2]
 		}
 	}
+	return g
+}
+
+// dcrawGammaEncoder returns the forward (linear→encoded, 0..1) gamma function
+// LibRaw/dcraw bakes into its output, for output power pwr and toe slope ts.
+// Reproducing it here keeps a folded transient frame matching the re-decoded
+// settle. Mirrors dcraw's gamma_curve coefficient solve.
+func dcrawGammaEncoder(pwr, ts float64) func(float64) float64 {
+	g := dcrawGammaCoeffs(pwr, ts)
 	return func(r float64) float64 {
 		if r >= 1 {
 			return 1
@@ -127,6 +135,28 @@ func dcrawGammaEncoder(pwr, ts float64) func(float64) float64 {
 			return math.Pow(r, pwr)*(1+g[4]) - g[4]
 		}
 		return math.Log(r)*g[2] + 1
+	}
+}
+
+// dcrawGammaDecoder returns the inverse (encoded→linear, 0..1) of
+// dcrawGammaEncoder — each segment inverted analytically. Used to take
+// already-encoded decode output back to linear light for an exposure fold.
+func dcrawGammaDecoder(pwr, ts float64) func(float64) float64 {
+	g := dcrawGammaCoeffs(pwr, ts)
+	return func(y float64) float64 {
+		if y >= 1 {
+			return 1
+		}
+		if y <= 0 {
+			return 0
+		}
+		if y < g[3]*ts { // the toe's encoded extent is enc(g[3]) = g[3]·ts
+			return y / ts
+		}
+		if pwr != 0 {
+			return math.Pow((y+g[4])/(1+g[4]), 1/pwr)
+		}
+		return math.Exp((y - 1) / g[2])
 	}
 }
 

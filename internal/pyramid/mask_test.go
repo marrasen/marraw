@@ -132,10 +132,20 @@ func TestLinearWeightProperties(t *testing.T) {
 }
 
 // TestMaskExposureMatchesExposureLUT: a mask covering the whole frame at full
-// weight with only ExpEV set must reproduce applyExposureLUT within ±1 level.
+// weight with only ExpEV set must reproduce the mask stage's linear-light
+// exposure model (scale by 2^Δ under previewExposureGamma — the pure power,
+// NOT the dcraw toe curve ApplyExposureEV uses on raw decode output; masks run
+// in the look stage where that encoding no longer holds) within ±1 level.
 func TestMaskExposureMatchesExposureLUT(t *testing.T) {
 	ref := smoothImage(80, 60)
-	applyExposureLUT(ref, 1)
+	var lut [256]uint8
+	for i := range lut {
+		x := math.Min(1, math.Pow(float64(i)/255, previewExposureGamma)*2)
+		lut[i] = uint8(math.Round(255 * math.Pow(x, 1/previewExposureGamma)))
+	}
+	for i := 0; i+3 < len(ref.Pix); i += 4 {
+		ref.Pix[i], ref.Pix[i+1], ref.Pix[i+2] = lut[ref.Pix[i]], lut[ref.Pix[i+1]], lut[ref.Pix[i+2]]
+	}
 
 	img := smoothImage(80, 60)
 	ApplyMasks(img, &edit.Params{Masks: []edit.Mask{{

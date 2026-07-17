@@ -48,7 +48,7 @@ type decodeCache struct {
 	photoID  int64
 	key      string
 	noExpKey string      // LibrawInputsHashNoExp: matches across exposure-only changes
-	expEV    float64     // the ExpEV baked into rgba (via LibRaw exp_shift)
+	expEV    float64     // the exposure baked into rgba (BakedExpEV, via LibRaw exp_shift)
 	rgba     *image.RGBA // never mutated in place once cached
 }
 
@@ -154,7 +154,10 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 	// Fallback: exact decode, reusing a warm decode that differs only in
 	// exposure (the common case right after an auto/preset) and folding the
 	// difference in post-decode; a full miss runs the demosaic. The deferred
-	// 2048 settle re-decodes exactly for the accurate render.
+	// 2048 settle re-decodes exactly for the accurate render. Either way the
+	// delta folded in is ep.ExpEV minus what the decode actually baked — for
+	// a fresh decode that is ResidualExpEV, the stops beyond LibRaw's
+	// exp_shift range.
 	var rgba *image.RGBA
 	var expDelta float64
 	if reused, baked, ok := e.approxDecode(photoID, ep); ok {
@@ -167,6 +170,7 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 		if err != nil {
 			return nil, err
 		}
+		expDelta = ep.ResidualExpEV()
 	}
 	return jpegBlob(pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta,
 		e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep)))
@@ -292,12 +296,14 @@ func (e *Edits) decodePreview(ctx context.Context, photoID int64, photo store.Ph
 
 // decodeKeys derives the decode cache keys for a LibRaw-input state: the exact
 // key, the exposure-independent key (for approxDecode reuse), and the baked
-// exposure. A nil/base decode keys as "base" with zero exposure.
+// exposure — BakedExpEV, not ExpEV, because LibRaw only bakes what exp_shift
+// spans and approxDecode's delta must measure from the pixels as decoded. A
+// nil/base decode keys as "base" with zero exposure.
 func decodeKeys(ep *edit.Params) (key, noExpKey string, expEV float64) {
 	if ep == nil {
 		return "base", "base", 0
 	}
-	return ep.LibrawInputsHash(), ep.LibrawInputsHashNoExp(), ep.ExpEV
+	return ep.LibrawInputsHash(), ep.LibrawInputsHashNoExp(), ep.BakedExpEV()
 }
 
 // cachedDecode returns the cached half-size decode for (photoID, key), or nil.

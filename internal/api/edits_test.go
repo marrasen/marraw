@@ -79,4 +79,17 @@ func TestApproxDecodeExposureReuse(t *testing.T) {
 	if _, _, ok := e.approxDecode(7, wbChanged); ok {
 		t.Error("reused a decode across a white-balance change")
 	}
+
+	// Beyond LibRaw's exp_shift range the decode only carries the clamped
+	// stops, so the reported bake must be what the pixels have — not the dial
+	// value — or the caller's fold delta would drop the residual.
+	hot := &edit.Params{ExpEV: 4.5, WBTemp: 10}
+	key, noExpKey, expEV = decodeKeys(hot)
+	if expEV != edit.LibrawMaxExpEV {
+		t.Errorf("decodeKeys baked EV for +4.5 = %v, want %v", expEV, edit.LibrawMaxExpEV)
+	}
+	e.storeDecode(7, key, noExpKey, expEV, rgba)
+	if _, baked, ok := e.approxDecode(7, &edit.Params{ExpEV: 2, WBTemp: 10}); !ok || baked != edit.LibrawMaxExpEV {
+		t.Errorf("reuse of a clamped-bake decode reported %v, want %v", baked, edit.LibrawMaxExpEV)
+	}
 }

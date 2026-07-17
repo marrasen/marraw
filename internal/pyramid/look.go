@@ -58,7 +58,7 @@ func AutoBrightEV(brightMean, flatMean float64) float64 {
 		return 0
 	}
 	ev := 2.222 * math.Log2(brightMean/flatMean)
-	return math.Min(3, math.Max(-2, math.Round(ev*100)/100))
+	return math.Min(edit.MaxExpEV, math.Max(edit.MinExpEV, math.Round(ev*100)/100))
 }
 
 // meanLumaPacked is MeanLuma for LibRaw's 3-byte interleaved RGB output.

@@ -243,10 +243,10 @@ func TestAutoWithinValidatorRanges(t *testing.T) {
 		wellExposed(t),
 	}
 	for i, img := range scenes {
-		for _, ev := range []float64{-2, 0, 3} {
+		for _, ev := range []float64{edit.MinExpEV, -2, 0, 3, edit.MaxExpEV} {
 			p := edit.Params{ExpEV: ev}
 			AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone, AutoColor}, nil)
-			if p.ExpEV < -2 || p.ExpEV > 3 {
+			if p.ExpEV < edit.MinExpEV || p.ExpEV > edit.MaxExpEV {
 				t.Errorf("scene %d: ExpEV %v out of range", i, p.ExpEV)
 			}
 			for name, v := range map[string]float64{

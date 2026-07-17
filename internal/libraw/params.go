@@ -31,7 +31,9 @@ type Params struct {
 	HalfSize bool // skip demosaic, half resolution: the fast-preview switch
 
 	// Exposure correction (applied before demosaic). ExpShift is a linear
-	// multiplier: 0.25 = -2 EV, 8.0 = +3 EV. 0 disables the stage.
+	// multiplier: 0.25 = -2 EV, 8.0 = +3 EV. 0 disables the stage. That range
+	// is a hard LibRaw limit (apply() clamps to it) — callers wanting a wider
+	// move must fold the remainder post-decode (see edit.Params.ResidualExpEV).
 	ExpShift    float64
 	ExpPreserve float64 // highlight preservation 0..1 when ExpShift > 1
 

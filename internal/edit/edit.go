@@ -182,8 +182,20 @@ type Spot struct {
 // The zero value is the neutral edit. Every field's zero value must mean
 // "default" — IsNeutral and hashing rely on it, and it keeps stored JSON
 // from older versions forward-compatible.
+// Exposure dial range. LibRaw's pre-demosaic exp_shift only spans
+// LibrawMinExpEV..LibrawMaxExpEV (exp_shift 0.25..8, a hard LibRaw limit);
+// the stops beyond that are folded in post-decode — see BakedExpEV /
+// ResidualExpEV and pyramid.ApplyExposureEV.
+const (
+	MinExpEV = -5
+	MaxExpEV = 5
+
+	LibrawMinExpEV = -2
+	LibrawMaxExpEV = 3
+)
+
 type Params struct {
-	ExpEV       float64    `json:"expEV" validate:"gte=-2,lte=3"`
+	ExpEV       float64    `json:"expEV" validate:"gte=-5,lte=5"`
 	ExpPreserve float64    `json:"expPreserve" validate:"gte=0,lte=1"`
 	WBMode      WBMode     `json:"wbMode" validate:"omitempty,oneof=camera auto custom kelvin"`
 	WBMul       [4]float64 `json:"wbMul"`
@@ -670,6 +682,27 @@ func Parse(paramsJSON string) (*Params, error) {
 	return &e, nil
 }
 
+// BakedExpEV is the portion of the exposure move that the LibRaw decode
+// carries (via exp_shift): ExpEV clamped to LibRaw's hard exp_shift range.
+// Nil-safe (the base look bakes nothing).
+func (e *Params) BakedExpEV() float64 {
+	if e == nil {
+		return 0
+	}
+	return clamp(e.ExpEV, LibrawMinExpEV, LibrawMaxExpEV)
+}
+
+// ResidualExpEV is the remainder of the exposure move beyond what LibRaw's
+// exp_shift can bake. Every consumer of a LibrawParams decode must fold this
+// in post-decode (pyramid.ApplyExposureEV) or the rendered exposure silently
+// caps at LibRaw's range. Zero whenever ExpEV is within it. Nil-safe.
+func (e *Params) ResidualExpEV() float64 {
+	if e == nil {
+		return 0
+	}
+	return e.ExpEV - e.BakedExpEV()
+}
+
 // LibrawParams maps the edit state onto LibRaw processing parameters.
 // A nil receiver produces the "base" look (camera WB, auto-brighten).
 // Any edit disables auto-brighten so sliders behave deterministically.
@@ -683,7 +716,7 @@ func (e *Params) LibrawParams(halfSize bool) libraw.Params {
 		return p
 	}
 	p.NoAutoBright = true
-	p.ExpShift = math.Pow(2, e.ExpEV)
+	p.ExpShift = math.Pow(2, e.BakedExpEV())
 	p.ExpPreserve = e.ExpPreserve
 	switch e.WBMode {
 	case WBAuto:
@@ -785,7 +818,7 @@ type Delta struct {
 // Apply merges the delta into params, clamping to valid ranges.
 func (d Delta) Apply(e *Params) {
 	if d.ExpEV != nil {
-		e.ExpEV = clamp(e.ExpEV+*d.ExpEV, -2, 3)
+		e.ExpEV = clamp(e.ExpEV+*d.ExpEV, MinExpEV, MaxExpEV)
 	}
 	if d.Bright != nil {
 		base := e.Bright
