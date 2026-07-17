@@ -5,6 +5,12 @@ Only two constructs are parsed (client/src/lib/changelog.ts): `## X.Y.Z - YYYY-M
 version headers and `-` bullets; everything else is ignored. Newest release first.
 When cutting a release: bump the version in package.json and add a section here.
 
+## 0.5.1 - 2026-07-17
+
+- Cull/Develop: the floating folder pill shows just the folder name — a long path collided with the centered mode switch; hover it for the full path
+- Info: new Folder row showing the photo's full folder path
+- Window: the default window is now 3:2 (1500×1000), matching the photos, so full-bleed frames fill it edge to edge
+
 ## 0.5.0 - 2026-07-17
 
 - Develop: exposure range widened to −5..+5 EV (was −2..+3), in line with other RAW editors — the extra stops render correctly everywhere, from the live drag preview to the final export
