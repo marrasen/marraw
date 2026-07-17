@@ -3,9 +3,9 @@
 // copy/paste/reset clipboard actions (moved off the develop stack), and a
 // clickable edit-history timeline. It drives the same edit-session functions
 // the keyboard and command palette do — nothing here holds edit state itself.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Copy, ClipboardPaste, Plus, RotateCcw, X } from 'lucide-react';
+import { Copy, ClipboardPaste, CopyPlus, Download, Pencil, Plus, RefreshCw, RotateCcw, Upload, X } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { previewEdit } from '@/api/edits';
 import type { Params } from '@/api/edit';
@@ -39,6 +39,7 @@ import {
   stripToLook,
   type PresetGroup,
 } from '@/lib/presetSections';
+import { parseUserPresetsFile, userPresetsFileBlob } from '@/lib/userPresets';
 import { useUIStore } from '@/stores/uiStore';
 
 const THUMB_PX = 168;
@@ -203,6 +204,9 @@ function UserPresetsSection({
   const [name, setName] = useState('');
   const [sections, setSections] = useState<PresetGroup[]>(PRESET_GROUPS.map((g) => g.id));
   const [relative, setRelative] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState('');
+  const importInput = useRef<HTMLInputElement>(null);
   const thumbs = useUserPresetThumbs(client, photo, presets);
 
   const save = () => {
@@ -235,6 +239,84 @@ function UserPresetsSection({
     toast.success(`Removed preset “${p.name}”`);
   };
 
+  const rename = (p: UserPreset, newName: string) => {
+    const trimmed = newName.trim();
+    setRenamingId(null);
+    if (!trimmed || trimmed === p.name) return;
+    updateUserPresets(client, presets.map((x) => (x.id === p.id ? { ...x, name: trimmed } : x)));
+  };
+
+  const duplicate = (p: UserPreset) => {
+    const copy = { ...p, id: crypto.randomUUID(), name: uniqueName(p.name, presets) };
+    const at = presets.findIndex((x) => x.id === p.id) + 1;
+    updateUserPresets(client, [...presets.slice(0, at), copy, ...presets.slice(at)]);
+  };
+
+  // Overwrite re-snapshots the look from the current draft, keeping the
+  // preset's identity and semantics (id → the Ctrl+Shift+n slot and any
+  // default-preset reference stay valid; sections/relative unchanged).
+  const overwrite = (p: UserPreset) => {
+    if (!draft) return;
+    updateUserPresets(
+      client,
+      presets.map((x) =>
+        x.id === p.id
+          ? { ...x, params: stripToLook(draft), baseExpEV: photo?.baseExpEV || undefined }
+          : x,
+      ),
+    );
+    toast.success(`“${p.name}” overwritten with the current look`);
+  };
+
+  const exportAll = () => {
+    const url = URL.createObjectURL(userPresetsFileBlob(presets));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'marraw-presets.json';
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const importFile = async (file: File) => {
+    try {
+      const imported = parseUserPresetsFile(await file.text());
+      if (imported.length === 0) {
+        toast.error('No presets found in the file');
+        return;
+      }
+      const taken = [...presets];
+      const named = imported.map((p) => {
+        const withName = { ...p, name: uniqueName(p.name, taken, true) };
+        taken.push(withName);
+        return withName;
+      });
+      updateUserPresets(client, [...presets, ...named]);
+      toast.success(`Imported ${named.length} preset${named.length === 1 ? '' : 's'}`);
+    } catch (err) {
+      toast.error(`Import failed: ${(err as Error).message}`);
+    }
+  };
+
+  // Drag a card onto another to reorder (LibraryRail's block pattern). The
+  // stored order IS the Ctrl+Shift+1..9 binding order — that's the point.
+  const dragProps = (p: UserPreset) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => e.dataTransfer.setData('marraw/preset', p.id),
+    onDragOver: (e: React.DragEvent) => {
+      if (e.dataTransfer.types.includes('marraw/preset')) e.preventDefault();
+    },
+    onDrop: (e: React.DragEvent) => {
+      const from = e.dataTransfer.getData('marraw/preset');
+      if (!from || from === p.id) return;
+      e.preventDefault();
+      const moving = presets.find((x) => x.id === from);
+      if (!moving) return;
+      const ordered = presets.filter((x) => x.id !== from);
+      ordered.splice(ordered.findIndex((x) => x.id === p.id), 0, moving);
+      updateUserPresets(client, ordered);
+    },
+  });
+
   return (
     <Section title="My presets">
       {presets.length > 0 && (
@@ -247,11 +329,12 @@ function UserPresetsSection({
               // (debounced, low-res, draft untouched); leaving reverts.
               onMouseEnter={() => esHoverPreset(client, p)}
               onMouseLeave={() => esHoverEnd(client)}
+              {...dragProps(p)}
             >
               <button
                 className="flex w-full flex-col overflow-hidden rounded-lg border bg-inset text-left transition-colors hover:border-primary/50"
                 onClick={() => esApplyUserPreset(client, p)}
-                title={`Apply ${p.name} (keeps the photo's crop)${i < 9 ? ` (Ctrl+Shift+${i + 1})` : ''}`}
+                title={`Apply ${p.name} (keeps the photo's crop)${i < 9 ? ` (Ctrl+Shift+${i + 1})` : ''} — drag to reorder`}
               >
                 <div className="aspect-[3/2] w-full overflow-hidden bg-black/40">
                   {thumbs[p.id] ? (
@@ -260,29 +343,64 @@ function UserPresetsSection({
                     <div className="h-full w-full animate-pulse bg-white/5" />
                   )}
                 </div>
-                <span className="flex items-baseline gap-1.5 truncate px-2 py-1.5">
-                  <span className="truncate text-[12px] group-hover:text-foreground">{p.name}</span>
-                  {((p.sections?.length ?? 0) > 0 || p.relative) && (
-                    <span
-                      className="shrink-0 text-[9px] tracking-[.05em] text-muted-foreground uppercase"
-                      title={`${p.relative ? 'Relative preset (stacks on existing edits)' : 'Partial preset'}: ${presetSections(p)
-                        .map((id) => PRESET_GROUPS.find((g) => g.id === id)?.label ?? id)
-                        .join(', ')}`}
-                    >
-                      {p.relative ? '± ' : ''}
-                      {(p.sections?.length ?? 0) > 0 ? `${presetSections(p).length}/${PRESET_GROUPS.length}` : ''}
-                    </span>
-                  )}
-                </span>
+                {renamingId === p.id ? (
+                  <input
+                    autoFocus
+                    className="m-1 h-[24px] min-w-0 rounded-md border border-input bg-secondary px-1.5 text-[12px] text-secondary-foreground outline-none focus:border-ring dark:bg-white/5"
+                    value={renameVal}
+                    onChange={(e) => setRenameVal(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onBlur={() => rename(p, renameVal)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter') rename(p, renameVal);
+                      if (e.key === 'Escape') setRenamingId(null);
+                    }}
+                    aria-label={`Rename preset ${p.name}`}
+                  />
+                ) : (
+                  <span className="flex items-baseline gap-1.5 truncate px-2 py-1.5">
+                    <span className="truncate text-[12px] group-hover:text-foreground">{p.name}</span>
+                    {((p.sections?.length ?? 0) > 0 || p.relative) && (
+                      <span
+                        className="shrink-0 text-[9px] tracking-[.05em] text-muted-foreground uppercase"
+                        title={`${p.relative ? 'Relative preset (stacks on existing edits)' : 'Partial preset'}: ${presetSections(p)
+                          .map((id) => PRESET_GROUPS.find((g) => g.id === id)?.label ?? id)
+                          .join(', ')}`}
+                      >
+                        {p.relative ? '± ' : ''}
+                        {(p.sections?.length ?? 0) > 0 ? `${presetSections(p).length}/${PRESET_GROUPS.length}` : ''}
+                      </span>
+                    )}
+                  </span>
+                )}
               </button>
-              <button
-                className="absolute top-1 right-1 hidden size-5 items-center justify-center rounded-md bg-black/60 text-white/80 group-hover:flex hover:bg-black/80 hover:text-white"
-                onClick={() => remove(p)}
-                title={`Delete preset ${p.name}`}
-                aria-label={`Delete preset ${p.name}`}
-              >
-                <X className="size-3" />
-              </button>
+              <div className="absolute top-1 right-1 hidden gap-0.5 group-hover:flex">
+                <CardAction
+                  icon={<Pencil className="size-3" />}
+                  label={`Rename preset ${p.name}`}
+                  onClick={() => {
+                    setRenamingId(p.id);
+                    setRenameVal(p.name);
+                  }}
+                />
+                <CardAction
+                  icon={<CopyPlus className="size-3" />}
+                  label={`Duplicate preset ${p.name}`}
+                  onClick={() => duplicate(p)}
+                />
+                <CardAction
+                  icon={<RefreshCw className="size-3" />}
+                  label={`Overwrite ${p.name} with the current look`}
+                  disabled={!draft}
+                  onClick={() => overwrite(p)}
+                />
+                <CardAction
+                  icon={<X className="size-3" />}
+                  label={`Delete preset ${p.name}`}
+                  onClick={() => remove(p)}
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -350,13 +468,85 @@ function UserPresetsSection({
           </div>
         </div>
       ) : (
-        <Button size="sm" variant="outline" className="w-fit" disabled={!draft} onClick={() => setNaming(true)}>
-          <Plus data-icon="inline-start" />
-          Save current look
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" className="w-fit" disabled={!draft} onClick={() => setNaming(true)}>
+            <Plus data-icon="inline-start" />
+            Save current look
+          </Button>
+          <span className="flex-1" />
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={presets.length === 0}
+            onClick={exportAll}
+            title="Export all presets to a file"
+            aria-label="Export presets"
+          >
+            <Download />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => importInput.current?.click()}
+            title="Import presets from a file"
+            aria-label="Import presets"
+          >
+            <Upload />
+          </Button>
+          <input
+            ref={importInput}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              // Reset so re-importing the same file fires onChange again.
+              e.target.value = '';
+              if (f) void importFile(f);
+            }}
+          />
+        </div>
       )}
     </Section>
   );
+}
+
+// CardAction is one tiny hover-revealed icon button on a preset card.
+function CardAction({
+  icon,
+  label,
+  onClick,
+  disabled,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      className="flex size-5 items-center justify-center rounded-md bg-black/60 text-white/80 hover:bg-black/80 hover:text-white disabled:opacity-40"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+    >
+      {icon}
+    </button>
+  );
+}
+
+// uniqueName appends " (2)", " (3)", … until the name is free. With
+// `keepBase` the base name itself is used when free (imports keep their
+// names unless taken); without it numbering always starts (duplicates).
+function uniqueName(base: string, taken: { name: string }[], keepBase = false): string {
+  const names = new Set(taken.map((t) => t.name));
+  if (keepBase && !names.has(base)) return base;
+  const stripped = base.replace(/ \(\d+\)$/, '');
+  for (let n = 2; ; n++) {
+    const candidate = `${stripped} (${n})`;
+    if (!names.has(candidate)) return candidate;
+  }
 }
 
 // useUserPresetThumbs renders a small preview of each saved look applied to

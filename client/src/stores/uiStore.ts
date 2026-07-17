@@ -4,6 +4,7 @@ import type { ExportOptions, FolderView, UISettings, UserPreset, Watermark } fro
 import type { Params } from '@/api/edit';
 import { sanitizeDialKeys, type DialKey } from '@/lib/dials';
 import { sanitizeAutoPresets, type AutoPreset } from '@/lib/autoPresets';
+import { sanitizeUserPresets } from '@/lib/userPresets';
 import { sanitizeWatermarks } from '@/lib/watermarks';
 
 export type Theme = 'dark' | 'light' | 'system';
@@ -456,8 +457,9 @@ export const useUIStore = create<UIState>((set, get) => ({
       quickDials: sanitizeDialKeys(s.quickDials),
       autoPresets: sanitizeAutoPresets(s.autoPresets),
       // The server re-marshals presets through edit.Params, so params arrive
-      // complete; only entries missing identity are dropped.
-      userPresets: (s.userPresets ?? []).filter((p) => p.id && p.name && p.params),
+      // complete (trusted); identity and the section/flag fields still get
+      // narrowed to the client shape.
+      userPresets: sanitizeUserPresets(s.userPresets, { trusted: true }),
       watermarks: sanitizeWatermarks(s.watermarks),
       exportDir: s.exportDir,
       exportOptions: sanitizeExportOptions(s.exportOptions),
