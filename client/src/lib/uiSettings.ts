@@ -26,6 +26,7 @@ import {
   setShootSort,
   setTheme,
   setThumbFit,
+  setDefaultPresets,
   setUserPresets,
   setWatermarks,
   useGetUISettings,
@@ -129,6 +130,11 @@ export function updateAutoPresets(client: ApiClient, presets: AutoPreset[]) {
 export function updateUserPresets(client: ApiClient, presets: UserPreset[]) {
   useUIStore.setState({ userPresets: presets });
   setUserPresets(client, presets).catch(swallow);
+}
+
+export function updateDefaultPresets(client: ApiClient, defaults: Record<string, string>) {
+  useUIStore.setState({ defaultPresets: defaults });
+  setDefaultPresets(client, defaults).catch(swallow);
 }
 
 export function updateWatermarks(client: ApiClient, watermarks: Watermark[]) {

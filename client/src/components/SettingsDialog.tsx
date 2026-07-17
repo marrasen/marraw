@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { X } from 'lucide-react';
-import { useGetAppSettings, setSidecarWrites } from '@/api/library';
+import { useGetAppSettings, setSidecarWrites, useListCameras } from '@/api/library';
 import {
   useGetCacheInfo,
   clearCache,
@@ -35,10 +35,18 @@ import {
   updateBurstGapSeconds,
   updateBurstHamming,
   updateCullDials,
+  updateDefaultPresets,
   updatePrerenderFullres,
   updateQuickDials,
   updateThumbFit,
 } from '@/lib/uiSettings';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
@@ -56,7 +64,7 @@ function formatBytes(n: number): string {
   return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
 }
 
-const SECTIONS = ['General', 'Toolbars', 'Auto presets', 'Cache', 'Models', 'Sidecars'] as const;
+const SECTIONS = ['General', 'Toolbars', 'Auto presets', 'Default presets', 'Cache', 'Models', 'Sidecars'] as const;
 type Section = (typeof SECTIONS)[number];
 
 /**
@@ -104,6 +112,7 @@ export function SettingsDialog() {
             {open && section === 'General' && <GeneralSection />}
             {open && section === 'Toolbars' && <ToolbarsSection />}
             {open && section === 'Auto presets' && <AutoPresetsSection />}
+            {open && section === 'Default presets' && <DefaultPresetsSection />}
             {open && section === 'Cache' && <CacheSection />}
             {open && section === 'Models' && <ModelsSection />}
             {open && section === 'Sidecars' && <SidecarSection />}
@@ -538,6 +547,83 @@ function AutoPresetsSection() {
           Restore defaults
         </Button>
       </div>
+    </div>
+  );
+}
+
+// DefaultPresetsSection maps cameras to the saved look the calibrate pass
+// seeds onto NEW photos (never-edited ones) right after measuring their
+// exposure baseline. An exact "Make Model" match beats the any-camera row;
+// adaptive presets are excluded (seeding can't run their per-photo auto).
+// Reset returns a photo to camera neutral, not the default preset.
+function DefaultPresetsSection() {
+  const client = useApiClient();
+  const defaults = useUIStore((s) => s.defaultPresets);
+  const userPresets = useUIStore((s) => s.userPresets);
+  const cameras = useListCameras();
+  // Seeding runs presetLook server-side, which can't resolve per-photo
+  // autos — offer only non-adaptive presets.
+  const seedable = userPresets.filter((p) => (p.autoSections?.length ?? 0) === 0);
+  // Cameras with a stale mapping (folder removed from the catalog) still
+  // show, so the entry can be seen and cleared.
+  const cameraKeys = new Set((cameras.data ?? []).map((c) => c.key));
+  const staleKeys = Object.keys(defaults).filter((k) => k !== '*' && !cameraKeys.has(k));
+
+  const setDefault = (key: string, presetId: string) => {
+    const next = { ...defaults };
+    if (presetId === '') delete next[key];
+    else next[key] = presetId;
+    updateDefaultPresets(client, next);
+  };
+
+  const row = (key: string, label: string, sub?: string) => (
+    <div key={key} className="flex items-center gap-3 py-1.5">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-xs">{label}</div>
+        {sub && <div className="text-[11px] text-muted-foreground">{sub}</div>}
+      </div>
+      <Select value={defaults[key] ?? ''} onValueChange={(v) => setDefault(key, v ?? '')}>
+        <SelectTrigger className="w-52" size="sm" aria-label={`Default preset for ${label}`}>
+          <SelectValue placeholder="No default" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">No default</SelectItem>
+          {seedable.map((p) => (
+            <SelectItem key={p.id} value={p.id}>
+              {p.name}
+            </SelectItem>
+          ))}
+          {/* A mapping to a deleted preset stays visible so it can be cleared. */}
+          {defaults[key] && !seedable.some((p) => p.id === defaults[key]) && (
+            <SelectItem value={defaults[key]}>(deleted preset)</SelectItem>
+          )}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col">
+      <div className="pb-4">
+        <div className="text-sm font-medium">Default presets</div>
+        <div className="mt-0.5 text-xs leading-normal text-muted-foreground">
+          New photos get the chosen look applied automatically as they are calibrated — per camera,
+          or one default for everything. Only photos you have never edited are touched; Reset
+          returns a photo to camera neutral. Adaptive presets can&apos;t be seeded and aren&apos;t
+          offered here.
+        </div>
+      </div>
+      {seedable.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          No saved presets yet — save a look in Develop → Presets first.
+        </p>
+      ) : (
+        <div className="flex flex-col divide-y divide-border/50">
+          {row('*', 'Any camera', 'Used when no camera row matches')}
+          {(cameras.data ?? []).map((c) => row(c.key, c.key))}
+          {staleKeys.map((k) => row(k, k, 'No photos from this camera in the catalog'))}
+        </div>
+      )}
     </div>
   );
 }

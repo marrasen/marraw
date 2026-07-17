@@ -221,6 +221,28 @@ const (
 
 // GetAppSettings returns the application preferences. Subscription query: a
 // SetSidecarWrites call pushes an update.
+// CameraInfo is one distinct camera seen in the catalog, for the Settings →
+// Default presets picker.
+type CameraInfo struct {
+	Make  string `json:"make"`
+	Model string `json:"model"`
+	// Key is the "Make Model" string the default-preset map is keyed by.
+	Key string `json:"key"`
+}
+
+// ListCameras returns the distinct cameras across the whole catalog.
+func (l *Library) ListCameras(ctx context.Context) ([]CameraInfo, error) {
+	pairs, err := l.deps.DB.ListCameras(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CameraInfo, 0, len(pairs))
+	for _, p := range pairs {
+		out = append(out, CameraInfo{Make: p[0], Model: p[1], Key: cameraKey(p[0], p[1])})
+	}
+	return out, nil
+}
+
 func (l *Library) GetAppSettings(ctx context.Context) (*AppSettings, error) {
 	aprot.RegisterRefreshTrigger(ctx, appSettingsKey)
 	return &AppSettings{

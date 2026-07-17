@@ -173,6 +173,12 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 		return
 	}
 
+	// Per-camera default presets: resolved once per pass; seeding happens
+	// right after a photo's first BaseExpEV measurement (below), so a new
+	// import lands with the default look already applied — as a REAL edit,
+	// which grid thumbs, prerender and export all key off.
+	defaults := newDefaultPresetResolver(ctx, l.deps.DB)
+
 	tctx, task := tasks.StartTask[TaskMeta](ctx, "Calibrating "+name, tasks.Shared())
 	task.SetMeta(TaskMeta{Kind: "calibrate", Folder: name, FolderPath: path})
 	total := len(work)
@@ -230,7 +236,17 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 					if err != nil {
 						return err
 					}
-					return l.deps.DB.SetBaseExpEV(context.WithoutCancel(jctx), p.ID, ev)
+					if err := l.deps.DB.SetBaseExpEV(context.WithoutCancel(jctx), p.ID, ev); err != nil {
+						return err
+					}
+					// First calibration of this photo: seed the configured
+					// default preset (no-op when none matches; SetEditSeed's
+					// edit_params IS NULL condition keeps a racing user edit
+					// safe from being clobbered).
+					if up := defaults.forPhoto(p); up != nil {
+						return l.deps.seedDefaultPreset(context.WithoutCancel(jctx), p.ID, *up, ev)
+					}
+					return nil
 				})
 			if err != nil && gctx.Err() == nil {
 				task.Output(p.FileName + ": " + err.Error())

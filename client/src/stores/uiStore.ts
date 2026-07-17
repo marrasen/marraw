@@ -192,6 +192,9 @@ interface UIState {
   autoPresets: AutoPreset[];
   // Saved develop looks (Presets tab → Save current look).
   userPresets: UserPreset[];
+  // Camera key ("Make Model", or "*" for any) → user-preset id seeded onto
+  // new photos by the calibrate pass.
+  defaultPresets: Record<string, string>;
   // Named export overlays (Export dialog → Watermark → Edit…).
   watermarks: Watermark[];
   theme: Theme;
@@ -377,6 +380,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   quickDials: [],
   autoPresets: [],
   userPresets: [],
+  defaultPresets: {},
   watermarks: [],
   theme: 'dark',
   exportDir: '',
@@ -460,6 +464,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       // complete (trusted); identity and the section/flag fields still get
       // narrowed to the client shape.
       userPresets: sanitizeUserPresets(s.userPresets, { trusted: true }),
+      defaultPresets: s.defaultPresets ?? {},
       watermarks: sanitizeWatermarks(s.watermarks),
       exportDir: s.exportDir,
       exportOptions: sanitizeExportOptions(s.exportOptions),

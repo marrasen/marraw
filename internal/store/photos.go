@@ -487,11 +487,49 @@ func (db *DB) DeletePhotos(ctx context.Context, ids []int64) error {
 	return err
 }
 
+// ListCameras returns the distinct camera make/model pairs across the whole
+// catalog (blank-metadata photos excluded), for the default-preset picker
+// in Settings. The caller composes the "Make Model" key so the
+// normalization lives in one place.
+func (db *DB) ListCameras(ctx context.Context) ([][2]string, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT DISTINCT make, model FROM photos
+		 WHERE TRIM(make) != '' OR TRIM(model) != '' ORDER BY make, model`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out [][2]string
+	for rows.Next() {
+		var mk, md string
+		if err := rows.Scan(&mk, &md); err != nil {
+			return nil, err
+		}
+		out = append(out, [2]string{mk, md})
+	}
+	return out, rows.Err()
+}
+
 // SetEdit stores the edit params JSON (nil clears) and its hash.
 func (db *DB) SetEdit(ctx context.Context, id int64, paramsJSON *string, hash string, updatedAtMs int64) error {
 	_, err := db.ExecContext(ctx, `UPDATE photos SET edit_params = ?, edit_hash = ?, updated_at = ? WHERE id = ?`,
 		paramsJSON, hash, updatedAtMs, id)
 	return err
+}
+
+// SetEditSeed stores an edit only when the photo has never been edited
+// (edit_params IS NULL), reporting whether the write landed. The calibrate
+// pass seeds default presets through it, so a user edit racing the pass can
+// never be clobbered — the condition and the write are one statement.
+func (db *DB) SetEditSeed(ctx context.Context, id int64, paramsJSON string, hash string, updatedAtMs int64) (bool, error) {
+	res, err := db.ExecContext(ctx,
+		`UPDATE photos SET edit_params = ?, edit_hash = ?, updated_at = ? WHERE id = ? AND edit_params IS NULL`,
+		paramsJSON, hash, updatedAtMs, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // ApplyImportedEdit applies portable intent read from a sidecar to a photo,

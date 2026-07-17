@@ -252,6 +252,11 @@ type UISettings struct {
 	AutoPresets     []AutoPreset `json:"autoPresets"`
 	// UserPresets are saved develop looks (Presets tab → Save current look).
 	UserPresets []UserPreset `json:"userPresets"`
+	// DefaultPresets: camera key ("Make Model", or "*" for any camera) →
+	// user-preset id. The calibrate pass seeds the matching preset onto
+	// photos that have never been edited, right after measuring BaseExpEV;
+	// an exact camera match beats the "*" entry.
+	DefaultPresets map[string]string `json:"defaultPresets"`
 	// Watermarks are the named export overlays (Export dialog → Watermark).
 	Watermarks []Watermark `json:"watermarks"`
 	ExportDir  string      `json:"exportDir"`
@@ -316,6 +321,9 @@ const (
 	settingUIQuickDials    = "ui:quickDials"
 	settingUIAutoPresets   = "ui:autoPresets"
 	settingUIUserPresets   = "ui:userPresets"
+	// settingUIDefaultPresets maps a camera ("Make Model", or "*" for any)
+	// to the user-preset id the calibrate pass seeds onto new photos.
+	settingUIDefaultPresets = "ui:defaultPresets"
 	settingUIWatermarks    = "ui:watermarks"
 	settingUIExportDir     = "ui:exportDir"
 	settingUIExportOptions = "ui:exportOptions"
@@ -420,6 +428,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		QuickDials:       jsonSetting(ctx, db, settingUIQuickDials, []string{}),
 		AutoPresets:      autoPresetsOrDefault(ctx, db),
 		UserPresets:      jsonSetting(ctx, db, settingUIUserPresets, []UserPreset{}),
+		DefaultPresets:   jsonSetting(ctx, db, settingUIDefaultPresets, map[string]string{}),
 		Watermarks:       jsonSetting(ctx, db, settingUIWatermarks, []Watermark{}),
 		ExportDir:        exportDir,
 		ExportOptions:    normalizeExportOptions(jsonSetting(ctx, db, settingUIExportOptions, ExportOptions{})),
@@ -541,6 +550,22 @@ func (u *Settings) SetUserPresets(ctx context.Context, presets []UserPreset) err
 		presets[i].Params.Normalize()
 	}
 	return u.saveJSON(ctx, settingUIUserPresets, presets)
+}
+
+// SetDefaultPresets replaces the per-camera default-preset map (camera key
+// or "*" → user-preset id; empty map = feature off). Ids referencing a
+// deleted preset simply stop resolving — the calibrate pass then seeds the
+// plain measured baseline, so stale entries are harmless.
+func (u *Settings) SetDefaultPresets(ctx context.Context, defaults map[string]string) error {
+	if defaults == nil {
+		defaults = map[string]string{}
+	}
+	for cam, id := range defaults {
+		if strings.TrimSpace(cam) == "" || id == "" {
+			return aprot.ErrInvalidParams("default presets need a camera key and a preset id")
+		}
+	}
+	return u.saveJSON(ctx, settingUIDefaultPresets, defaults)
 }
 
 // autoPresetsOrDefault reads the stored creative-auto presets, seeding the

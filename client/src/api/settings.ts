@@ -122,6 +122,7 @@ export interface UISettings {
     quickDials: string[];
     autoPresets: AutoPreset[];
     userPresets: UserPreset[];
+    defaultPresets: Record<string, string>;
     watermarks: Watermark[];
     exportDir: string;
     exportOptions: ExportOptions;
@@ -252,6 +253,19 @@ setCullDials.method = 'Settings.SetCullDials' as const;
 
 export function subscribeSetCullDials(client: ApiClient, dials: string[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetCullDials', [dials], callback, onError, options);
+}
+
+
+export function setDefaultPresets(client: ApiClient, defaults: Record<string, string>, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetDefaultPresets', [defaults], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setDefaultPresets.method = 'Settings.SetDefaultPresets' as const;
+
+export function subscribeSetDefaultPresets(client: ApiClient, defaults: Record<string, string>, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetDefaultPresets', [defaults], callback, onError, options);
 }
 
 
@@ -590,6 +604,21 @@ export function useSetCullDials(dials: string[], options?: UseQueryOptions<void>
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [dials], _subscribe: { method: 'Settings.SetCullDials', params: [dials] } });
+}
+
+/**
+ * Subscribes to `Settings.SetDefaultPresets` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetDefaultPresets(defaults: Record<string, string>, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, defaults: Record<string, string>) => setDefaultPresets(client, defaults, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [defaults], _subscribe: { method: 'Settings.SetDefaultPresets', params: [defaults] } });
 }
 
 /**
