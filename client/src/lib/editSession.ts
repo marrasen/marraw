@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import type { ApiClient } from '@/api/client';
 import {
   autoAdjust,
+  generateAIMap,
   getEditParams,
   pasteEditParams,
   pickWhiteBalance,
@@ -18,8 +19,9 @@ import {
   setEditParams,
   suggestHealSource,
 } from '@/api/edits';
-import type { Mask, Params, Spot } from '@/api/edit';
+import type { AIKindType, Mask, Params, Spot } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
+import { isModelNotDownloaded } from '@/lib/aiConsent';
 import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPresets';
 import { applyUserPreset, lerpPresetAmount } from '@/lib/presetSections';
 import {
@@ -1155,7 +1157,11 @@ export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
 // calibrated baseline), so geometry, masks, retouch spots, and every
 // section the preset doesn't carry keep the photo's own values. Shared by
 // the Presets tab and the Ctrl+Shift+1..9 shortcuts.
-export function esApplyUserPreset(client: ApiClient, preset: UserPreset) {
+export function esApplyUserPreset(
+  client: ApiClient,
+  preset: UserPreset,
+  opts?: { onMasksNeedDownload?: (kind: AIKindType) => void },
+) {
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
   const autoSecs = presetAutoSections(preset);
@@ -1166,6 +1172,7 @@ export function esApplyUserPreset(client: ApiClient, preset: UserPreset) {
     // AFTER esApplyParams — it clears lastPresetApply (any whole-draft
     // replacement invalidates a stale scrubber).
     setState({ lastPresetApply: { photoId: s.photoId, base, result, name: preset.name, amount: 1 } });
+    runPresetMasks(client, preset, opts);
     return;
   }
   // Adaptive preset: the backend computes the photo's own auto for the
@@ -1184,10 +1191,75 @@ export function esApplyUserPreset(client: ApiClient, preset: UserPreset) {
       const result = applyUserPreset(resolved, preset, cur.baseExpEV);
       esApplyParamsPreview(client, result, preset.name);
       setState({ lastPresetApply: { photoId: pid, base, result, name: preset.name, amount: 1 } });
+      // Masks only AFTER the look landed — running them concurrently would
+      // let the late look replace the draft and drop the appended masks.
+      runPresetMasks(client, preset, opts);
     } catch (err) {
       toast.error(`Auto adjust failed: ${(err as Error).message}`);
     }
   })();
+}
+
+// runPresetMasks fires the preset's AI-mask phase (fire-and-forget behind
+// the look apply). Without a consent hook a missing model just reports how
+// to get it — a keyboard apply must not pop a dialog the view isn't
+// prepared for.
+function runPresetMasks(
+  client: ApiClient,
+  preset: UserPreset,
+  opts?: { onMasksNeedDownload?: (kind: AIKindType) => void },
+) {
+  void esApplyPresetMasks(client, preset).then((r) => {
+    if (r.status !== 'needs-download') return;
+    if (opts?.onMasksNeedDownload) opts.onMasksNeedDownload(r.kind!);
+    else toast(`Look applied — AI masks skipped (the ${r.kind} model isn't downloaded yet)`);
+  });
+}
+
+// esApplyPresetMasks is a preset apply's second phase: re-run detection for
+// the preset's AI-mask RECIPES on the focused photo (GenerateAIMap is
+// idempotent — instant when the map is on disk) and append them to the
+// draft as one further history entry "Name · masks". The look stays applied
+// whatever happens here; a missing model resolves to 'needs-download' so
+// the caller can ask consent and retry with allowDownload.
+export async function esApplyPresetMasks(
+  client: ApiClient,
+  preset: UserPreset,
+  opts?: { allowDownload?: boolean },
+): Promise<{ status: 'none' | 'done' | 'needs-download'; kind?: AIKindType }> {
+  const s = useEditSession.getState();
+  if (s.photoId == null || !s.draft) return { status: 'none' };
+  const recipes = (preset.params.masks ?? []).filter((m) => m.type === 'ai' && m.aiKind);
+  if (recipes.length === 0) return { status: 'none' };
+  const pid = s.photoId;
+  const kinds = [...new Set(recipes.map((m) => m.aiKind!))];
+  const vers: Partial<Record<AIKindType, string>> = {};
+  for (const kind of kinds) {
+    try {
+      const res = await generateAIMap(client, pid, kind, opts?.allowDownload ?? false);
+      vers[kind] = res.mapVer;
+    } catch (err) {
+      if (isModelNotDownloaded(err)) return { status: 'needs-download', kind };
+      toast.error(`AI masks failed: ${(err as Error).message}`);
+      return { status: 'none' };
+    }
+    if (useEditSession.getState().photoId !== pid) return { status: 'none' }; // superseded
+  }
+  const cur = useEditSession.getState();
+  if (cur.photoId !== pid || !cur.draft) return { status: 'none' };
+  const masks = [
+    // APPEND to the photo's own masks — replacing would destroy local work;
+    // a duplicate from re-applying is visible and deletable.
+    ...(cur.draft.masks ?? []),
+    ...recipes.map((m) => ({ ...m, mapVer: vers[m.aiKind!]! })),
+  ];
+  // esApplyParams clears the amount scrubber (any whole-draft replacement
+  // does); the look phase's record stays valid — scrubs preserve the
+  // draft's masks — so restore it across the mask commit.
+  const keep = cur.lastPresetApply;
+  esApplyParams(client, { ...cur.draft, masks }, { label: `${preset.name} · masks` });
+  if (keep && keep.photoId === pid) setState({ lastPresetApply: keep });
+  return { status: 'done' };
 }
 
 // resolveUserPreset computes the params applying `preset` to the current
@@ -1275,8 +1347,11 @@ export function esHoverEnd(client: ApiClient) {
 export function esSetPresetAmount(client: ApiClient, t: number) {
   const s = useEditSession.getState();
   const a = s.lastPresetApply;
-  if (!a || s.photoId !== a.photoId) return;
-  const params = lerpPresetAmount(a.base, a.result, t);
+  if (!a || s.photoId !== a.photoId || !s.draft) return;
+  // The draft owns the photo's local adjustments — a preset's mask phase
+  // may have appended masks AFTER base/result were captured, and the scrub
+  // must not lerp them away.
+  const params = { ...lerpPresetAmount(a.base, a.result, t), masks: s.draft.masks, spots: s.draft.spots };
   setState({ draft: params, lastPresetApply: { ...a, amount: t } });
   schedulePreview(client, 'draft');
   window.clearTimeout(amountTimer);

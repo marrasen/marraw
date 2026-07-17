@@ -8,7 +8,7 @@
 //
 // A leaf module like controlSpecs: editSession and the presets UI build on
 // it, so it must not import them back.
-import type { Params } from '@/api/edit';
+import type { Mask, Params } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import { CONTROL_SPECS, NEUTRAL } from '@/lib/controlSpecs';
 
@@ -294,6 +294,18 @@ export function lerpPresetAmount(base: Params, result: Params, t: number): Param
       v === effective(key, NEUTRAL) ? (NEUTRAL as unknown as Record<string, number>)[key] : v;
   }
   return out;
+}
+
+// aiMaskRecipes extracts the draft's AI masks as portable RECIPES: mapVer
+// (which pins a generated map file) is cleared — applying re-runs detection
+// on the target photo and stamps a fresh version. Painted masks
+// (linear/radial/brush) are geometry tied to one photo's content and never
+// travel; undefined when the draft has no AI masks.
+export function aiMaskRecipes(draft: Params): Mask[] | undefined {
+  const recipes = (draft.masks ?? [])
+    .filter((m) => m.type === 'ai' && m.aiKind)
+    .map((m) => ({ ...m, mapVer: '' }));
+  return recipes.length > 0 ? recipes : undefined;
 }
 
 // stripToLook returns a copy of `draft` with geometry zeroed and local

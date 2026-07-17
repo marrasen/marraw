@@ -3,7 +3,7 @@
 // read path mostly checks identity; presets from an IMPORTED FILE are
 // untrusted JSON and every field is narrowed before it goes anywhere near
 // the store. A leaf module (imports only the API types + catalogs).
-import type { Params } from '@/api/edit';
+import type { Mask, MaskAdjust, Params } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import { NEUTRAL } from '@/lib/controlSpecs';
 import { PRESET_GROUPS } from '@/lib/presetSections';
@@ -48,8 +48,9 @@ function sanitizeIds(raw: unknown, known: Set<string>): string[] | undefined {
 // only matching primitive shapes, fixed-length numeric arrays checked
 // element-wise. Value RANGES are the server's job (Normalize clamps on
 // save); this guards shape so garbage can't reach the store or the wire.
-// Masks and spots never travel in a preset file's look (local geometry) and
-// are dropped.
+// Painted masks and retouch spots never travel in a preset (local
+// geometry); AI-mask RECIPES do (they re-run detection per photo) and are
+// narrowed field-by-field.
 function sanitizeParams(raw: Record<string, unknown>): Params {
   const out: Params = { ...NEUTRAL };
   const fields = out as unknown as Record<string, unknown>;
@@ -69,7 +70,51 @@ function sanitizeParams(raw: Record<string, unknown>): Params {
       fields[key] = v;
     }
   }
+  out.masks = sanitizeMaskRecipes(raw.masks);
   return out;
+}
+
+const AI_KINDS = new Set(['subject', 'class', 'depth']);
+const ADJUST_KEYS = [
+  'expEV', 'contrast', 'toneHighlights', 'toneShadows', 'whites', 'blacks',
+  'temp', 'tint', 'saturation',
+] as const;
+
+function finite(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+// sanitizeMaskRecipes keeps only AI-mask recipes from an imported preset:
+// known kind, numeric tuning, numeric adjust — mapVer always cleared
+// (applying re-runs detection and stamps the local model's version).
+function sanitizeMaskRecipes(raw: unknown): Mask[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: Mask[] = [];
+  for (const m of raw) {
+    if (typeof m !== 'object' || m === null) continue;
+    const r = m as Record<string, unknown>;
+    if (r.type !== 'ai' || typeof r.aiKind !== 'string' || !AI_KINDS.has(r.aiKind)) continue;
+    const adjust: MaskAdjust = {};
+    if (typeof r.adjust === 'object' && r.adjust !== null) {
+      for (const k of ADJUST_KEYS) {
+        const v = finite((r.adjust as Record<string, unknown>)[k]);
+        if (v !== undefined && v !== 0) adjust[k] = v;
+      }
+    }
+    out.push({
+      type: 'ai',
+      aiKind: r.aiKind as Mask['aiKind'],
+      mapVer: '',
+      invert: r.invert === true || undefined,
+      classId: finite(r.classId),
+      depthLo: finite(r.depthLo),
+      depthHi: finite(r.depthHi),
+      threshold: finite(r.threshold),
+      feather: finite(r.feather),
+      adjust,
+    });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 // The preset share-file envelope. Version 1; unknown newer versions are

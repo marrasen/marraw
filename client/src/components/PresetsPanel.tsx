@@ -7,7 +7,9 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Copy, ClipboardPaste, CopyPlus, Download, Pencil, Plus, RefreshCw, RotateCcw, Upload, X } from 'lucide-react';
 import type { Photo } from '@/api/library';
-import { autoAdjust, previewEdit } from '@/api/edits';
+import { aIModelStatus as aiModelStatus, autoAdjust, previewEdit } from '@/api/edits';
+import type { AIKindType } from '@/api/edit';
+import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import type { Params } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import type { ApiClient } from '@/api/client';
@@ -20,6 +22,7 @@ import {
   computePresetParams,
   esApplyAutoPreset,
   esApplyParams,
+  esApplyPresetMasks,
   esApplyUserPreset,
   esAuto,
   esCommitPresetAmount,
@@ -36,6 +39,7 @@ import {
 } from '@/lib/editSession';
 import {
   adaptiveLookDiff,
+  aiMaskRecipes,
   PRESET_GROUPS,
   presetSections,
   stripToLook,
@@ -209,6 +213,11 @@ function UserPresetsSection({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState('');
   const [autoSecs, setAutoSecs] = useState<AutoSection[]>([]);
+  const [withMasks, setWithMasks] = useState(false);
+  // A preset whose AI-mask phase hit a missing model, waiting on download
+  // consent; non-null renders the AIModelDialog.
+  const [maskConsent, setMaskConsent] = useState<{ preset: UserPreset; pending: PendingAIDownload } | null>(null);
+  const draftAIMaskCount = (draft?.masks ?? []).filter((m) => m.type === 'ai').length;
   const importInput = useRef<HTMLInputElement>(null);
   const thumbs = useUserPresetThumbs(client, photo, presets);
 
@@ -218,9 +227,13 @@ function UserPresetsSection({
     // Adaptive auto sections only make sense for look groups the preset
     // carries (their names coincide with the group ids by design).
     const autos = autoSecs.filter((a) => sections.includes(a));
-    // Masks and retouch spots are local geometry tied to one photo's
-    // content, not a look; geometry stays with the photo too.
-    let params = stripToLook(draft);
+    // Painted masks and retouch spots are local geometry tied to one
+    // photo's content, not a look; geometry stays with the photo too. AI
+    // masks travel as recipes when chosen — applying re-runs detection.
+    let params: Params = {
+      ...stripToLook(draft),
+      masks: withMasks ? aiMaskRecipes(draft) : undefined,
+    };
     let rel = relative;
     // The source photo's calibrated exposure baseline: apply re-anchors
     // the look's creative exposure to the target photo's baseline, so a
@@ -238,7 +251,7 @@ function UserPresetsSection({
         toast.error(`Auto adjust failed: ${(err as Error).message}`);
         return;
       }
-      params = adaptiveLookDiff(draft, auto);
+      params = { ...adaptiveLookDiff(draft, auto), masks: withMasks ? aiMaskRecipes(draft) : undefined };
       rel = true;
       // Exposure rides the per-photo auto result; no baseline to anchor.
       baseEV = undefined;
@@ -280,14 +293,23 @@ function UserPresetsSection({
 
   // Overwrite re-snapshots the look from the current draft, keeping the
   // preset's identity and semantics (id → the Ctrl+Shift+n slot and any
-  // default-preset reference stay valid; sections/relative unchanged).
+  // default-preset reference stay valid; sections/relative unchanged). A
+  // preset that carries AI-mask recipes refreshes them from the draft's AI
+  // masks; one without stays mask-free.
   const overwrite = (p: UserPreset) => {
     if (!draft) return;
     updateUserPresets(
       client,
       presets.map((x) =>
         x.id === p.id
-          ? { ...x, params: stripToLook(draft), baseExpEV: photo?.baseExpEV || undefined }
+          ? {
+              ...x,
+              params: {
+                ...stripToLook(draft),
+                masks: (x.params.masks?.length ?? 0) > 0 ? aiMaskRecipes(draft) : undefined,
+              },
+              baseExpEV: photo?.baseExpEV || undefined,
+            }
           : x,
       ),
     );
@@ -321,6 +343,14 @@ function UserPresetsSection({
     } catch (err) {
       toast.error(`Import failed: ${(err as Error).message}`);
     }
+  };
+
+  // A preset's mask phase hit a missing model: look up the download size
+  // and open the consent dialog (models are never fetched silently).
+  const requestMaskConsent = async (p: UserPreset, kind: AIKindType) => {
+    const status = await aiModelStatus(client, kind).catch(() => null);
+    if (!status) return;
+    setMaskConsent({ preset: p, pending: { kind, bytes: status.bytes, mode: 'add' } });
   };
 
   // Drag a card onto another to reorder (LibraryRail's block pattern). The
@@ -359,8 +389,12 @@ function UserPresetsSection({
             >
               <button
                 className="flex w-full flex-col overflow-hidden rounded-lg border bg-inset text-left transition-colors hover:border-primary/50"
-                onClick={() => esApplyUserPreset(client, p)}
-                title={`Apply ${p.name} (keeps the photo's crop)${i < 9 ? ` (Ctrl+Shift+${i + 1})` : ''} — drag to reorder`}
+                onClick={() =>
+                  esApplyUserPreset(client, p, {
+                    onMasksNeedDownload: (kind) => void requestMaskConsent(p, kind),
+                  })
+                }
+                title={`Apply ${p.name} (keeps the photo's crop)${(p.params.masks?.length ?? 0) > 0 ? ' + AI masks' : ''}${i < 9 ? ` (Ctrl+Shift+${i + 1})` : ''} — drag to reorder`}
               >
                 <div className="aspect-[3/2] w-full overflow-hidden bg-black/40">
                   {thumbs[p.id] ? (
@@ -544,6 +578,23 @@ function UserPresetsSection({
                 </button>
               );
             })}
+            {draftAIMaskCount > 0 && (
+              <>
+                <span className="mx-0.5 h-3.5 w-px bg-border" />
+                <button
+                  className={cn(
+                    'rounded-md border px-1.5 py-0.5 text-[11px] transition-colors',
+                    withMasks
+                      ? 'border-primary/50 bg-primary/15 text-accent-text'
+                      : 'border-input text-muted-foreground hover:text-foreground',
+                  )}
+                  onClick={() => setWithMasks((w) => !w)}
+                  title="Include this photo's AI masks as recipes — applying re-detects the subject/scene/depth on each target photo"
+                >
+                  AI masks ({draftAIMaskCount})
+                </button>
+              </>
+            )}
           </div>
         </div>
       ) : (
@@ -586,6 +637,17 @@ function UserPresetsSection({
           />
         </div>
       )}
+      <AIModelDialog
+        pending={maskConsent?.pending ?? null}
+        onCancel={() => setMaskConsent(null)}
+        onConfirm={() => {
+          const c = maskConsent;
+          setMaskConsent(null);
+          // allowDownload is safe to set for the whole retry post-consent —
+          // same rule as EyeScanDialog: the user just approved the fetch.
+          if (c) void esApplyPresetMasks(client, c.preset, { allowDownload: true });
+        }}
+      />
     </Section>
   );
 }
