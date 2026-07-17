@@ -11,26 +11,33 @@ a React front-end does the rest, and Electron holds it together.
 <sup>Cull mode. The scrubber deck has already broken 191 frames into 31 groups —
 note the `+6 min gap`, `+3 min gap` dividers between runs.</sup>
 
-> **Status: early. Windows only.**
+> **Status: early.**
 > marraw is usable daily but the feature set is deliberately narrow — read
 > [What marraw does *not* do](#what-marraw-does-not-do) before you invest time
-> in it. Nothing is stopping a macOS/Linux build except work; see
-> [DEVELOPER.md](DEVELOPER.md#porting-to-macos-and-linux).
+> in it. Windows is the primary platform; the macOS and Linux builds are
+> newer and less travelled — issue reports are very welcome.
 
 ---
 
 ## Install
 
-Grab `marraw-Setup-<version>.exe` from the
-[latest release](https://github.com/marrasen/marraw/releases/latest).
+Grab your platform's package from the
+[latest release](https://github.com/marrasen/marraw/releases/latest):
 
-The installer is not code-signed yet, so Windows SmartScreen will warn you once
-— **More info → Run anyway**. After that the app updates itself: it checks
-GitHub on launch, downloads new versions in the background, and installs them
-when you quit.
+- **Windows** — `marraw-Setup-<version>.exe`. Not code-signed yet, so
+  SmartScreen will warn you once — **More info → Run anyway**.
+- **Linux** — `marraw-<version>-x86_64.AppImage` (auto-updating) or the
+  `.deb` package.
+- **macOS** — `marraw-<version>-arm64.dmg` (Apple Silicon). Unsigned, so
+  first launch needs right-click → **Open** (or "Open Anyway" under
+  Privacy & Security on macOS 15+); auto-update is not available on macOS.
 
-**Requirements:** Windows 10 or 11, 64-bit. No LibRaw DLLs, no runtime, no
-Python. One installer.
+On Windows and Linux (AppImage) the app updates itself: it checks GitHub on
+launch, downloads new versions in the background, and installs them when you
+quit.
+
+**Requirements:** Windows 10/11 64-bit, a recent x86-64 Linux distro, or an
+Apple Silicon Mac. No LibRaw DLLs, no runtime, no Python. One installer.
 
 ---
 
@@ -217,8 +224,8 @@ them is load-bearing for your work, marraw is not ready for you yet.
 
 **Platform & workflow**
 
-- ❌ **Windows only.** No macOS or Linux build exists yet.
-- ❌ **Not code-signed.** Expect a SmartScreen warning on first install.
+- ❌ **Not code-signed.** Expect a SmartScreen warning on first install
+  (Windows) or a right-click → Open dance on first launch (macOS).
 - ❌ **No second-display window**, no tethered capture, no soft-proofing.
 - ❌ **No panorama stitch or HDR bracket merge.**
 
@@ -229,7 +236,8 @@ themes, per-photo undo/redo, and a cache with a configurable size cap.
 
 ## Where your data lives
 
-- **Catalog** — SQLite under `%APPDATA%\marraw`.
+- **Catalog** — SQLite under `%APPDATA%\marraw` (Windows), `~/.config/marraw`
+  (Linux), or `~/Library/Application Support/marraw` (macOS).
 - **Preview cache** — same place, with a size cap you set in Settings.
 - **Your edits** — in the catalog *and* in a `.marraw.json` next to each RAW,
   unless you turn sidecars off.
@@ -241,11 +249,11 @@ Your RAW files are never modified or moved.
 ## Contributing
 
 Want to build this yourself or contribute? Everything is in
-**[DEVELOPER.md](DEVELOPER.md)** — architecture, setup, tests, packaging, the
-release process, and a worked plan for the macOS/Linux port.
+**[DEVELOPER.md](DEVELOPER.md)** — architecture, setup, tests, packaging, and
+the release process.
 
-Issues and pull requests are welcome, especially for the port and for anything
-on the missing list above.
+Issues and pull requests are welcome, especially reports from the newer macOS
+and Linux builds and anything on the missing list above.
 
 ---
 
