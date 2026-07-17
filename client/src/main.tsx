@@ -49,6 +49,13 @@ if (import.meta.env.DEV) {
       esFinishSpot: (i: number) => es.esFinishSpot(client, i),
       esSetSpotTool: (t: unknown) => es.esSetSpotTool(t as never),
       esSetSpotVisualize: (on: boolean) => es.esSetSpotVisualize(on),
+      // User presets (the `presets` shot surface): seed, apply, hover, scrub.
+      setUserPresets: (p: unknown) => us.updateUserPresets(client, p as never),
+      esApplyUserPreset: (p: unknown) => es.esApplyUserPreset(client, p as never),
+      esHoverPreset: (p: unknown) => es.esHoverPreset(client, p as never),
+      esHoverEnd: () => es.esHoverEnd(client),
+      esSetPresetAmount: (t: number) => es.esSetPresetAmount(client, t),
+      esCommitPresetAmount: () => es.esCommitPresetAmount(client),
       // Server-persisted UI settings (optimistic store write + server call).
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),

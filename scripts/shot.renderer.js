@@ -409,6 +409,46 @@ if (shot === 'cull') {
     .map((e) => e.textContent)
     .filter((t) => t !== 'Downloaded models');
   window.__modelsProbe = { rows, text: dlg.textContent.includes('Not used by this version') };
+} else if (shot === 'presets') {
+  // The Presets tab with saved looks: seeds two user presets (one full
+  // absolute, one partial+relative), applies the first so the Amount
+  // scrubber shows, and probes hover preview + the amount lerp.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  const look = { ...es.getState().draft, contrast: 0.25, vibrance: 0.3, splitShadowHue: 200, splitShadowAmt: 0.2, rotate: 0, flipH: false, cropX: 0, cropY: 0, cropW: 0, cropH: 0, cropAngle: 0, masks: undefined, spots: undefined };
+  const presets = [
+    { id: 'shot-full', name: 'Punchy look', params: look, baseExpEV: es.getState().baseExpEV || undefined },
+    { id: 'shot-tone', name: 'Warm tone (partial)', params: { ...look, splitShadowHue: 35 }, sections: ['tone', 'color'], relative: true },
+  ];
+  mw.setUserPresets(presets);
+  ui().setDevelopTab('presets');
+  await sleep(2500); // preset card thumbnails render
+  // Hover probe: the loupe must paint the override without touching draft.
+  const draftBefore = JSON.stringify(es.getState().draft);
+  mw.esHoverPreset(presets[0]);
+  await sleep(700); // debounce + low-res frame
+  const hoverSet = es.getState().hoverParams != null;
+  const draftUntouched = JSON.stringify(es.getState().draft) === draftBefore;
+  mw.esHoverEnd();
+  await sleep(300);
+  const hoverCleared = es.getState().hoverParams == null;
+  // Apply + scrub to 60%: contrast lands at base + 0.6×(0.25 − base).
+  mw.esApplyUserPreset(presets[0]);
+  await until(() => es.getState().lastPresetApply != null);
+  const applied = es.getState().draft.contrast;
+  mw.esSetPresetAmount(0.6);
+  await sleep(200);
+  const scrubbed = es.getState().draft.contrast;
+  mw.esCommitPresetAmount();
+  window.__presetsProbe = {
+    hoverSet,
+    draftUntouched,
+    hoverCleared,
+    applied,
+    scrubbed,
+    amountShown: !!es.getState().lastPresetApply,
+  };
 } else if (shot === 'develop-light') {
   document.documentElement.classList.remove('dark');
   // setState on the mirror: shows the dials without persisting server-side.
@@ -941,6 +981,7 @@ const probe =
   window.__neardupProbe ??
   window.__modelsProbe ??
   window.__maskProbe ??
+  window.__presetsProbe ??
   window.__cropProbe ??
   window.__renderProbe ??
   window.__settleProbe ??
