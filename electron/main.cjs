@@ -3,7 +3,7 @@
 // Single-instance: relaunching the exe opens a new window in the running
 // instance instead of a second process (two daemons on one SQLite file
 // clobbered each other's settings).
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, nativeImage } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -367,6 +367,15 @@ ipcMain.handle('marraw:pick-image', async () => {
 });
 ipcMain.handle('marraw:reveal', (_ev, p) => {
   if (typeof p === 'string') shell.showItemInFolder(p);
+});
+ipcMain.handle('marraw:copy-image', (_ev, buf) => {
+  if (!(buf instanceof ArrayBuffer) && !ArrayBuffer.isView(buf)) return false;
+  const img = nativeImage.createFromBuffer(
+    ArrayBuffer.isView(buf) ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : Buffer.from(buf),
+  );
+  if (img.isEmpty()) return false;
+  clipboard.writeImage(img);
+  return true;
 });
 ipcMain.handle('marraw:is-directory', (_ev, p) => {
   if (typeof p !== 'string') return false;

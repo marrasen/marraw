@@ -4,6 +4,7 @@ import { getEditParams } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { toast } from 'sonner';
 import { applyRating as doRating, applyFlag as doFlag, applyFlagOps } from '@/lib/actions';
+import { copyTargetPhotoToClipboard } from '@/lib/clipboardExport';
 import { chCanRedo, chCanUndo, chRedo, chUndo } from '@/lib/cullHistory';
 import { rowNeighbor } from '@/lib/gridNav';
 import { useUIStore, selectionOrFocus, type DevelopTab } from '@/stores/uiStore';
@@ -79,6 +80,8 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 //                 Library/Cull (falling back to edit history when empty)
 //   Ctrl+0        reset all develop settings
 //   Ctrl+E        export dialog
+//   Ctrl+⇧+C      copy the focused photo to the clipboard as an image
+//                 (renders with the last-used export settings)
 //   Ctrl+U        auto dynamics (+Shift = auto colours, +Alt = auto everything)
 //   Ctrl+1..9     creative auto presets (Settings → Auto presets)
 //   Ctrl+⇧+1..9   saved "My presets" looks (Develop → Presets tab)
@@ -182,6 +185,13 @@ export function useKeyboard() {
             s.selectAll(s.visibleIds);
             return;
           case 'c': {
+            // Ctrl+Shift+C renders the single targeted photo with the
+            // last-used export settings and puts the image on the system
+            // clipboard — the fast path for pasting into a chat.
+            if (e.shiftKey) {
+              if (copyTargetPhotoToClipboard(client)) e.preventDefault();
+              return;
+            }
             if (s.focusId == null) return;
             e.preventDefault();
             getEditParams(client, s.focusId).then((p) => {

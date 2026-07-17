@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,6 +146,45 @@ func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.Tas
 		}
 	}()
 	return &tasks.TaskRef{TaskID: task.ID()}, nil
+}
+
+type ClipboardRenderRequest struct {
+	PhotoID  int64 `json:"photoId" validate:"required"`
+	LongEdge int   `json:"longEdge" validate:"gte=0,lte=65536"`
+	// SharpenTarget/SharpenAmount mirror ExportRequest; empty = off / standard.
+	SharpenTarget SharpenTarget `json:"sharpenTarget" validate:"omitempty,oneof=off screen matte glossy"`
+	SharpenAmount SharpenAmount `json:"sharpenAmount" validate:"omitempty,oneof=low standard high"`
+	// WatermarkID composites the named watermark; empty or unknown = none.
+	WatermarkID string `json:"watermarkId" validate:"omitempty,max=64"`
+}
+
+// RenderClipboard renders one photo to PNG bytes for the system clipboard.
+// Always sRGB (untagged, per the encoder convention) and EXIF-free — clipboard
+// pastes keep no metadata, and stripping it avoids leaking GPS positions.
+// Synchronous: the caller waits (and may cancel via the request context).
+func (x *Export) RenderClipboard(ctx context.Context, req ClipboardRenderRequest) (*aprot.Blob, error) {
+	var wmSpec *watermark.Spec
+	if wm := watermarkByID(ctx, x.deps.DB, req.WatermarkID); wm != nil {
+		wmSpec = toWatermarkSpec(*wm, x.deps.WatermarkDir)
+	}
+	rendered, err := export.RenderOne(ctx, x.deps.DB, req.PhotoID, export.Request{
+		Format:        "png",
+		LongEdge:      req.LongEdge,
+		ColorSpace:    "srgb",
+		SharpenTarget: string(req.SharpenTarget),
+		SharpenAmount: string(req.SharpenAmount),
+		ExifMode:      "none",
+		Watermark:     wmSpec,
+		AIMaps:        x.deps.Cache.AIMaps,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, rendered); err != nil {
+		return nil, err
+	}
+	return &aprot.Blob{ContentType: "image/png", Data: buf.Bytes()}, nil
 }
 
 func plural(n int) string {

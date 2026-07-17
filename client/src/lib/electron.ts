@@ -9,6 +9,8 @@ declare global {
       revealInExplorer: (path: string) => void;
       getPathForFile: (file: File) => string;
       isDirectory: (path: string) => Promise<boolean>;
+      // Absent on builds predating clipboard export — feature-check.
+      copyImageToClipboard?: (buf: ArrayBuffer) => Promise<boolean>;
       // Absent on builds predating the auto-update setting — feature-check.
       updatesSupported?: boolean;
       getAutoUpdate?: () => Promise<boolean>;

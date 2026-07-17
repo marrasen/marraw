@@ -10,6 +10,14 @@ import type {
 import type { ColorSpaceType, ExifModeType, ExportFormatType, SharpenAmountType, SharpenTargetType } from './api';
 import type { TaskRef } from './tasks.types';
 
+export interface ClipboardRenderRequest {
+    photoId: number;
+    longEdge: number;
+    sharpenTarget: SharpenTargetType;
+    sharpenAmount: SharpenAmountType;
+    watermarkId: string;
+}
+
 export interface DestInfo {
     exists: boolean;
 }
@@ -46,6 +54,19 @@ export function subscribeCheckDest(client: ApiClient, path: string, callback: (d
 }
 
 
+export function renderClipboard(client: ApiClient, req: ClipboardRenderRequest, options?: RequestOptions): Promise<Blob> {
+    return client.request<Blob>('Export.RenderClipboard', [req], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+renderClipboard.method = 'Export.RenderClipboard' as const;
+
+export function subscribeRenderClipboard(client: ApiClient, req: ClipboardRenderRequest, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Blob>('Export.RenderClipboard', [req], callback, onError, options);
+}
+
+
 export function startExport(client: ApiClient, req: ExportRequest, options?: RequestOptions): Promise<TaskRef> {
     return client.request<TaskRef>('Export.StartExport', [req], options);
 }
@@ -73,6 +94,21 @@ export function useCheckDest(path: string, options?: UseQueryOptions<DestInfo>):
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Export.CheckDest', params: [path] } });
+}
+
+/**
+ * Subscribes to `Export.RenderClipboard` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useRenderClipboard(req: ClipboardRenderRequest, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, req: ClipboardRenderRequest) => renderClipboard(client, req, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [req], _subscribe: { method: 'Export.RenderClipboard', params: [req] } });
 }
 
 /**

@@ -337,6 +337,30 @@ if (shot === 'cull') {
   ui().setPaletteOpen(true);
 } else if (shot === 'export') {
   ui().setExportOpen(true);
+} else if (shot === 'export-copy') {
+  // Copy-to-clipboard button: with a single photo selected the button shows;
+  // clicking it runs the whole path (render RPC → blob → Electron IPC →
+  // clipboard.writeImage) and lands the success toast. With a multi-photo
+  // selection the button must be absent.
+  ui().setExportOpen(true);
+  await sleep(400);
+  const copyBtn = () =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Copy to clipboard');
+  const singleShown = !!copyBtn();
+  copyBtn()?.click();
+  await until(() => document.body.textContent.includes('Copied — ready to paste'), 120000);
+  const dialogClosed = !ui().exportOpen;
+  ui().selectAll(ui().visibleIds);
+  ui().setExportOpen(true);
+  await sleep(400);
+  const multiShown = !!copyBtn();
+  // Back to a single selection so the capture shows the button.
+  ui().setExportOpen(false);
+  await sleep(200);
+  ui().focus(ui().visibleIds[0]);
+  ui().setExportOpen(true);
+  await sleep(300);
+  window.__exportCopyProbe = { singleShown, dialogClosed, multiShown };
 } else if (shot === 'export-raw') {
   ui().setExportOpen(true);
   await sleep(400);
@@ -903,5 +927,6 @@ const probe =
   window.__renderProbe ??
   window.__settleProbe ??
   window.__welcomeProbe ??
-  window.__folderViewProbe;
+  window.__folderViewProbe ??
+  window.__exportCopyProbe;
 return probe ? { shot, ...probe } : shot;

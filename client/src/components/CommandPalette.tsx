@@ -15,6 +15,8 @@ import { DIALS } from '@/lib/dials';
 import { CONTROL_KEYS } from '@/lib/keyboard';
 import type { AutoPreset } from '@/lib/autoPresets';
 import { useTheme } from '@/components/theme-provider';
+import { toast } from 'sonner';
+import { copyTargetPhotoToClipboard } from '@/lib/clipboardExport';
 import { useUIStore, type DevelopTab } from '@/stores/uiStore';
 
 interface Command {
@@ -55,6 +57,11 @@ function buildCommands(
           ui().setContactSheet(true);
         } },
       { id: 'export', label: 'Export…', group: 'Actions', hint: 'Ctrl+E', run: () => ui().setExportOpen(true) },
+      // Renders the single targeted photo with the last-used export settings
+      // and puts the image on the system clipboard (mirrors Ctrl+Shift+C).
+      { id: 'copy-image', label: 'Copy image to clipboard', group: 'Actions', hint: 'Ctrl+⇧+C', run: (client) => {
+          if (!copyTargetPhotoToClipboard(client)) toast.error('Select a single photo to copy');
+        } },
     );
   }
   out.push(

@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld('marraw', {
   // Absolute path of a dragged-in File (drop a folder anywhere to add it).
   getPathForFile: (file) => webUtils.getPathForFile(file),
   isDirectory: (path) => ipcRenderer.invoke('marraw:is-directory', path),
+  // Puts an encoded image (PNG/JPEG bytes) on the system clipboard. Native
+  // clipboard has no document-focus requirement, unlike navigator.clipboard.
+  copyImageToClipboard: (buf) => ipcRenderer.invoke('marraw:copy-image', buf),
   // Background auto-update opt-out. Unsigned macOS builds can never update
   // themselves, and on Linux only the AppImage packaging self-updates (a .deb
   // install has no updater) — hide the setting rather than show a dead toggle.

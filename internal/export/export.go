@@ -151,14 +151,16 @@ func Run(ctx context.Context, db *store.DB, req Request, onItem func(Item)) erro
 	return g.Wait()
 }
 
-func exportOne(ctx context.Context, photo store.Photo, outPath string, req Request) error {
+// renderPhoto decodes the RAW and produces the final output pixels — the
+// render half of exportOne, without the encode/write tail.
+func renderPhoto(ctx context.Context, photo store.Photo, req Request) (*image.RGBA, error) {
 	proc, err := libraw.New()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer proc.Close()
 	if err := proc.Open(photo.Path()); err != nil {
-		return err
+		return nil, err
 	}
 
 	var params *edit.Params
@@ -177,7 +179,7 @@ func exportOne(ctx context.Context, photo store.Photo, outPath string, req Reque
 	// (recycle-on-cancel) costs nothing extra — it just stops burning a core.
 	img, err := proc.Process(ctx, lp)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	gamma := photo.LookGamma
@@ -185,7 +187,21 @@ func exportOne(ctx context.Context, photo store.Photo, outPath string, req Reque
 		gamma = pyramid.FallbackLookGamma
 	}
 
-	rendered, err := renderFinal(img, gamma, params, photo, req)
+	return renderFinal(img, gamma, params, photo, req)
+}
+
+// RenderOne renders a single photo to final pixels without writing anything
+// to disk. Used by the clipboard-copy RPC.
+func RenderOne(ctx context.Context, db *store.DB, photoID int64, req Request) (*image.RGBA, error) {
+	photo, err := db.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	return renderPhoto(ctx, photo, req)
+}
+
+func exportOne(ctx context.Context, photo store.Photo, outPath string, req Request) error {
+	rendered, err := renderPhoto(ctx, photo, req)
 	if err != nil {
 		return err
 	}

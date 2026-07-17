@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -22,6 +22,7 @@ import { Segmented } from '@/components/ui/segmented';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { copyPhotoToClipboard } from '@/lib/clipboardExport';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
 import { updateExportDir, updateExportOptions } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
@@ -122,7 +123,14 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   const [copyright, setCopyright] = useState('');
   const [watermarkId, setWatermarkId] = useState('');
   const [starting, setStarting] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [needsCreate, setNeedsCreate] = useState(false);
+  // Closing the dialog aborts an in-flight clipboard render — the RPC signal
+  // cancels the decode server-side, so it stops burning a core.
+  const copyAbort = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (!open) copyAbort.current?.abort();
+  }, [open]);
 
   // Prefill from the last-used options when the dialog opens: the previous
   // destination (else "<current folder>\Exports") plus the persisted export
@@ -220,6 +228,35 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
       toast.error(`Export failed to start: ${(err as Error).message}`);
     } finally {
       setStarting(false);
+    }
+  };
+
+  // Renders the single targeted photo server-side and puts it on the system
+  // clipboard, honoring the dialog's pixel options (resize, sharpen,
+  // watermark) — format/metadata are fixed by the RPC (PNG, sRGB, no EXIF).
+  const copy = async () => {
+    const ac = new AbortController();
+    copyAbort.current = ac;
+    setCopying(true);
+    try {
+      await copyPhotoToClipboard(
+        client,
+        {
+          photoId: ids[0],
+          longEdge,
+          sharpenTarget,
+          sharpenAmount,
+          watermarkId: isRaw ? '' : watermarkId,
+        },
+        ac.signal,
+      );
+      toast.success('Copied — ready to paste');
+      setOpen(false);
+    } catch (err) {
+      if (!ac.signal.aborted) toast.error(`Copy failed: ${(err as Error).message}`);
+    } finally {
+      copyAbort.current = null;
+      setCopying(false);
     }
   };
 
@@ -556,10 +593,15 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
             </>
           ) : (
             <>
+              {ids.length === 1 && (
+                <Button variant="outline" size="lg" onClick={copy} disabled={starting || copying}>
+                  {copying ? 'Rendering…' : 'Copy to clipboard'}
+                </Button>
+              )}
               <Button variant="outline" size="lg" onClick={() => setOpen(false)} disabled={starting}>
                 Cancel
               </Button>
-              <Button size="lg" onClick={() => start(false)} disabled={ids.length === 0 || starting}>
+              <Button size="lg" onClick={() => start(false)} disabled={ids.length === 0 || starting || copying}>
                 Export
               </Button>
             </>

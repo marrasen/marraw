@@ -33,6 +33,13 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
     ],
   },
   {
+    title: 'Export',
+    rows: [
+      ['Export dialog', 'Ctrl+E'],
+      ['Copy image to clipboard', 'Ctrl+⇧+C'],
+    ],
+  },
+  {
     title: 'Develop',
     rows: [
       ['Switch panel tab', 'Tab'],
