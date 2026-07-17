@@ -21,7 +21,7 @@ import {
 import type { Mask, Params, Spot } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPresets';
-import { applyUserPreset } from '@/lib/presetSections';
+import { applyUserPreset, lerpPresetAmount } from '@/lib/presetSections';
 import {
   CONTROL_ORDER,
   CONTROL_SPECS,
@@ -133,6 +133,14 @@ interface EditSessionState {
   // Draft snapshot from when the WB eyedropper opened: the revert target for
   // Reset/Cancel. Null when the picker is closed.
   wbPickBase: Params | null;
+  // Transient render override while a preset card is hovered: the loupe
+  // paints these params instead of the draft. Never touches the draft,
+  // history, or persistence — clearing it reverts by construction.
+  hoverParams: Params | null;
+  // The last preset apply, kept for the post-apply amount scrubber: lerping
+  // between base (the pre-apply draft) and result re-derives any strength
+  // 0..200%. Invalidated by a photo switch, any other edit, undo, or reset.
+  lastPresetApply: { photoId: number; base: Params; result: Params; name: string; amount: number } | null;
   cropping: boolean; // crop overlay active: loupe shows the uncropped frame
   // Heal/retouch tool active: pointer-down on the loupe places or grabs a spot
   // (draft.spots) instead of panning.
@@ -192,6 +200,8 @@ export const useEditSession = create<EditSessionState>(() => ({
   preview: null,
   wbPicking: false,
   wbPickBase: null,
+  hoverParams: null,
+  lastPresetApply: null,
   cropping: false,
   healing: false,
   activeSpot: null,
@@ -249,6 +259,12 @@ let commitTimer = 0;
 // a newer apply (or a photo switch) supersedes an in-flight one so a stale
 // result can't clobber the draft.
 let applyGen = 0;
+// Hover-preview debounce: quick sweeps across preset cards must not fire a
+// render (or an autoAdjust) per card. The gen token supersedes the async
+// resolution of an earlier hover.
+let hoverTimer = 0;
+let hoverGen = 0;
+let amountTimer = 0;
 
 // In crop mode the loupe draws the rectangle and applies the straighten angle
 // as a CSS rotation, both client-side — so the backend renders the flat full
@@ -288,7 +304,8 @@ function schedulePreview(client: ApiClient, kind: 'draft' | 'settle') {
       // draft coalescing.
       esFlushDraft();
       const s = useEditSession.getState();
-      if (s.draft && !sameKey(inFlight.key, keyFor(s.draft, s.cropping))) inFlight.abort.abort();
+      const shown = s.hoverParams ?? s.draft;
+      if (shown && !sameKey(inFlight.key, keyFor(shown, s.cropping))) inFlight.abort.abort();
     }
   }
 }
@@ -403,7 +420,9 @@ function labelForDiff(prev: Params, next: Params): string {
 // unmeasured or the caller doesn't have the payload at hand).
 export async function esLoad(client: ApiClient, photoId: number, applyIds: number[], baseExpEV = 0) {
   window.clearTimeout(commitTimer);
+  window.clearTimeout(hoverTimer);
   applyGen++; // supersede any autoAdjust still in flight for the old photo
+  hoverGen++;
   pending = null; // BEFORE the abort: its finally must not refire for the old photo
   inFlight?.abort.abort();
   lastShown = null;
@@ -412,6 +431,8 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     photoId,
     applyIds,
     baseExpEV,
+    hoverParams: null,
+    lastPresetApply: null,
     draft: null,
     lastDraft: s.draft ?? s.lastDraft,
     loading: true,
@@ -826,6 +847,10 @@ export function esFlushDraft() {
 export function esUpdate(client: ApiClient, patch: Partial<Params>) {
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return;
+  // A manual slider move ends the post-apply amount scrubber (its base and
+  // result no longer describe the draft) and any hover overlay (the moved
+  // slider must be visible, not a stale hover frame).
+  if (s.lastPresetApply || s.hoverParams) setState({ lastPresetApply: null, hoverParams: null });
   pendingPatch = { ...(pendingPatch ?? {}), ...patch };
   if (!draftRaf) draftRaf = requestAnimationFrame(flushDraft);
   // While cropping, the crop rectangle and straighten angle are previewed
@@ -838,10 +863,13 @@ export function esUpdate(client: ApiClient, patch: Partial<Params>) {
 
 async function renderPreview(client: ApiClient, full: boolean) {
   esFlushDraft(); // render the freshest slider state, not last frame's
-  const { photoId, draft, cropping } = useEditSession.getState();
+  const { photoId, draft, hoverParams, cropping } = useEditSession.getState();
   if (photoId == null || !draft) return;
-  const renderParams = flattenedParams(draft, cropping);
-  const key = keyFor(draft, cropping);
+  // A hovered preset overrides what the loupe shows; the draft (and
+  // everything keyed off it — persistence, history) is untouched.
+  const shown = hoverParams ?? draft;
+  const renderParams = flattenedParams(shown, cropping);
+  const key = keyFor(shown, cropping);
   // The identical sharp frame already landed (and ensurePreview wrote it to
   // the pyramid cache) — nothing to render. Most commonly the drag-release
   // commit right after an identical settle.
@@ -925,7 +953,9 @@ export function esApplyParams(
 ) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
-  setState({ draft: params });
+  // hoverParams cleared: a replaced draft must not stay hidden behind a
+  // stale hover overlay (the pointer may still be parked on a card).
+  setState({ draft: params, lastPresetApply: null, hoverParams: null });
   if (!opts?.skipHistory) pushHistory(s.photoId, params, opts?.label ?? 'Edit');
   schedulePreview(client, 'settle');
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
@@ -941,7 +971,7 @@ export function esApplyParams(
 function esApplyParamsPreview(client: ApiClient, params: Params, label: string) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
-  setState({ draft: params });
+  setState({ draft: params, lastPresetApply: null, hoverParams: null });
   pushHistory(s.photoId, params, label);
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
   persist(client, params, ids);
@@ -1000,6 +1030,7 @@ export function esJumpTo(client: ApiClient, index: number) {
   const params = h.stack[index].params;
   setState({
     draft: params,
+    lastPresetApply: null,
     history: { ...s.history, [s.photoId]: { ...h, index } },
   });
   schedulePreview(client, 'settle');
@@ -1058,7 +1089,7 @@ export function esReset(client: ApiClient) {
   // it — the photo hasn't changed).
   pending = null;
   inFlight?.abort.abort();
-  setState({ draft: { ...NEUTRAL } });
+  setState({ draft: { ...NEUTRAL }, lastPresetApply: null });
   esClearPreview();
   const ids = s.applyIds.length > 1 ? s.applyIds : [photoId];
   resetEdits(client, ids)
@@ -1111,6 +1142,8 @@ export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
     const out = await computePresetParams(client, pid, base, preset);
     if (applyGen !== gen || useEditSession.getState().photoId !== pid) return; // superseded
     esApplyParamsPreview(client, out, preset.name);
+    // AFTER the apply — it clears lastPresetApply like any draft replacement.
+    setState({ lastPresetApply: { photoId: pid, base, result: out, name: preset.name, amount: 1 } });
   } catch (err) {
     toast.error(`Auto adjust failed: ${(err as Error).message}`);
   }
@@ -1124,8 +1157,107 @@ export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
 // the Presets tab and the Ctrl+Shift+1..9 shortcuts.
 export function esApplyUserPreset(client: ApiClient, preset: UserPreset) {
   const s = useEditSession.getState();
-  if (!s.draft) return;
-  esApplyParams(client, applyUserPreset(s.draft, preset, s.baseExpEV), { label: preset.name });
+  if (!s.draft || s.photoId == null) return;
+  const base = s.draft;
+  const result = applyUserPreset(base, preset, s.baseExpEV);
+  esApplyParams(client, result, { label: preset.name });
+  // AFTER esApplyParams — it clears lastPresetApply (any whole-draft
+  // replacement invalidates a stale scrubber).
+  setState({ lastPresetApply: { photoId: s.photoId, base, result, name: preset.name, amount: 1 } });
+}
+
+// esHoverPreset previews a preset on the loupe while its card is hovered:
+// after a short debounce (sweeping across cards must not render per card)
+// the merged params land in hoverParams — a pure render override; draft,
+// history, and persistence stay untouched. Suppressed while a modal-ish
+// tool owns the loupe (WB picker, crop, heal, mask paint, keyboard adjust).
+export function esHoverPreset(client: ApiClient, preset: UserPreset) {
+  hoverStart(client, (cur) => applyUserPreset(cur.draft!, preset, cur.baseExpEV));
+}
+
+// esHoverAutoPreset is esHoverPreset for creative-auto presets: the debounce
+// also absorbs the autoAdjust round trip, and the gen token drops a stale
+// resolution (card left, photo switched) on the floor.
+export function esHoverAutoPreset(client: ApiClient, preset: AutoPreset) {
+  hoverStart(client, (cur) => computePresetParams(client, cur.photoId!, cur.draft!, preset));
+}
+
+function hoverSuppressed(s: EditSessionState): boolean {
+  return s.wbPicking || s.cropping || s.healing || s.maskPaint || s.keyAdjust;
+}
+
+function hoverStart(client: ApiClient, resolve: (s: EditSessionState) => Params | Promise<Params>) {
+  const s = useEditSession.getState();
+  if (s.photoId == null || !s.draft || hoverSuppressed(s)) return;
+  window.clearTimeout(hoverTimer);
+  const gen = ++hoverGen;
+  const pid = s.photoId;
+  hoverTimer = window.setTimeout(() => {
+    void (async () => {
+      const cur = useEditSession.getState();
+      if (hoverGen !== gen || cur.photoId !== pid || !cur.draft || hoverSuppressed(cur)) return;
+      try {
+        const params = await resolve(cur);
+        const now = useEditSession.getState();
+        if (hoverGen !== gen || now.photoId !== pid || hoverSuppressed(now)) return;
+        setState({ hoverParams: params });
+        schedulePreview(client, 'draft'); // low-res only — hovers never settle
+      } catch {
+        // autoAdjust failed — the hover just doesn't preview
+      }
+    })();
+  }, 150);
+}
+
+// esHoverEnd cancels a pending hover and, if one was showing, reverts the
+// loupe to the draft: instant low-res frame with the sharp settle queued
+// behind it.
+export function esHoverEnd(client: ApiClient) {
+  window.clearTimeout(hoverTimer);
+  hoverGen++;
+  const s = useEditSession.getState();
+  if (s.hoverParams == null) return;
+  setState({ hoverParams: null });
+  schedulePreview(client, 'draft');
+  schedulePreview(client, 'settle');
+}
+
+// esSetPresetAmount scrubs the strength of the last preset apply: the draft
+// becomes the base→result lerp at t (0 = pre-preset, 1 = as applied, up to
+// 2 = doubled, clamped per-field). Renders the instant low-res frame per
+// move; the persist + history amend rides a short idle (esCommitPresetAmount)
+// so a scrub lands as ONE amended entry, not an undo-stack spam.
+export function esSetPresetAmount(client: ApiClient, t: number) {
+  const s = useEditSession.getState();
+  const a = s.lastPresetApply;
+  if (!a || s.photoId !== a.photoId) return;
+  const params = lerpPresetAmount(a.base, a.result, t);
+  setState({ draft: params, lastPresetApply: { ...a, amount: t } });
+  schedulePreview(client, 'draft');
+  window.clearTimeout(amountTimer);
+  amountTimer = window.setTimeout(() => esCommitPresetAmount(client), 400);
+}
+
+// esCommitPresetAmount persists the scrubbed strength and AMENDS the preset's
+// history entry in place (label "Name · 85%") — the apply stays one undoable
+// step whatever the final amount.
+export function esCommitPresetAmount(client: ApiClient) {
+  window.clearTimeout(amountTimer);
+  const s = useEditSession.getState();
+  const a = s.lastPresetApply;
+  if (!a || s.photoId == null || s.photoId !== a.photoId || !s.draft) return;
+  const params = s.draft;
+  const label = a.amount === 1 ? a.name : `${a.name} · ${Math.round(a.amount * 100)}%`;
+  setState((st) => {
+    const h = st.history[a.photoId];
+    if (!h) return {};
+    const stack = [...h.stack];
+    stack[h.index] = { params, label };
+    return { history: { ...st.history, [a.photoId]: { ...h, stack } } };
+  });
+  const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
+  persist(client, params, ids);
+  schedulePreview(client, 'settle');
 }
 
 // computePresetParams resolves a creative-auto preset to concrete params for a

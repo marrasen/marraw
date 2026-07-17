@@ -216,6 +216,55 @@ function presetExpEV(draft: Params, preset: UserPreset, targetBaseExpEV: number)
   return targetBaseExpEV + creative;
 }
 
+// lerpPresetAmount re-derives a preset apply at strength t: 0 = the
+// pre-apply draft (base), 1 = the preset result as applied, up to 2 =
+// doubled, clamped per-field to the control ranges. Smooth numerics lerp
+// over EFFECTIVE values (so sentinel-default fields interpolate through
+// their real defaults); position-valued numerics (hues, Kelvin), cycle
+// values and the WB multipliers snap at t = 0.5 — an intermediate hue or
+// mode is not a meaningful "half" of either. Geometry and masks/spots are
+// identical in base and result (a preset never touches them) and pass
+// through.
+export function lerpPresetAmount(base: Params, result: Params, t: number): Params {
+  const out: Params = { ...result };
+  for (const key of LOOK_KEYS) {
+    const { mode } = PRESET_FIELDS[key];
+
+    if (key === 'hslHue' || key === 'hslSat' || key === 'hslLum') {
+      out[key] = base[key].map((b, i) =>
+        clampRound(b + t * (result[key][i] - b), HSL_RANGE.min, HSL_RANGE.max),
+      ) as Params['hslHue'];
+      continue;
+    }
+    if (key === 'wbMul') {
+      out.wbMul = t >= 0.5 ? [...result.wbMul] : [...base.wbMul];
+      continue;
+    }
+    if (mode === 'enum' || mode === 'absolute') {
+      (out as unknown as Record<string, unknown>)[key] = t >= 0.5
+        ? (result as unknown as Record<string, unknown>)[key]
+        : (base as unknown as Record<string, unknown>)[key];
+      continue;
+    }
+
+    const b = effective(key, base);
+    const r = effective(key, result);
+    if (b === r) {
+      // Untouched by the preset — keep the base's stored representation
+      // (sentinel included) instead of round-tripping through effective.
+      (out as unknown as Record<string, unknown>)[key] = (base as unknown as Record<string, unknown>)[key];
+      continue;
+    }
+    const spec = CONTROL_SPECS[key as keyof typeof CONTROL_SPECS];
+    const min = spec && spec.kind === 'numeric' ? spec.min : -1;
+    const max = spec && spec.kind === 'numeric' ? spec.max : 1;
+    const v = clampRound(b + t * (r - b), min, max);
+    (out as unknown as Record<string, number>)[key] =
+      v === effective(key, NEUTRAL) ? (NEUTRAL as unknown as Record<string, number>)[key] : v;
+  }
+  return out;
+}
+
 // stripToLook returns a copy of `draft` with geometry zeroed and local
 // adjustments removed — the shape a preset's params snapshot must have.
 export function stripToLook(draft: Params): Params {

@@ -15,14 +15,20 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { AutoPreset } from '@/lib/autoPresets';
 import { updateUserPresets } from '@/lib/uiSettings';
+import { Slider } from '@/components/ui/slider';
 import {
   computePresetParams,
   esApplyAutoPreset,
   esApplyParams,
   esApplyUserPreset,
   esAuto,
+  esCommitPresetAmount,
+  esHoverAutoPreset,
+  esHoverEnd,
+  esHoverPreset,
   esJumpTo,
   esReset,
+  esSetPresetAmount,
   NEUTRAL,
   useEditSession,
 } from '@/lib/editSession';
@@ -90,6 +96,8 @@ export function PresetsPanel({
         )}
       </Section>
 
+      <AmountSection client={client} />
+
       <Section title="Clipboard">
         <div className="flex flex-wrap gap-2">
           <Button
@@ -125,6 +133,45 @@ export function PresetsPanel({
         <HistoryList client={client} />
       </Section>
     </div>
+  );
+}
+
+// AmountSection is the post-apply strength scrubber: after a preset lands it
+// re-derives the apply at 0–200% (lerp between the pre-apply draft and the
+// preset result). Scrubbing amends the preset's single history entry rather
+// than stacking undo steps; any other edit, undo, reset, or photo switch
+// dismisses it.
+function AmountSection({ client }: { client: ApiClient }) {
+  const apply = useEditSession((s) => s.lastPresetApply);
+  const photoId = useEditSession((s) => s.photoId);
+  if (!apply || apply.photoId !== photoId) return null;
+  const pct = Math.round(apply.amount * 100);
+  return (
+    <Section title="Amount">
+      <div className="flex items-center gap-2.5">
+        <span className="w-20 shrink-0 truncate text-xs text-muted-foreground" title={apply.name}>
+          {apply.name}
+        </span>
+        <div className="min-w-0 flex-1">
+          <Slider
+            value={pct}
+            min={0}
+            max={200}
+            step={5}
+            fillFrom={100}
+            aria-label={`${apply.name} amount`}
+            onValueChange={(v) => esSetPresetAmount(client, (v as number) / 100)}
+            onValueCommitted={(v) => {
+              esSetPresetAmount(client, (v as number) / 100);
+              esCommitPresetAmount(client);
+            }}
+          />
+        </div>
+        <span className="w-14 shrink-0 text-right font-mono text-[11px] text-foreground tabular-nums">
+          {pct}%
+        </span>
+      </div>
+    </Section>
   );
 }
 
@@ -193,7 +240,14 @@ function UserPresetsSection({
       {presets.length > 0 && (
         <div className="grid grid-cols-2 gap-2">
           {presets.map((p, i) => (
-            <div key={p.id} className="group relative">
+            <div
+              key={p.id}
+              className="group relative"
+              // Hovering the card previews the look full-size on the loupe
+              // (debounced, low-res, draft untouched); leaving reverts.
+              onMouseEnter={() => esHoverPreset(client, p)}
+              onMouseLeave={() => esHoverEnd(client)}
+            >
               <button
                 className="flex w-full flex-col overflow-hidden rounded-lg border bg-inset text-left transition-colors hover:border-primary/50"
                 onClick={() => esApplyUserPreset(client, p)}
@@ -369,6 +423,8 @@ function PresetGrid({
           key={preset.id}
           className="group flex flex-col overflow-hidden rounded-lg border bg-inset text-left transition-colors hover:border-primary/50"
           onClick={() => void esApplyAutoPreset(client, preset)}
+          onMouseEnter={() => esHoverAutoPreset(client, preset)}
+          onMouseLeave={() => esHoverEnd(client)}
           title={`Apply ${preset.name}`}
         >
           <div className="aspect-[3/2] w-full overflow-hidden bg-black/40">
