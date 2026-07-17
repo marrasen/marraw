@@ -6,10 +6,10 @@ description: Cut a marraw release end-to-end — changelog from commits since th
 # Releasing a new marraw version
 
 The pipeline: pushing a `v*` tag runs `.github/workflows/release.yml`, which
-builds the Windows installer and uploads it to a **draft** GitHub release
-(marrasen/marraw). Nothing reaches users — and electron-updater sees nothing —
-until the draft is published. Publishing is the last step and it IS wanted:
-"release" means users get the update.
+builds the Windows, macOS and Linux packages and uploads them to a **draft**
+GitHub release (marrasen/marraw). Nothing reaches users — and electron-updater
+sees nothing — until the draft is published. Publishing is the last step and
+it IS wanted: "release" means users get the update.
 
 Development is trunk-based: everything happens on `main`, tags define
 releases, there is no `develop` branch. If an old release ever needs a patch
@@ -125,9 +125,24 @@ against package.json verbatim, so both must carry the suffix.
 
 ## 6. Publish
 
-When the run succeeds, electron-builder has created a draft release with
-`marraw-Setup-X.Y.Z.exe`, `.blockmap`, and `latest.yml`. Verify the assets
-(`gh release view vX.Y.Z`), then publish with the changelog section as notes:
+When the run succeeds, electron-builder has created a draft release. The full
+asset set is NINE files: `marraw-Setup-X.Y.Z.exe` + `.exe.blockmap` +
+`latest.yml` (Windows), `-arm64.dmg` + `.dmg.blockmap` + `latest-mac.yml`
+(macOS), `-x86_64.AppImage` + `-amd64.deb` + `latest-linux.yml` (Linux).
+
+**Known race (hit on v0.5.0-beta.2 AND v0.5.0):** the per-OS jobs sometimes
+create TWO drafts for the same tag — one with the exe + mac assets, one with
+the linux assets + the Windows blockmap. Check with
+`gh api repos/marrasen/marraw/releases --jq '.[] | select(.tag_name=="vX.Y.Z") | {id, assets: [.assets[].name]}'`.
+If split, consolidate BEFORE publishing: download the smaller draft's assets
+(`gh api repos/marrasen/marraw/releases/assets/<id> -H "Accept: application/octet-stream" > <name>`),
+DELETE that draft (`gh api -X DELETE .../releases/<id>`) — delete first, so
+the tag is unambiguous — then `gh release upload vX.Y.Z <files>`. A missing
+`latest-linux.yml` breaks Linux auto-update; a missing `.exe.blockmap` breaks
+Windows differential updates.
+
+Verify all nine assets (`gh release view vX.Y.Z`), then publish with the
+changelog section as notes:
 
 ```
 gh release edit vX.Y.Z --draft=false --latest --notes-file <notes.md>
