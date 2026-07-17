@@ -12,10 +12,11 @@ a React front-end does the rest, and Electron holds it together.
 note the `+6 min gap`, `+3 min gap` dividers between runs.</sup>
 
 > **Status: early.**
-> marraw is usable daily but the feature set is deliberately narrow — read
-> [What marraw does *not* do](#what-marraw-does-not-do) before you invest time
-> in it. Windows is the primary platform; the macOS and Linux builds are
-> newer and less travelled — issue reports are very welcome.
+> marraw is usable daily, and the scope has been growing fast — smart culling
+> and AI-masked local editing are in. The gaps that remain are real ones,
+> though: read [What marraw does *not* do](#what-marraw-does-not-do) before
+> you invest time in it. Windows is the primary platform; the macOS and Linux
+> builds are newer and less travelled — issue reports are very welcome.
 
 ---
 
@@ -66,6 +67,17 @@ so you can see a whole day's structure at once.
 <sup>The contact sheet (`G`). Each section header carries its time range, its
 frame count, and how long the dead time before it was.</sup>
 
+**The machine does the pixel-peeping first.**
+Within those groups, near-duplicate frames collapse into burst stacks with the
+sharpest frame on top: an auto-judge weighs sharpness and subject focus, and
+`⇧P`/`⇧X` pick or reject around a stack's best frame. Folder-wide analysis
+scores every photo for sharpness and subject focus — a **Soft** filter sweeps
+the out-of-focus rejects in one pass — and closed-eye detection badges the
+blinks, with a **Blinks** filter that narrows the grid to just those frames.
+All of it runs on your machine: the models download only after you say yes,
+nothing leaves your computer, and Settings shows the downloaded weights and
+lets you delete them.
+
 **Culling is keyboard-first, and the loupe remembers where you were.**
 Arrows navigate, `1`–`5` rate, `P` picks, `X` excludes, `Enter` goes deeper.
 Zoom and pan position persist across arrow navigation, so stepping through a
@@ -94,9 +106,12 @@ There is no catalog to import into and nothing to migrate out of.
 **Batch work is first-class.**
 Select ten frames and apply *relative* adjustments — "+0.5 EV on all of these"
 — rather than stamping one absolute value over ten different exposures. Copy
-and paste edit settings with `Ctrl+C`/`Ctrl+V`. `Ctrl+U` auto-tones; `Ctrl+1`–`9`
-apply your own saved creative auto-presets, and any look can be saved as a
-named preset and applied from the Presets tab (the photo keeps its own crop).
+and paste edit settings with `Ctrl+C`/`Ctrl+V`. `Ctrl+U` auto-tones — metering
+the detected subject when one exists, not just the frame average — and
+auto-crop frames that subject; `Ctrl+1`–`9` apply your own saved creative
+auto-presets, `Ctrl+⇧+1`–`9` your saved presets by position, and any look can
+be saved as a named preset and applied from the Presets tab (the photo keeps
+its own crop).
 
 **`Ctrl+K` jumps to anything** — any mode, any panel, any single develop
 control, any preset.
@@ -110,7 +125,7 @@ control, any preset.
 | Mode | For |
 | --- | --- |
 | **Library** | Virtualized grid, adjustable thumbnail size, time-gap grouping, multi-select, rating/flag badges. |
-| **Cull** | Full-bleed cinema loupe, scrubber deck, pick/reject bar, contact sheet (`G`). |
+| **Cull** | Full-bleed cinema loupe, scrubber deck, pick/reject bar, burst stacks with best-frame auto-judge, sharpness/blink badges, contact sheet (`G`). |
 | **Develop** | Darkroom canvas, pinnable panel, floating quick-dials you choose, crop and white-balance overlays. |
 | **Export** | JPEG, lossless TIFF / PNG, or RAW + XMP handoff — batched across every core. |
 
@@ -123,20 +138,25 @@ control, any preset.
 
 - **Geometry** — crop & straighten via an interactive overlay (±15°), 90°
   rotation and mirroring from the overlay toolbar.
-- **Retouch** — circular spot removal (`Q`): click a dust spot or blemish (drag
-  to size it) and it fills from a nearby patch marraw picks for you — heal
-  (source texture tone-matched to the surroundings) or clone (verbatim) — with a
-  draggable source and per-spot feather. Spots are anchored to image content, so
-  they survive recrops and re-straightens and render identically in previews,
+- **Retouch** — spot removal (`Q`): click a dust spot or blemish (drag to
+  size it), or paint over any shape with the heal brush, and it fills from a
+  source patch marraw picks for you — heal (source texture tone-matched to
+  the surroundings) or clone (verbatim) — with a draggable source, per-spot
+  feather, and `1`–`9`/`0` setting a selected spot's opacity. Visualize
+  spots (`A`) flips to a high-contrast dust view with a sensitivity slider
+  for hunting sensor spots. Spots are anchored to image content, so they
+  survive recrops and re-straightens and render identically in previews,
   1:1 tiles and exports.
-- **Local adjustments** — linear (graduated) filters, radial filters, and a
-  feathered brush with flow and eraser, each carrying its own exposure,
-  contrast, highlights/shadows, whites/blacks, temperature, tint and
-  saturation. Masks are anchored to image content, so they survive recrops
-  and re-straightens, and render identically in previews, 1:1 tiles and
-  exports.
-- **Tone** — exposure, preserve highlights, brightness, gamma, shadow slope,
-  contrast, whites, blacks, shadows, highlights.
+- **Local adjustments** — linear (graduated) filters, radial filters, a
+  feathered brush with flow and eraser, and AI masks: Subject, Depth (a
+  two-thumb near/far range) and Scene selections, with mask edges refined
+  automatically at high zoom and a mask row's region tinted on hover. Each
+  mask carries its own exposure, contrast, highlights/shadows, whites/blacks,
+  temperature, tint and saturation. Masks are anchored to image content, so
+  they survive recrops and re-straightens, and render identically in
+  previews, 1:1 tiles and exports.
+- **Tone** — exposure (±5 EV), preserve highlights, brightness, gamma, shadow
+  slope, contrast, whites, blacks, shadows, highlights.
 - **Presence** — clarity, texture, dehaze.
 - **White balance** — as shot / auto / Kelvin, temperature, tint, and an
   eyedropper (`W`).
@@ -163,7 +183,8 @@ and at web sizes. Output files take a name template — `{name}`, `{seq}`,
 RAW knew (body, exposure triangle, lens, capture time, GPS), copyright only,
 or nothing, with persisted artist/copyright credit fields and a one-switch
 location strip. Runs in the background across all cores at full AHD demosaic
-quality.
+quality. A single photo can also go straight to the clipboard (`Ctrl+⇧+C`),
+rendered exactly like an export, for pasting into a chat or a doc.
 
 If you want to finish a photo in another editor, don't export an intermediate
 — nothing marraw can render carries more information than the file your camera
@@ -189,17 +210,16 @@ them is load-bearing for your work, marraw is not ready for you yet.
 
 **Editing**
 
-- ❌ **No AI masks.** Local adjustments exist (linear/radial/brush — see
-  Editing tools), but there is no subject/sky/person detection, no luminance
-  or color range masks, and local adjustments are not carried into RAW + XMP
+- ❌ **No luminance or color range masks.** AI masks (subject/depth/scene)
+  and drawn masks exist — see Editing tools — but there is no luma/color
+  range selection, and local adjustments are not carried into RAW + XMP
   handoffs.
 - ❌ **No tone curve.** Contrast and the whites/blacks/shadows/highlights
   sliders drive a fixed parametric curve. There is no point curve and no
   per-channel R/G/B curves.
-- ⚠️ **Spot removal is circular-only.** Click a dust spot or blemish and marraw
-  heals or clones it from an auto-picked (draggable) source patch — but there is
-  no brush-shaped healing, no content-aware/ML fill, and spots are not carried
-  into the RAW + XMP handoff.
+- ⚠️ **Retouch is heal/clone only.** Spots and the heal brush fill from
+  another patch of the same photo — there is no content-aware/ML fill, and
+  retouch is not carried into the RAW + XMP handoff.
 - ❌ **No lens profile corrections.** No distortion or vignetting profiles, no
   automatic defringe — only a manual CA slider and a creative vignette.
 - ❌ **No modern denoise.** You get LibRaw's wavelet/FBDD/median, not
@@ -212,8 +232,9 @@ them is load-bearing for your work, marraw is not ready for you yet.
 - ❌ **No XMP round-trip.** Working sidecars are marraw's own `.marraw.json`,
   and marraw never *reads* XMP. Export can write Adobe-compatible `.xmp`
   sidecars (see RAW + XMP above), but that is a one-way handoff, not sync.
-- ❌ **No photo search, keywords, or collections.** You filter by rating and
-  flag within a folder. That's it.
+- ❌ **No photo search, keywords, or collections.** You filter by rating,
+  flag, and the culling signals (soft frames, blinks) within a folder.
+  That's it.
 - ❌ **No DCP camera profiles.**
 
 **Export & output**
@@ -230,7 +251,8 @@ them is load-bearing for your work, marraw is not ready for you yet.
 - ❌ **No panorama stitch or HDR bracket merge.**
 
 Multi-window (several windows, one library) *does* work. So do light/dark
-themes, per-photo undo/redo, and a cache with a configurable size cap.
+themes, per-photo edit undo/redo, one-`Ctrl+Z`-per-stroke culling undo, and a
+cache with a configurable size cap.
 
 ---
 
