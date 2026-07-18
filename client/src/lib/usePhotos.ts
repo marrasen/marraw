@@ -19,6 +19,11 @@ function photoPatchReducer(data: Photo[], patch: unknown): Photo[] {
     if (p.rating != null) next.rating = p.rating;
     if (p.flag != null) next.flag = p.flag;
     if (p.editHash != null) next.editHash = p.editHash;
+    // Geometry arrives as explicit values on every edit save (0 = reset), so
+    // != null both applies and clears — the grid's cell aspect follows live.
+    if (p.rotate != null) next.rotate = p.rotate;
+    if (p.cropW != null) next.cropW = p.cropW;
+    if (p.cropH != null) next.cropH = p.cropH;
     if (p.subjectSharpness != null) next.subjectSharpness = p.subjectSharpness;
     if (p.subjectAnalyzed != null) next.subjectAnalyzed = p.subjectAnalyzed;
     if (p.eyesClosed != null) next.eyesClosed = p.eyesClosed;

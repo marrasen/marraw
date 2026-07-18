@@ -12,32 +12,42 @@ export function displayDims(photo: Photo): [number, number] {
   return [photo.width, photo.height];
 }
 
+// AspectGeometry is the subset of edit geometry that changes the rendered
+// output size. Full Params satisfies it, and so does the Photo DTO — the
+// server mirrors rotate/cropW/cropH onto every photo (and edit patch) so the
+// grid can size natural-layout cells without loading edit state.
+export interface AspectGeometry {
+  rotate?: number;
+  cropW?: number;
+  cropH?: number;
+}
+
 // hasCrop reports whether a real crop rectangle is set (a straighten angle
 // alone rotates the full frame without cropping).
-export function hasCrop(p: Params | null | undefined): boolean {
-  return !!p && p.cropW > 0 && p.cropH > 0;
+export function hasCrop(p: AspectGeometry | null | undefined): boolean {
+  return !!p && (p.cropW ?? 0) > 0 && (p.cropH ?? 0) > 0;
 }
 
 // rotateTurns is the coarse rotation as canonical quarter turns clockwise in
 // 0..3. Matches edit.Params.RotateTurns on the Go side.
-export function rotateTurns(p: Params | null | undefined): number {
-  return p ? ((p.rotate % 4) + 4) % 4 : 0;
+export function rotateTurns(p: AspectGeometry | null | undefined): number {
+  return p ? (((p.rotate ?? 0) % 4) + 4) % 4 : 0;
 }
 
 // rotatedDims applies the coarse 90° rotation to the full display dims. The
 // crop rectangle and straighten angle live in this rotated space, so it is
 // the flat-frame size the crop overlay works against.
-export function rotatedDims(fullW: number, fullH: number, p: Params | null | undefined): [number, number] {
+export function rotatedDims(fullW: number, fullH: number, p: AspectGeometry | null | undefined): [number, number] {
   return rotateTurns(p) % 2 !== 0 ? [fullH, fullW] : [fullW, fullH];
 }
 
 // renderedDims maps the full display dimensions to the rendered size after the
 // coarse rotation and crop. The straighten angle does not change the output
 // size. Matches edit.Params.OutputDims on the Go side.
-export function renderedDims(fullW: number, fullH: number, p: Params | null | undefined): [number, number] {
+export function renderedDims(fullW: number, fullH: number, p: AspectGeometry | null | undefined): [number, number] {
   [fullW, fullH] = rotatedDims(fullW, fullH, p);
   if (!hasCrop(p)) return [fullW, fullH];
-  return [Math.max(1, Math.round(p!.cropW * fullW)), Math.max(1, Math.round(p!.cropH * fullH))];
+  return [Math.max(1, Math.round(p!.cropW! * fullW)), Math.max(1, Math.round(p!.cropH! * fullH))];
 }
 
 // rotateCropPatch returns the params patch for one more quarter turn of the

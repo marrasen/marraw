@@ -77,6 +77,9 @@ export interface Photo {
     width: number;
     height: number;
     orientation: number;
+    rotate?: number;
+    cropW?: number;
+    cropH?: number;
     iso: number;
     shutter: number;
     aperture: number;
@@ -97,6 +100,9 @@ export interface PhotoPatch {
     rating: number | null;
     flag: FlagType | null;
     editHash: string | null;
+    rotate: number | null;
+    cropW: number | null;
+    cropH: number | null;
     subjectSharpness: number | null;
     subjectAnalyzed: boolean | null;
     eyesClosed: number | null;

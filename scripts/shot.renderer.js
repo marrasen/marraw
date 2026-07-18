@@ -339,6 +339,26 @@ if (shot === 'cull') {
     max: sorted[sorted.length - 1],
     over1s: steps.filter((s) => s > 1000).length,
   };
+} else if (shot === 'naturalgrid') {
+  // Natural thumbFit must size each grid cell to the RENDERED aspect —
+  // cropaspect-verify.mjs has committed a half-width crop on photo #2 and a
+  // quarter turn on photo #3, so their cells must read ~0.75 and ~0.67
+  // against the uncropped ~1.5. Probes the live DOM boxes, not the layout
+  // math that produced them.
+  ui().setMode('library');
+  mw.useUIStore.setState({ thumbFit: 'natural' });
+  await sleep(1200);
+  const cellAspect = (name) => {
+    const el = document.querySelector(`[title="${name}"]`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return r.height > 0 ? Math.round((r.width / r.height) * 100) / 100 : null;
+  };
+  window.__naturalGridProbe = {
+    fullAspect: cellAspect('sample1.arw'),
+    croppedAspect: cellAspect('sample2.arw'),
+    rotatedAspect: cellAspect('sample3.arw'),
+  };
 } else if (shot === 'addfolder') {
   ui().setAddFolderOpen(true);
 } else if (shot === 'shortcuts') {
@@ -1025,6 +1045,7 @@ const probe =
   window.__presetsProbe ??
   window.__suggestProbe ??
   window.__cropProbe ??
+  window.__naturalGridProbe ??
   window.__renderProbe ??
   window.__settleProbe ??
   window.__welcomeProbe ??

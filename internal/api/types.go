@@ -123,6 +123,15 @@ type Photo struct {
 	Width       int     `json:"width"`
 	Height      int     `json:"height"`
 	Orientation int     `json:"orientation"`
+	// Rotate/CropW/CropH are the aspect-affecting edit geometry: coarse
+	// rotation in quarter turns CW and the crop rectangle's size as fractions
+	// of the rotated frame (0 = no crop). The natural-layout grid composes
+	// them with Width/Height (renderedDims) to size cells to the rendered
+	// aspect without loading edit params. CropAngle/FlipH are deliberately
+	// absent — they don't change the output size.
+	Rotate int     `json:"rotate,omitempty"`
+	CropW  float64 `json:"cropW,omitempty"`
+	CropH  float64 `json:"cropH,omitempty"`
 	ISO         float64 `json:"iso"`
 	Shutter     float64 `json:"shutter"`
 	Aperture    float64 `json:"aperture"`
@@ -275,6 +284,12 @@ type PhotoPatch struct {
 	Rating   *int    `json:"rating"`
 	Flag     *Flag   `json:"flag"`
 	EditHash *string `json:"editHash"`
+	// Rotate/CropW/CropH mirror Photo's aspect-affecting geometry. Every edit
+	// save sets all three alongside EditHash (see editPatch), so a reset
+	// delivers explicit zeros and the grid's cell aspect follows live.
+	Rotate *int     `json:"rotate"`
+	CropW  *float64 `json:"cropW"`
+	CropH  *float64 `json:"cropH"`
 	// SubjectSharpness delivers a just-measured subject focus score to the grid
 	// without a full folder-list refresh. Only ever a real score — the "-1
 	// unscoreable" sentinel is client-invisible (see SubjectAnalyzed).

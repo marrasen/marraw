@@ -3,7 +3,7 @@
 // the container width exactly (Flickr/Lightroom style). Pure and testable — the
 // grids feed it their measured width and turn the result into cells.
 import type { Photo } from '@/api/library';
-import { displayDims } from '@/lib/crop';
+import { displayDims, renderedDims } from '@/lib/crop';
 
 export interface JustifiedRow {
   start: number; // flat index of the row's first frame
@@ -17,12 +17,18 @@ export interface RowLayout {
   centersX: number[]; // per-photo normalized x-center (0..1 of container width)
 }
 
-// aspectOf is the on-screen width/height ratio of a frame. Falls back to 3:2
-// (today's crop cell) while width/height are still 0 — metadata not yet
-// scanned — so a cold folder renders near-uniform and settles as it streams in.
+// aspectOf is the on-screen width/height ratio of a frame — the RENDERED
+// aspect, with the edit's rotate/crop applied, so a cropped photo's cell
+// matches its thumbnail. Falls back to 3:2 (today's crop cell) while
+// width/height are still 0 — metadata not yet scanned — so a cold folder
+// renders near-uniform and settles as it streams in. The fallback checks the
+// FULL dims before applying geometry: renderedDims clamps 0×0 to 1×1, which
+// would read as square.
 export function aspectOf(photo: Photo): number {
-  const [w, h] = displayDims(photo);
-  return w > 0 && h > 0 ? w / h : 3 / 2;
+  const [fw, fh] = displayDims(photo);
+  if (!(fw > 0 && fh > 0)) return 3 / 2;
+  const [w, h] = renderedDims(fw, fh, photo);
+  return w / h;
 }
 
 export interface LayoutOpts {

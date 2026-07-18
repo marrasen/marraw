@@ -809,12 +809,26 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 	// scroll-triggered fetch racing the patch, and mirror the new intent to
 	// the photo's portable sidecar.
 	if p, err := e.deps.DB.GetPhoto(context.WithoutCancel(ctx), photoID); err == nil {
-		h := hash
-		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{{ID: photoID, EditHash: &h}})
+		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{editPatch(photoID, hash, params)})
 		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)
 		e.deps.warmEdit(p, hash)
 	}
 	return nil
+}
+
+// editPatch is the folder broadcast for one photo's new edit state: the
+// content hash plus the aspect-affecting geometry, so natural-layout grids
+// can reshape cells without refetching edit params. All three geometry
+// fields are always set — a reset must deliver explicit zeros, and nil
+// params means exactly that (params are already normalized, so CropW/CropH
+// are 0 unless a real crop is present).
+func editPatch(photoID int64, hash string, params *edit.Params) PhotoPatch {
+	rotate := params.RotateTurns()
+	var cropW, cropH float64
+	if params != nil {
+		cropW, cropH = params.CropW, params.CropH
+	}
+	return PhotoPatch{ID: photoID, EditHash: &hash, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
 }
 
 // warmSlot holds the cancel func of one in-flight post-save warm so a

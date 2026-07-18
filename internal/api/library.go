@@ -338,6 +338,7 @@ func (l *Library) ListPhotos(ctx context.Context, folderID int64) ([]Photo, erro
 }
 
 func toAPIPhoto(p store.Photo) Photo {
+	rotate, cropW, cropH := photoGeometry(p.EditParams)
 	return Photo{
 		ID:               p.ID,
 		FileName:         p.FileName,
@@ -351,6 +352,9 @@ func toAPIPhoto(p store.Photo) Photo {
 		Width:            p.Width,
 		Height:           p.Height,
 		Orientation:      p.Orientation,
+		Rotate:           rotate,
+		CropW:            cropW,
+		CropH:            cropH,
 		ISO:              p.ISO,
 		Shutter:          p.Shutter,
 		Aperture:         p.Aperture,
@@ -364,6 +368,25 @@ func toAPIPhoto(p store.Photo) Photo {
 		EyesClosed:       nonNegativeFloat(p.EyesClosed),
 		EyesAnalyzed:     p.EyesClosed.Valid,
 	}
+}
+
+// photoGeometry extracts the aspect-affecting edit geometry from the stored
+// edit JSON. Unmarshalling just these three fields (instead of edit.Parse)
+// keeps ListPhotos cheap — the whole document's validation already happened
+// at save time. NULL or malformed JSON reads as neutral geometry.
+func photoGeometry(editParams sql.NullString) (rotate int, cropW, cropH float64) {
+	if !editParams.Valid {
+		return 0, 0, 0
+	}
+	var g struct {
+		Rotate int     `json:"rotate"`
+		CropW  float64 `json:"cropW"`
+		CropH  float64 `json:"cropH"`
+	}
+	if json.Unmarshal([]byte(editParams.String), &g) != nil {
+		return 0, 0, 0
+	}
+	return ((g.Rotate % 4) + 4) % 4, g.CropW, g.CropH
 }
 
 func nullableFloat(v sql.NullFloat64) *float64 {
