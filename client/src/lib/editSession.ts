@@ -19,6 +19,7 @@ import {
   setEditParams,
   suggestHealSource,
 } from '@/api/edits';
+import type { Suggestion } from '@/api/edits';
 import type { AIKindType, Mask, Params, Spot } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
@@ -1149,6 +1150,47 @@ export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
   } catch (err) {
     toast.error(`Auto adjust failed: ${(err as Error).message}`);
   }
+}
+
+// The fields a suggested look can carry — the union of what the server's
+// auto base and suggestion recipes write (lockstep with
+// internal/pyramid/suggest.go). Applying merges exactly these over the live
+// draft, so a suggestion computed from a stale base snapshot can never
+// revert edits it doesn't speak for (WB, detail, texture, geometry, masks).
+const SUGGESTION_KEYS = [
+  'expEV', 'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
+  'saturation', 'vibrance',
+  'splitShadowHue', 'splitShadowAmt', 'splitHighlightHue', 'splitHighlightAmt',
+  'clarity', 'dehaze', 'vignette',
+] as const;
+
+function mergeSuggestion(draft: Params, s: Suggestion): Params {
+  const out: Params = { ...draft };
+  const fields = out as unknown as Record<string, unknown>;
+  const src = s.params as unknown as Record<string, unknown>;
+  for (const key of SUGGESTION_KEYS) fields[key] = src[key];
+  return out;
+}
+
+// esApplySuggestion applies a server-suggested look (SuggestEdits candidate)
+// over the live draft: one labeled undo entry, multi-select persistence, and
+// the instant-low-res + queued-settle paint (esApplyParamsPreview). Records
+// lastPresetApply so the post-apply Amount scrubber works on suggestions.
+export function esApplySuggestion(client: ApiClient, s: Suggestion) {
+  const st = useEditSession.getState();
+  if (st.photoId == null || !st.draft) return;
+  const base = st.draft;
+  const result = mergeSuggestion(base, s);
+  esApplyParamsPreview(client, result, s.label);
+  // AFTER the apply — it clears lastPresetApply like any draft replacement.
+  setState({ lastPresetApply: { photoId: st.photoId, base, result, name: s.label, amount: 1 } });
+}
+
+// esHoverSuggestion previews a suggestion on the loupe while its card is
+// hovered. The candidate's params are already resolved, so unlike preset
+// hovers there is no RPC inside the debounce — just the merge.
+export function esHoverSuggestion(client: ApiClient, s: Suggestion) {
+  hoverStart(client, (cur) => mergeSuggestion(cur.draft!, s));
 }
 
 // esApplyUserPreset lays a saved "My presets" look over the photo's current

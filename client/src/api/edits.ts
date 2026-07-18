@@ -47,6 +47,17 @@ export interface SubjectBoundsResult {
     h: number;
 }
 
+export interface SuggestResult {
+    suggestions: Suggestion[];
+    needsClassMap: boolean;
+}
+
+export interface Suggestion {
+    id: string;
+    label: string;
+    params: Params;
+}
+
 
 export function aIModelStatus(client: ApiClient, kind: AIKindType, options?: RequestOptions): Promise<AIModelInfo> {
     return client.request<AIModelInfo>('Edits.AIModelStatus', [kind], options);
@@ -214,6 +225,19 @@ subjectBounds.method = 'Edits.SubjectBounds' as const;
 
 export function subscribeSubjectBounds(client: ApiClient, photoID: number, params: Params, allowDownload: boolean, callback: (data: SubjectBoundsResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<SubjectBoundsResult>('Edits.SubjectBounds', [photoID, params, allowDownload], callback, onError, options);
+}
+
+
+export function suggestEdits(client: ApiClient, photoID: number, params: Params, options?: RequestOptions): Promise<SuggestResult> {
+    return client.request<SuggestResult>('Edits.SuggestEdits', [photoID, params], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+suggestEdits.method = 'Edits.SuggestEdits' as const;
+
+export function subscribeSuggestEdits(client: ApiClient, photoID: number, params: Params, callback: (data: SuggestResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<SuggestResult>('Edits.SuggestEdits', [photoID, params], callback, onError, options);
 }
 
 
@@ -424,6 +448,21 @@ export function useSubjectBounds(photoID: number, params: Params, allowDownload:
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, params, allowDownload], _subscribe: { method: 'Edits.SubjectBounds', params: [photoID, params, allowDownload] } });
+}
+
+/**
+ * Subscribes to `Edits.SuggestEdits` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSuggestEdits(photoID: number, params: Params, options?: UseQueryOptions<SuggestResult>): UseQueryResult<SuggestResult> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params) => suggestEdits(client, photoID, params, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params], _subscribe: { method: 'Edits.SuggestEdits', params: [photoID, params] } });
 }
 
 /**

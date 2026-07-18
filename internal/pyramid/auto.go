@@ -63,10 +63,29 @@ func AutoAdjust(img *image.RGBA, lookGamma float64, p *edit.Params, sections []A
 		return
 	}
 
+	stats := GatherSceneStats(img, lookGamma, subject)
+	if tone {
+		autoTone(&stats.Luma, stats.N, &stats.Subj, stats.SubjTotal, p)
+	}
+	if color {
+		autoColor(&stats.Chroma, stats.N, p)
+	}
+}
+
+// SceneStats holds the display-space histograms AutoAdjust and SuggestLooks
+// derive their decisions from: luma and chroma over the whole frame, plus
+// matte-weighted luma counts when a subject matte was supplied.
+type SceneStats struct {
+	Luma, Chroma, Subj [256]int
+	N, SubjTotal       int
+}
+
+// GatherSceneStats measures img through the baseline look (see AutoAdjust for
+// the display-space rationale) in one strided pass.
+func GatherSceneStats(img *image.RGBA, lookGamma float64, subject *AIMap) *SceneStats {
 	lut := buildLookLUT(lookGamma, nil)
-	var lumaHist, chromaHist, subjHist [256]int
+	stats := &SceneStats{}
 	pix := img.Pix
-	n, subjTotal := 0, 0
 	w := img.Bounds().Dx()
 	var msx, msy float64
 	if subject != nil && subject.W > 0 && subject.H > 0 && w > 0 {
@@ -79,13 +98,13 @@ func AutoAdjust(img *image.RGBA, lookGamma float64, p *edit.Params, sections []A
 		g := int32(lut[pix[i+1]])
 		b := int32(lut[pix[i+2]])
 		luma := (299*r + 587*g + 114*b) / 1000
-		lumaHist[luma]++
+		stats.Luma[luma]++
 		// The base look boosts saturation ×1.15 around luma, which scales
 		// chroma by exactly that factor — apply it so color statistics see
 		// what the screen shows.
 		chroma := min(255, (max(r, g, b)-min(r, g, b))*115/100)
-		chromaHist[chroma]++
-		n++
+		stats.Chroma[chroma]++
+		stats.N++
 		if msx > 0 {
 			// Matte-weighted luma counts (nearest sample is plenty here).
 			px := (i % img.Stride) / 4
@@ -93,18 +112,12 @@ func AutoAdjust(img *image.RGBA, lookGamma float64, p *edit.Params, sections []A
 			mx := min(subject.W-1, int(float64(px)*msx))
 			my := min(subject.H-1, int(float64(py)*msy))
 			if m := int(subject.Pix[my*subject.W+mx]); m > 0 {
-				subjHist[luma] += m
-				subjTotal += m
+				stats.Subj[luma] += m
+				stats.SubjTotal += m
 			}
 		}
 	}
-
-	if tone {
-		autoTone(&lumaHist, n, &subjHist, subjTotal, p)
-	}
-	if color {
-		autoColor(&chromaHist, n, p)
-	}
+	return stats
 }
 
 // autoTone derives the tone-section values from the display-space luma

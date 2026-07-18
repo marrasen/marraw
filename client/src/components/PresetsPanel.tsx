@@ -7,7 +7,8 @@ import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Copy, ClipboardPaste, CopyPlus, Download, Pencil, Plus, RefreshCw, RotateCcw, Upload, X } from 'lucide-react';
 import type { Photo } from '@/api/library';
-import { aIModelStatus as aiModelStatus, autoAdjust, previewEdit } from '@/api/edits';
+import { aIModelStatus as aiModelStatus, autoAdjust, generateAIMap, previewEdit, suggestEdits } from '@/api/edits';
+import type { Suggestion } from '@/api/edits';
 import type { AIKindType } from '@/api/edit';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import type { Params } from '@/api/edit';
@@ -23,8 +24,10 @@ import {
   esApplyAutoPreset,
   esApplyParams,
   esApplyPresetMasks,
+  esApplySuggestion,
   esApplyUserPreset,
   esAuto,
+  esHoverSuggestion,
   esCommitPresetAmount,
   esHoverAutoPreset,
   esHoverEnd,
@@ -45,6 +48,7 @@ import {
   stripToLook,
   type PresetGroup,
 } from '@/lib/presetSections';
+import { isModelNotDownloaded } from '@/lib/aiConsent';
 import { parseUserPresetsFile, userPresetsFileBlob } from '@/lib/userPresets';
 import { useUIStore } from '@/stores/uiStore';
 
@@ -85,6 +89,7 @@ export function PresetsPanel({
             Auto colour
           </Button>
         </div>
+        <SuggestionsGrid client={client} photo={photo} />
       </Section>
 
       <UserPresetsSection client={client} photo={photo} draft={draft} />
@@ -733,6 +738,134 @@ function useUserPresetThumbs(client: ApiClient, photo: Photo | undefined, preset
   }, [client, photoId, presetsKey]);
 
   return thumbs;
+}
+
+// SuggestionsGrid is the scene-aware suggestion gallery: 3–5 server-computed
+// candidate looks for the focused photo (SuggestEdits — histogram plus
+// whatever AI maps are already cached), each a card with a live thumbnail.
+// Click applies (one undo entry, Amount scrubber armed), hover previews on
+// the loupe. When no scene map is cached a one-liner offers the analysis —
+// suggestions themselves never trigger inference or downloads.
+function SuggestionsGrid({ client, photo }: { client: ApiClient; photo?: Photo }) {
+  const { suggestions, needsClassMap, thumbs, refresh } = useSuggestions(client, photo);
+  const [classConsent, setClassConsent] = useState<PendingAIDownload | null>(null);
+
+  // Generate the scene map (consent-gated download on first use, instant
+  // when the map is already on disk), then recompute the suggestions with
+  // the category gates unlocked. Same sentinel flow as esApplyPresetMasks.
+  const analyze = async (allowDownload: boolean) => {
+    if (!photo) return;
+    try {
+      await generateAIMap(client, photo.id, 'class', allowDownload);
+      refresh();
+    } catch (err) {
+      if (isModelNotDownloaded(err)) {
+        const status = await aiModelStatus(client, 'class').catch(() => null);
+        if (status) setClassConsent({ kind: 'class', bytes: status.bytes, mode: 'add' });
+      } else {
+        toast.error(`Scene analysis failed: ${(err as Error).message}`);
+      }
+    }
+  };
+
+  if (suggestions.length === 0) return null;
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        {suggestions.map((s) => (
+          <button
+            key={s.id}
+            className="group flex flex-col overflow-hidden rounded-lg border bg-inset text-left transition-colors hover:border-primary/50"
+            onClick={() => esApplySuggestion(client, s)}
+            onMouseEnter={() => esHoverSuggestion(client, s)}
+            onMouseLeave={() => esHoverEnd(client)}
+            title={`Apply ${s.label} (keeps the photo's crop and white balance)`}
+          >
+            <div className="aspect-[3/2] w-full overflow-hidden bg-black/40">
+              {thumbs[s.id] ? (
+                <img src={thumbs[s.id]} alt="" draggable={false} className="h-full w-full object-cover" />
+              ) : (
+                <div className="h-full w-full animate-pulse bg-white/5" />
+              )}
+            </div>
+            <span className="truncate px-2 py-1.5 text-[12px] group-hover:text-foreground">{s.label}</span>
+          </button>
+        ))}
+      </div>
+      {needsClassMap && (
+        <button
+          className="w-fit text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+          onClick={() => void analyze(false)}
+          title="Generate the scene map (sky, people, foliage …) so the suggestions can react to what's in the photo"
+        >
+          Analyze scene for smarter suggestions
+        </button>
+      )}
+      <AIModelDialog
+        pending={classConsent}
+        onCancel={() => setClassConsent(null)}
+        onConfirm={() => {
+          setClassConsent(null);
+          // The user just approved the fetch (same rule as the mask flow).
+          void analyze(true);
+        }}
+      />
+    </>
+  );
+}
+
+// useSuggestions fetches the candidates once per focused photo — same
+// anti-churn rule as the preset thumb hooks: the gallery is a stable
+// function of the photo, not of every commit — then fills thumbnails
+// sequentially off the same cached decode. refresh() refetches in place
+// (after a scene analysis unlocks the category recipes).
+function useSuggestions(client: ApiClient, photo: Photo | undefined) {
+  const [result, setResult] = useState<{ suggestions: Suggestion[]; needsClassMap: boolean }>({
+    suggestions: [],
+    needsClassMap: false,
+  });
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [gen, setGen] = useState(0);
+  const photoId = photo?.id;
+
+  useEffect(() => {
+    if (photoId == null) return;
+    let alive = true;
+    const urls: string[] = [];
+    // Snapshot the base ONCE (usePresetThumbs' rule); applying re-merges
+    // onto the live draft, so a stale snapshot only affects thumbnails.
+    const base = useEditSession.getState().draft ?? { ...NEUTRAL };
+    // Clear stale cards before the async fetch below.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResult({ suggestions: [], needsClassMap: false });
+    setThumbs({});
+    (async () => {
+      try {
+        const res = await suggestEdits(client, photoId, base);
+        if (!alive) return;
+        setResult({ suggestions: res.suggestions ?? [], needsClassMap: res.needsClassMap });
+        for (const s of res.suggestions ?? []) {
+          try {
+            const blob = await previewEdit(client, photoId, s.params, THUMB_PX);
+            if (!alive) return;
+            const url = URL.createObjectURL(blob);
+            urls.push(url);
+            setThumbs((t) => ({ ...t, [s.id]: url }));
+          } catch {
+            /* a failed thumbnail just stays a placeholder */
+          }
+        }
+      } catch {
+        /* suggestions unavailable — the section simply doesn't render */
+      }
+    })();
+    return () => {
+      alive = false;
+      urls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [client, photoId, gen]);
+
+  return { ...result, thumbs, refresh: () => setGen((g) => g + 1) };
 }
 
 // PresetGrid renders each creative-auto preset as a card with a live low-res
