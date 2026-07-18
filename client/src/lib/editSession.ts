@@ -337,6 +337,9 @@ export function esClearPreview() {
 export function esPreviewSettled(): boolean {
   const s = useEditSession.getState();
   if (inFlight || s.rendering > 0 || pending || pendingPatch) return false;
+  // A hover overlay is on screen: the blob shows the hovered preset, not the
+  // committed state — even though the draft itself sits at the history head.
+  if (s.hoverParams != null) return false;
   if (s.photoId == null || !s.draft) return false;
   const h = s.history[s.photoId];
   return !h || sameParams(s.draft, h.stack[h.index].params);

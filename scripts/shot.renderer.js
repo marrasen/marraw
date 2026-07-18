@@ -454,6 +454,18 @@ if (shot === 'cull') {
   await sleep(300);
   const hoverCleared = es.getState().hoverParams == null;
   // Apply + scrub to 60%: contrast lands at base + 0.6×(0.25 − base).
+  // Hover at tile depth (1:1 zoom): the settled-clear effect must not evict
+  // the hover frame — esPreviewSettled is false while a hover overlay shows,
+  // even though the draft sits at the history head.
+  ui().setLoupeZoom(1);
+  await sleep(800);
+  mw.esHoverPreset(presets[0]);
+  await sleep(900); // debounce + low-res frame + any clear effect
+  const tilesHoverSet = es.getState().hoverParams != null;
+  const tilesPreviewShown = es.getState().preview != null;
+  mw.esHoverEnd();
+  ui().setLoupeZoom('fit');
+  await sleep(500);
   mw.esApplyUserPreset(presets[0]);
   await until(() => es.getState().lastPresetApply != null);
   const applied = es.getState().draft.contrast;
@@ -465,6 +477,8 @@ if (shot === 'cull') {
     hoverSet,
     draftUntouched,
     hoverCleared,
+    tilesHoverSet,
+    tilesPreviewShown,
     applied,
     scrubbed,
     amountShown: !!es.getState().lastPresetApply,
