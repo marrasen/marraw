@@ -56,6 +56,9 @@ if (import.meta.env.DEV) {
       esHoverEnd: () => es.esHoverEnd(client),
       esSetPresetAmount: (t: number) => es.esSetPresetAmount(client, t),
       esCommitPresetAmount: () => es.esCommitPresetAmount(client),
+      // Suggested looks (the `suggestions` shot surface): apply + hover.
+      esApplySuggestion: (s: unknown) => es.esApplySuggestion(client, s as never),
+      esHoverSuggestion: (s: unknown) => es.esHoverSuggestion(client, s as never),
       // Server-persisted UI settings (optimistic store write + server call).
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),

@@ -449,6 +449,47 @@ if (shot === 'cull') {
     scrubbed,
     amountShown: !!es.getState().lastPresetApply,
   };
+} else if (shot === 'suggestions') {
+  // The scene-aware suggestion gallery in the Presets tab: waits for the
+  // candidate cards and their live thumbnails, probes hover (loupe override
+  // paints, draft untouched, leave reverts), then applies one candidate and
+  // probes the labeled undo entry + the Amount scrubber arming.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  ui().setDevelopTab('presets');
+  const cards = () =>
+    [...document.querySelectorAll('button')].filter(
+      (b) => (b.title || '').startsWith('Apply ') && b.title.includes('white balance'),
+    );
+  await until(() => cards().length >= 3);
+  await until(() => cards().filter((c) => c.querySelector('img')).length >= 3, 60000);
+  const labels = cards().map((c) => c.textContent.trim());
+  const draftBefore = JSON.stringify(es.getState().draft);
+  // React maps onMouseEnter/Leave from mouseover/mouseout.
+  cards()[1].dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  await sleep(700); // debounce + low-res frame
+  const hoverSet = es.getState().hoverParams != null;
+  const draftUntouched = JSON.stringify(es.getState().draft) === draftBefore;
+  cards()[1].dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+  await sleep(300);
+  const hoverCleared = es.getState().hoverParams == null;
+  const applyLabel = labels[1];
+  cards()[1].click();
+  await until(() => es.getState().lastPresetApply != null);
+  await sleep(400);
+  const st = es.getState();
+  const h = st.history[st.photoId];
+  window.__suggestProbe = {
+    labels,
+    hoverSet,
+    draftUntouched,
+    hoverCleared,
+    appliedName: st.lastPresetApply?.name,
+    historyLabel: h?.stack[h.index]?.label,
+    labelMatches: st.lastPresetApply?.name === applyLabel && h?.stack[h.index]?.label === applyLabel,
+    amountShown: !!st.lastPresetApply,
+  };
 } else if (shot === 'develop-light') {
   document.documentElement.classList.remove('dark');
   // setState on the mirror: shows the dials without persisting server-side.
@@ -982,6 +1023,7 @@ const probe =
   window.__modelsProbe ??
   window.__maskProbe ??
   window.__presetsProbe ??
+  window.__suggestProbe ??
   window.__cropProbe ??
   window.__renderProbe ??
   window.__settleProbe ??
