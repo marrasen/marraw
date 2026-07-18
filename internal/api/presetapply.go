@@ -162,7 +162,7 @@ func (r defaultPresetResolver) forPhoto(p store.Photo) *UserPreset {
 
 // seedDefaultPreset persists the default preset onto a photo that has never
 // been edited, with the same post-save side effects as a user edit (folder
-// patch, sidecar, thumb warm). The untouched check and the write are one
+// patch, sidecar) minus the thumb warm. The untouched check and the write are one
 // conditional statement (SetEditSeed), so a user edit racing the calibrate
 // pass can never be clobbered — the seed just doesn't land.
 func (d *Deps) seedDefaultPreset(ctx context.Context, photoID int64, up UserPreset, baseEV float64) error {
@@ -183,7 +183,13 @@ func (d *Deps) seedDefaultPreset(ctx context.Context, photoID int64, up UserPres
 		h := params.Hash()
 		d.patchFolderPhotos(p.FolderID, []PhotoPatch{{ID: photoID, EditHash: &h}})
 		d.writeSidecarFor(ctx, p)
-		d.warmEdit(p, h)
+		// No warmEdit here (unlike a user edit commit): the calibrate pass is
+		// the sole caller, and a per-seed Prefetch warm would outrank the
+		// remaining Background calibrate jobs in the shared pool — starving
+		// the very pass that spawned it. It's also duplicated work: on-screen
+		// cells re-fetch at Visible priority when the patch changes their img
+		// URL, and the prerender pass that follows renders the seeded hash's
+		// 2048, which yields the 512 the warm would have produced.
 	}
 	return nil
 }

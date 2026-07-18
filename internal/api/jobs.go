@@ -5,11 +5,13 @@ import (
 	"context"
 	"fmt"
 	"image/jpeg"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/marrasen/aprot"
 	"github.com/marrasen/aprot/tasks"
@@ -195,8 +197,17 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 			}
 			// The DB write lives inside the pool job so a deduplicated
 			// concurrent caller can't race in a zero measurement.
+			// Timed per stage (like pyramid's RAW-render log): a large wait=
+			// means the pool preempted us with higher-priority work, a large
+			// measure= means the pass is disk-read bound, a large rest= means
+			// the serialized side effects (DB writes, seed, sidecar) dominate.
+			enq := time.Now()
+			var wait, fnD, thumbD, measureD time.Duration
 			err := l.deps.Pool.Do(gctx, p.CacheKey+"|calibrate", decode.PriorityBackground,
 				func(jctx context.Context, proc *libraw.Processor) error {
+					wait = time.Since(enq)
+					fnStart := time.Now()
+					defer func() { fnD = time.Since(fnStart) }()
 					if err := jctx.Err(); err != nil {
 						return err
 					}
@@ -229,10 +240,13 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 							}
 						}
 					}
+					thumbD = time.Since(fnStart)
 					if p.BaseExpEV.Valid {
 						return nil // only the thumb-based backfills were missing
 					}
+					mStart := time.Now()
 					ev, err := pyramid.MeasureAutoBrightEV(jctx, proc)
+					measureD = time.Since(mStart)
 					if err != nil {
 						return err
 					}
@@ -248,6 +262,11 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 					}
 					return nil
 				})
+			if gctx.Err() == nil {
+				log.Printf("calibrate: %s wait=%s thumb=%s measure=%s rest=%s",
+					p.FileName, wait.Round(time.Millisecond), thumbD.Round(time.Millisecond),
+					measureD.Round(time.Millisecond), (fnD - thumbD - measureD).Round(time.Millisecond))
+			}
 			if err != nil && gctx.Err() == nil {
 				task.Output(p.FileName + ": " + err.Error())
 			}
