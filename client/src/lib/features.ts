@@ -11,7 +11,7 @@ export interface FeatureDef {
   label: string;
   description: string;
   group: FeatureGroup;
-  experimental?: boolean;
+  experimental: boolean;
   defaultOn: boolean;
 }
 
@@ -21,12 +21,14 @@ export const FEATURES = {
     description:
       'Group near-duplicate frames into bursts: the Bursts and Auto-judge filter buttons, burst badges, and the best-of-burst shortcuts.',
     group: 'culling',
+    experimental: false,
     defaultOn: true,
   },
   softFilter: {
     label: 'Soft-focus filter',
     description: 'Flag soft frames: the Soft filter button and the grid softness badge.',
     group: 'culling',
+    experimental: false,
     defaultOn: true,
   },
   eyes: {
@@ -34,6 +36,7 @@ export const FEATURES = {
     description:
       'Scan portraits for closed eyes: the Eyes scan, the Blinks filter button, and blink badges.',
     group: 'culling',
+    experimental: false,
     defaultOn: true,
   },
   subjects: {
@@ -41,6 +44,7 @@ export const FEATURES = {
     description:
       'Re-score sharpness on the detected subject instead of the whole frame. Scores already computed keep informing burst ranking.',
     group: 'culling',
+    experimental: false,
     defaultOn: true,
   },
   suggestions: {
