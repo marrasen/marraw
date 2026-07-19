@@ -5,11 +5,20 @@ import './index.css';
 import App from './App.tsx';
 import { ThemeProvider } from '@/components/theme-provider.tsx';
 import { ApiClient, ApiClientProvider } from '@/api/client';
+import { onAIMapsGeneratedEvent } from '@/api/edits';
 import { backend } from '@/lib/backend';
+import { bumpImgBust } from '@/lib/imgCacheBust';
 import { migrateLocalSettings } from '@/lib/migrateLocalSettings';
 
 const client = new ApiClient(backend.ws);
 client.connect();
+
+// An AI map landed for a saved edit that already references it (batch preset
+// apply, GenerateAIMaps): the photo's /img pixels changed under an unchanged
+// URL, so bust its cached renditions. Wired here, not in a component — the
+// event must land whatever folder or view is mounted, and bumpImgBust is
+// global (localStorage) state.
+onAIMapsGeneratedEvent(client, (ev) => bumpImgBust(ev.photoId));
 
 // One-time import of pre-server-settings localStorage into the daemon DB.
 void migrateLocalSettings(client);

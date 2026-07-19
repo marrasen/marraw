@@ -11,6 +11,7 @@ import type { ApiClient } from '@/api/client';
 import {
   autoAdjust,
   generateAIMap,
+  generateAIMaps,
   getEditParams,
   pasteEditParams,
   pickWhiteBalance,
@@ -1267,6 +1268,12 @@ function runPresetMasks(
 // draft as one further history entry "Name · masks". The look stays applied
 // whatever happens here; a missing model resolves to 'needs-download' so
 // the caller can ask consent and retry with allowDownload.
+//
+// The recipes persist to the WHOLE selection (applyIds), but a recipe renders
+// as a no-op until the photo's own map exists — so after the persist, the rest
+// of the selection's maps are materialized server-side as one background task
+// (GenerateAIMaps). Each landed map repaints its grid thumb via the
+// AIMapsGeneratedEvent broadcast → bumpImgBust (wired in main.tsx).
 export async function esApplyPresetMasks(
   client: ApiClient,
   preset: UserPreset,
@@ -1304,6 +1311,15 @@ export async function esApplyPresetMasks(
   const keep = cur.lastPresetApply;
   esApplyParams(client, { ...cur.draft, masks }, { label: `${preset.name} · masks` });
   if (keep && keep.photoId === pid) setState({ lastPresetApply: keep });
+  // The focused photo's maps just ran above; the rest of the selection got the
+  // same recipes persisted but no inference — kick it off now. Consent was
+  // already settled by the focused run, so allowDownload carries over.
+  const rest = cur.applyIds.length > 1 ? cur.applyIds.filter((id) => id !== pid) : [];
+  if (rest.length > 0) {
+    void generateAIMaps(client, rest, kinds, opts?.allowDownload ?? false).catch((err) => {
+      toast.error(`AI masks failed for the selection: ${(err as Error).message}`);
+    });
+  }
   return { status: 'done' };
 }
 

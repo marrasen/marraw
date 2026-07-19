@@ -102,6 +102,18 @@ func (d *Deps) BroadcastRenderProgress(photoID int64, editHash string, frac floa
 	}
 }
 
+// BroadcastAIMapsGenerated tells every window that photoID's rendered pixels
+// changed under an unchanged edit hash — an AI map landed for a saved edit
+// that already references it (see AIMapsGeneratedEvent).
+func (d *Deps) BroadcastAIMapsGenerated(photoID int64) {
+	d.mu.RLock()
+	s := d.server
+	d.mu.RUnlock()
+	if s != nil {
+		s.Broadcast(AIMapsGeneratedEvent{PhotoID: photoID})
+	}
+}
+
 // TriggerRefresh fires subscription refresh keys from background goroutines.
 func (d *Deps) TriggerRefresh(keys ...string) {
 	d.mu.RLock()
@@ -188,6 +200,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	// TypeScript types generated for the client-side patch reducer.
 	registry.RegisterPushEventFor(library, PhotoPatchEvent{})
 	registry.RegisterPushEventFor(library, RenderProgressEvent{})
+	registry.RegisterPushEventFor(edits, AIMapsGeneratedEvent{})
 
 	// marraw is single-user localhost: any window may cancel any task. This
 	// also restores cancel rights after a reconnect, which the default

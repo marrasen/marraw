@@ -304,6 +304,18 @@ type PhotoPatch struct {
 	EyesAnalyzed *bool    `json:"eyesAnalyzed"`
 }
 
+// AIMapsGeneratedEvent is broadcast when an AI-mask map lands for a photo
+// whose saved edit already references it (GenerateAIMaps): the rendered
+// pixels changed under an UNCHANGED edit hash, so clients must cache-bust
+// the photo's /img renditions (bumpImgBust — the batch twin of
+// GenerateAIMap returning generated=true). Broadcast to every connection
+// rather than pushed as a folder-scoped photo patch: the bust must land
+// even when the client has since navigated to another folder, and
+// bumpImgBust is global client state, not folder state.
+type AIMapsGeneratedEvent struct {
+	PhotoID int64 `json:"photoId"`
+}
+
 // PhotoPatchEvent is broadcast when rating/flag/edits change so clients can
 // patch their in-memory photo list without a full re-query.
 type PhotoPatchEvent struct {

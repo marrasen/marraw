@@ -208,9 +208,10 @@ const aiModelNotDownloadedMsg = "model not downloaded"
 // with aiModelNotDownloadedMsg so the client can ask.
 //
 // This is the single-photo path and surfaces one "AI mask: <file>" task. The
-// folder-wide subject scan (AnalyzeSubjects) does NOT go through here — it
-// drives generateAIMap directly under one aggregate task, so a batch reports a
-// single task and toast rather than one per frame.
+// batch paths — the folder-wide subject scan (AnalyzeSubjects) and the
+// selection-wide preset-mask materialization (GenerateAIMaps) — do NOT go
+// through here: they drive generateAIMap directly under one aggregate task, so
+// a batch reports a single task and toast rather than one per frame.
 func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKind, allowDownload bool) (*AIMapResult, error) {
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
 	if err != nil {
@@ -307,6 +308,122 @@ func (e *Edits) generateAIMap(ctx context.Context, photo store.Photo, kind edit.
 		res.Categories = e.categoriesFor(photo.CacheKey, ver)
 	}
 	return res, downloaded, nil
+}
+
+// GenerateAIMaps materializes the model maps for every (photo, kind) pair as
+// one shared, cancellable background task — the batch companion to
+// GenerateAIMap. A preset apply across a selection persists the same AI-mask
+// RECIPES to every photo, but each photo needs its own inference before the
+// recipe renders as anything (a missing map is a silent render no-op, see
+// pyramid.AIMapSet.SetFor); this is where the non-focused photos get theirs.
+// Photos whose requested maps are all on disk are skipped up front; returns a
+// nil ref when that leaves nothing to do.
+//
+// The maps land AFTER the recipes were persisted and their thumbs warmed, and
+// a map is a render input OUTSIDE the edit hash — so each landed map
+// broadcasts AIMapsGeneratedEvent telling every client to cache-bust that
+// photo's unchanged /img URLs (the batch twin of GenerateAIMap's
+// generated=true contract).
+//
+// Same task shape and download-consent rules as AnalyzeSubjects: one aggregate
+// task riding a cancel-free context (the user cancels from the tray), and
+// without allowDownload a missing model fails up front with
+// aiModelNotDownloadedMsg. In the preset-apply flow the focused photo's
+// GenerateAIMap already settled consent, so this never trips there.
+func (e *Edits) GenerateAIMaps(ctx context.Context, photoIDs []int64, kinds []edit.AIKind, allowDownload bool) (*tasks.TaskRef, error) {
+	if e.deps.Cache.AIMaps == nil || e.deps.Infer == nil {
+		return nil, aprot.ErrInvalidParams("ai masks: inference is not configured")
+	}
+	vers := make(map[edit.AIKind]string, len(kinds))
+	for _, k := range kinds {
+		ver, ok := aimask.MapVerFor(k)
+		if !ok {
+			return nil, aprot.ErrInvalidParams(fmt.Sprintf("ai masks: %q has no model available yet", k))
+		}
+		vers[k] = ver
+	}
+	photos, err := e.deps.DB.GetPhotos(ctx, photoIDs)
+	if err != nil {
+		return nil, err
+	}
+	// Work = each photo's requested kinds whose map isn't on disk yet.
+	type job struct {
+		photo   store.Photo
+		missing []edit.AIKind
+	}
+	var work []job
+	for _, p := range photos {
+		var missing []edit.AIKind
+		for _, k := range kinds {
+			if !e.deps.Cache.AIMaps.Has(p.CacheKey, k, vers[k]) {
+				missing = append(missing, k)
+			}
+		}
+		if len(missing) > 0 {
+			work = append(work, job{photo: p, missing: missing})
+		}
+	}
+	if len(work) == 0 {
+		return nil, nil // every map already exists — nothing to do
+	}
+	for _, k := range kinds {
+		if spec, _ := aimask.SpecFor(k); !allowDownload && !e.deps.Infer.HasModel(spec) {
+			return nil, aprot.ErrInvalidParams("ai masks: " + aiModelNotDownloadedMsg)
+		}
+	}
+	total := len(work)
+
+	meta := TaskMeta{Kind: "aimask", Folder: filepath.Base(work[0].photo.FolderPath), FolderPath: work[0].photo.FolderPath}
+	tctx, task := tasks.StartTask[TaskMeta](
+		context.WithoutCancel(ctx),
+		fmt.Sprintf("AI masks — %d photo%s", total, plural(total)),
+		tasks.Shared(),
+	)
+	task.SetMeta(meta)
+	task.Progress(0, total)
+
+	go func() {
+		var done atomic.Int64
+		g, gctx := errgroup.WithContext(tctx)
+		// Same worker cap as AnalyzeSubjects: memory binds, not cores — every
+		// in-flight frame pins a LibRaw handle the 3-entry HandleCache cannot
+		// evict while held.
+		g.SetLimit(min(3, max(1, runtime.NumCPU()-2)))
+		for _, j := range work {
+			g.Go(func() error {
+				if gctx.Err() != nil {
+					return gctx.Err()
+				}
+				// Re-fetch: the preset apply persists the recipes concurrently
+				// with this task, and generateAIMap invalidates renditions by
+				// the photo's CURRENT edit hash — the snapshot from task start
+				// may predate the save.
+				p := j.photo
+				if fresh, err := e.deps.DB.GetPhoto(gctx, j.photo.ID); err == nil {
+					p = fresh
+				}
+				generated := false
+				for _, k := range j.missing {
+					res, _, err := e.generateAIMap(gctx, p, k, allowDownload, false, nil)
+					if err != nil {
+						if gctx.Err() != nil {
+							return gctx.Err() // cancelled — not a per-frame failure
+						}
+						task.Output(p.FileName + ": " + err.Error())
+						continue
+					}
+					generated = generated || res.Generated
+				}
+				if generated {
+					e.deps.BroadcastAIMapsGenerated(p.ID)
+				}
+				task.Progress(int(done.Add(1)), total)
+				return nil
+			})
+		}
+		task.Err(g.Wait())
+	}()
+	return &tasks.TaskRef{TaskID: task.ID()}, nil
 }
 
 // SubjectBoundsResult is the subject's bounding box in fractions of the
