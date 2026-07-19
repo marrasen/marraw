@@ -172,9 +172,7 @@ export function ContactSheet({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div className="flex h-12 shrink-0 items-center gap-3.5 border-b bg-sidebar py-0 pr-2 pl-4 [-webkit-app-region:drag]">
-        <div className="flex size-6 items-center justify-center rounded-[7px] bg-primary text-sm font-bold text-primary-foreground">
-          m
-        </div>
+        <img src="./icon.svg" alt="" className="size-6 shrink-0" />
         {/* Folder NAME only, like CinemaHUD — the full path is in the Info tab. */}
         <span className="text-[13px] font-semibold" title={folderPath ?? undefined}>
           {current ? rootName(current) : folderPath ? baseName(folderPath) : ''}

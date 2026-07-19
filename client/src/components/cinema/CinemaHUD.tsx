@@ -58,9 +58,7 @@ export function CinemaHUD({
         )}
       >
         <div className="glass flex items-center gap-2.5 rounded-[9px] px-3 py-[7px]">
-          <div className="flex size-[18px] items-center justify-center rounded-[5px] bg-primary text-[11px] font-bold text-primary-foreground">
-            m
-          </div>
+          <img src="./icon.svg" alt="" className="size-[18px]" />
           {/* Folder NAME only — a full path collides with the centered mode
               control; the full path lives in the Info tab (and the tooltip). */}
           <span className="text-[12.5px] font-semibold" title={folderPath ?? undefined}>
