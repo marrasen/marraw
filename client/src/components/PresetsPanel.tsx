@@ -49,6 +49,7 @@ import {
   type PresetGroup,
 } from '@/lib/presetSections';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
+import { useFeature } from '@/lib/features';
 import { parseUserPresetsFile, userPresetsFileBlob } from '@/lib/userPresets';
 import { useUIStore } from '@/stores/uiStore';
 
@@ -68,6 +69,9 @@ export function PresetsPanel({
   const setClipboard = useUIStore((s) => s.setClipboard);
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
   const presets = useUIStore((s) => s.autoPresets);
+  // Experimental, off by default (Settings → Features). Unmounted = no
+  // SuggestEdits calls at all.
+  const suggestionsEnabled = useFeature('suggestions');
 
   return (
     <div className="flex flex-col gap-5 px-4 pt-3 pb-4 text-sm">
@@ -89,7 +93,7 @@ export function PresetsPanel({
             Auto colour
           </Button>
         </div>
-        <SuggestionsGrid client={client} photo={photo} />
+        {suggestionsEnabled && <SuggestionsGrid client={client} photo={photo} />}
       </Section>
 
       <UserPresetsSection client={client} photo={photo} draft={draft} />

@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { applyFlag, applyRating, judgeAllBursts } from '@/lib/actions';
 import type { BurstInfo } from '@/lib/bursts';
+import { useFeature } from '@/lib/features';
 import { esApplyParams } from '@/lib/editSession';
 import { updateFolderFilters, updateLibrarySort } from '@/lib/uiSettings';
 import { useUIStore, type FlagFilter, type LibrarySort } from '@/stores/uiStore';
@@ -82,6 +83,10 @@ export function FilterBar({
   const showEditPanel = useUIStore((s) => s.showEditPanel);
   const toggleEditPanel = useUIStore((s) => s.toggleEditPanel);
   const multiSelect = useUIStore((s) => s.selection.size > 1);
+  const burstsEnabled = useFeature('bursts');
+  const softEnabled = useFeature('softFilter');
+  const eyesEnabled = useFeature('eyes');
+  const subjectsEnabled = useFeature('subjects');
 
   // A multi-photo selection takes over the filter row (handoff "BATCH").
   if (multiSelect) return <SelectionBar />;
@@ -133,6 +138,7 @@ export function FilterBar({
       {/* Soft-focus filter: isolate the frames the grid badges as soft so they
           can be picked through and rejected. Disabled until the folder has
           enough sharpness scores to define a threshold (softBelow > 0). */}
+      {softEnabled && (
       <button
         onClick={toggleSoftOnly}
         disabled={softBelow <= 0}
@@ -155,10 +161,12 @@ export function FilterBar({
         <Contrast className="size-[13px]" strokeWidth={1.75} />
         <span className="@max-[1440px]:hidden">Soft</span>
       </button>
+      )}
 
       {/* Collapse bursts: show one frame per near-duplicate group — the
           sharpest member (or the lead frame until scores exist). Singles are
           unaffected. Disabled when the folder has no bursts. */}
+      {burstsEnabled && (
       <button
         onClick={toggleCollapseBursts}
         disabled={bursts.size === 0}
@@ -181,10 +189,12 @@ export function FilterBar({
         <Layers className="size-[13px]" strokeWidth={1.75} />
         <span className="@max-[1440px]:hidden">Bursts</span>
       </button>
+      )}
 
       {/* Blinks filter: isolate the frames closed-eye detection badges (◡) so
           they can be reviewed and rejected in one sweep. Disabled until the
           folder has eye scores — the Eyes button runs the scan. */}
+      {eyesEnabled && (
       <button
         onClick={toggleEyesClosedOnly}
         disabled={eyesAnalyzed === 0}
@@ -208,10 +218,12 @@ export function FilterBar({
         <EyeOff className="size-[13px]" strokeWidth={1.75} />
         <span className="@max-[1440px]:hidden">Blinks</span>
       </button>
+      )}
 
       {/* Auto-judge bursts: the folder-wide Shift+P — pick every burst's
           sharpest frame, reject the rest, one undo entry. Skips unscored
           bursts and bursts where a non-sharpest member is already picked. */}
+      {burstsEnabled && (
       <button
         onClick={() => judgeAllBursts(client, bursts)}
         disabled={![...bursts.values()].some((b) => b.bestId != null)}
@@ -227,11 +239,13 @@ export function FilterBar({
         <Wand2 className="size-[13px]" strokeWidth={1.75} />
         <span className="@max-[1440px]:hidden">Auto-judge</span>
       </button>
+      )}
 
       {/* Subject-aware focus: amber once any frame is scored over its AI
           subject matte (with a count while partially scanned), muted
           otherwise. Click opens the folder-wide "analyze subjects & re-score
           focus" dialog. */}
+      {subjectsEnabled && (
       <button
         onClick={() => setSubjectScanOpen(true)}
         disabled={photoCount === 0}
@@ -258,10 +272,12 @@ export function FilterBar({
             : 'Subjects'}
         </span>
       </button>
+      )}
 
       {/* Closed-eye detection: amber once any frame has been checked (with a
           count while partially scanned), muted otherwise. Click opens the
           folder-wide "detect closed eyes" dialog. */}
+      {eyesEnabled && (
       <button
         onClick={() => setEyeScanOpen(true)}
         disabled={photoCount === 0}
@@ -286,6 +302,7 @@ export function FilterBar({
           {eyesAnalyzed > 0 && eyesAnalyzed < photoCount ? `${eyesAnalyzed}/${photoCount}` : 'Eyes'}
         </span>
       </button>
+      )}
 
       <div className="flex-1" />
 

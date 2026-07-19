@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils';
 import type { Photo } from '@/api/library';
 import { focusScore } from '@/lib/bursts';
+import { useFeature } from '@/lib/features';
 
 // SoftBadge is the soft-focus marker (◐) shared by every thumbnail surface
 // (grid, cull scrubber): it shows when a frame's focus score sits below the
@@ -17,8 +18,9 @@ export function SoftBadge({
   softBelow: number;
   className?: string;
 }) {
+  const enabled = useFeature('softFilter');
   const score = focusScore(photo);
-  if (score == null || softBelow <= 0 || score >= softBelow) return null;
+  if (!enabled || score == null || softBelow <= 0 || score >= softBelow) return null;
   return (
     <div
       className={cn('rounded bg-black/50 px-[4px] py-0.5 text-[9px] text-amber-400', className)}

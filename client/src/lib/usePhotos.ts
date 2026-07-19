@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useListPhotos, type Photo, type PhotoPatchEvent } from '@/api/library';
 import { burstMap, isSoft, softThreshold, type BurstInfo } from '@/lib/bursts';
 import { hasClosedEyes } from '@/lib/eyes';
+import { resolveFeature } from '@/lib/features';
 import { useUIStore, type LibrarySort } from '@/stores/uiStore';
 
 // photoPatchReducer folds server-pushed subscription patches (aprot
@@ -83,9 +84,12 @@ export function usePhotos(folderId: number): PhotoLists {
   const overrides = useUIStore((s) => s.overrides);
   const minRating = useUIStore((s) => s.minRating);
   const flagFilter = useUIStore((s) => s.flagFilter);
-  const softOnly = useUIStore((s) => s.softOnly);
-  const eyesClosedOnly = useUIStore((s) => s.eyesClosedOnly);
-  const collapseBursts = useUIStore((s) => s.collapseBursts);
+  // A filter whose feature is disabled goes inert here (not just hidden in
+  // the FilterBar), so a disable arriving from another window can't leave
+  // the visible set narrowed by a control that no longer exists.
+  const softOnly = useUIStore((s) => s.softOnly && resolveFeature(s.features, 'softFilter'));
+  const eyesClosedOnly = useUIStore((s) => s.eyesClosedOnly && resolveFeature(s.features, 'eyes'));
+  const collapseBursts = useUIStore((s) => s.collapseBursts && resolveFeature(s.features, 'bursts'));
   const librarySort = useUIStore((s) => s.librarySort);
 
   // Sort before merging overrides: overrides never move a photo, so rating

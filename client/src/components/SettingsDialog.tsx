@@ -30,12 +30,14 @@ import {
 } from '@/lib/autoPresets';
 import { CONTROL_SPECS, type ControlId } from '@/lib/controlSpecs';
 import type { AutoSection } from '@/lib/editSession';
+import { FEATURES, FEATURE_GROUPS, FEATURE_IDS, resolveFeature } from '@/lib/features';
 import {
   updateAutoPresets,
   updateBurstGapSeconds,
   updateBurstHamming,
   updateCullDials,
   updateDefaultPresets,
+  updateFeature,
   updatePrerenderFullres,
   updateQuickDials,
   updateThumbFit,
@@ -64,7 +66,7 @@ function formatBytes(n: number): string {
   return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
 }
 
-const SECTIONS = ['General', 'Toolbars', 'Auto presets', 'Default presets', 'Cache', 'Models', 'Sidecars'] as const;
+const SECTIONS = ['General', 'Features', 'Toolbars', 'Auto presets', 'Default presets', 'Cache', 'Models', 'Sidecars'] as const;
 type Section = (typeof SECTIONS)[number];
 
 /**
@@ -110,6 +112,7 @@ export function SettingsDialog() {
           </div>
           <div className="flex-1 overflow-y-auto p-5">
             {open && section === 'General' && <GeneralSection />}
+            {open && section === 'Features' && <FeaturesSection />}
             {open && section === 'Toolbars' && <ToolbarsSection />}
             {open && section === 'Auto presets' && <AutoPresetsSection />}
             {open && section === 'Default presets' && <DefaultPresetsSection />}
@@ -128,7 +131,7 @@ function SettingRow({
   description,
   control,
 }: {
-  title: string;
+  title: React.ReactNode;
   description: React.ReactNode;
   control?: React.ReactNode;
 }) {
@@ -147,14 +150,6 @@ function GeneralSection() {
   const { theme, setTheme } = useTheme();
   const client = useApiClient();
   const thumbFit = useUIStore((s) => s.thumbFit);
-  const burstHamming = useUIStore((s) => s.burstHamming);
-  const burstGapSeconds = useUIStore((s) => s.burstGapSeconds);
-  // Follow the thumb live during a drag; only commit to the server (which
-  // re-clusters open folders) on release — same pattern as OffsetSlider.
-  const [burstDrag, setBurstDrag] = useState<number | null>(null);
-  const burstShown = burstDrag ?? burstHamming;
-  const [gapDrag, setGapDrag] = useState<number | null>(null);
-  const gapShown = gapDrag ?? burstGapSeconds;
   return (
     <div className="flex flex-col">
       <SettingRow
@@ -191,6 +186,78 @@ function GeneralSection() {
           />
         }
       />
+      <AutoUpdateRow />
+      <BetaChannelRow />
+    </div>
+  );
+}
+
+// FeaturesSection: whole-feature switches (registry in lib/features.ts).
+// Disabling hides a feature's buttons, badges, and shortcuts everywhere;
+// experimental features default off until opted into here.
+function FeaturesSection() {
+  const client = useApiClient();
+  const features = useUIStore((s) => s.features);
+  return (
+    <div className="flex flex-col">
+      {FEATURE_GROUPS.map(({ key, label }, i) => (
+        <div key={key} className={cn(i > 0 && 'mt-6')}>
+          <div className="mb-1.5 text-[10px] tracking-[.06em] text-muted-foreground uppercase">
+            {label}
+          </div>
+          <div className="flex flex-col">
+            {FEATURE_IDS.filter((id) => FEATURES[id].group === key).map((id) => {
+              const def = FEATURES[id];
+              const enabled = resolveFeature(features, id);
+              return (
+                <div key={id}>
+                  <SettingRow
+                    title={
+                      def.experimental ? (
+                        <span className="flex items-center gap-1.5">
+                          {def.label}
+                          <span className="rounded-[4px] bg-amber-400/15 px-1.5 py-px text-[9px] font-semibold tracking-[.05em] text-amber-500 uppercase dark:text-amber-400">
+                            Experimental
+                          </span>
+                        </span>
+                      ) : (
+                        def.label
+                      )
+                    }
+                    description={def.description}
+                    control={
+                      <Switch
+                        checked={enabled}
+                        onCheckedChange={(on) => updateFeature(client, id, on)}
+                        aria-label={def.label}
+                      />
+                    }
+                  />
+                  {id === 'bursts' && enabled && <BurstTuningRows />}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// The burst grouping/time-window sliders, shown under the Bursts toggle
+// while it's on.
+function BurstTuningRows() {
+  const client = useApiClient();
+  const burstHamming = useUIStore((s) => s.burstHamming);
+  const burstGapSeconds = useUIStore((s) => s.burstGapSeconds);
+  // Follow the thumb live during a drag; only commit to the server (which
+  // re-clusters open folders) on release — same pattern as OffsetSlider.
+  const [burstDrag, setBurstDrag] = useState<number | null>(null);
+  const burstShown = burstDrag ?? burstHamming;
+  const [gapDrag, setGapDrag] = useState<number | null>(null);
+  const gapShown = gapDrag ?? burstGapSeconds;
+  return (
+    <>
       <SettingRow
         title="Burst grouping"
         description="How different two frames can be and still group as a near-duplicate burst. Higher groups shots where the subject shifts pose between frames; lower groups only near-identical frames. Measured in dHash bits (of 64) — at 64 similarity is ignored and anything shot within the time window below groups."
@@ -241,9 +308,7 @@ function GeneralSection() {
           </div>
         }
       />
-      <AutoUpdateRow />
-      <BetaChannelRow />
-    </div>
+    </>
   );
 }
 

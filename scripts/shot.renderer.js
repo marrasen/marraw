@@ -488,6 +488,7 @@ if (shot === 'cull') {
   // candidate cards and their live thumbnails, probes hover (loupe override
   // paints, draft untouched, leave reverts), then applies one candidate and
   // probes the labeled undo entry + the Amount scrubber arming.
+  mw.setFeature('suggestions', true); // experimental, off by default
   ui().setMode('develop');
   const es = mw.useEditSession;
   await until(() => es.getState().draft != null);
@@ -523,6 +524,63 @@ if (shot === 'cull') {
     historyLabel: h?.stack[h.index]?.label,
     labelMatches: st.lastPresetApply?.name === applyLabel && h?.stack[h.index]?.label === applyLabel,
     amountShown: !!st.lastPresetApply,
+  };
+} else if (shot === 'features' || shot === 'features-exp') {
+  // Settings → Features at defaults: culling aids on (with the burst sliders
+  // under the Bursts row), ML suggestions off wearing its Experimental badge
+  // (features-exp scrolls the pane to it). Persisted setFeature writes seed
+  // the defaults for idempotence.
+  for (const id of ['bursts', 'softFilter', 'eyes', 'subjects']) mw.setFeature(id, true);
+  mw.setFeature('suggestions', false);
+  await sleep(500);
+  ui().setSettingsOpen(true);
+  await sleep(300);
+  [...document.querySelectorAll('button')].find((b) => b.textContent === 'Features')?.click();
+  await sleep(500);
+  const dlg = document.querySelector('[role="dialog"]');
+  const switches = [...dlg.querySelectorAll('[role="switch"]')];
+  if (shot === 'features-exp') {
+    const pane = dlg.querySelector('.overflow-y-auto');
+    pane.scrollTop = pane.scrollHeight;
+    await sleep(300);
+  }
+  window.__featuresProbe = {
+    switchCount: switches.length,
+    onCount: switches.filter((s) => s.getAttribute('aria-checked') === 'true').length,
+    badge: dlg.textContent.includes('Experimental'),
+    burstSliders: !!dlg.querySelector('[aria-label="Burst grouping sensitivity"]'),
+  };
+} else if (shot === 'features-off') {
+  // Culling aids disabled: Soft/Bursts/Blinks/Auto-judge/Subjects/Eyes leave
+  // the FilterBar, the grid badges go, and a blinks filter flipped on while
+  // disabled (the other-window race) leaves the visible set untouched.
+  // setState on the mirror, not setFeature — nothing persists past this run.
+  const badgeCount = (t) => document.querySelectorAll(`[data-testid="${t}"]`).length;
+  const badgesBefore = badgeCount('burst-badge');
+  mw.useUIStore.setState({
+    features: { bursts: false, softFilter: false, eyes: false, subjects: false },
+  });
+  await sleep(500);
+  const byLabel = (l) =>
+    [...document.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === l);
+  const byTestId = (t) => document.querySelector(`[data-testid="${t}"]`);
+  const before = ui().visibleIds.length;
+  mw.useUIStore.setState({ eyesClosedOnly: true });
+  await sleep(400);
+  const blinkInert = ui().visibleIds.length === before;
+  mw.useUIStore.setState({ eyesClosedOnly: false });
+  window.__featuresProbe = {
+    softBtn: !!byLabel('Show only soft-focus frames'),
+    burstsBtn: !!byLabel('Collapse bursts to their sharpest frame'),
+    blinksBtn: !!byTestId('blinks-filter'),
+    autoJudgeBtn: !!byTestId('auto-judge-bursts'),
+    subjectsBtn: !!byTestId('subject-scan-button'),
+    eyesBtn: !!byTestId('eye-scan-button'),
+    burstBadgesBefore: badgesBefore,
+    burstBadges: badgeCount('burst-badge'),
+    softBadges: badgeCount('soft-badge'),
+    blinkInert,
+    visible: before,
   };
 } else if (shot === 'develop-light') {
   document.documentElement.classList.remove('dark');
@@ -1058,6 +1116,7 @@ const probe =
   window.__maskProbe ??
   window.__presetsProbe ??
   window.__suggestProbe ??
+  window.__featuresProbe ??
   window.__cropProbe ??
   window.__naturalGridProbe ??
   window.__renderProbe ??

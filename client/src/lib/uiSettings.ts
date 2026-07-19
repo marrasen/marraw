@@ -13,6 +13,7 @@ import {
   setEditGroupOpen,
   setExportDir,
   setExportOptions,
+  setFeature,
   setFolderView,
   setGapMinutes,
   setGroupAlias,
@@ -38,6 +39,7 @@ import {
 } from '@/api/settings';
 import type { ApiClient } from '@/api/client';
 import type { AutoPreset } from '@/lib/autoPresets';
+import type { FeatureId } from '@/lib/features';
 import type { DialKey } from '@/lib/dials';
 import {
   clampRailWidth,
@@ -155,6 +157,23 @@ export function updateExportOptions(client: ApiClient, opts: ExportOptions) {
 export function updatePrerenderFullres(client: ApiClient, enabled: boolean) {
   useUIStore.setState({ prerenderFullres: enabled });
   setPrerenderFullres(client, enabled).catch(swallow);
+}
+
+// Transient state that stops making sense once its feature is off. Cleared
+// on disable so e.g. an active Blinks filter can't keep hiding photos after
+// its button is gone. (usePhotos also ignores these while disabled, which
+// covers a disable arriving from another window.)
+const featureTransients: Partial<Record<FeatureId, () => void>> = {
+  bursts: () => useUIStore.setState({ collapseBursts: false }),
+  softFilter: () => useUIStore.setState({ softOnly: false }),
+  eyes: () => useUIStore.setState({ eyesClosedOnly: false, eyeScanOpen: false }),
+  subjects: () => useUIStore.setState({ subjectScanOpen: false }),
+};
+
+export function updateFeature(client: ApiClient, id: FeatureId, enabled: boolean) {
+  useUIStore.setState({ features: { ...useUIStore.getState().features, [id]: enabled } });
+  if (!enabled) featureTransients[id]?.();
+  setFeature(client, id, enabled).catch(swallow);
 }
 
 export function updateThumbFit(client: ApiClient, fit: ThumbFit) {

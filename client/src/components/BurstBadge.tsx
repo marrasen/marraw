@@ -1,11 +1,13 @@
 import { cn } from '@/lib/utils';
 import type { BurstInfo } from '@/lib/bursts';
+import { useFeature } from '@/lib/features';
 
 // BurstBadge is the near-duplicate marker shared by every thumbnail surface
 // (grid, contact sheet): "⧉ 2/4" — this frame's position in its burst —
 // tinted as the group's sharpest frame on the best member. Call sites pass
 // only their positioning class so the label, titles, and test hooks can't
-// drift between views.
+// drift between views. Renders nothing while the bursts feature is off, so
+// every surface un-badges through this one gate.
 export function BurstBadge({
   burst,
   photoId,
@@ -15,6 +17,8 @@ export function BurstBadge({
   photoId: number;
   className?: string;
 }) {
+  const enabled = useFeature('bursts');
+  if (!enabled) return null;
   const isBest = burst.bestId === photoId;
   const pos = burst.members.indexOf(photoId) + 1;
   return (

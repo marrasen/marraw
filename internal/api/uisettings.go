@@ -293,6 +293,9 @@ type UISettings struct {
 	// filters / sort / gap grouping. LibrarySort and GapMinutes above stay
 	// the last-used fallback for folders with no entry.
 	FolderViews map[string]FolderView `json:"folderViews"`
+	// Features: feature id -> explicit enable/disable override. Absent means
+	// the client's default for that feature; the server never interprets ids.
+	Features map[string]bool `json:"features"`
 }
 
 // Settings serves the persisted client preferences. Everything lives in the
@@ -339,6 +342,7 @@ const (
 	settingUIShootGroup    = "ui:shootGroup"
 	settingUILastSeen      = "ui:lastSeenVersion"
 	settingUIFolderViews   = "ui:folderViews"
+	settingUIFeatures      = "ui:features"
 )
 
 // Library rail width bounds; the default matches the design handoff.
@@ -444,6 +448,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		ShootGroup:       shootGroup,
 		LastSeenVersion:  lastSeen,
 		FolderViews:      jsonSetting(ctx, db, settingUIFolderViews, map[string]FolderView{}),
+		Features:         jsonSetting(ctx, db, settingUIFeatures, map[string]bool{}),
 	}, nil
 }
 
@@ -692,6 +697,18 @@ func (u *Settings) SetDevelopPinned(ctx context.Context, pinned bool) error {
 func (u *Settings) SetEditGroupOpen(ctx context.Context, id string, open bool) error {
 	return updateMapSetting(ctx, u, settingUIEditGroups, id, !open, func(m map[string]bool) {
 		m[id] = false
+	})
+}
+
+// SetFeature persists one feature's enable/disable override. The client's
+// registry owns ids and defaults, so any non-empty id is accepted and the
+// stored map only ever holds explicit user choices.
+func (u *Settings) SetFeature(ctx context.Context, id string, enabled bool) error {
+	if id == "" {
+		return aprot.ErrInvalidParams("empty feature id")
+	}
+	return updateMapSetting(ctx, u, settingUIFeatures, id, true, func(m map[string]bool) {
+		m[id] = enabled
 	})
 }
 

@@ -21,6 +21,7 @@ import { clampRailWidth, RAIL_WIDTH_DEFAULT, useUIStore } from '@/stores/uiStore
 import { GridView } from '@/views/GridView';
 import { CullView } from '@/views/CullView';
 import { DevelopView } from '@/views/DevelopView';
+import { useFeature } from '@/lib/features';
 import { useKeyboard } from '@/lib/keyboard';
 import { usePhotos } from '@/lib/usePhotos';
 import { useFolderScan } from '@/lib/useFolderScan';
@@ -316,6 +317,8 @@ function Workspace({ folderId }: { folderId: number }) {
   const setSubjectScanOpen = useUIStore((s) => s.setSubjectScanOpen);
   const eyeScanOpen = useUIStore((s) => s.eyeScanOpen);
   const setEyeScanOpen = useUIStore((s) => s.setEyeScanOpen);
+  const subjectsEnabled = useFeature('subjects');
+  const eyesEnabled = useFeature('eyes');
   const { all, visible, softBelow, bursts } = usePhotos(folderId);
   const picked = all.filter((p) => p.flag === 'pick').length;
   // Subject-analysis coverage over the whole folder, for the toolbar scan
@@ -370,12 +373,16 @@ function Workspace({ folderId }: { folderId: number }) {
         </aside>
       )}
       <ExportDialog photos={visible} />
-      <SubjectScanDialog
-        photos={all}
-        open={subjectScanOpen}
-        onOpenChange={setSubjectScanOpen}
-      />
-      <EyeScanDialog photos={all} open={eyeScanOpen} onOpenChange={setEyeScanOpen} />
+      {subjectsEnabled && (
+        <SubjectScanDialog
+          photos={all}
+          open={subjectScanOpen}
+          onOpenChange={setSubjectScanOpen}
+        />
+      )}
+      {eyesEnabled && (
+        <EyeScanDialog photos={all} open={eyeScanOpen} onOpenChange={setEyeScanOpen} />
+      )}
     </>
   );
 }

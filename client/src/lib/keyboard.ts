@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { applyRating as doRating, applyFlag as doFlag, applyFlagOps } from '@/lib/actions';
 import { copyTargetPhotoToClipboard } from '@/lib/clipboardExport';
 import { chCanRedo, chCanUndo, chRedo, chUndo } from '@/lib/cullHistory';
+import { featureEnabled } from '@/lib/features';
 import { rowNeighbor } from '@/lib/gridNav';
 import { useUIStore, selectionOrFocus, type DevelopTab } from '@/stores/uiStore';
 import {
@@ -147,6 +148,8 @@ export function useKeyboard() {
       // reject, so the keys deliberately no-op instead of guessing. The whole
       // judgement is one undo entry: a single Ctrl+Z restores the burst.
       const judgeBurst = (pickKept: boolean) => {
+        // No-op with the bursts feature off, like the hidden Auto-judge button.
+        if (!featureEnabled('bursts')) return;
         if (s.focusId == null) return;
         const members = s.burstMembers.get(s.focusId);
         if (!members) return;

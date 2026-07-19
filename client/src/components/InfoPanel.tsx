@@ -4,6 +4,7 @@
 // technical metadata — resolution, file size, camera/EXIF, capture time.
 import type { Photo } from '@/api/library';
 import { EYES_CLOSED_BADGE } from '@/lib/eyes';
+import { useFeature } from '@/lib/features';
 import { Histogram } from '@/components/Histogram';
 import { NavigatorMap } from '@/views/LoupeView';
 import { useLoupeNav } from '@/lib/loupeNav';
@@ -16,6 +17,8 @@ export function InfoPanel({ photo }: { photo: Photo }) {
   const panTo = useLoupeNav((s) => s.panTo);
   // The HUD and top bar show only the folder NAME; the full path lives here.
   const folderPath = useUIStore((s) => s.folderPath);
+  const subjectsEnabled = useFeature('subjects');
+  const eyesEnabled = useFeature('eyes');
 
   const fileName = photo.fileName.split(/[\\/]/).pop() ?? photo.fileName;
 
@@ -40,10 +43,10 @@ export function InfoPanel({ photo }: { photo: Photo }) {
           {photo.sharpness != null && (
             <Row label="Focus score" value={String(Math.round(photo.sharpness))} />
           )}
-          {photo.subjectSharpness != null && (
+          {subjectsEnabled && photo.subjectSharpness != null && (
             <Row label="Subject focus" value={String(Math.round(photo.subjectSharpness))} />
           )}
-          {photo.eyesAnalyzed && (
+          {eyesEnabled && photo.eyesAnalyzed && (
             <Row
               label="Eyes"
               value={

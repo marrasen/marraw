@@ -70,6 +70,8 @@ if (import.meta.env.DEV) {
       esHoverSuggestion: (s: unknown) => es.esHoverSuggestion(client, s as never),
       // Server-persisted UI settings (optimistic store write + server call).
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
+      // Feature toggles (the `features*` shot surfaces).
+      setFeature: (id: unknown, enabled: boolean) => us.updateFeature(client, id as never, enabled),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),
       setGapMinutes: (min: number | null) => us.updateGapMinutes(client, min),
       setFlagFilter: (f: unknown) => us.updateFolderFilters(client, { flagFilter: f as never }),

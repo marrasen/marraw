@@ -243,6 +243,9 @@ interface UIState {
   railGroups: Record<string, boolean>;
   // Library rail width in px (drag its right edge; RAIL_WIDTH_* bounds).
   railWidth: number;
+  // Feature id -> explicit enable/disable override (absent = the default in
+  // lib/features.ts; resolve through useFeature/featureEnabled, not directly).
+  features: Record<string, boolean>;
   // App version whose changelog the Welcome page last showed ('' = never).
   lastSeenVersion: string;
   // True once the first uiSettings snapshot has arrived.
@@ -401,6 +404,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   groupAliases: {},
   railGroups: {},
   railWidth: RAIL_WIDTH_DEFAULT,
+  features: {},
   lastSeenVersion: '',
   settingsLoaded: false,
   focusId: null,
@@ -478,6 +482,9 @@ export const useUIStore = create<UIState>((set, get) => ({
       groupAliases: s.groupAliases,
       railGroups: s.railGroups,
       railWidth: clampRailWidth(s.railWidth),
+      // No sanitizer: unknown ids are inert, resolution goes through the
+      // lib/features.ts registry.
+      features: s.features ?? {},
       lastSeenVersion: s.lastSeenVersion ?? '',
       settingsLoaded: true,
     });

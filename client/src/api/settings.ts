@@ -138,6 +138,7 @@ export interface UISettings {
     shootGroup: ShootGroupType;
     lastSeenVersion: string;
     folderViews: Record<string, FolderView>;
+    features: Record<string, boolean>;
 }
 
 export interface UserPreset {
@@ -318,6 +319,19 @@ setExportOptions.method = 'Settings.SetExportOptions' as const;
 
 export function subscribeSetExportOptions(client: ApiClient, opts: ExportOptions, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetExportOptions', [opts], callback, onError, options);
+}
+
+
+export function setFeature(client: ApiClient, id: string, enabled: boolean, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetFeature', [id, enabled], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setFeature.method = 'Settings.SetFeature' as const;
+
+export function subscribeSetFeature(client: ApiClient, id: string, enabled: boolean, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetFeature', [id, enabled], callback, onError, options);
 }
 
 
@@ -679,6 +693,21 @@ export function useSetExportOptions(opts: ExportOptions, options?: UseQueryOptio
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [opts], _subscribe: { method: 'Settings.SetExportOptions', params: [opts] } });
+}
+
+/**
+ * Subscribes to `Settings.SetFeature` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetFeature(id: string, enabled: boolean, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, id: string, enabled: boolean) => setFeature(client, id, enabled, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [id, enabled], _subscribe: { method: 'Settings.SetFeature', params: [id, enabled] } });
 }
 
 /**
