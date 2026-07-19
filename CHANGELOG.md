@@ -5,6 +5,22 @@ Only two constructs are parsed (client/src/lib/changelog.ts): `## X.Y.Z - YYYY-M
 version headers and `-` bullets; everything else is ignored. Newest release first.
 When cutting a release: bump the version in package.json and add a section here.
 
+## 0.6.0 - 2026-07-19
+
+- Presets: partial presets — choose which sections of the edit a preset carries when saving it
+- Presets: relative mode — a preset applies as an offset on top of each photo's calibrated baseline, with exposure re-anchored per photo instead of stamped absolute
+- Presets: adaptive save — save a look as its difference from auto, so it adapts to every photo it lands on
+- Presets: hover a preset to preview it on the loupe, and scrub the amount after applying
+- Presets: manage your presets — rename, duplicate, overwrite, reorder, and share them as files
+- Presets: per-camera defaults are seeded when a folder calibrates
+- Presets: AI-mask recipes — a preset's Subject/Depth/Scene masks re-detect on each photo they're applied to
+- Presets: applying an AI-mask preset to a multi-photo selection now generates masks for every selected photo, not just the focused one
+- Suggestions: scene-aware edit suggestions — 3–5 candidate looks per photo (experimental, off by default)
+- Settings: Features tab — switch whole features on or off (burst grouping, soft filter, closed-eye detection, subject focus, edit suggestions) to declutter the UI
+- Library: grid cells follow the rendered shape after crop or rotate
+- Cull: folder calibration no longer slows down while default presets are being seeded
+- UI: the marraw logo replaces the "m" mark in the top bar and the cull/develop overlay
+
 ## 0.5.1 - 2026-07-17
 
 - Cull/Develop: the floating folder pill shows just the folder name — a long path collided with the centered mode switch; hover it for the full path
