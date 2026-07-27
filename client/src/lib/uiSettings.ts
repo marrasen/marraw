@@ -13,6 +13,7 @@ import {
   setEditGroupOpen,
   setExportDir,
   setExportOptions,
+  setExportPresets,
   setFeature,
   setFolderView,
   setGapMinutes,
@@ -33,6 +34,7 @@ import {
   useGetUISettings,
   type AutoPreset as WireAutoPreset,
   type ExportOptions,
+  type ExportPreset,
   type FolderView,
   type UserPreset,
   type Watermark,
@@ -152,6 +154,11 @@ export function updateExportDir(client: ApiClient, dir: string) {
 export function updateExportOptions(client: ApiClient, opts: ExportOptions) {
   useUIStore.setState({ exportOptions: opts });
   setExportOptions(client, opts).catch(swallow);
+}
+
+export function updateExportPresets(client: ApiClient, presets: ExportPreset[]) {
+  useUIStore.setState({ exportPresets: presets });
+  setExportPresets(client, presets).catch(swallow);
 }
 
 export function updatePrerenderFullres(client: ApiClient, enabled: boolean) {

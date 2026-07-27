@@ -1,9 +1,21 @@
 import { create } from 'zustand';
 import type { FlagType, Photo, PhotoPatch } from '@/api/library';
-import type { ExportOptions, FolderView, UISettings, UserPreset, Watermark } from '@/api/settings';
+import type {
+  ExportOptions,
+  ExportPreset,
+  FolderView,
+  UISettings,
+  UserPreset,
+  Watermark,
+} from '@/api/settings';
 import type { Params } from '@/api/edit';
 import { sanitizeDialKeys, type DialKey } from '@/lib/dials';
 import { sanitizeAutoPresets, type AutoPreset } from '@/lib/autoPresets';
+import {
+  DEFAULT_EXPORT_OPTIONS,
+  sanitizeExportOptions,
+  sanitizeExportPresets,
+} from '@/lib/exportPresets';
 import { sanitizeUserPresets } from '@/lib/userPresets';
 import { sanitizeWatermarks } from '@/lib/watermarks';
 
@@ -31,22 +43,6 @@ export interface PhotoMeta {
   flag: FlagType;
   rating: number;
 }
-
-export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
-  format: 'jpeg',
-  jpegQuality: 90,
-  resizeMode: 'full',
-  edgePx: 2160,
-  colorSpace: 'srgb',
-  sharpenTarget: 'off',
-  sharpenAmount: 'standard',
-  fileNameTemplate: '',
-  exifMode: 'all',
-  removeLocation: false,
-  artist: '',
-  copyright: '',
-  watermarkId: '',
-};
 
 // Library rail width bounds — mirror the server's SetRailWidth validation.
 export const RAIL_WIDTH_DEFAULT = 214;
@@ -127,40 +123,6 @@ function resolveFolderView(
   };
 }
 
-// Mirrors the server's normalizeExportOptions: missing or invalid fields
-// from older blobs fall back to the dialog defaults.
-function sanitizeExportOptions(o: Partial<ExportOptions> | undefined): ExportOptions {
-  return {
-    // An older blob may still say 'tiff16'; that format is gone, so it falls
-    // back to the jpeg default like any other unknown value.
-    format:
-      o?.format === 'tiff8' || o?.format === 'png' || o?.format === 'rawXmp' ? o.format : 'jpeg',
-    jpegQuality:
-      typeof o?.jpegQuality === 'number' && o.jpegQuality >= 1 && o.jpegQuality <= 100
-        ? Math.round(o.jpegQuality)
-        : DEFAULT_EXPORT_OPTIONS.jpegQuality,
-    resizeMode: o?.resizeMode === 'edge' ? 'edge' : 'full',
-    edgePx:
-      typeof o?.edgePx === 'number' && o.edgePx >= 16 && o.edgePx <= 65536
-        ? Math.round(o.edgePx)
-        : DEFAULT_EXPORT_OPTIONS.edgePx,
-    colorSpace:
-      o?.colorSpace === 'adobergb' || o?.colorSpace === 'prophoto' ? o.colorSpace : 'srgb',
-    sharpenTarget:
-      o?.sharpenTarget === 'screen' || o?.sharpenTarget === 'matte' || o?.sharpenTarget === 'glossy'
-        ? o.sharpenTarget
-        : 'off',
-    sharpenAmount:
-      o?.sharpenAmount === 'low' || o?.sharpenAmount === 'high' ? o.sharpenAmount : 'standard',
-    fileNameTemplate: typeof o?.fileNameTemplate === 'string' ? o.fileNameTemplate.trim() : '',
-    exifMode: o?.exifMode === 'copyright' || o?.exifMode === 'none' ? o.exifMode : 'all',
-    removeLocation: o?.removeLocation === true,
-    artist: typeof o?.artist === 'string' ? o.artist.trim() : '',
-    copyright: typeof o?.copyright === 'string' ? o.copyright.trim() : '',
-    watermarkId: typeof o?.watermarkId === 'string' ? o.watermarkId : '',
-  };
-}
-
 interface UIState {
   mode: Mode;
   folderId: number | null;
@@ -202,6 +164,8 @@ interface UIState {
   exportDir: string;
   // Last-used export dialog options; the dialog re-opens with these.
   exportOptions: ExportOptions;
+  // Named export-settings snapshots (Export dialog → Preset).
+  exportPresets: ExportPreset[];
   // Active tab of the develop drawer / library aside (client-only, not
   // persisted server-side — it's an ephemeral view choice).
   developTab: DevelopTab;
@@ -388,6 +352,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   theme: 'dark',
   exportDir: '',
   exportOptions: DEFAULT_EXPORT_OPTIONS,
+  exportPresets: [],
   developTab: 'develop',
   prerenderFullres: false,
   burstHamming: 18,
@@ -472,6 +437,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       watermarks: sanitizeWatermarks(s.watermarks),
       exportDir: s.exportDir,
       exportOptions: sanitizeExportOptions(s.exportOptions),
+      exportPresets: sanitizeExportPresets(s.exportPresets),
       prerenderFullres: s.prerenderFullres,
       burstHamming: s.burstHamming,
       burstGapSeconds: s.burstGapSeconds,

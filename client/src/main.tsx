@@ -60,6 +60,8 @@ if (import.meta.env.DEV) {
       esSetSpotVisualize: (on: boolean) => es.esSetSpotVisualize(on),
       // User presets (the `presets` shot surface): seed, apply, hover, scrub.
       setUserPresets: (p: unknown) => us.updateUserPresets(client, p as never),
+      // Export presets (the `export-presets` shot surface): cleanup between runs.
+      setExportPresets: (p: unknown) => us.updateExportPresets(client, p as never),
       esApplyUserPreset: (p: unknown) => es.esApplyUserPreset(client, p as never),
       esHoverPreset: (p: unknown) => es.esHoverPreset(client, p as never),
       esHoverEnd: () => es.esHoverEnd(client),

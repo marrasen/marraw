@@ -406,6 +406,59 @@ if (shot === 'cull') {
   [...document.querySelectorAll('button')].find((b) => b.textContent === 'RAW + XMP')?.click();
   await sleep(200);
   [...document.querySelectorAll('button')].find((b) => b.textContent === 'Use current folder')?.click();
+} else if (shot === 'export-presets') {
+  // Export presets: save the current dialog settings as a named preset via
+  // the real menus and naming input, diverge a setting to get the
+  // "(modified)" suffix, Update to clear it, and leave the preset applied
+  // for the capture. Idempotent: leftover UITEST presets are cleared first.
+  const setInput = (el, v) => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const btn = (label) =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === label);
+  const item = (label) =>
+    [...document.querySelectorAll('[role="menuitem"]')].find((el) =>
+      el.textContent.trim().startsWith(label),
+    );
+  mw.setExportPresets(ui().exportPresets.filter((p) => !p.name.startsWith('UITEST')));
+  await sleep(300);
+  ui().setExportOpen(true);
+  await sleep(400);
+  // A known start state so the TIFF click below is a real divergence.
+  btn('JPEG')?.click();
+  await sleep(200);
+  btn('Save…')?.click();
+  await until(() => item('Save as new preset…'));
+  item('Save as new preset…').click();
+  const nameInput = await until(() => document.querySelector('input[aria-label="Preset name"]'));
+  setInput(nameInput, 'UITEST preset');
+  await sleep(150);
+  btn('Save')?.click();
+  await sleep(500);
+  const savedInStore = ui().exportPresets.some((p) => p.name === 'UITEST preset');
+  const picker = () =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent.includes('UITEST preset'));
+  const activeShown = !!picker() && !picker().textContent.includes('(modified)');
+  // Diverge: switch the format — the picker must flag the divergence.
+  btn('TIFF')?.click();
+  await sleep(300);
+  const modifiedShown = !!picker() && picker().textContent.includes('(modified)');
+  // Update re-snapshots into the preset, keeping id and name; suffix clears.
+  btn('Save…')?.click();
+  await until(() => item('Update'));
+  item('Update').click();
+  await sleep(500);
+  const updateClears = !!picker() && !picker().textContent.includes('(modified)');
+  const updateStored =
+    ui().exportPresets.find((p) => p.name === 'UITEST preset')?.options.format === 'tiff8';
+  window.__exportPresetsProbe = {
+    savedInStore,
+    activeShown,
+    modifiedShown,
+    updateClears,
+    updateStored,
+  };
 } else if (shot === 'settings') {
   ui().setSettingsOpen(true);
 } else if (shot === 'sidecars') {
@@ -1173,5 +1226,6 @@ const probe =
   window.__settleProbe ??
   window.__welcomeProbe ??
   window.__folderViewProbe ??
-  window.__exportCopyProbe;
+  window.__exportCopyProbe ??
+  window.__exportPresetsProbe;
 return probe ? { shot, ...probe } : shot;

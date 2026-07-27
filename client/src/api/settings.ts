@@ -121,6 +121,12 @@ export interface ExportOptions {
     watermarkId: string;
 }
 
+export interface ExportPreset {
+    id: string;
+    name: string;
+    options: ExportOptions;
+}
+
 export interface FolderView {
     minRating?: number;
     flagFilter?: FlagFilterType;
@@ -141,6 +147,7 @@ export interface UISettings {
     watermarks: Watermark[];
     exportDir: string;
     exportOptions: ExportOptions;
+    exportPresets: ExportPreset[];
     developPinned: boolean;
     editGroups: Record<string, boolean>;
     groupAliases: Record<string, string>;
@@ -348,6 +355,19 @@ setExportOptions.method = 'Settings.SetExportOptions' as const;
 
 export function subscribeSetExportOptions(client: ApiClient, opts: ExportOptions, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetExportOptions', [opts], callback, onError, options);
+}
+
+
+export function setExportPresets(client: ApiClient, presets: ExportPreset[], options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetExportPresets', [presets], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setExportPresets.method = 'Settings.SetExportPresets' as const;
+
+export function subscribeSetExportPresets(client: ApiClient, presets: ExportPreset[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetExportPresets', [presets], callback, onError, options);
 }
 
 
@@ -722,6 +742,21 @@ export function useSetExportOptions(opts: ExportOptions, options?: UseQueryOptio
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [opts], _subscribe: { method: 'Settings.SetExportOptions', params: [opts] } });
+}
+
+/**
+ * Subscribes to `Settings.SetExportPresets` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetExportPresets(presets: ExportPreset[], options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, presets: ExportPreset[]) => setExportPresets(client, presets, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [presets], _subscribe: { method: 'Settings.SetExportPresets', params: [presets] } });
 }
 
 /**

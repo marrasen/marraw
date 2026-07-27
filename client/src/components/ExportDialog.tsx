@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -11,6 +11,7 @@ import {
 import { checkDest, startExport } from '@/api/export';
 import { useApiClient } from '@/api/client';
 import type { Photo } from '@/api/library';
+import type { ExportOptions, ExportPreset } from '@/api/settings';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -23,8 +24,14 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { copyPhotoToClipboard } from '@/lib/clipboardExport';
+import {
+  EXPORT_PRESET_NAME_MAX,
+  exportOptionsEqual,
+  sanitizeExportOptions,
+} from '@/lib/exportPresets';
 import { rootName, samePath, useLibraryRoots } from '@/lib/library';
-import { updateExportDir, updateExportOptions } from '@/lib/uiSettings';
+import { updateExportDir, updateExportOptions, updateExportPresets } from '@/lib/uiSettings';
+import { uniqueName } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
 
@@ -105,6 +112,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   const selection = useUIStore((s) => s.selection);
   const folderPath = useUIStore((s) => s.folderPath);
   const watermarks = useUIStore((s) => s.watermarks);
+  const exportPresets = useUIStore((s) => s.exportPresets);
   const setWatermarkEditorOpen = useUIStore((s) => s.setWatermarkEditorOpen);
   const { roots } = useLibraryRoots();
 
@@ -125,12 +133,38 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   const [starting, setStarting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [needsCreate, setNeedsCreate] = useState(false);
+  // Preset picker: the applied preset's id ('' = none) and the inline
+  // naming state for save-as / rename.
+  const [activePresetId, setActivePresetId] = useState('');
+  const [presetNaming, setPresetNaming] = useState<null | {
+    mode: 'save' | 'rename';
+    value: string;
+  }>(null);
   // Closing the dialog aborts an in-flight clipboard render — the RPC signal
   // cancels the decode server-side, so it stops burning a core.
   const copyAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     if (!open) copyAbort.current?.abort();
   }, [open]);
+
+  // Loads an options blob (the last-used state or a preset) into the form.
+  const applyOptions = useCallback((o: ExportOptions) => {
+    setFileTemplate(o.fileNameTemplate);
+    setFormat(o.format);
+    setQuality(o.jpegQuality);
+    setResize(o.resizeMode === 'edge' ? 'edge' : 'full');
+    setEdgePx(o.edgePx);
+    setColorSpace(o.colorSpace);
+    setSharpenTarget(o.sharpenTarget);
+    setSharpenAmount(o.sharpenAmount);
+    setExifMode(o.exifMode);
+    setRemoveLocation(o.removeLocation);
+    setArtist(o.artist);
+    setCopyright(o.copyright);
+    // A referenced watermark that was deleted since falls back to none.
+    const { watermarks } = useUIStore.getState();
+    setWatermarkId(watermarks.some((w) => w.id === o.watermarkId) ? o.watermarkId : '');
+  }, []);
 
   // Prefill from the last-used options when the dialog opens: the previous
   // destination (else "<current folder>\Exports") plus the persisted export
@@ -141,28 +175,18 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
     // reading getState() during render would be impure, so this stays an effect.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setNeedsCreate(false);
+    setPresetNaming(null);
     // Read imperatively: a subscription echo must not clobber a value the
     // user is editing while the dialog is open.
-    const { exportDir, exportOptions } = useUIStore.getState();
+    const { exportDir, exportOptions, exportPresets } = useUIStore.getState();
     setDestDir(exportDir || (folderPath ? `${folderPath}\\Exports` : ''));
-    setFileTemplate(exportOptions.fileNameTemplate);
-    setFormat(exportOptions.format);
-    setQuality(exportOptions.jpegQuality);
-    setResize(exportOptions.resizeMode === 'edge' ? 'edge' : 'full');
-    setEdgePx(exportOptions.edgePx);
-    setColorSpace(exportOptions.colorSpace);
-    setSharpenTarget(exportOptions.sharpenTarget);
-    setSharpenAmount(exportOptions.sharpenAmount);
-    setExifMode(exportOptions.exifMode);
-    setRemoveLocation(exportOptions.removeLocation);
-    setArtist(exportOptions.artist);
-    setCopyright(exportOptions.copyright);
-    // A remembered watermark that was deleted since falls back to none.
-    const { watermarks } = useUIStore.getState();
-    setWatermarkId(
-      watermarks.some((w) => w.id === exportOptions.watermarkId) ? exportOptions.watermarkId : '',
+    applyOptions(exportOptions);
+    // Reopening after "apply preset → export" shows that preset as active
+    // again: the one whose options match the prefilled blob, if any.
+    setActivePresetId(
+      exportPresets.find((p) => exportOptionsEqual(p.options, exportOptions))?.id ?? '',
     );
-  }, [open, folderPath]);
+  }, [open, folderPath, applyOptions]);
 
   const ids = selection.size > 0 ? [...selection] : photos.map((p) => p.id);
   const current = folderPath ? roots.find((r) => samePath(r.path, folderPath)) : undefined;
@@ -174,6 +198,25 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   // sidecars next to the originals.
   const isRaw = format === 'rawXmp';
   const inPlace = isRaw && !!folderPath && samePath(destDir, folderPath);
+
+  // Snapshots the form as the persisted options shape — written back as the
+  // sticky blob when an export starts, and captured into presets.
+  const currentOptions = (): ExportOptions => ({
+    format,
+    jpegQuality: quality,
+    resizeMode: resize,
+    edgePx,
+    colorSpace,
+    sharpenTarget,
+    sharpenAmount,
+    fileNameTemplate: fileTemplate.trim(),
+    exifMode,
+    // Remembered as toggled even when another mode hides it.
+    removeLocation,
+    artist: artist.trim(),
+    copyright: copyright.trim(),
+    watermarkId,
+  });
 
   const start = async (createDir: boolean) => {
     if (!destDir) {
@@ -207,22 +250,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
         createDir,
       });
       updateExportDir(client, destDir);
-      updateExportOptions(client, {
-        format,
-        jpegQuality: quality,
-        resizeMode: resize,
-        edgePx,
-        colorSpace,
-        sharpenTarget,
-        sharpenAmount,
-        fileNameTemplate: fileTemplate.trim(),
-        exifMode,
-        // Remembered as toggled even when another mode hides it.
-        removeLocation,
-        artist: artist.trim(),
-        copyright: copyright.trim(),
-        watermarkId,
-      });
+      updateExportOptions(client, currentOptions());
       setOpen(false); // progress lives in the top-bar task chip
     } catch (err) {
       toast.error(`Export failed to start: ${(err as Error).message}`);
@@ -258,6 +286,57 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
       copyAbort.current = null;
       setCopying(false);
     }
+  };
+
+  // The applied preset, resolved by id every render — one deleted from
+  // another window simply stops resolving and the picker degrades to None.
+  const activePreset = exportPresets.find((p) => p.id === activePresetId);
+  // Edits after applying silently diverge; this suffix is the only signal,
+  // and the selection persists so "Update" stays one click away.
+  const presetModified =
+    !!activePreset && !exportOptionsEqual(sanitizeExportOptions(currentOptions()), activePreset.options);
+
+  const commitPresetNaming = () => {
+    if (!presetNaming) return;
+    const trimmed = presetNaming.value.trim();
+    setPresetNaming(null);
+    if (!trimmed) return;
+    if (presetNaming.mode === 'save') {
+      const preset: ExportPreset = {
+        id: crypto.randomUUID(),
+        name: uniqueName(trimmed, exportPresets, true),
+        options: sanitizeExportOptions(currentOptions()),
+      };
+      updateExportPresets(client, [...exportPresets, preset]);
+      setActivePresetId(preset.id);
+      toast.success(`Saved export preset “${preset.name}”`);
+    } else {
+      if (!activePreset || trimmed === activePreset.name) return;
+      updateExportPresets(
+        client,
+        exportPresets.map((p) => (p.id === activePresetId ? { ...p, name: trimmed } : p)),
+      );
+    }
+  };
+
+  // Re-snapshot the current settings into the applied preset, keeping its
+  // identity (PresetsPanel's overwrite pattern).
+  const updateActivePreset = () => {
+    if (!activePreset) return;
+    updateExportPresets(
+      client,
+      exportPresets.map((p) =>
+        p.id === activePresetId ? { ...p, options: sanitizeExportOptions(currentOptions()) } : p,
+      ),
+    );
+    toast.success(`“${activePreset.name}” updated with the current settings`);
+  };
+
+  const removeActivePreset = () => {
+    if (!activePreset) return;
+    updateExportPresets(client, exportPresets.filter((p) => p.id !== activePresetId));
+    setActivePresetId('');
+    toast.success(`Removed export preset “${activePreset.name}”`);
   };
 
   const summary = [
@@ -297,7 +376,18 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   );
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(o, details) => {
+        // Escape while naming a preset cancels the naming, not the dialog.
+        if (!o && details.reason === 'escape-key' && presetNaming) {
+          details.cancel();
+          setPresetNaming(null);
+          return;
+        }
+        setOpen(o);
+      }}
+    >
       <DialogContent
         showCloseButton={false}
         className="flex w-[680px] max-w-none flex-col gap-0 overflow-hidden rounded-[14px] border-glass-border p-0 sm:max-w-none"
@@ -320,6 +410,127 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
         </div>
 
         <div className="flex flex-col gap-4 px-[22px] py-5">
+          {row(
+            'Preset',
+            presetNaming ? (
+              <>
+                <input
+                  autoFocus
+                  className="flex h-[34px] min-w-0 flex-1 items-center rounded-lg border border-input bg-secondary px-2.5 text-xs text-secondary-foreground outline-none focus:border-ring dark:bg-white/5"
+                  placeholder={
+                    presetNaming.mode === 'save' ? 'Preset name, e.g. Web JPEG' : 'New name'
+                  }
+                  value={presetNaming.value}
+                  maxLength={EXPORT_PRESET_NAME_MAX}
+                  onChange={(e) => setPresetNaming({ ...presetNaming, value: e.target.value })}
+                  // Stop the global keyboard map from rating/flagging while typing.
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') commitPresetNaming();
+                    if (e.key === 'Escape') setPresetNaming(null);
+                  }}
+                  aria-label="Preset name"
+                />
+                <Button
+                  size="sm"
+                  className="h-[34px]"
+                  onClick={commitPresetNaming}
+                  disabled={!presetNaming.value.trim()}
+                >
+                  {presetNaming.mode === 'save' ? 'Save' : 'Rename'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-[34px]"
+                  onClick={() => setPresetNaming(null)}
+                >
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger className="flex h-[34px] items-center gap-2 rounded-lg border border-input bg-secondary px-2.5 text-xs text-secondary-foreground dark:bg-white/5">
+                    <span className="max-w-[220px] truncate">
+                      {activePreset
+                        ? activePreset.name + (presetModified ? ' (modified)' : '')
+                        : 'None'}
+                    </span>
+                    <span className="text-[10px] opacity-60">▾</span>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[220px] rounded-[11px] border-glass-border bg-popover/98 p-[7px]">
+                    <DropdownMenuItem
+                      className="flex h-8 rounded-[7px] px-2.5 text-[13px] text-muted-foreground"
+                      onClick={() => setActivePresetId('')}
+                    >
+                      None
+                    </DropdownMenuItem>
+                    {exportPresets.map((p) => (
+                      <DropdownMenuItem
+                        key={p.id}
+                        className={
+                          p.id === activePresetId
+                            ? 'flex h-8 rounded-[7px] px-2.5 text-[13px] font-semibold text-foreground'
+                            : 'flex h-8 rounded-[7px] px-2.5 text-[13px]'
+                        }
+                        onClick={() => {
+                          applyOptions(p.options);
+                          setActivePresetId(p.id);
+                          setNeedsCreate(false);
+                        }}
+                      >
+                        <span className="truncate">{p.name}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button size="sm" variant="ghost" className="h-[34px]">
+                        Save…
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent align="start" className="w-[240px] rounded-[11px] border-glass-border bg-popover/98 p-[7px]">
+                    <DropdownMenuItem
+                      className="flex h-8 rounded-[7px] px-2.5 text-[13px]"
+                      onClick={() =>
+                        setPresetNaming({ mode: 'save', value: activePreset?.name ?? '' })
+                      }
+                    >
+                      Save as new preset…
+                    </DropdownMenuItem>
+                    {activePreset && (
+                      <>
+                        <DropdownMenuItem
+                          className="flex h-8 rounded-[7px] px-2.5 text-[13px]"
+                          onClick={updateActivePreset}
+                        >
+                          <span className="truncate">Update “{activePreset.name}”</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="flex h-8 rounded-[7px] px-2.5 text-[13px]"
+                          onClick={() =>
+                            setPresetNaming({ mode: 'rename', value: activePreset.name })
+                          }
+                        >
+                          Rename…
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="flex h-8 rounded-[7px] px-2.5 text-[13px]"
+                          onClick={removeActivePreset}
+                        >
+                          Delete
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
+            ),
+          )}
           {row(
             'Destination',
             <>

@@ -15,7 +15,7 @@ import type { Params } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import type { ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { cn, uniqueName } from '@/lib/utils';
 import type { AutoPreset } from '@/lib/autoPresets';
 import { updateUserPresets } from '@/lib/uiSettings';
 import { Slider } from '@/components/ui/slider';
@@ -684,19 +684,6 @@ function CardAction({
       {icon}
     </button>
   );
-}
-
-// uniqueName appends " (2)", " (3)", … until the name is free. With
-// `keepBase` the base name itself is used when free (imports keep their
-// names unless taken); without it numbering always starts (duplicates).
-function uniqueName(base: string, taken: { name: string }[], keepBase = false): string {
-  const names = new Set(taken.map((t) => t.name));
-  if (keepBase && !names.has(base)) return base;
-  const stripped = base.replace(/ \(\d+\)$/, '');
-  for (let n = 2; ; n++) {
-    const candidate = `${stripped} (${n})`;
-    if (!names.has(candidate)) return candidate;
-  }
 }
 
 // useUserPresetThumbs renders a small preview of each saved look applied to

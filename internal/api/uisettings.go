@@ -152,6 +152,16 @@ type UserPreset struct {
 	AutoSections []string `json:"autoSections,omitempty"`
 }
 
+// ExportPreset is one named snapshot of the export dialog's options
+// (Export dialog → Preset). The destination dir is deliberately excluded —
+// it stays the sticky global (ui:exportDir), since paths are machine-specific
+// and would silently break inside presets.
+type ExportPreset struct {
+	ID      string        `json:"id"`
+	Name    string        `json:"name"`
+	Options ExportOptions `json:"options"`
+}
+
 // ExportOptions is the last-used state of the export dialog, persisted as
 // one blob when an export starts (the dialog is "sticky", Lightroom-style).
 type ExportOptions struct {
@@ -262,6 +272,9 @@ type UISettings struct {
 	ExportDir  string      `json:"exportDir"`
 	// ExportOptions is the export dialog's last-used state.
 	ExportOptions ExportOptions `json:"exportOptions"`
+	// ExportPresets are the named export-settings snapshots (Export dialog →
+	// Preset).
+	ExportPresets []ExportPreset `json:"exportPresets"`
 	// DevelopPinned keeps the develop drawer expanded.
 	DevelopPinned bool `json:"developPinned"`
 	// EditGroups: edit-panel group id -> open. Absent means open.
@@ -330,6 +343,7 @@ const (
 	settingUIWatermarks    = "ui:watermarks"
 	settingUIExportDir     = "ui:exportDir"
 	settingUIExportOptions = "ui:exportOptions"
+	settingUIExportPresets = "ui:exportPresets"
 	settingUIDevelopPinned = "ui:developPinned"
 	settingUIEditGroups    = "ui:editGroups"
 	settingUIGroupAliases  = "ui:groupAliases"
@@ -436,6 +450,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		Watermarks:       jsonSetting(ctx, db, settingUIWatermarks, []Watermark{}),
 		ExportDir:        exportDir,
 		ExportOptions:    normalizeExportOptions(jsonSetting(ctx, db, settingUIExportOptions, ExportOptions{})),
+		ExportPresets:    jsonSetting(ctx, db, settingUIExportPresets, []ExportPreset{}),
 		DevelopPinned:    pinned,
 		EditGroups:       jsonSetting(ctx, db, settingUIEditGroups, map[string]bool{}),
 		GroupAliases:     jsonSetting(ctx, db, settingUIGroupAliases, map[string]string{}),
@@ -681,6 +696,22 @@ func (u *Settings) SetLastSeenVersion(ctx context.Context, version string) error
 // SetExportOptions persists the export dialog's last-used state.
 func (u *Settings) SetExportOptions(ctx context.Context, opts ExportOptions) error {
 	return u.saveJSON(ctx, settingUIExportOptions, normalizeExportOptions(opts))
+}
+
+// SetExportPresets replaces the named export-settings presets (add, remove,
+// rename, and overwrite are all "send the new list", like the user presets).
+func (u *Settings) SetExportPresets(ctx context.Context, presets []ExportPreset) error {
+	if presets == nil {
+		presets = []ExportPreset{}
+	}
+	for i := range presets {
+		presets[i].Name = clampText(presets[i].Name, 80)
+		if presets[i].ID == "" || presets[i].Name == "" {
+			return aprot.ErrInvalidParams("export presets need an id and a name")
+		}
+		presets[i].Options = normalizeExportOptions(presets[i].Options)
+	}
+	return u.saveJSON(ctx, settingUIExportPresets, presets)
 }
 
 // SetDevelopPinned persists the develop-drawer pin.
