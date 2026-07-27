@@ -13,7 +13,7 @@ import (
 func drawRect(dst *image.RGBA, el Element, shortEdge int) {
 	b := dst.Bounds()
 	w := max(1, int(math.Round(el.WidthPct/100*float64(b.Dx()))))
-	h := max(1, int(math.Round(el.HeightPct/100*float64(b.Dy()))))
+	h := sizePx(el.HeightPct, shortEdge)
 	origin := anchorOrigin(b, w, h, el.Anchor, marginPx(el.MarginPct, shortEdge))
 	rect := image.Rectangle{Min: origin, Max: origin.Add(image.Point{X: w, Y: h})}.Intersect(b)
 	if rect.Empty() {

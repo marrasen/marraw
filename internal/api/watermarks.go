@@ -117,16 +117,17 @@ type WatermarkElement struct {
 	Asset       string `json:"asset"`
 	AssetWidth  int    `json:"assetWidth"`
 	AssetHeight int    `json:"assetHeight"`
-	// Rect elements: an anchored filled box. Width/height are % of the
-	// canvas width/height (unlike SizePct's short-edge rule) so a full-bleed
-	// bar is widthPct 100. Fill picks solid (Color/Opacity) or a linear
+	// Rect elements: an anchored filled box. Width is % of the canvas width
+	// (unlike SizePct's short-edge rule) so a full-bleed bar is widthPct 100;
+	// height follows the short-edge rule so a bar keeps its proportion to
+	// text across orientations. Fill picks solid (Color/Opacity) or a linear
 	// gradient from Color/Opacity to Color2/Opacity2 along GradientDir.
 	Fill        WatermarkFill        `json:"fill"`
 	Color2      string               `json:"color2"`   // #rrggbb
 	Opacity2    float64              `json:"opacity2"` // 0..1; 0 = fade to transparent
 	GradientDir WatermarkGradientDir `json:"gradientDir"`
 	WidthPct    float64              `json:"widthPct"`  // % of canvas width
-	HeightPct   float64              `json:"heightPct"` // % of canvas height
+	HeightPct   float64              `json:"heightPct"` // % of short edge
 	// Shared geometry.
 	Anchor    WatermarkAnchor `json:"anchor"`
 	SizePct   float64         `json:"sizePct"`   // % of short edge (text em / image height)

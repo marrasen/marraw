@@ -916,6 +916,81 @@ if (shot === 'cull') {
     scrimDrawn = scrim[0] > 60 && scrim[0] < 200 && Math.abs(scrim[0] - scrim[2]) < 12;
   }
   window.__wmProbe = { frameDrawn, scrimDrawn, canvas: !!canvas };
+} else if (shot === 'watermark-bar' || shot === 'watermark-bar-portrait') {
+  // Short-edge rule regression probe: a bottom bar + text must keep their
+  // height ratio between the Landscape and Portrait previews (heightPct and
+  // sizePct both resolve against the short edge). The bar is forced solid
+  // red so the probe can tell it from the white text ink.
+  const setInput = (el, v) => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const btn = (label) =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === label);
+  ui().setWatermarkEditorOpen(true);
+  await sleep(400);
+  btn('New watermark')?.click();
+  await sleep(300);
+  const textInput = document.querySelector('input[aria-label="Watermark text"]');
+  if (textInput) setInput(textInput, 'by marras');
+  btn('Rectangle')?.click();
+  await sleep(300);
+  {
+    const st = ui();
+    const wm = st.watermarks[st.watermarks.length - 1];
+    if (wm) {
+      // Bar first so the text draws on top of it, like the real use case.
+      const styled = wm.elements.map((e) =>
+        e.type === 'rect'
+          ? { ...e, fill: 'solid', color: '#ff0000', opacity: 1 }
+          : e.type === 'text'
+            ? { ...e, sizePct: 8 }
+            : e,
+      );
+      styled.sort((a, b) => (a.type === 'rect' ? -1 : 0) - (b.type === 'rect' ? -1 : 0));
+      mw.useUIStore.setState({
+        watermarks: st.watermarks.map((w) => (w.id === wm.id ? { ...w, elements: styled } : w)),
+      });
+    }
+  }
+  if (shot === 'watermark-bar-portrait') {
+    await sleep(300);
+    btn('Portrait')?.click();
+  }
+  await sleep(2500);
+  const canvas = document.querySelector('[role="dialog"] canvas');
+  let barPx = 0;
+  let textPx = 0;
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    // Bar thickness: red rows in a left-edge column, clear of the text.
+    const col = ctx.getImageData(4, 0, 1, canvas.height).data;
+    for (let y = 0; y < canvas.height; y++) {
+      if (col[y * 4] > 150 && col[y * 4 + 1] < 80 && col[y * 4 + 2] < 80) barPx++;
+    }
+    // Text ink height: white pixel row bounds in the right half.
+    const half = Math.floor(canvas.width / 2);
+    const w = canvas.width - half;
+    const d = ctx.getImageData(half, 0, w, canvas.height).data;
+    let minY = -1;
+    let maxY = -1;
+    for (let y = 0; y < canvas.height; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        if (d[i] > 225 && d[i + 1] > 225 && d[i + 2] > 225) {
+          if (minY < 0) minY = y;
+          maxY = y;
+        }
+      }
+    }
+    if (maxY >= 0) textPx = maxY - minY + 1;
+  }
+  window.__wmProbe = {
+    barPx,
+    textPx,
+    barOverText: barPx && textPx ? +(barPx / textPx).toFixed(2) : null,
+    canvas: !!canvas,
+  };
 } else if (shot === 'subjects' || shot === 'subjectscan') {
   // Library toolbar's subject-scan control (beside "Soft"). Hide the develop
   // panel for maximum toolbar width; on a 1500px window the @container is

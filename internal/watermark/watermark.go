@@ -56,15 +56,17 @@ type Element struct {
 	Color color.NRGBA // alpha ignored; Opacity is the single alpha control
 	// Image elements.
 	AssetPath string
-	// Rect elements: a filled box sized per canvas axis (unlike SizePct's
-	// short-edge rule) so a full-bleed bar is WidthPct 100. Solid fill uses
-	// Color/Opacity; Gradient blends to Color2/Opacity2 along GradientDir.
+	// Rect elements: a filled box. Width is per canvas axis (unlike SizePct's
+	// short-edge rule) so a full-bleed bar is WidthPct 100; height follows the
+	// short-edge rule so a bar keeps its proportion to text across
+	// orientations. Solid fill uses Color/Opacity; Gradient blends to
+	// Color2/Opacity2 along GradientDir.
 	Gradient    bool
 	Color2      color.NRGBA
 	Opacity2    float64 // 0..1; 0 = fade to transparent
 	GradientDir GradientDir
 	WidthPct    float64 // % of canvas width
-	HeightPct   float64 // % of canvas height
+	HeightPct   float64 // % of short edge
 	// Shared geometry.
 	Anchor    Anchor
 	SizePct   float64 // % of short edge: text em size / image height

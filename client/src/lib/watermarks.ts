@@ -234,7 +234,7 @@ export function renderWatermark(
     ctx.globalAlpha = el.opacity;
     if (el.type === 'rect') {
       const w = Math.max(1, Math.round((el.widthPct / 100) * W));
-      const h = Math.max(1, Math.round((el.heightPct / 100) * H));
+      const h = sizePx(el.heightPct, short);
       const o = anchorOrigin(W, H, w, h, el.anchor, marginPx(el.marginPct, short));
       if (el.fill === 'gradient') {
         // The two stops carry their own alphas (straight, like the Go strips).

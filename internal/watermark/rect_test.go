@@ -63,7 +63,7 @@ func TestRectGradient(t *testing.T) {
 
 // TestRectGradientColors lerps between two colors at full opacity.
 func TestRectGradientColors(t *testing.T) {
-	dst := black(10, 100)
+	dst := black(100, 100)
 	Apply(dst, Spec{Elements: []Element{{
 		Kind: KindRect, Gradient: true, GradientDir: GradientDown,
 		Color:   color.NRGBA{R: 200, G: 0, B: 0, A: 255},
@@ -79,6 +79,26 @@ func TestRectGradientColors(t *testing.T) {
 	}
 	if c := dst.RGBAAt(5, 50); c.R < 80 || c.R > 120 || c.B < 80 || c.B > 120 {
 		t.Errorf("middle = %v, want ~half/half", c)
+	}
+}
+
+// TestRectOrientation: HeightPct follows the short-edge rule, so the same
+// bottom bar is equally thick on a landscape and a portrait canvas — it must
+// not grow with the long edge the way a %-of-height rule would.
+func TestRectOrientation(t *testing.T) {
+	el := Element{
+		Kind:     KindRect,
+		Color:    color.NRGBA{R: 255, G: 255, B: 255, A: 255},
+		WidthPct: 100, HeightPct: 25,
+		Anchor: AnchorBottom, Opacity: 1,
+	}
+	thickness := func(w, h int) int {
+		dst := black(w, h)
+		Apply(dst, Spec{Elements: []Element{el}})
+		return lit(dst, dst.Bounds()) / w
+	}
+	if land, port := thickness(200, 100), thickness(100, 200); land != port {
+		t.Errorf("band thickness landscape = %d, portrait = %d, want equal", land, port)
 	}
 }
 
