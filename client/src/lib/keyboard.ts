@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 import type { FlagType } from '@/api/library';
 import { getEditParams } from '@/api/edits';
-import { useApiClient } from '@/api/client';
+import { useApiClient, type ApiClient } from '@/api/client';
 import { toast } from 'sonner';
 import { applyRating as doRating, applyFlag as doFlag, applyFlagOps } from '@/lib/actions';
 import { copyTargetPhotoToClipboard } from '@/lib/clipboardExport';
-import { chCanRedo, chCanUndo, chRedo, chUndo } from '@/lib/cullHistory';
+import { chRedo, chRedoSeq, chUndo, chUndoSeq } from '@/lib/cullHistory';
 import { featureEnabled } from '@/lib/features';
 import { rowNeighbor } from '@/lib/gridNav';
 import { useUIStore, selectionOrFocus, type DevelopTab } from '@/stores/uiStore';
@@ -18,6 +18,7 @@ import {
   esMoveActive,
   esMoveMaskActive,
   esRedo,
+  esRedoSeq,
   esReset,
   esSetActive,
   esSetActiveMask,
@@ -31,12 +32,33 @@ import {
   esStep,
   esStepMask,
   esUndo,
+  esUndoSeq,
   esUpdateSpot,
   esWBPickCancel,
   esWBPickDone,
   useEditSession,
   type ControlId,
 } from '@/lib/editSession';
+
+// Outside Develop, Ctrl+Z undoes the most recent action across the two undo
+// stacks — flag/rating entries and edit-history snapshots carry a shared
+// monotonic seq (undoSeq.ts), so undo takes the larger of the two candidates
+// and redo replays forward from the smaller. The develop dials and edit
+// panel stay usable in Library/Cull, so their undo must stay reachable
+// there too. esUndo/esRedo no-op when their stack is spent.
+function undoRecent(client: ApiClient) {
+  const ch = chUndoSeq();
+  const es = esUndoSeq();
+  if (ch != null && (es == null || ch > es)) chUndo(client);
+  else esUndo(client);
+}
+
+function redoRecent(client: ApiClient) {
+  const ch = chRedoSeq();
+  const es = esRedoSeq();
+  if (ch != null && (es == null || ch < es)) chRedo(client);
+  else esRedo(client);
+}
 
 // Keys that focus an edit control; +/- then adjusts it, Esc returns to the
 // image (where +/- zooms again).
@@ -211,23 +233,19 @@ export function useKeyboard() {
             toast.success('Edit settings pasted');
             return;
           }
-          // Outside Develop, Ctrl+Z works the flag/rating history first and
-          // falls back to the edit history when that stack is spent — the
-          // develop dials and edit panel stay usable in Library/Cull, so
-          // their undo must stay reachable there too.
           case 'z':
             e.preventDefault();
             if (e.shiftKey) {
-              if (s.mode !== 'develop' && chCanRedo()) chRedo(client);
+              if (s.mode !== 'develop') redoRecent(client);
               else esRedo(client);
             } else {
-              if (s.mode !== 'develop' && chCanUndo()) chUndo(client);
+              if (s.mode !== 'develop') undoRecent(client);
               else esUndo(client);
             }
             return;
           case 'y':
             e.preventDefault();
-            if (s.mode !== 'develop' && chCanRedo()) chRedo(client);
+            if (s.mode !== 'develop') redoRecent(client);
             else esRedo(client);
             return;
           case 'e':

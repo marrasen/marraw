@@ -4,6 +4,7 @@ import type { ApiClient } from '@/api/client';
 import type { BurstInfo } from '@/lib/bursts';
 import { useUIStore } from '@/stores/uiStore';
 import { chPlay, chPush, chRevert, type CullEntry } from '@/lib/cullHistory';
+import { nextSeq } from '@/lib/undoSeq';
 
 // Optimistic rating/flag mutations shared by the keyboard map and the
 // edit-panel controls: record an undo entry capturing the prior values, apply
@@ -33,7 +34,10 @@ function groupByPrior<V>(ids: number[], prior: (id: number) => V): { ids: number
   return [...byValue].map(([value, groupIds]) => ({ ids: groupIds, value }));
 }
 
-function commit(client: ApiClient, entry: CullEntry, what: string) {
+// commit stamps the shared undo seq (so the entry orders against edit-history
+// snapshots) and keeps one entry identity for push and the failure revert.
+function commit(client: ApiClient, op: Omit<CullEntry, 'seq'>, what: string) {
+  const entry: CullEntry = { ...op, seq: nextSeq() };
   chPush(entry);
   void chPlay(client, entry.redo).then((results) => {
     const bad = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
@@ -64,7 +68,7 @@ export function applyFlagOps(
     .filter((o) => o.ids.length > 0);
   if (eff.length === 0) return;
   const touched = eff.flatMap((o) => o.ids);
-  const entry: CullEntry = {
+  const entry: Omit<CullEntry, 'seq'> = {
     label: label ?? `${FLAG_LABELS[eff[0].flag]}${countSuffix(touched.length)}`,
     redo: { kind: 'flag', groups: eff.map((o) => ({ ids: o.ids, value: o.flag })) },
     undo: { kind: 'flag', groups: groupByPrior(touched, (id) => priorFlag(s, id)) },
@@ -134,7 +138,7 @@ export function applyRating(client: ApiClient, ids: number[], rating: number) {
   const s = useUIStore.getState();
   const eff = ids.filter((id) => priorRating(s, id) !== rating);
   if (eff.length === 0) return;
-  const entry: CullEntry = {
+  const entry: Omit<CullEntry, 'seq'> = {
     label: `${rating === 0 ? 'Clear rating' : `${rating}★`}${countSuffix(eff.length)}`,
     redo: { kind: 'rating', groups: [{ ids: eff, value: rating }] },
     undo: { kind: 'rating', groups: groupByPrior(eff, (id) => priorRating(s, id)) },

@@ -26,6 +26,7 @@ import type { UserPreset } from '@/api/settings';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
 import { offsetIsAdditive, type AutoPreset, type OffsetKey } from '@/lib/autoPresets';
 import { applyUserPreset, lerpPresetAmount } from '@/lib/presetSections';
+import { nextSeq } from '@/lib/undoSeq';
 import {
   CONTROL_ORDER,
   CONTROL_SPECS,
@@ -110,6 +111,9 @@ interface Preview {
 export interface HistorySnapshot {
   params: Params;
   label: string;
+  // Global undo ordering vs the cull history (see undoSeq.ts). 0 on the
+  // 'Original' baseline, which is never an undo candidate.
+  seq: number;
 }
 
 interface HistoryEntry {
@@ -472,7 +476,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
   setState((s) => {
     const history = s.history[photoId]
       ? s.history
-      : { ...s.history, [photoId]: { stack: [{ params: draft, label: 'Original' }], index: 0 } };
+      : { ...s.history, [photoId]: { stack: [{ params: draft, label: 'Original', seq: 0 }], index: 0 } };
     return { draft, loading: false, history };
   });
 }
@@ -968,9 +972,9 @@ async function renderPreview(client: ApiClient, full: boolean) {
 
 function pushHistory(photoId: number, params: Params, label: string) {
   setState((s) => {
-    const entry = s.history[photoId] ?? { stack: [{ params: { ...NEUTRAL }, label: 'Original' }], index: 0 };
+    const entry = s.history[photoId] ?? { stack: [{ params: { ...NEUTRAL }, label: 'Original', seq: 0 }], index: 0 };
     if (sameParams(entry.stack[entry.index].params, params)) return {};
-    const stack = [...entry.stack.slice(0, entry.index + 1), { params, label }].slice(-50);
+    const stack = [...entry.stack.slice(0, entry.index + 1), { params, label, seq: nextSeq() }].slice(-50);
     return { history: { ...s.history, [photoId]: { stack, index: stack.length - 1 } } };
   });
 }
@@ -1055,6 +1059,23 @@ export function esCanRedo(s: EditSessionState): boolean {
   if (s.photoId == null) return false;
   const h = s.history[s.photoId];
   return !!h && h.index < h.stack.length - 1;
+}
+
+// The seq of the snapshot the next undo would leave / the next redo would
+// restore on the focused photo, or null when that side is spent — compared
+// against the cull history's by the keyboard dispatch (see undoSeq.ts).
+export function esUndoSeq(): number | null {
+  const s = useEditSession.getState();
+  if (s.photoId == null) return null;
+  const h = s.history[s.photoId];
+  return h && h.index > 0 ? h.stack[h.index].seq : null;
+}
+
+export function esRedoSeq(): number | null {
+  const s = useEditSession.getState();
+  if (s.photoId == null) return null;
+  const h = s.history[s.photoId];
+  return h && h.index < h.stack.length - 1 ? h.stack[h.index + 1].seq : null;
 }
 
 // esUndo/esRedo walk the focused photo's history. They persist to the
@@ -1487,7 +1508,9 @@ export function esCommitPresetAmount(client: ApiClient) {
     const h = st.history[a.photoId];
     if (!h) return {};
     const stack = [...h.stack];
-    stack[h.index] = { params, label };
+    // Keep the original seq: the amended apply stays one undoable step at
+    // its original position in the cross-stack undo order.
+    stack[h.index] = { ...stack[h.index], params, label };
     return { history: { ...st.history, [a.photoId]: { ...h, stack } } };
   });
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];

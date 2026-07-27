@@ -20,6 +20,8 @@ export interface CullEntry {
   label: string;
   undo: CullOp;
   redo: CullOp;
+  // Global undo ordering vs the edit history (see undoSeq.ts).
+  seq: number;
 }
 
 interface CullHistoryState {
@@ -74,10 +76,16 @@ export function chRevert(client: ApiClient, entry: CullEntry) {
   void chPlay(client, entry.undo);
 }
 
-export const chCanUndo = () => useCullHistory.getState().index > 0;
-export const chCanRedo = () => {
+// The seq of the entry the next undo/redo would replay, or null when that
+// side of the stack is spent — the keyboard dispatch compares these against
+// the edit history's to undo the most recent action first.
+export const chUndoSeq = (): number | null => {
   const s = useCullHistory.getState();
-  return s.index < s.stack.length;
+  return s.index > 0 ? s.stack[s.index - 1].seq : null;
+};
+export const chRedoSeq = (): number | null => {
+  const s = useCullHistory.getState();
+  return s.index < s.stack.length ? s.stack[s.index].seq : null;
 };
 
 function reportFailure(results: PromiseSettledResult<unknown>[], what: string) {
