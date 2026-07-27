@@ -1,6 +1,7 @@
 // Backend location and image URL helpers. The Electron shell passes the
-// daemon's port and auth token via query params; browser dev falls back to
-// the fixed dev port.
+// daemon's location and auth token via query params: apiPort for the local
+// daemon, or apiHost (host:port) + remote=1 for a connection to another
+// machine's daemon. Browser dev falls back to the fixed dev port.
 
 import { getImgBust } from './imgCacheBust';
 
@@ -11,15 +12,25 @@ export type Level = '256' | '512' | '1024' | '2048';
 export const TILE_SIZE = 1024;
 
 const q = new URLSearchParams(window.location.search);
-const port = q.get('apiPort') ?? '8483';
+const host = q.get('apiHost') ?? `127.0.0.1:${q.get('apiPort') ?? '8483'}`;
 const token = q.get('token') ?? '';
 
 export const backend = {
-  port,
   token,
-  http: `http://127.0.0.1:${port}`,
-  ws: `ws://127.0.0.1:${port}/ws${token ? `?t=${encodeURIComponent(token)}` : ''}`,
+  // isRemote: this window talks to a daemon on another machine, so anything
+  // that touches THIS machine's filesystem (native pickers, reveal) is wrong.
+  isRemote: q.get('remote') === '1',
+  remoteName: q.get('remoteName') ?? '',
+  http: `http://${host}`,
+  // Trust rides in the first-message auth frame (see main.tsx), not the URL.
+  ws: `ws://${host}/ws`,
 };
+
+// canUseHostFs: whether Electron bridges that touch THIS machine's filesystem
+// (reveal in Explorer, dropped-folder paths) are meaningful. They aren't in a
+// plain browser tab, nor in a remote window — there the library's paths live
+// on the daemon's machine, which local dialogs and Explorer can't see.
+export const canUseHostFs = (): boolean => !!window.marraw && !backend.isRemote;
 
 export interface ImgRef {
   id: number;

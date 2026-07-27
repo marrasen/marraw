@@ -39,11 +39,19 @@ import (
 func main() {
 	var (
 		port     = flag.Int("port", 0, "listen port (0 = pick a free one)")
+		listen   = flag.String("listen", "127.0.0.1", "bind address (e.g. 0.0.0.0 or a Tailscale IP to allow remote connections)")
 		dev      = flag.Bool("dev", false, "development mode: no token required, permissive origin")
 		dataDir  = flag.String("data-dir", "", "app data directory (default %APPDATA%/marraw)")
 		cacheCap = flag.Int64("cache-cap-gb", 20, "preview cache size cap in GiB")
 	)
 	flag.Parse()
+
+	// --dev disables every auth check; it must never be reachable from
+	// another machine.
+	loopbackOnly := isLoopback(*listen)
+	if *dev && !loopbackOnly {
+		log.Fatalf("--dev must not be exposed beyond loopback (got --listen %s)", *listen)
+	}
 
 	if *dataDir == "" {
 		base, err := os.UserConfigDir()
@@ -80,6 +88,23 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer db.Close()
+
+	// The persistent pairing token remote clients authenticate with. Created
+	// once and kept in the DB so a saved laptop connection survives restarts;
+	// Settings can regenerate it (System.RegeneratePairingToken).
+	pairing, err := db.GetSetting(context.Background(), api.PairingTokenKey)
+	if err != nil {
+		log.Fatalf("read pairing token: %v", err)
+	}
+	if pairing == "" {
+		if pairing, err = api.GeneratePairingToken(); err != nil {
+			log.Fatalf("generate pairing token: %v", err)
+		}
+		if err := db.SetSetting(context.Background(), api.PairingTokenKey, pairing); err != nil {
+			log.Fatalf("store pairing token: %v", err)
+		}
+	}
+	tokens := api.NewAuthTokens(token, pairing)
 
 	pool := decode.NewPool(runtime.NumCPU())
 	defer pool.Close()
@@ -126,13 +151,16 @@ func main() {
 	}
 
 	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir, WatermarkDir: watermarkDir,
-		Infer: infer.NewManager(filepath.Join(*dataDir, "models")), IOGate: ioGate}
+		Infer: infer.NewManager(filepath.Join(*dataDir, "models")), IOGate: ioGate, Tokens: tokens, LoopbackOnly: loopbackOnly}
 	registry, library, _, _ := api.NewRegistry(deps)
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any
 	// future large streams; the generated client understands both framings.
+	// MaxMessageSize covers the largest inbound frame we accept: a watermark
+	// asset uploaded as a base64 blob param (20 MB raw ≈ 27 MB encoded).
 	server := aprot.NewServer(registry, aprot.ServerOptions{
 		StreamChunking: &aprot.StreamChunking{},
+		MaxMessageSize: 32 << 20,
 	})
 	deps.SetServer(server)
 	// Log every handler error (except normal client cancellations) so a
@@ -163,37 +191,42 @@ func main() {
 		defer watcher.Close()
 	}
 
-	// The renderer runs on file:// (Origin "null") in production; trust is
-	// established by the shared token, not the origin.
+	// The renderer runs on file:// (Origin "null") in production, so origin
+	// checks prove nothing. Trust lives in the first-message auth frame: the
+	// per-launch launch token (local windows) or the persistent pairing token
+	// (remote connections). Dev registers no hook — connections are open.
 	isDev := *dev
-	server.SetCheckOrigin(func(r *http.Request) bool {
-		if isDev {
-			return true
-		}
-		return r.URL.Query().Get("t") == token
-	})
+	server.SetCheckOrigin(func(r *http.Request) bool { return true })
+	if !isDev {
+		server.OnAuth(func(ctx context.Context, conn *aprot.Conn, tok string) error {
+			if tokens.Valid(tok) {
+				return nil
+			}
+			return aprot.ErrAuthFailed("invalid token")
+		})
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
 	go janitor.Run(ctx)
 
-	imgToken := token
-	if isDev {
-		imgToken = ""
+	var tokenValid func(string) bool
+	if !isDev {
+		tokenValid = tokens.Valid
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/ws", server)
-	img := &imghttp.Handler{DB: db, Cache: cache, Token: imgToken}
+	img := &imghttp.Handler{DB: db, Cache: cache, TokenValid: tokenValid}
 	mux.Handle("GET /img/{id}/{level}", img)
 	mux.Handle("GET /img/{id}/tile/{tx}/{ty}", http.HandlerFunc(img.ServeTile))
-	mux.Handle("GET /wm/{name}", &imghttp.Assets{Dir: watermarkDir, Token: imgToken})
+	mux.Handle("GET /wm/{name}", &imghttp.Assets{Dir: watermarkDir, TokenValid: tokenValid})
 	// The bundled watermark fonts, so the editor preview renders with the
 	// byte-identical faces the exporter uses. Fonts are CORS-gated even on
 	// file:// — the wildcard origin is required, and safe under the same
 	// token-in-URL trust model as the images (the files are public anyway).
 	mux.HandleFunc("GET /fonts/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if imgToken != "" && r.URL.Query().Get("t") != imgToken && r.Header.Get("X-Marraw-Token") != imgToken {
+		if tokenValid != nil && !tokenValid(r.URL.Query().Get("t")) && !tokenValid(r.Header.Get("X-Marraw-Token")) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -210,12 +243,24 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
+	// The connect screen's reachability probe: proves both the host and the
+	// token in one authenticated round trip. /healthz stays open on purpose.
+	mux.HandleFunc("GET /authz", func(w http.ResponseWriter, r *http.Request) {
+		if tokenValid != nil && !tokenValid(r.URL.Query().Get("t")) && !tokenValid(r.Header.Get("X-Marraw-Token")) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"app":"marraw","version":%q}`+"\n", buildVersion())
+	})
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
+	ln, err := net.Listen("tcp", net.JoinHostPort(*listen, strconv.Itoa(*port)))
 	if err != nil {
 		log.Fatalf("listen: %v", err)
 	}
 	actualPort := ln.Addr().(*net.TCPAddr).Port
+	deps.ListenAddr = net.JoinHostPort(*listen, strconv.Itoa(actualPort))
 
 	httpServer := &http.Server{Handler: cors(isDev, mux)}
 	go func() {
@@ -226,7 +271,7 @@ func main() {
 
 	// The handshake line the Electron main process waits for.
 	fmt.Printf("MARRAW_READY port=%d\n", actualPort)
-	log.Printf("marrawd listening on 127.0.0.1:%d (data: %s)", actualPort, *dataDir)
+	log.Printf("marrawd listening on %s (data: %s)", deps.ListenAddr, *dataDir)
 
 	// Exit when the parent dies: Electron holds our stdin open; EOF means
 	// the shell is gone and we must not linger.
@@ -274,6 +319,25 @@ func setupLogging(dataDir string) *os.File {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetOutput(io.MultiWriter(os.Stderr, f))
 	return f
+}
+
+// isLoopback reports whether host is unreachable from other machines.
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// buildVersion is what GET /authz reports so the connect screen can show
+// which version it reached. Release builds carry the module version via
+// -buildvcs/embedded build info; a source build reports "dev".
+func buildVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
 }
 
 // cors allows the Vite dev origin to fetch /img during browser development.

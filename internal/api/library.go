@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -43,12 +44,22 @@ func (l *Library) ListDrives(ctx context.Context) ([]DriveInfo, error) {
 			}
 		}
 	}
-	for letter := 'A'; letter <= 'Z'; letter++ {
-		root := string(letter) + `:\`
-		if _, err := os.Stat(root); err == nil {
-			out = append(out, DriveInfo{Path: root, Name: string(letter) + ":"})
+	if runtime.GOOS == "windows" {
+		for letter := 'A'; letter <= 'Z'; letter++ {
+			root := string(letter) + `:\`
+			if _, err := os.Stat(root); err == nil {
+				out = append(out, DriveInfo{Path: root, Name: string(letter) + ":"})
+			}
 		}
+		return out, nil
 	}
+	// Unix hosts have no drive letters: without the home dir and filesystem
+	// root the picker would strand a (possibly remote) client in ~/Pictures
+	// with no way to reach /mnt or /media.
+	if home, err := os.UserHomeDir(); err == nil {
+		out = append(out, DriveInfo{Path: home, Name: "Home"})
+	}
+	out = append(out, DriveInfo{Path: "/", Name: "/"})
 	return out, nil
 }
 

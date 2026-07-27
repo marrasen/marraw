@@ -22,6 +22,12 @@ contextBridge.exposeInMainWorld('marraw', {
   // version; see main.cjs betaChannelEnabled.
   getBetaChannel: () => ipcRenderer.invoke('marraw:get-beta-channel'),
   setBetaChannel: (on) => ipcRenderer.invoke('marraw:set-beta-channel', on),
+  // Remote connections: Settings surfaces the shell's remote-access prefs
+  // (spawn flags, so a change needs relaunch) and the connect screen.
+  openConnectWindow: () => ipcRenderer.send('marraw:open-connect'),
+  getRemoteAccess: () => ipcRenderer.invoke('marraw:get-remote-access'),
+  setRemoteAccess: (patch) => ipcRenderer.invoke('marraw:set-remote-access', patch),
+  relaunch: () => ipcRenderer.invoke('marraw:relaunch'),
 });
 
 // Frameless-window controls (diff handoff "frameless window + baked-in controls").

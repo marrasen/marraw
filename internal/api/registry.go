@@ -49,6 +49,14 @@ type Deps struct {
 	// IOGate stages background full decodes through sequential per-device
 	// reads (see internal/diskio). Nil is valid — opens stay direct.
 	IOGate *diskio.Gate
+	// Tokens validates WS auth frames and image-URL tokens. Nil is valid (dev
+	// mode: no auth anywhere).
+	Tokens *AuthTokens
+	// ListenAddr is the address the daemon actually bound (set by main before
+	// serving); LoopbackOnly reports whether it is unreachable from other
+	// machines. Surfaced to the Settings UI via System.GetRemoteAccess.
+	ListenAddr   string
+	LoopbackOnly bool
 
 	mu     sync.RWMutex
 	server *aprot.Server

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { canUseHostFs } from '@/lib/backend';
 import {
   AppWindow,
   ArrowDown,
@@ -579,13 +580,15 @@ function ManagedParent({
           <ContextMenuItem onClick={() => setRenaming(key)}>
             <Pencil /> <span className="flex-1">Rename group…</span>
           </ContextMenuItem>
-          <ContextMenuItem
-            hint="Explorer"
-            onClick={() => window.marraw?.revealInExplorer(root.path)}
-            disabled={!window.marraw || !online}
-          >
-            <ExternalLink /> <span className="flex-1">Locate on disk</span>
-          </ContextMenuItem>
+          {canUseHostFs() && (
+            <ContextMenuItem
+              hint="Explorer"
+              onClick={() => window.marraw?.revealInExplorer(root.path)}
+              disabled={!online}
+            >
+              <ExternalLink /> <span className="flex-1">Locate on disk</span>
+            </ContextMenuItem>
+          )}
           <ContextMenuItem onClick={() => refetch()}>
             <RefreshCw /> <span className="flex-1 text-foreground">Refresh</span>
           </ContextMenuItem>
@@ -770,13 +773,11 @@ function ShootRow({
             <FolderPen /> <span className="flex-1">Rename on disk…</span>
           </ContextMenuItem>
         )}
-        <ContextMenuItem
-          hint="Explorer"
-          onClick={() => window.marraw?.revealInExplorer(shoot.path)}
-          disabled={!window.marraw}
-        >
-          <ExternalLink /> <span className="flex-1 text-foreground">Locate on disk</span>
-        </ContextMenuItem>
+        {canUseHostFs() && (
+          <ContextMenuItem hint="Explorer" onClick={() => window.marraw?.revealInExplorer(shoot.path)}>
+            <ExternalLink /> <span className="flex-1 text-foreground">Locate on disk</span>
+          </ContextMenuItem>
+        )}
         <ContextMenuItem
           onClick={() => {
             void navigator.clipboard.writeText(shoot.path);
@@ -887,13 +888,14 @@ function Group({
             <ContextMenuItem onClick={() => setRenaming(groupRenameId)}>
               <Pencil /> <span className="flex-1">Rename group…</span>
             </ContextMenuItem>
-            <ContextMenuItem
-              hint="Explorer"
-              onClick={() => window.marraw?.revealInExplorer(group.parentPath)}
-              disabled={!window.marraw}
-            >
-              <ExternalLink /> <span className="flex-1">Locate on disk</span>
-            </ContextMenuItem>
+            {canUseHostFs() && (
+              <ContextMenuItem
+                hint="Explorer"
+                onClick={() => window.marraw?.revealInExplorer(group.parentPath)}
+              >
+                <ExternalLink /> <span className="flex-1">Locate on disk</span>
+              </ContextMenuItem>
+            )}
             <ContextMenuItem onClick={rescanAll}>
               <RefreshCw /> <span className="flex-1">Rescan all shoots</span>
             </ContextMenuItem>
@@ -1071,13 +1073,15 @@ function RootRow({
         <ContextMenuItem disabled={!online} onClick={renameOnDisk}>
           <FolderPen /> <span className="flex-1">Rename on disk…</span>
         </ContextMenuItem>
-        <ContextMenuItem
-          hint="Explorer"
-          onClick={() => window.marraw?.revealInExplorer(root.path)}
-          disabled={!window.marraw || !online}
-        >
-          <ExternalLink /> <span className="flex-1 text-foreground">Locate on disk</span>
-        </ContextMenuItem>
+        {canUseHostFs() && (
+          <ContextMenuItem
+            hint="Explorer"
+            onClick={() => window.marraw?.revealInExplorer(root.path)}
+            disabled={!online}
+          >
+            <ExternalLink /> <span className="flex-1 text-foreground">Locate on disk</span>
+          </ContextMenuItem>
+        )}
         <ContextMenuItem
           onClick={() => {
             void navigator.clipboard.writeText(root.path);

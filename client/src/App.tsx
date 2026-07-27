@@ -16,6 +16,7 @@ import { EyeScanDialog } from '@/components/EyeScanDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { WatermarkDialog } from '@/components/WatermarkDialog';
 import { StatusBar } from '@/components/StatusBar';
+import { ConnectionBanner } from '@/components/ConnectionBanner';
 import { TaskToasts } from '@/components/TaskTray';
 import { clampRailWidth, RAIL_WIDTH_DEFAULT, useUIStore } from '@/stores/uiStore';
 import { GridView } from '@/views/GridView';
@@ -38,6 +39,7 @@ import {
 import { updateLastSeenVersion, updateRailWidth, UISettingsSync } from '@/lib/uiSettings';
 import { entriesSince, type ChangelogEntry } from '@/lib/changelog';
 import { openFolder, setFocus } from '@/api/library';
+import { canUseHostFs } from '@/lib/backend';
 import { useApiClient } from '@/api/client';
 import '@/lib/electron';
 
@@ -63,6 +65,14 @@ function useDropFolder() {
       e.preventDefault();
       const file = e.dataTransfer?.files?.[0];
       if (!file || !window.marraw) return;
+      // A dropped folder is a path on THIS machine; the daemon on the other
+      // machine could never read it.
+      if (!canUseHostFs()) {
+        toast.info('Drag-and-drop adds folders from this machine', {
+          description: 'Use “Add folder” to browse the remote library instead.',
+        });
+        return;
+      }
       const path = window.marraw.getPathForFile(file);
       if (!path || !(await window.marraw.isDirectory(path))) return;
       if (roots.some((r) => samePath(r.path, path))) {
@@ -138,6 +148,7 @@ export default function App() {
   return (
     <div className="app-backdrop flex h-screen flex-col text-foreground">
       <UISettingsSync />
+      <ConnectionBanner />
       {/* Cinema modes are edge-to-edge; their floating HUD replaces the bar. */}
       {structured && <TopBar />}
       <div className="flex min-h-0 flex-1">

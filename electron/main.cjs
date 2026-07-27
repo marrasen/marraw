@@ -153,6 +153,21 @@ ipcMain.handle('marraw:set-beta-channel', (_ev, on) => {
   return prefs.betaChannel;
 });
 
+// Remote access prefs: when enabled, the local daemon binds a reachable
+// address on a STABLE port (a random one would break every saved laptop
+// connection on restart). Spawn-time only — changing it needs a relaunch.
+const remoteAccessPrefs = () => {
+  const ra = readPrefs().remoteAccess ?? {};
+  return {
+    enabled: ra.enabled === true,
+    listen: typeof ra.listen === 'string' && ra.listen ? ra.listen : '0.0.0.0',
+    port: Number.isInteger(ra.port) && ra.port > 0 && ra.port < 65536 ? ra.port : 8482,
+  };
+};
+// The config the running daemon was actually spawned with (null until spawned)
+// — lets set-remote-access answer whether a relaunch is needed.
+let daemonRemoteAccess = null;
+
 async function startDaemon() {
   // Dev convenience: attach to an already-running `marrawd --dev`.
   if (DEV && process.env.MARRAW_PORT) {
@@ -163,7 +178,12 @@ async function startDaemon() {
   const exe = UNPACKAGED
     ? path.join(__dirname, '..', 'build', bin)
     : path.join(process.resourcesPath, bin);
-  child = spawn(exe, ['--port', '0', '--data-dir', app.getPath('userData')], {
+  const ra = remoteAccessPrefs();
+  daemonRemoteAccess = ra;
+  const args = ra.enabled
+    ? ['--port', String(ra.port), '--listen', ra.listen, '--data-dir', app.getPath('userData')]
+    : ['--port', '0', '--data-dir', app.getPath('userData')];
+  child = spawn(exe, args, {
     env: { ...process.env, MARRAW_TOKEN: token, MARRAW_PARENT_WATCH: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -210,17 +230,20 @@ function ensureDaemon() {
 const windows = new Set();
 
 async function createWindow(opts = {}) {
-  // { initial?, openFolder? }
+  // { initial?, openFolder?, remote? } — remote {name, host, token} windows
+  // talk to another machine's daemon and never touch the local one.
   let backend;
-  try {
-    backend = await ensureDaemon();
-  } catch (err) {
-    if (!startupFailed) {
-      startupFailed = true;
-      dialog.showErrorBox('marraw', `Cannot start backend: ${err.message}`);
-      app.quit();
+  if (!opts.remote) {
+    try {
+      backend = await ensureDaemon();
+    } catch (err) {
+      if (!startupFailed) {
+        startupFailed = true;
+        dialog.showErrorBox('marraw', `Cannot start backend: ${err.message}`);
+        app.quit();
+      }
+      return;
     }
-    return;
   }
 
   const win = new BrowserWindow({
@@ -257,7 +280,9 @@ async function createWindow(opts = {}) {
   win.on('enter-full-screen', () => win.webContents.send('win:fullscreenChanged', true));
   win.on('leave-full-screen', () => win.webContents.send('win:fullscreenChanged', false));
 
-  const query = { apiPort: String(backend.port), token: backend.token };
+  const query = opts.remote
+    ? { apiHost: opts.remote.host, token: opts.remote.token, remote: '1', remoteName: opts.remote.name }
+    : { apiPort: String(backend.port), token: backend.token };
   if (opts.openFolder) query.openFolder = opts.openFolder;
   if (opts.initial) {
     // Env-derived params apply only to the first window (harness/dev hooks).
@@ -397,6 +422,144 @@ ipcMain.handle('marraw:is-directory', (_ev, p) => {
   }
 });
 
+// ---- Remote connections ----
+// Saved remotes live in preferences.json (not the daemon's settings DB): the
+// connect screen must list them before — and even without — any daemon.
+const remotesList = () => {
+  const list = readPrefs().remoteConnections;
+  return Array.isArray(list) ? list : [];
+};
+// "host" or "host:port" → "host:port" (the daemon's remote default port).
+const normalizeHost = (host) => {
+  const h = String(host).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  // A lone hostname/IPv4 gets the default port; IPv6 literals and host:port
+  // pass through.
+  return /^[^:]+$/.test(h) ? `${h}:8482` : h;
+};
+
+ipcMain.handle('marraw:remotes-list', () => remotesList());
+ipcMain.handle('marraw:remotes-save', (_ev, conn) => {
+  if (!conn || typeof conn.host !== 'string' || !conn.host.trim()) return remotesList();
+  const entry = {
+    id: typeof conn.id === 'string' && conn.id ? conn.id : crypto.randomUUID(),
+    name: typeof conn.name === 'string' && conn.name.trim() ? conn.name.trim() : normalizeHost(conn.host),
+    host: normalizeHost(conn.host),
+    token: typeof conn.token === 'string' ? conn.token.trim() : '',
+  };
+  const prefs = readPrefs();
+  const list = Array.isArray(prefs.remoteConnections) ? prefs.remoteConnections : [];
+  const i = list.findIndex((c) => c && c.id === entry.id);
+  if (i >= 0) list[i] = entry;
+  else list.push(entry);
+  prefs.remoteConnections = list;
+  writePrefs(prefs);
+  return list;
+});
+ipcMain.handle('marraw:remotes-delete', (_ev, id) => {
+  const prefs = readPrefs();
+  prefs.remoteConnections = remotesList().filter((c) => c && c.id !== id);
+  writePrefs(prefs);
+  return prefs.remoteConnections;
+});
+// Reachability probe from the MAIN process: no CORS in play, and it proves
+// host + token in one authenticated round trip against GET /authz.
+ipcMain.handle('marraw:remote-test', async (_ev, host, token) => {
+  try {
+    const res = await fetch(`http://${normalizeHost(host)}/authz`, {
+      headers: token ? { 'X-Marraw-Token': token } : {},
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res.status === 403) return { ok: false, error: 'invalid token' };
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+    const body = await res.json().catch(() => null);
+    if (!body || body.app !== 'marraw') return { ok: false, error: 'not a marraw daemon' };
+    return { ok: true, version: body.version ?? '' };
+  } catch (err) {
+    return { ok: false, error: err?.name === 'TimeoutError' ? 'unreachable (timed out)' : String(err?.message ?? err) };
+  }
+});
+ipcMain.handle('marraw:get-remote-access', () => ({
+  ...remoteAccessPrefs(),
+  // The daemon binds at spawn: prefs changed after that need a relaunch.
+  restartRequired:
+    daemonRemoteAccess != null &&
+    JSON.stringify(daemonRemoteAccess) !== JSON.stringify(remoteAccessPrefs()),
+}));
+ipcMain.handle('marraw:set-remote-access', (_ev, patch) => {
+  const prefs = readPrefs();
+  const cur = remoteAccessPrefs();
+  prefs.remoteAccess = {
+    enabled: typeof patch?.enabled === 'boolean' ? patch.enabled : cur.enabled,
+    listen: typeof patch?.listen === 'string' && patch.listen.trim() ? patch.listen.trim() : cur.listen,
+    port:
+      Number.isInteger(patch?.port) && patch.port > 0 && patch.port < 65536 ? patch.port : cur.port,
+  };
+  writePrefs(prefs);
+  return {
+    ...prefs.remoteAccess,
+    restartRequired:
+      daemonRemoteAccess != null &&
+      JSON.stringify(daemonRemoteAccess) !== JSON.stringify(prefs.remoteAccess),
+  };
+});
+ipcMain.handle('marraw:relaunch', () => {
+  app.relaunch();
+  app.quit();
+});
+const launchMode = () => (readPrefs().launchMode === 'picker' ? 'picker' : 'local');
+ipcMain.handle('marraw:get-launch-mode', () => launchMode());
+ipcMain.handle('marraw:set-launch-mode', (_ev, mode) => {
+  const prefs = readPrefs();
+  prefs.launchMode = mode === 'picker' ? 'picker' : 'local';
+  writePrefs(prefs);
+  return prefs.launchMode;
+});
+ipcMain.on('marraw:open-connect', () => openConnectWindow());
+ipcMain.handle('marraw:open-remote', (_ev, id) => {
+  const conn = remotesList().find((c) => c && c.id === id);
+  if (!conn) return false;
+  void createWindow({ remote: { name: conn.name, host: conn.host, token: conn.token } });
+  if (connectWin && !connectWin.isDestroyed()) connectWin.close();
+  return true;
+});
+ipcMain.handle('marraw:open-local', () => {
+  void createWindow({});
+  if (connectWin && !connectWin.isDestroyed()) connectWin.close();
+  return true;
+});
+
+// The connect screen: a small pre-launch picker that must work before any
+// daemon exists, so it is a plain static page, not the React client.
+let connectWin = null;
+function openConnectWindow() {
+  if (connectWin && !connectWin.isDestroyed()) {
+    connectWin.focus();
+    return;
+  }
+  connectWin = new BrowserWindow({
+    width: 480,
+    height: 620,
+    resizable: false,
+    frame: false,
+    backgroundColor: '#0c0d0f',
+    icon: WINDOW_ICON,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'connectPreload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  connectWin.setMenuBarVisibility(false);
+  connectWin.once('ready-to-show', () => connectWin.show());
+  connectWin.on('closed', () => {
+    connectWin = null;
+  });
+  connectWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  void connectWin.loadFile(path.join(__dirname, 'connect.html'));
+}
+
 // Single instance: a second launch hands its MARRAW_OPEN_FOLDER over via
 // additionalData (the first instance can't see the second's env) and exits;
 // we answer by opening a new window. Harness runs bypass the lock — they
@@ -415,7 +578,12 @@ if (!gotLock) {
     void createWindow({ openFolder: folder });
   });
   app.whenReady().then(() => {
-    void createWindow({ initial: true });
+    // Harness runs always need the real app window, whatever the pref says.
+    if (launchMode() === 'picker' && !UITEST) {
+      openConnectWindow();
+    } else {
+      void createWindow({ initial: true });
+    }
     initAutoUpdater();
   });
 }

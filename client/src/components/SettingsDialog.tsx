@@ -9,7 +9,13 @@ import {
   setCacheDir,
   useGetModelsInfo,
   deleteModel,
+  getRemoteAccess,
+  regeneratePairingToken,
+  type RemoteAccessInfo,
 } from '@/api/system';
+import { backend, canUseHostFs } from '@/lib/backend';
+import type { RemoteAccessPrefs } from '@/lib/electron';
+import { DirPickerDialog } from '@/components/DirPickerDialog';
 import { useApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
@@ -66,7 +72,7 @@ function formatBytes(n: number): string {
   return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
 }
 
-const SECTIONS = ['General', 'Features', 'Toolbars', 'Auto presets', 'Default presets', 'Cache', 'Models', 'Sidecars'] as const;
+const SECTIONS = ['General', 'Features', 'Toolbars', 'Auto presets', 'Default presets', 'Cache', 'Models', 'Sidecars', 'Remote'] as const;
 type Section = (typeof SECTIONS)[number];
 
 /**
@@ -77,6 +83,10 @@ export function SettingsDialog() {
   const open = useUIStore((s) => s.settingsOpen);
   const setOpen = useUIStore((s) => s.setSettingsOpen);
   const [section, setSection] = useState<Section>('General');
+  // Remote access is configured on the machine that HOSTS the library, via
+  // the shell's prefs — hide it in remote windows and plain browser tabs.
+  const showRemote = !backend.isRemote && !!window.marraw?.getRemoteAccess;
+  const sections = SECTIONS.filter((s) => s !== 'Remote' || showRemote);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent
@@ -95,7 +105,7 @@ export function SettingsDialog() {
         </div>
         <div className="flex min-h-0 flex-1">
           <div className="flex w-[168px] shrink-0 flex-col gap-px border-r bg-sidebar p-2.5">
-            {SECTIONS.map((s) => (
+            {sections.map((s) => (
               <button
                 key={s}
                 className={cn(
@@ -119,6 +129,7 @@ export function SettingsDialog() {
             {open && section === 'Cache' && <CacheSection />}
             {open && section === 'Models' && <ModelsSection />}
             {open && section === 'Sidecars' && <SidecarSection />}
+            {open && section === 'Remote' && showRemote && <RemoteSection />}
           </div>
         </div>
       </DialogContent>
@@ -788,6 +799,7 @@ function CacheSection() {
   const { data: info } = useGetCacheInfo();
   const [busy, setBusy] = useState(false);
   const [gb, setGb] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
   useEffect(() => {
     // Seed the editable field from fetched cache info. Keyed on the query
     // snapshot's identity, so this can't live as an adjust-during-render.
@@ -837,8 +849,8 @@ function CacheSection() {
           info?.dir ? (
             <button
               className="max-w-full truncate text-left font-mono text-[11px] underline-offset-2 hover:underline"
-              title={window.marraw ? `${info.dir} — click to reveal` : info.dir}
-              onClick={() => window.marraw?.revealInExplorer(info.dir)}
+              title={canUseHostFs() ? `${info.dir} — click to reveal` : info.dir}
+              onClick={() => canUseHostFs() && window.marraw?.revealInExplorer(info.dir)}
             >
               {info.dir}
               {info.isCustom ? '' : ' (default)'}
@@ -859,22 +871,21 @@ function CacheSection() {
                 Use default
               </Button>
             )}
-            {window.marraw && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={async () => {
-                  const dir = await window.marraw!.pickDirectory();
-                  if (dir) run(() => setCacheDir(client, dir), 'Cache folder changed');
-                }}
-              >
-                Change…
-              </Button>
-            )}
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => setPickerOpen(true)}>
+              Change…
+            </Button>
           </div>
         }
       />
+      {pickerOpen && (
+        <DirPickerDialog
+          title="Choose cache folder"
+          description="A marraw-previews folder is created inside your pick"
+          initialPath={info?.isCustom ? info.dir : undefined}
+          onSelect={(dir) => run(() => setCacheDir(client, dir), 'Cache folder changed')}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
       <SettingRow
         title="Preview cache limit"
         description="When the cache grows past this size, the least-recently viewed previews are evicted in the background. Bigger caches keep more shoots instant."
@@ -1033,6 +1044,155 @@ function ModelsSection() {
           }
         />
       )}
+    </div>
+  );
+}
+
+// RemoteSection: host this library to other machines (e.g. a laptop over a
+// Tailscale network). The listen/port toggle is a shell preference applied at
+// daemon spawn — hence the relaunch dance — while the pairing token lives in
+// the daemon and swaps live.
+function RemoteSection() {
+  const client = useApiClient();
+  const [prefs, setPrefs] = useState<RemoteAccessPrefs | null>(null);
+  const [info, setInfo] = useState<RemoteAccessInfo | null>(null);
+  const [port, setPort] = useState('');
+  const [confirmRegen, setConfirmRegen] = useState(false);
+
+  useEffect(() => {
+    void window.marraw?.getRemoteAccess?.().then((p) => {
+      setPrefs(p);
+      setPort(String(p.port));
+    });
+    getRemoteAccess(client).then(setInfo).catch(() => {});
+  }, [client]);
+
+  const update = (patch: Partial<RemoteAccessPrefs>) =>
+    window.marraw
+      ?.setRemoteAccess?.(patch)
+      .then((p) => {
+        setPrefs(p);
+        setPort(String(p.port));
+      })
+      .catch((err) => toast.error((err as Error).message));
+
+  const applyPort = () => {
+    const n = Number(port);
+    if (!prefs || !Number.isInteger(n) || n < 1 || n > 65535 || n === prefs.port) {
+      setPort(prefs ? String(prefs.port) : '');
+      return;
+    }
+    void update({ port: n });
+  };
+
+  const regen = () => {
+    setConfirmRegen(false);
+    regeneratePairingToken(client)
+      .then((i) => {
+        setInfo(i);
+        toast.success('Pairing token regenerated — saved connections need the new token');
+      })
+      .catch((err) => toast.error((err as Error).message));
+  };
+
+  return (
+    <div className="flex flex-col">
+      <SettingRow
+        title="Allow remote connections"
+        description="Let marraw on another machine (e.g. your laptop over Tailscale) open this library. The daemon listens on all interfaces on the port below — only clients with the pairing token get in."
+        control={
+          <Switch
+            checked={prefs?.enabled ?? false}
+            disabled={!prefs}
+            onCheckedChange={(v) => update({ enabled: v })}
+            aria-label="Allow remote connections"
+          />
+        }
+      />
+      {prefs?.enabled && (
+        <SettingRow
+          title="Port"
+          description="Remote machines connect to this port. Pick one that's free on this machine; saved connections on other machines include it."
+          control={
+            <input
+              className="h-8 w-20 rounded-lg border border-input bg-secondary px-2 text-right font-mono text-xs outline-none focus:border-ring dark:bg-white/5"
+              value={port}
+              onChange={(e) => setPort(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && applyPort()}
+              onBlur={applyPort}
+              aria-label="Remote access port"
+            />
+          }
+        />
+      )}
+      {prefs?.restartRequired && (
+        <SettingRow
+          title={<span className="text-accent-text">Restart required</span>}
+          description="Remote access settings apply when the app starts."
+          control={
+            <Button variant="outline" size="sm" onClick={() => void window.marraw?.relaunch?.()}>
+              Restart now
+            </Button>
+          }
+        />
+      )}
+      <SettingRow
+        title="Pairing token"
+        description={
+          <div className="flex flex-col gap-1">
+            <span>
+              Enter this on the connecting machine (its connect screen asks for it). Regenerating
+              locks out every saved connection until they update the token.
+            </span>
+            <span className="font-mono text-[11.5px] text-foreground select-text">
+              {info ? info.pairingToken : '…'}
+            </span>
+          </div>
+        }
+        control={
+          <div className="flex gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!info}
+              onClick={() => {
+                void navigator.clipboard.writeText(info!.pairingToken);
+                toast.success('Pairing token copied');
+              }}
+            >
+              Copy
+            </Button>
+            {confirmRegen ? (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => setConfirmRegen(false)}>
+                  Cancel
+                </Button>
+                <Button variant="destructive" size="sm" onClick={regen}>
+                  Regenerate
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="destructive"
+                size="sm"
+                disabled={!info}
+                onClick={() => setConfirmRegen(true)}
+              >
+                Regenerate
+              </Button>
+            )}
+          </div>
+        }
+      />
+      <SettingRow
+        title="Connect to another library"
+        description="Open the connect screen to browse a marraw library hosted on another machine."
+        control={
+          <Button variant="outline" size="sm" onClick={() => window.marraw?.openConnectWindow?.()}>
+            Connect…
+          </Button>
+        }
+      />
     </div>
   );
 }

@@ -9,8 +9,22 @@ import { onAIMapsGeneratedEvent } from '@/api/edits';
 import { backend } from '@/lib/backend';
 import { bumpImgBust } from '@/lib/imgCacheBust';
 import { migrateLocalSettings } from '@/lib/migrateLocalSettings';
+import { useConnectionRejected } from '@/stores/connectionStore';
 
-const client = new ApiClient(backend.ws);
+// The token authenticates via the first-message auth frame (re-sent on every
+// reconnect). Dev runs tokenless against a --dev daemon with no auth hook, so
+// only pass the options when a token exists. A rejection (wrong or regenerated
+// pairing token) stops auto-reconnect; ConnectionBanner surfaces it.
+const client = new ApiClient(
+  backend.ws,
+  backend.token
+    ? {
+        getAuthToken: () => backend.token,
+        onConnectionRejected: (err) =>
+          useConnectionRejected.getState().setRejected(err.message || 'access denied'),
+      }
+    : undefined,
+);
 client.connect();
 
 // An AI map landed for a saved edit that already references it (batch preset

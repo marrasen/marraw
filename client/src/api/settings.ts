@@ -215,16 +215,16 @@ export interface WatermarkFrame {
 }
 
 
-export function addWatermarkAsset(client: ApiClient, path: string, options?: RequestOptions): Promise<WatermarkAssetInfo> {
-    return client.request<WatermarkAssetInfo>('Settings.AddWatermarkAsset', [path], options);
+export function addWatermarkAsset(client: ApiClient, data: { contentType?: string; data: string }, options?: RequestOptions): Promise<WatermarkAssetInfo> {
+    return client.request<WatermarkAssetInfo>('Settings.AddWatermarkAsset', [data], options);
 }
 // Wire-method tag consumed by useQuerySuspense to key the promise cache and
 // open the matching server subscription. Stable identifier across builds
 // (unaffected by minification, unlike Function.name).
 addWatermarkAsset.method = 'Settings.AddWatermarkAsset' as const;
 
-export function subscribeAddWatermarkAsset(client: ApiClient, path: string, callback: (data: WatermarkAssetInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
-    return client.subscribe<WatermarkAssetInfo>('Settings.AddWatermarkAsset', [path], callback, onError, options);
+export function subscribeAddWatermarkAsset(client: ApiClient, data: { contentType?: string; data: string }, callback: (data: WatermarkAssetInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<WatermarkAssetInfo>('Settings.AddWatermarkAsset', [data], callback, onError, options);
 }
 
 
@@ -587,12 +587,12 @@ export function subscribeSetWatermarks(client: ApiClient, watermarks: Watermark[
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useAddWatermarkAsset(path: string, options?: UseQueryOptions<WatermarkAssetInfo>): UseQueryResult<WatermarkAssetInfo> {
+export function useAddWatermarkAsset(data: { contentType?: string; data: string }, options?: UseQueryOptions<WatermarkAssetInfo>): UseQueryResult<WatermarkAssetInfo> {
     const wrappedFn = useCallback(
-        (client: ApiClient, signal: AbortSignal, path: string) => addWatermarkAsset(client, path, { signal }),
+        (client: ApiClient, signal: AbortSignal, data: { contentType?: string; data: string }) => addWatermarkAsset(client, data, { signal }),
         [],
     );
-    return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Settings.AddWatermarkAsset', params: [path] } });
+    return useQuery(wrappedFn, { ...options, params: [data], _subscribe: { method: 'Settings.AddWatermarkAsset', params: [data] } });
 }
 
 /**

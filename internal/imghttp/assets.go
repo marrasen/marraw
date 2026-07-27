@@ -16,12 +16,14 @@ var assetName = regexp.MustCompile(`^[0-9a-f]{16}\.(png|jpg)$`)
 // Assets serves watermark asset files for the editor preview:
 // GET /wm/{name}?t=token.
 type Assets struct {
-	Dir   string
-	Token string // empty disables the check (dev mode)
+	Dir string
+	// TokenValid validates the ?t=/X-Marraw-Token credential; nil disables
+	// the check (dev mode).
+	TokenValid func(string) bool
 }
 
 func (h *Assets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h.Token != "" && r.URL.Query().Get("t") != h.Token && r.Header.Get("X-Marraw-Token") != h.Token {
+	if !authorized(h.TokenValid, r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}

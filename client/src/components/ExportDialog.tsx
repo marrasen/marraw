@@ -23,6 +23,7 @@ import { Segmented } from '@/components/ui/segmented';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { DirPickerDialog } from '@/components/DirPickerDialog';
 import { copyPhotoToClipboard } from '@/lib/clipboardExport';
 import {
   EXPORT_PRESET_NAME_MAX,
@@ -133,6 +134,7 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
   const [starting, setStarting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [needsCreate, setNeedsCreate] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   // Preset picker: the applied preset's id ('' = none) and the inline
   // naming state for save-as / rename.
   const [activePresetId, setActivePresetId] = useState('');
@@ -179,7 +181,10 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
     // Read imperatively: a subscription echo must not clobber a value the
     // user is editing while the dialog is open.
     const { exportDir, exportOptions, exportPresets } = useUIStore.getState();
-    setDestDir(exportDir || (folderPath ? `${folderPath}\\Exports` : ''));
+    // The default dest lives on the daemon's machine: its own path style
+    // decides the separator (a Windows client may face a Linux host).
+    const sep = folderPath?.includes('/') ? '/' : '\\';
+    setDestDir(exportDir || (folderPath ? `${folderPath}${sep}Exports` : ''));
     applyOptions(exportOptions);
     // Reopening after "apply preset → export" shows that preset as active
     // again: the one whose options match the prefilled blob, if any.
@@ -543,21 +548,9 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
                   setNeedsCreate(false);
                 }}
               />
-              {window.marraw && (
-                <Button
-                  variant="outline"
-                  className="h-[34px]"
-                  onClick={async () => {
-                    const dir = await window.marraw!.pickDirectory();
-                    if (dir) {
-                      setDestDir(dir);
-                      setNeedsCreate(false);
-                    }
-                  }}
-                >
-                  Choose…
-                </Button>
-              )}
+              <Button variant="outline" className="h-[34px]" onClick={() => setPickerOpen(true)}>
+                Choose…
+              </Button>
               {isRaw && folderPath && !inPlace && (
                 <Button
                   variant="outline"
@@ -818,6 +811,18 @@ export function ExportDialog({ photos }: { photos: Photo[] }) {
             </>
           )}
         </div>
+        {pickerOpen && (
+          <DirPickerDialog
+            title="Choose export destination"
+            description="Folders on the machine that hosts the library"
+            initialPath={destDir || folderPath || undefined}
+            onSelect={(dir) => {
+              setDestDir(dir);
+              setNeedsCreate(false);
+            }}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -1,5 +1,15 @@
 // Types for the Electron preload bridge (electron/preload.cjs). Absent when
 // running in a plain browser tab — always feature-check window.marraw.
+
+// The shell's remote-access preferences (preferences.json). Spawn flags, so a
+// change reports restartRequired until the app relaunches.
+export interface RemoteAccessPrefs {
+  enabled: boolean;
+  listen: string;
+  port: number;
+  restartRequired: boolean;
+}
+
 declare global {
   interface Window {
     marraw?: {
@@ -18,6 +28,11 @@ declare global {
       // Absent on builds predating the beta-channel setting — feature-check.
       getBetaChannel?: () => Promise<boolean>;
       setBetaChannel?: (on: boolean) => Promise<boolean>;
+      // Remote connections — absent on builds predating them; feature-check.
+      openConnectWindow?: () => void;
+      getRemoteAccess?: () => Promise<RemoteAccessPrefs>;
+      setRemoteAccess?: (patch: Partial<RemoteAccessPrefs>) => Promise<RemoteAccessPrefs>;
+      relaunch?: () => Promise<void>;
     };
     win?: {
       minimize: () => void;

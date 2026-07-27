@@ -28,6 +28,12 @@ export interface ModelsInfo {
     models: ModelFile[];
 }
 
+export interface RemoteAccessInfo {
+    pairingToken: string;
+    listenAddr: string;
+    loopbackOnly: boolean;
+}
+
 
 export function clearCache(client: ApiClient, options?: RequestOptions): Promise<CacheInfo> {
     return client.request<CacheInfo>('System.ClearCache', [], options);
@@ -78,6 +84,32 @@ getModelsInfo.method = 'System.GetModelsInfo' as const;
 
 export function subscribeGetModelsInfo(client: ApiClient, callback: (data: ModelsInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<ModelsInfo>('System.GetModelsInfo', [], callback, onError, options);
+}
+
+
+export function getRemoteAccess(client: ApiClient, options?: RequestOptions): Promise<RemoteAccessInfo> {
+    return client.request<RemoteAccessInfo>('System.GetRemoteAccess', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+getRemoteAccess.method = 'System.GetRemoteAccess' as const;
+
+export function subscribeGetRemoteAccess(client: ApiClient, callback: (data: RemoteAccessInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<RemoteAccessInfo>('System.GetRemoteAccess', [], callback, onError, options);
+}
+
+
+export function regeneratePairingToken(client: ApiClient, options?: RequestOptions): Promise<RemoteAccessInfo> {
+    return client.request<RemoteAccessInfo>('System.RegeneratePairingToken', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+regeneratePairingToken.method = 'System.RegeneratePairingToken' as const;
+
+export function subscribeRegeneratePairingToken(client: ApiClient, callback: (data: RemoteAccessInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<RemoteAccessInfo>('System.RegeneratePairingToken', [], callback, onError, options);
 }
 
 
@@ -163,6 +195,34 @@ export function useGetModelsInfo(options?: UseQueryOptions<ModelsInfo>): UseQuer
         [],
     );
     return useQuery(wrappedFn, { ...options, _subscribe: { method: 'System.GetModelsInfo', params: [] } });
+}
+
+/**
+ * Subscribes to `System.GetRemoteAccess` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useGetRemoteAccess(options?: UseQueryOptions<RemoteAccessInfo>): UseQueryResult<RemoteAccessInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => getRemoteAccess(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'System.GetRemoteAccess', params: [] } });
+}
+
+/**
+ * Subscribes to `System.RegeneratePairingToken` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useRegeneratePairingToken(options?: UseQueryOptions<RemoteAccessInfo>): UseQueryResult<RemoteAccessInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => regeneratePairingToken(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'System.RegeneratePairingToken', params: [] } });
 }
 
 /**

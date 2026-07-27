@@ -17,7 +17,19 @@ import (
 type Handler struct {
 	DB    *store.DB
 	Cache *pyramid.Cache
-	Token string // empty disables the check (dev mode)
+	// TokenValid validates the ?t=/X-Marraw-Token credential. Nil disables
+	// the check (dev mode). A func rather than a string so a regenerated
+	// pairing token takes effect without re-wiring handlers.
+	TokenValid func(string) bool
+}
+
+// authorized checks the request's token against TokenValid, accepting either
+// the ?t= query param or the X-Marraw-Token header.
+func authorized(valid func(string) bool, r *http.Request) bool {
+	if valid == nil {
+		return true
+	}
+	return valid(r.URL.Query().Get("t")) || valid(r.Header.Get("X-Marraw-Token"))
 }
 
 // photoFor authorizes the request and resolves the photo record and edit
@@ -28,7 +40,7 @@ type Handler struct {
 // cache key, hence a new URL, so responses are immutable and cacheable
 // forever. A stale v yields 409 so the client refetches the photo record.
 func (h *Handler) photoFor(w http.ResponseWriter, r *http.Request) (photo store.Photo, editHash string, ok bool) {
-	if h.Token != "" && r.URL.Query().Get("t") != h.Token && r.Header.Get("X-Marraw-Token") != h.Token {
+	if !authorized(h.TokenValid, r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}

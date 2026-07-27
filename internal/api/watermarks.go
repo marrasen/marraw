@@ -280,17 +280,20 @@ type WatermarkAssetInfo struct {
 	Height   int    `json:"height"`
 }
 
-// AddWatermarkAsset copies the picked image into the app-managed asset dir
+// AddWatermarkAsset stores an uploaded image in the app-managed asset dir
 // under a content-hash name (re-adding the same file is a no-op), so exports
 // keep working when the user's original moves. Served back to the preview
-// via GET /wm/{name}.
-func (u *Settings) AddWatermarkAsset(ctx context.Context, path string) (*WatermarkAssetInfo, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, aprot.ErrInvalidParams("cannot read image: " + err.Error())
+// via GET /wm/{name}. The image arrives as bytes rather than a path: the
+// client may run on another machine than the daemon, so a client-local path
+// would name the wrong filesystem.
+func (u *Settings) AddWatermarkAsset(ctx context.Context, data aprot.Blob) (*WatermarkAssetInfo, error) {
+	raw := data.Data
+	if len(raw) == 0 {
+		return nil, aprot.ErrInvalidParams("empty image upload")
 	}
-	if len(raw) > 64<<20 {
-		return nil, aprot.ErrInvalidParams("image is larger than 64 MB")
+	// Cap matches the daemon's MaxMessageSize headroom (base64 inflates 4/3).
+	if len(raw) > 20<<20 {
+		return nil, aprot.ErrInvalidParams("image is larger than 20 MB")
 	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {

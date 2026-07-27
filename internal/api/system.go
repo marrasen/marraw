@@ -78,6 +78,45 @@ func (s *System) ClearCache(ctx context.Context) (*CacheInfo, error) {
 	return s.cacheInfo(ctx), nil
 }
 
+// RemoteAccessInfo describes how this daemon can be reached from another
+// machine: the pairing token remote clients authenticate with and what the
+// daemon is actually listening on.
+type RemoteAccessInfo struct {
+	PairingToken string `json:"pairingToken"`
+	ListenAddr   string `json:"listenAddr"`
+	LoopbackOnly bool   `json:"loopbackOnly"`
+}
+
+func (s *System) remoteAccessInfo() *RemoteAccessInfo {
+	info := &RemoteAccessInfo{ListenAddr: s.deps.ListenAddr, LoopbackOnly: s.deps.LoopbackOnly}
+	if s.deps.Tokens != nil {
+		info.PairingToken = s.deps.Tokens.Pairing()
+	}
+	return info
+}
+
+// GetRemoteAccess returns the pairing token and listen address for the
+// Settings dialog's Remote section.
+func (s *System) GetRemoteAccess(ctx context.Context) (*RemoteAccessInfo, error) {
+	return s.remoteAccessInfo(), nil
+}
+
+// RegeneratePairingToken replaces the pairing token, invalidating the old one
+// for new connections. Clients already connected stay until they disconnect.
+func (s *System) RegeneratePairingToken(ctx context.Context) (*RemoteAccessInfo, error) {
+	tok, err := GeneratePairingToken()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.deps.DB.SetSetting(ctx, PairingTokenKey, tok); err != nil {
+		return nil, err
+	}
+	if s.deps.Tokens != nil {
+		s.deps.Tokens.SetPairing(tok)
+	}
+	return s.remoteAccessInfo(), nil
+}
+
 // SetCacheDir relocates the preview cache. An empty path restores the default
 // location; otherwise the cache moves into "<path>/marraw-previews". The
 // previous cache is wiped (its previews are regenerable), and the change takes

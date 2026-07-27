@@ -129,9 +129,9 @@ export function WatermarkDialog() {
   };
 
   const pickImage = async (): Promise<{ fileName: string; width: number; height: number } | null> => {
-    const path = await window.marraw?.pickImage?.();
-    if (!path) return null;
-    return addAssetFromPath(client, path);
+    const file = await pickImageFile();
+    if (!file) return null;
+    return addAssetFromFile(client, file);
   };
 
   const moveElement = (idx: number, dir: -1 | 1) =>
@@ -253,11 +253,37 @@ export function WatermarkDialog() {
   );
 }
 
-// addAssetFromPath copies a local image into the daemon's asset store.
-async function addAssetFromPath(client: ApiClient, path: string) {
+// pickImageFile opens the browser's file picker. No Electron bridge: the
+// image is uploaded as bytes, so it works the same in a local window, a
+// remote window, and a plain browser tab.
+function pickImageFile(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg';
+    input.onchange = () => resolve(input.files?.[0] ?? null);
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
+}
+
+// addAssetFromFile uploads an image into the daemon's asset store. Bytes, not
+// a path: with a remote daemon a client-local path would name the wrong
+// machine's filesystem.
+async function addAssetFromFile(client: ApiClient, file: File) {
+  if (file.size > 20 << 20) {
+    toast.error('Could not add image: larger than 20 MB');
+    return null;
+  }
   try {
-    const info = await addWatermarkAsset(client, path);
-    return info;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // btoa needs a binary string; chunked to keep big logos off the arg-spread
+    // stack limit.
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return await addWatermarkAsset(client, { contentType: file.type, data: btoa(binary) });
   } catch (err) {
     toast.error(`Could not add image: ${(err as Error).message}`);
     return null;
@@ -381,12 +407,10 @@ function WatermarkEditor({
             <Type data-icon="inline-start" />
             Text
           </Button>
-          {window.marraw?.pickImage && (
-            <Button size="sm" variant="outline" onClick={onAddImage}>
-              <ImageIcon data-icon="inline-start" />
-              Image
-            </Button>
-          )}
+          <Button size="sm" variant="outline" onClick={onAddImage}>
+            <ImageIcon data-icon="inline-start" />
+            Image
+          </Button>
           <Button size="sm" variant="outline" onClick={onAddRect}>
             <Square data-icon="inline-start" />
             Rectangle
@@ -520,9 +544,9 @@ function ElementEditor({
   );
 
   const replaceImage = async () => {
-    const path = await window.marraw?.pickImage?.();
-    if (!path) return;
-    const info = await addAssetFromPath(client, path);
+    const file = await pickImageFile();
+    if (!file) return;
+    const info = await addAssetFromFile(client, file);
     if (!info) return;
     onPatch(
       (e) => ({ ...e, asset: info.fileName, assetWidth: info.width, assetHeight: info.height }),
@@ -540,8 +564,8 @@ function ElementEditor({
           : async (e) => {
               e.preventDefault();
               const file = e.dataTransfer?.files?.[0];
-              if (!file || !window.marraw) return;
-              const info = await addAssetFromPath(client, window.marraw.getPathForFile(file));
+              if (!file) return;
+              const info = await addAssetFromFile(client, file);
               if (!info) return;
               onPatch(
                 (x) => ({ ...x, asset: info.fileName, assetWidth: info.width, assetHeight: info.height }),
@@ -593,11 +617,9 @@ function ElementEditor({
             ) : (
               <span className="text-xs text-muted-foreground">No image yet</span>
             )}
-            {window.marraw?.pickImage && (
-              <Button size="sm" variant="outline" onClick={replaceImage}>
-                {el.asset ? 'Replace…' : 'Choose image…'}
-              </Button>
-            )}
+            <Button size="sm" variant="outline" onClick={replaceImage}>
+              {el.asset ? 'Replace…' : 'Choose image…'}
+            </Button>
           </>
         ) : null}
         <div className="ml-auto flex shrink-0 items-center gap-0.5 text-muted-foreground">
