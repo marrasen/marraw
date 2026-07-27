@@ -69,6 +69,7 @@ import {
   esSetMaskPaint,
   esSetWBPicking,
   esRemoveSpot,
+  esSetTintSpot,
   esUndo,
   esUpdate,
   esUpdateMask,
@@ -1045,7 +1046,11 @@ function SpotRow({
   };
   return (
     <div className={cn('flex flex-col rounded-md border', selected ? 'border-primary/45' : 'border-border')}>
-      <div className="flex items-center gap-1.5 px-2 py-1.5">
+      <div
+        className="flex items-center gap-1.5 px-2 py-1.5"
+        onMouseEnter={() => esSetTintSpot(index)}
+        onMouseLeave={() => esSetTintSpot(null)}
+      >
         <button
           type="button"
           className={cn('flex flex-1 items-center gap-1.5 text-left', spot.disabled && 'opacity-45')}

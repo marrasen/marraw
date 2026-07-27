@@ -32,7 +32,7 @@ import { CropOverlay } from '@/components/CropOverlay';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
 import { MaskOverlay } from '@/components/MaskOverlay';
-import { HealOverlay } from '@/components/HealOverlay';
+import { HealOverlay, SpotHoverTint } from '@/components/HealOverlay';
 import { SpotVisualizeLayer } from '@/components/SpotVisualize';
 import { MaskHoverTint } from '@/components/MaskHoverTint';
 import { AIPickOverlay } from '@/components/AIPickOverlay';
@@ -1244,6 +1244,9 @@ export function CinemaImage({
               />
             )}
             {visualizeUI && <SpotVisualizeLayer src={shownSrc} boxW={boxW} boxH={boxH} />}
+            {healUI && draft && (
+              <SpotHoverTint draft={draft} frameW={rfw} frameH={rfh} boxW={boxW} boxH={boxH} />
+            )}
             {healUI && draft && (
               <HealOverlay
                 client={client}

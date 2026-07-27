@@ -194,6 +194,9 @@ interface EditSessionState {
   // Mask row currently hovered in the Masks panel: the loupe shows that
   // mask's red weight tint while set (see MaskHoverTint).
   tintMask: number | null;
+  // Spot row currently hovered in the Retouch panel: the loupe tints that
+  // spot's area red while set (see SpotHoverTint).
+  tintSpot: number | null;
   // AI region-mask detections, kept per kind until the photo changes. Both
   // chip rows (people + scene) can show at once; hovering a chip or — while
   // armed — the loupe tints that region. mapVer pins the generating model.
@@ -252,6 +255,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   activeMaskControl: null,
   maskPaint: false,
   tintMask: null,
+  tintSpot: null,
   aiDetect: { person: null, class: null },
   aiPickArmed: null,
   aiHover: null,
@@ -491,6 +495,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     activeMaskControl: null,
     maskPaint: false,
     tintMask: null,
+    tintSpot: null,
     aiDetect: { person: null, class: null },
     aiPickArmed: null,
     aiHover: null,
@@ -877,6 +882,11 @@ export function esSetBrushTool(
 // esSetTintMask shows (or clears) the hover weight tint for one mask.
 export function esSetTintMask(index: number | null) {
   setState({ tintMask: index });
+}
+
+// esSetTintSpot shows (or clears) the hover tint for one retouch spot.
+export function esSetTintSpot(index: number | null) {
+  setState({ tintSpot: index });
 }
 
 // esAddMask appends a mask with a sensible default shape, selects it, and

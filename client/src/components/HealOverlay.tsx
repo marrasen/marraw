@@ -499,3 +499,86 @@ function ActiveHandles({
     </>
   );
 }
+
+// SpotHoverTint fills a retouch spot's area red over the loupe while its row in
+// the Retouch panel is hovered (tintSpot), fading out when the pointer leaves —
+// the spot twin of MaskHoverTint. Spot geometry is fully client-side, so unlike
+// AI masks it needs no server-rendered tint: it just redraws the hovered spot's
+// circle/stroke in red using the same frame→box mapping HealOverlay uses. It's
+// a standalone layer (not part of HealOverlay) so it stays visible while the
+// heal overlay itself fades on idle.
+const SPOT_TINT = 'rgba(240,64,64,';
+export function SpotHoverTint({
+  draft,
+  frameW,
+  frameH,
+  boxW,
+  boxH,
+}: {
+  draft: Params;
+  frameW: number;
+  frameH: number;
+  boxW: number;
+  boxH: number;
+}) {
+  const tintSpot = useEditSession((s) => s.tintSpot);
+  // Keep the last hovered spot mounted through the fade-out; seed from the live
+  // hover so a mount while a row is already hovered shows the tint immediately.
+  const [shown, setShown] = useState<number | null>(tintSpot);
+  const [prevTint, setPrevTint] = useState(tintSpot);
+  if (tintSpot !== prevTint) {
+    setPrevTint(tintSpot);
+    if (tintSpot != null) setShown(tintSpot);
+  }
+
+  const spot = shown != null ? draft.spots?.[shown] : undefined;
+  if (shown == null || !spot) return null;
+  const visible = tintSpot === shown;
+
+  const L = Math.max(frameW, frameH);
+  const k = boxW / ((draft.cropW > 0 ? draft.cropW : 1) * frameW);
+  const toBoxPx = (fx: number, fy: number): [number, number] => {
+    const [bx, by] = displayFromFrame(fx, fy, draft, frameW, frameH);
+    return [bx * boxW, by * boxH];
+  };
+  // Box-px SVG path through a stroke's points (rotation-aware per point).
+  const strokePath = (pts: number[]) => {
+    let d = '';
+    for (let i = 0; i + 1 < pts.length; i += 2) {
+      const [bx, by] = toBoxPx(pts[i], pts[i + 1]);
+      d += `${i === 0 ? 'M' : 'L'}${bx.toFixed(1)} ${by.toFixed(1)}`;
+    }
+    if (pts.length === 2) {
+      const [bx, by] = toBoxPx(pts[0], pts[1]);
+      d += `L${(bx + 0.01).toFixed(2)} ${by.toFixed(1)}`;
+    }
+    return d;
+  };
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-[9] transition-opacity duration-300"
+      style={{ opacity: visible ? 1 : 0 }}
+      data-testid="spot-hover-tint"
+    >
+      <svg className="pointer-events-none absolute inset-0 size-full overflow-visible">
+        {spot.kind === 'stroke'
+          ? (spot.strokes ?? []).map((st, j) => (
+              <path
+                key={j}
+                d={strokePath(st.pts)}
+                fill="none"
+                stroke={`${SPOT_TINT}.35)`}
+                strokeWidth={Math.max(3, 2 * st.radius * L * k)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ))
+          : (() => {
+              const [dcx, dcy] = toBoxPx(spot.cx, spot.cy);
+              return <circle cx={dcx} cy={dcy} r={Math.max(2, spot.radius * L * k)} fill={`${SPOT_TINT}.35)`} />;
+            })()}
+      </svg>
+    </div>
+  );
+}
