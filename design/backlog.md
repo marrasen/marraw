@@ -14,10 +14,18 @@ smaller stuff.
   `SettingsDialog.tsx`. Deleting a model re-triggers the consent dialog on
   next use. Verified by `scripts/models-verify.mjs` and the `models` shot
   surface.
-- **Per-person instance masks.** Semantic segmentation lumps every person
-  into one People mask; "the person on the left" needs an instance/panoptic
-  model (Mask2Former-class — heavier, and license needs vetting). Deferred
-  in the roadmap.
+- ~~**Per-person instance masks.**~~ Done 2026-07-27 (commit `15d4aa3`):
+  new `AIKind "person"` whose 1024px map plane stores instance IDs (0 = bg,
+  1..N left-to-right by centroid; `ClassID` doubles as instance index — no
+  schema change). Model: RF-DETR-Seg-Large (Apache-2.0 code + weights;
+  Mask2Former weights are CC-BY-NC, YOLO-seg/FastSAM are AGPL — both
+  rejected), exported to ONNX (`rfdetrseg-1`, 138 MB, ~1 s CPU) and mirrored
+  on marrasen/marraw-models. `internal/aimask/instances.go` composes the
+  plane and detects instances; the client hit-tests hover locally via the
+  `Edits.AIInstancePlane` blob RPC (`PersonPickOverlay`, People button +
+  person chips in EditPanel). Presets keep person masks ("Nth from left").
+  Verified by `node scripts/person-verify.mjs /tmp/marraw-fixture` and the
+  `personpick` shot surface.
 - ~~**Depth range as a two-thumb slider.**~~ Done 2026-07-14 (commit
   `e889169`): `EditRangeSlider` (EditSlider's two-thumb sibling), reset
   returns to the seed window via `DEPTH_WINDOW_DEFAULT`. Verified by the
