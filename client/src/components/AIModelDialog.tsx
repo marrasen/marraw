@@ -28,10 +28,15 @@ const AI_KIND_INFO: Record<string, { title: string; feature: string }> = {
     title: 'People detection',
     feature: 'Separates the individual people in a photo, so you can hover over someone and mask just that person — not everyone at once.',
   },
+  fill: {
+    title: 'content-aware fill',
+    feature: 'Fills a retouch spot by synthesizing new pixels from its surround — for blemishes and distractions where no clean source patch exists to heal or clone from.',
+  },
 };
 
 export interface PendingAIDownload {
-  kind: AIKindType;
+  // An AI-mask kind, or 'fill' for the retouch inpainting model.
+  kind: AIKindType | 'fill';
   bytes: number;
   // What confirmed consent should do: add a fresh mask ('add') or just
   // regenerate the maps an existing mask references ('restore').

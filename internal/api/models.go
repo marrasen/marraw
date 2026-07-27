@@ -9,6 +9,7 @@ import (
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/eyes"
+	"github.com/marrasen/marraw/internal/inpaint"
 )
 
 const modelsInfoKey = "modelsInfo"
@@ -47,6 +48,8 @@ func modelCatalog() map[string]ModelFile {
 		Name: "Face detection (YuNet)", Purpose: "Finds faces and eye positions, for closed-eye culling."}
 	catalog[eyes.StateSpec().FileName()] = ModelFile{
 		Name: "Eye state (open-closed-eye-0001)", Purpose: "Judges each detected eye open or closed, for closed-eye culling."}
+	catalog[inpaint.Spec().FileName()] = ModelFile{
+		Name: "Content-aware fill (MI-GAN)", Purpose: "Inpaints retouch regions from their surround, for fill-mode spots."}
 	return catalog
 }
 

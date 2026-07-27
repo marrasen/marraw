@@ -29,6 +29,7 @@ import (
 	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/imghttp"
 	"github.com/marrasen/marraw/internal/infer"
+	"github.com/marrasen/marraw/internal/inpaint"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
@@ -126,9 +127,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("open cache: %v", err)
 	}
-	// AI-mask maps live beside (not inside) the preview cache: they cost an
-	// inference to regenerate, so preview Clear/Relocate must not touch them.
+	// AI-mask maps and ML fill patches live beside (not inside) the preview
+	// cache: they cost an inference to regenerate, so preview Clear/Relocate
+	// must not touch them.
 	cache.AIMaps = pyramid.NewAIMapStore(filepath.Join(*dataDir, "aimaps"))
+	cache.Fills = pyramid.NewFillStore(filepath.Join(*dataDir, "fills"), inpaint.FillVer())
 	cache.IOGate = ioGate
 	handles := decode.NewHandleCache(3)
 	defer handles.Close()

@@ -53,6 +53,11 @@ export interface Delta {
     vibrance: number | null;
 }
 
+export interface FillResult {
+    fillVer: string;
+    generated: boolean;
+}
+
 export interface SubjectBoundsResult {
     found: boolean;
     x: number;
@@ -138,6 +143,19 @@ export function subscribeAutoAdjust(client: ApiClient, photoID: number, params: 
 }
 
 
+export function fillModelStatus(client: ApiClient, options?: RequestOptions): Promise<AIModelInfo> {
+    return client.request<AIModelInfo>('Edits.FillModelStatus', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+fillModelStatus.method = 'Edits.FillModelStatus' as const;
+
+export function subscribeFillModelStatus(client: ApiClient, callback: (data: AIModelInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<AIModelInfo>('Edits.FillModelStatus', [], callback, onError, options);
+}
+
+
 export function generateAIMap(client: ApiClient, photoID: number, kind: AIKindType, allowDownload: boolean, options?: RequestOptions): Promise<AIMapResult> {
     return client.request<AIMapResult>('Edits.GenerateAIMap', [photoID, kind, allowDownload], options);
 }
@@ -161,6 +179,19 @@ generateAIMaps.method = 'Edits.GenerateAIMaps' as const;
 
 export function subscribeGenerateAIMaps(client: ApiClient, photoIDs: number[], kinds: AIKindType[], allowDownload: boolean, callback: (data: TaskRef) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<TaskRef>('Edits.GenerateAIMaps', [photoIDs, kinds, allowDownload], callback, onError, options);
+}
+
+
+export function generateFill(client: ApiClient, photoID: number, params: Params, spotIndex: number, allowDownload: boolean, options?: RequestOptions): Promise<FillResult> {
+    return client.request<FillResult>('Edits.GenerateFill', [photoID, params, spotIndex, allowDownload], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+generateFill.method = 'Edits.GenerateFill' as const;
+
+export function subscribeGenerateFill(client: ApiClient, photoID: number, params: Params, spotIndex: number, allowDownload: boolean, callback: (data: FillResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<FillResult>('Edits.GenerateFill', [photoID, params, spotIndex, allowDownload], callback, onError, options);
 }
 
 
@@ -375,6 +406,20 @@ export function useAutoAdjust(photoID: number, params: Params, sections: string[
 }
 
 /**
+ * Subscribes to `Edits.FillModelStatus` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useFillModelStatus(options?: UseQueryOptions<AIModelInfo>): UseQueryResult<AIModelInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => fillModelStatus(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'Edits.FillModelStatus', params: [] } });
+}
+
+/**
  * Subscribes to `Edits.GenerateAIMap` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -402,6 +447,21 @@ export function useGenerateAIMaps(photoIDs: number[], kinds: AIKindType[], allow
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoIDs, kinds, allowDownload], _subscribe: { method: 'Edits.GenerateAIMaps', params: [photoIDs, kinds, allowDownload] } });
+}
+
+/**
+ * Subscribes to `Edits.GenerateFill` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useGenerateFill(photoID: number, params: Params, spotIndex: number, allowDownload: boolean, options?: UseQueryOptions<FillResult>): UseQueryResult<FillResult> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, spotIndex: number, allowDownload: boolean) => generateFill(client, photoID, params, spotIndex, allowDownload, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, spotIndex, allowDownload], _subscribe: { method: 'Edits.GenerateFill', params: [photoID, params, spotIndex, allowDownload] } });
 }
 
 /**

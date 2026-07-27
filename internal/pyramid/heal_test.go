@@ -44,8 +44,8 @@ func lumaAt(img *image.RGBA, x, y int) int {
 func TestApplyHealNeutralNoOp(t *testing.T) {
 	img := gradientImage(64, 48)
 	before := clonePix(img)
-	ApplyHeal(img, nil)
-	ApplyHeal(img, &edit.Params{})
+	ApplyHeal(img, nil, nil)
+	ApplyHeal(img, &edit.Params{}, nil)
 	for i := range before {
 		if img.Pix[i] != before[i] {
 			t.Fatalf("neutral ApplyHeal changed pixel %d: %d -> %d", i, before[i], img.Pix[i])
@@ -64,7 +64,7 @@ func TestApplyHealClone(t *testing.T) {
 		SX: 0.75, SY: 0.5, // source at (150,100)
 		Feather: 0.1,
 	}}}
-	ApplyHeal(img, e)
+	ApplyHeal(img, e, nil)
 	if got := lumaAt(img, 50, 100); got < 190 {
 		t.Errorf("clone center should copy the bright source (~200), got %d", got)
 	}
@@ -91,7 +91,7 @@ func TestApplyHealToneMatches(t *testing.T) {
 		SX: 0.75, SY: 0.5,
 		Feather: 0.1,
 	}}}
-	ApplyHeal(img, e)
+	ApplyHeal(img, e, nil)
 	got := lumaAt(img, 50, 100)
 	if got < 90 || got > 110 {
 		t.Errorf("heal should tone-match the ~100 surround, got %d", got)
@@ -101,17 +101,20 @@ func TestApplyHealToneMatches(t *testing.T) {
 // TestApplyHealSkipsUnknownKindsAndModes pins the forward-compat contract: a
 // sidecar written by a newer build renders here WITHOUT a Normalize pass, so
 // spot kinds/modes this build doesn't know must be ignored, never misrendered
-// as circles (the newMaskEvaluator unknown-type precedent).
+// as circles (the newMaskEvaluator unknown-type precedent). A fill spot whose
+// patch is not generated (or not generatable) shares the guarantee: it
+// composites nothing, never garbage.
 func TestApplyHealSkipsUnknownKindsAndModes(t *testing.T) {
 	img := gradientImage(120, 90)
 	before := clonePix(img)
 	ApplyHeal(img, &edit.Params{Spots: []edit.Spot{
-		{Kind: "fill", CX: 0.5, CY: 0.5, Radius: 0.2, SX: 0.2, SY: 0.2},
-		{Mode: "fill", CX: 0.5, CY: 0.5, Radius: 0.2, SX: 0.2, SY: 0.2},
+		{Kind: "polygon", CX: 0.5, CY: 0.5, Radius: 0.2, SX: 0.2, SY: 0.2},
+		// A known fill spot with no cached patch in the set: skipped.
+		{Mode: edit.SpotFill, CX: 0.5, CY: 0.5, Radius: 0.2},
 		// A stroke spot with an unknown MODE must be skipped too.
 		{Kind: "stroke", Mode: "bogus", CX: 0.5, CY: 0.5, SX: 0.2, SY: 0.2,
 			Strokes: []edit.Stroke{{Radius: 0.05, Pts: []float64{0.4, 0.5, 0.6, 0.5}}}},
-	}})
+	}}, nil)
 	for i := range before {
 		if img.Pix[i] != before[i] {
 			t.Fatalf("unknown kind/mode spot changed pixel %d: %d -> %d", i, before[i], img.Pix[i])
@@ -120,7 +123,7 @@ func TestApplyHealSkipsUnknownKindsAndModes(t *testing.T) {
 	// The un-normalized "heal" spelling of the default mode still heals.
 	ApplyHeal(img, &edit.Params{Spots: []edit.Spot{
 		{Mode: "heal", CX: 0.5, CY: 0.5, Radius: 0.1, SX: 0.2, SY: 0.2, Feather: 0.1},
-	}})
+	}}, nil)
 	changed := false
 	for i := range before {
 		if img.Pix[i] != before[i] {
@@ -141,7 +144,7 @@ func TestApplyHealNearEdge(t *testing.T) {
 		{CX: 0.01, CY: 0.01, Radius: 0.08, SX: 0.5, SY: 0.5, Feather: 0.4},
 		{CX: 0.99, CY: 0.99, Radius: 0.08, SX: 0.5, SY: 0.5, Mode: edit.SpotClone},
 	}}
-	ApplyHeal(img, e) // just needs to survive
+	ApplyHeal(img, e, nil) // just needs to survive
 }
 
 // strokeSpot paints a horizontal bar via one stroke: dest reference at
@@ -170,7 +173,7 @@ func TestApplyHealStrokeClone(t *testing.T) {
 		}
 	}
 	e := &edit.Params{Spots: []edit.Spot{strokeSpot(0.5, 0.5, 0, 0.3, 0.04, edit.SpotClone)}}
-	ApplyHeal(img, e)
+	ApplyHeal(img, e, nil)
 	if got := lumaAt(img, 100, 100); got < 190 {
 		t.Errorf("stroke clone center should copy the bright source (~200), got %d", got)
 	}
@@ -199,7 +202,7 @@ func TestApplyHealStrokeToneMatches(t *testing.T) {
 		}
 	}
 	e := &edit.Params{Spots: []edit.Spot{strokeSpot(0.5, 0.5, 0, 0.3, 0.04, edit.SpotHeal)}}
-	ApplyHeal(img, e)
+	ApplyHeal(img, e, nil)
 	got := lumaAt(img, 100, 100)
 	if got < 85 || got > 115 {
 		t.Errorf("stroke heal should tone-match the ~100 surround, got %d", got)
@@ -214,7 +217,7 @@ func TestApplyHealStrokeNearEdge(t *testing.T) {
 		strokeSpot(0.02, 0.02, 0.5, 0.5, 0.06, edit.SpotHeal),
 		strokeSpot(0.98, 0.98, 0.5, 0.5, 0.06, edit.SpotClone),
 	}}
-	ApplyHeal(img, e) // just needs to survive
+	ApplyHeal(img, e, nil) // just needs to survive
 }
 
 // TestApplyHealStrokeResolutionStable checks a stroke heals to the same tone
@@ -235,8 +238,8 @@ func TestApplyHealStrokeResolutionStable(t *testing.T) {
 	e := &edit.Params{Spots: []edit.Spot{strokeSpot(0.5, 0.5, 0, 0.3, 0.04, edit.SpotHeal)}}
 	big := mk(400, 300)
 	small := mk(200, 150)
-	ApplyHeal(big, e)
-	ApplyHeal(small, e)
+	ApplyHeal(big, e, nil)
+	ApplyHeal(small, e, nil)
 	gb := lumaAt(big, 200, 150)
 	gs := lumaAt(small, 100, 75)
 	if diff := gb - gs; diff < -12 || diff > 12 {
@@ -297,11 +300,77 @@ func TestApplyHealResolutionStable(t *testing.T) {
 	}}}
 	big := mk(400, 300)
 	small := mk(200, 150)
-	ApplyHeal(big, e)
-	ApplyHeal(small, e)
+	ApplyHeal(big, e, nil)
+	ApplyHeal(small, e, nil)
 	gb := lumaAt(big, 100, 150)
 	gs := lumaAt(small, 50, 75)
 	if diff := gb - gs; diff < -12 || diff > 12 {
 		t.Errorf("heal tone drifted across resolution: big=%d small=%d", gb, gs)
+	}
+}
+
+// TestApplyFillCompositesPatch pins the fill composite: a cached patch keyed
+// by the spot's SpotFillKey blends into the disc (feathered, so the center
+// carries the patch color) and leaves everything outside the disc untouched.
+func TestApplyFillCompositesPatch(t *testing.T) {
+	img := gradientImage(120, 90)
+	before := clonePix(img)
+	e := &edit.Params{Spots: []edit.Spot{
+		{Mode: edit.SpotFill, CX: 0.5, CY: 0.5, Radius: 0.1, Feather: 0.2},
+	}}
+	s := &e.Spots[0]
+
+	// A constant green patch spanning the spot's window at an arbitrary
+	// resolution — the composite must resample it, not assume the render size.
+	patch := image.NewRGBA(image.Rect(0, 0, 64, 48))
+	for i := 0; i < len(patch.Pix); i += 4 {
+		patch.Pix[i], patch.Pix[i+1], patch.Pix[i+2], patch.Pix[i+3] = 10, 200, 30, 255
+	}
+	fills := FillSet{e.SpotFillKey(s): &FillPatch{Img: patch}}
+
+	ApplyHeal(img, e, fills)
+
+	// Center of the disc: the patch color at full weight.
+	co := img.PixOffset(60, 45)
+	if img.Pix[co+1] < 150 || img.Pix[co] > 60 {
+		t.Errorf("disc center did not take the patch color: rgb=%d,%d,%d",
+			img.Pix[co], img.Pix[co+1], img.Pix[co+2])
+	}
+	// Outside the disc (radius is 0.1 of the 120 long edge = 12px): untouched.
+	oo := img.PixOffset(90, 45)
+	for c := 0; c < 3; c++ {
+		if img.Pix[oo+c] != before[oo+c] {
+			t.Fatalf("pixel outside the disc changed: %d -> %d", before[oo+c], img.Pix[oo+c])
+		}
+	}
+	// A disabled fill spot composites nothing.
+	img2 := gradientImage(120, 90)
+	before2 := clonePix(img2)
+	e.Spots[0].Disabled = true
+	ApplyHeal(img2, e, fills)
+	for i := range before2 {
+		if img2.Pix[i] != before2[i] {
+			t.Fatalf("disabled fill spot changed pixel %d", i)
+		}
+	}
+}
+
+// TestSpotFillWindowDeterminism pins that generation and composite agree on
+// the window: same normalized spot, same fractions, at any aspect.
+func TestSpotFillWindowDeterminism(t *testing.T) {
+	s := &edit.Spot{Mode: edit.SpotFill, CX: 0.5, CY: 0.5, Radius: 0.05}
+	for _, aspect := range []float64{1.5, 1 / 1.5, 1} {
+		x0, y0, x1, y1 := SpotFillWindow(aspect, s)
+		x0b, y0b, x1b, y1b := SpotFillWindow(aspect, s)
+		if x0 != x0b || y0 != y0b || x1 != x1b || y1 != y1b {
+			t.Fatalf("window not deterministic at aspect %v", aspect)
+		}
+		if x1 <= x0 || y1 <= y0 {
+			t.Fatalf("degenerate window at aspect %v: %v %v %v %v", aspect, x0, y0, x1, y1)
+		}
+		// The window must contain the spot region with real context margin.
+		if x0 > 0.5-0.05 || x1 < 0.5+0.05 || y0 > 0.5-0.05 || y1 < 0.5+0.05 {
+			t.Fatalf("window does not cover the spot at aspect %v: %v %v %v %v", aspect, x0, y0, x1, y1)
+		}
 	}
 }

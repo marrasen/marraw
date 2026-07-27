@@ -230,9 +230,10 @@ them is load-bearing for your work, marraw is not ready for you yet.
 - ❌ **No tone curve.** Contrast and the whites/blacks/shadows/highlights
   sliders drive a fixed parametric curve. There is no point curve and no
   per-channel R/G/B curves.
-- ⚠️ **Retouch is heal/clone only.** Spots and the heal brush fill from
-  another patch of the same photo — there is no content-aware/ML fill, and
-  retouch is not carried into the RAW + XMP handoff.
+- ⚠️ **Retouch is not carried into the RAW + XMP handoff.** Spots and the
+  heal brush heal/clone from another patch of the same photo, and Fill mode
+  inpaints the region with an on-device ML model (a one-time ~28 MB download,
+  after asking) — but none of it translates to Lightroom's retouch on export.
 - ❌ **No lens profile corrections.** No distortion or vignetting profiles, no
   automatic defringe — only a manual CA slider and a creative vignette.
 - ❌ **No modern denoise.** You get LibRaw's wavelet/FBDD/median, not

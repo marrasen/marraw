@@ -10,7 +10,7 @@ import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
 // (aprot's camelCasing lowercases exactly one leading character: aIModelStatus.)
-import { aIModelStatus as aiModelStatus, applyBatchEdit, generateAIMap, type Delta } from '@/api/edits';
+import { aIModelStatus as aiModelStatus, applyBatchEdit, fillModelStatus, generateAIMap, type Delta } from '@/api/edits';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
 import type { AIKindType, Mask, MaskAdjust, Params, Spot } from '@/api/edit';
@@ -52,6 +52,8 @@ import {
   esSetActiveMaskControl,
   esSetActiveSpot,
   esSetHealing,
+  esConfirmFillDownload,
+  esDeclineFillDownload,
   esSetSpotMode,
   esSetSpotTool,
   esSetSpotBrush,
@@ -840,8 +842,27 @@ function RetouchSection({ client, draft }: { client: ApiClient; draft: Params })
   const brushFeather = useEditSession((s) => s.spotBrushFeather);
   const visualize = useEditSession((s) => s.spotVisualize);
   const visualizeThreshold = useEditSession((s) => s.spotVisualizeThreshold);
+  const fillConsent = useEditSession((s) => s.fillConsent);
   const setMode = useUIStore((s) => s.setMode);
   const spots = draft.spots ?? [];
+  // Download-consent dialog for the fill model: fillConsent is set when the
+  // server refused a fill for lack of the model; the dialog opens once the
+  // model size arrives (the fetch resolves in ms — a local stat).
+  const [fillPending, setFillPending] = useState<PendingAIDownload | null>(null);
+  useEffect(() => {
+    if (fillConsent == null) return;
+    let stale = false;
+    fillModelStatus(client)
+      .then((st) => {
+        if (!stale) setFillPending({ kind: 'fill', bytes: st.bytes, mode: 'add' });
+      })
+      .catch(() => {
+        if (!stale) setFillPending({ kind: 'fill', bytes: 0, mode: 'add' });
+      });
+    return () => {
+      stale = true;
+    };
+  }, [client, fillConsent]);
   return (
     <div className="flex flex-col gap-2">
       <Button
@@ -914,6 +935,9 @@ function RetouchSection({ client, draft }: { client: ApiClient; draft: Params })
             <ToggleGroupItem value="clone" className="flex-1" title="Copy the source verbatim">
               Clone
             </ToggleGroupItem>
+            <ToggleGroupItem value="fill" className="flex-1" title="Inpaint the region from its surround (ML)">
+              Fill
+            </ToggleGroupItem>
           </ToggleGroup>
           {spotTool === 'brush' && (
             <>
@@ -975,6 +999,17 @@ function RetouchSection({ client, draft }: { client: ApiClient; draft: Params })
             : 'Remove sensor dust and blemishes. Spots stay anchored to image content through crops and straightens.'}
         </p>
       )}
+      <AIModelDialog
+        pending={fillConsent != null ? fillPending : null}
+        onConfirm={() => {
+          setFillPending(null);
+          esConfirmFillDownload(client);
+        }}
+        onCancel={() => {
+          setFillPending(null);
+          esDeclineFillDownload(client);
+        }}
+      />
     </div>
   );
 }
@@ -992,8 +1027,9 @@ function SpotRow({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const mode: SpotMode = spot.mode === 'clone' ? 'clone' : 'heal';
+  const mode: SpotMode = spot.mode === 'clone' || spot.mode === 'fill' ? spot.mode : 'heal';
   const stroke = spot.kind === 'stroke';
+  const fillBusy = useEditSession((s) => s.fillBusy.includes(index));
   // A stroke spot's edge softness lives per-stroke; surface the first stroke's
   // value and write changes back to every stroke in the region.
   const feather = (stroke ? spot.strokes?.[0]?.feather : spot.feather) ?? 0.5;
@@ -1019,6 +1055,7 @@ function SpotRow({
           <span className="text-[11.5px] text-secondary-foreground">
             {stroke ? 'Brush' : 'Spot'} {index + 1} · {mode}
           </span>
+          {fillBusy && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
         </button>
         <button
           type="button"
@@ -1047,12 +1084,13 @@ function SpotRow({
             value={[mode]}
             onValueChange={(g) => {
               const v = (g as string[])[0];
-              if (v) commitPatch({ mode: v === 'clone' ? 'clone' : undefined });
+              if (v) commitPatch({ mode: v === 'heal' ? undefined : (v as SpotMode) });
             }}
             aria-label="Spot mode"
           >
             <ToggleGroupItem value="heal" className="flex-1">Heal</ToggleGroupItem>
             <ToggleGroupItem value="clone" className="flex-1">Clone</ToggleGroupItem>
+            <ToggleGroupItem value="fill" className="flex-1">Fill</ToggleGroupItem>
           </ToggleGroup>
           <EditSlider
             label="Feather"
@@ -1406,7 +1444,8 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
         pending={pendingAI}
         onConfirm={(p) => {
           setPendingAI(null);
-          void runAI(p.kind, true, p.mode);
+          // This section's pending is always an AI-mask kind, never 'fill'.
+          if (p.kind !== 'fill') void runAI(p.kind, true, p.mode);
         }}
         onCancel={() => setPendingAI(null)}
       />

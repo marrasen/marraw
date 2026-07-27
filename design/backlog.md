@@ -133,12 +133,21 @@ render/normalize, so new kinds degrade gracefully in old builds.
   circle (`StrokeSpotCircle`) and returns CX/CY too. One paint gesture = one
   spot; dest drag translates the strokes. Verified by `go test` stroke cases,
   `scripts/spot-verify.mjs` section 5, and the `healbrush` shot surface.
-- **ML content-aware fill (`Kind:"fill"`).** LaMa-class inpainting ONNX model
-  slotted into the existing `infer.RunTiled` + `ModelSpec` download/consent
-  infra (the aimask.Generate pattern). Open questions: model licensing (the
-  RMBG trap — vet before mirroring), ~200 MB weights, and that fills are not
-  parametrically re-renderable — output must be cached per (photo, edit) like
-  AI maps (AIMapStore precedent), with a cache-buster on regenerate.
+- ~~**ML content-aware fill.**~~ Done 2026-07-27, as `Mode:"fill"` (not a
+  kind — it composes with both circle and brush regions): MI-GAN-512-Places2
+  (MIT code+weights, ~28 MB — LaMa's weights are CC BY-NC-SA and were
+  rejected), the authors' self-contained ONNX pipeline (uint8 image+mask in,
+  crop/resize/blend inside the graph), mirrored as `migan-pipeline-v2.onnx` →
+  `migan-1.onnx`. New `internal/inpaint` (aimask pattern, not RunTiled),
+  `pyramid.FillStore` under `<dataDir>/fills` (256 MB LRU disk cap — the
+  janitor doesn't reach it), patches keyed by `edit.SpotFillKey` (spot
+  geometry + decode-subset hash + orientation, so WB changes regenerate),
+  `FillSet` threaded through `ApplyFinish`'s five call sites, composite in
+  `pyramid.applyFill` via the shared feather/opacity blend.
+  `Edits.GenerateFill`/`FillModelStatus`; the client ensures patches after
+  every commit (fast-path no-op), consent rides the AIModelDialog. Design
+  notes in design/ml-fill.md; verify with `node scripts/fill-verify.mjs
+  /tmp/marraw-fixture` + the `healfill` shot surface.
 - **Spots in the RAW + XMP handoff.** Translate circular spots to Adobe
   `crs:RetouchAreas` (intent-level, like the existing slider mapping) in
   `internal/xmp` so Lightroom picks up the dust fixes.

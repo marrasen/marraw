@@ -108,8 +108,8 @@ MIT), whose shared library ships next to `marrawd`
 
 Model weights are **not** distributed with marraw — the app downloads them on
 first use from <https://github.com/marrasen/marraw-models> (or the pinned
-upstream), verifying each against a SHA-256 baked into `internal/aimask` and
-`internal/eyes`:
+upstream), verifying each against a SHA-256 baked into `internal/aimask`,
+`internal/eyes` and `internal/inpaint`:
 
 | Weights | Purpose | Origin | License |
 |---|---|---|---|
@@ -119,6 +119,7 @@ upstream), verifying each against a SHA-256 baked into `internal/aimask` and
 | RF-DETR-Seg-Large | Per-person instance masks | exported by us to ONNX from [roboflow/rf-detr](https://github.com/roboflow/rf-detr)'s `rf-detr-seg-l-ft` checkpoint (the Seg family is Apache-2.0; only the *detection* XL/2XL are under PML). Pretraining lineage includes Objects365, a research-oriented dataset — the same documented-judgment reading as ISNet's rembg redistribution | Apache-2.0 |
 | YuNet (2023mar) | Face + eye-landmark detection, for closed-eye culling | [opencv/opencv_zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) | MIT (the model README states MIT covers all files in the model directory, weights included) |
 | open-closed-eye-0001 | Eye open/closed classification, for closed-eye culling | [OpenVINO Open Model Zoo](https://github.com/openvinotoolkit/open_model_zoo/tree/master/models/public/open-closed-eye-0001) | Apache-2.0 |
+| MI-GAN-512-Places2 (ONNX pipeline v2) | Content-aware fill (retouch) | [Picsart-AI-Research/MI-GAN](https://github.com/Picsart-AI-Research/MI-GAN), authors' ONNX export from [andraniksargsyan/migan](https://huggingface.co/andraniksargsyan/migan) | MIT (the repo LICENSE, © 2024 Picsart AI Research, covers code and weights; chosen over big-LaMa, whose weights are CC BY-NC-SA) |
 
 ---
 

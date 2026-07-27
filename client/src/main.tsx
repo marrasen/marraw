@@ -75,6 +75,7 @@ if (import.meta.env.DEV) {
       esUpdateSpot: (i: number, patch: unknown) => es.esUpdateSpot(client, i, patch as never),
       esFinishSpot: (i: number) => es.esFinishSpot(client, i),
       esSetSpotTool: (t: unknown) => es.esSetSpotTool(t as never),
+      esSetSpotMode: (m: unknown) => es.esSetSpotMode(m as never),
       esSetSpotVisualize: (on: boolean) => es.esSetSpotVisualize(on),
       // User presets (the `presets` shot surface): seed, apply, hover, scrub.
       setUserPresets: (p: unknown) => us.updateUserPresets(client, p as never),

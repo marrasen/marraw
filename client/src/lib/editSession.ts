@@ -12,6 +12,7 @@ import {
   autoAdjust,
   generateAIMap,
   generateAIMaps,
+  generateFill,
   getEditParams,
   pasteEditParams,
   pickWhiteBalance,
@@ -20,6 +21,7 @@ import {
   setEditParams,
   suggestHealSource,
 } from '@/api/edits';
+import { bumpImgBust } from '@/lib/imgCacheBust';
 import type { AICategory, AIInstance, Suggestion } from '@/api/edits';
 import type { AIKindType, Mask, Params, Spot } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
@@ -57,7 +59,8 @@ export type GroupId = 'crop' | 'retouch' | 'tone' | 'presence' | 'wb' | 'color' 
 
 // SpotMode is the retouch fill mode a new spot is created with (and the toggle
 // the panel offers per spot). Mirrors the server's edit.SpotMode ("" = heal).
-export type SpotMode = 'heal' | 'clone';
+// 'fill' inpaints the region with the ML model — no source patch.
+export type SpotMode = 'heal' | 'clone' | 'fill';
 // The two AI maps whose regions can be picked (label maps with per-region
 // IDs): person instances and scene categories.
 export type AIPickKind = 'person' | 'class';
@@ -172,6 +175,13 @@ interface EditSessionState {
   // Visualize spots: high-pass dust view over the loupe while healing (A key).
   spotVisualize: boolean;
   spotVisualizeThreshold: number; // 0..1, higher = more sensitive
+  // Spot indices with an ML fill generation in flight (row spinner). Indices
+  // are best-effort — a concurrent removal shifts them, and the busy marks
+  // are cleared wholesale when each generation settles.
+  fillBusy: number[];
+  // Spot index whose fill needs the model downloaded: set when GenerateFill
+  // refuses without consent, drives the download dialog in the Retouch group.
+  fillConsent: number | null;
   // The selected local-adjustment mask (index into draft.masks): its overlay
   // handles show on the loupe and its sliders expand in the Masks tab.
   activeMask: number | null;
@@ -236,6 +246,8 @@ export const useEditSession = create<EditSessionState>(() => ({
   spotBrushFeather: 0.5,
   spotVisualize: false,
   spotVisualizeThreshold: 0.4,
+  fillBusy: [],
+  fillConsent: null,
   activeMask: null,
   activeMaskControl: null,
   maskPaint: false,
@@ -692,7 +704,7 @@ export function esBeginSpot(client: ApiClient, spot: Omit<Spot, 'mode'>): number
   esFlushDraft();
   const s = useEditSession.getState();
   if (!s.draft || s.photoId == null) return -1;
-  const full: Spot = s.spotMode === 'clone' ? { ...spot, mode: 'clone' } : { ...spot };
+  const full: Spot = s.spotMode === 'heal' ? { ...spot } : { ...spot, mode: s.spotMode };
   const spots = [...(s.draft.spots ?? []), full];
   const index = spots.length - 1;
   setState({ activeSpot: index });
@@ -723,6 +735,12 @@ export async function esFinishSpot(client: ApiClient, index: number) {
   const s = useEditSession.getState();
   const spots = s.draft?.spots;
   if (s.photoId == null || !s.draft || !spots || !spots[index]) return;
+  // A fill spot has no source to suggest: commit as placed — esCommit's
+  // ensure pass generates (or asks consent for) the inpaint patch.
+  if (spots[index].mode === 'fill') {
+    esCommit(client);
+    return;
+  }
   const gen = ++applyGen;
   const pid = s.photoId;
   try {
@@ -1043,6 +1061,69 @@ export function esCommit(client: ApiClient, patch?: Partial<Params>) {
   // Settle render: drag frames were low-res, so bring the loupe back to the
   // full 2048 (which the server also writes to the pyramid cache).
   schedulePreview(client, 'settle');
+  // Fill spots need their ML patch to exist for the state just committed;
+  // the server fast-paths when nothing changed, so this is free noise-wise.
+  void esEnsureFills(client);
+}
+
+// esEnsureFills asks the server for the inpaint patch of every enabled fill
+// spot in the draft. Runs after every commit: GenerateFill is idempotent and
+// cheap when the patch is cached, and re-keys itself when the spot geometry
+// or decode settings changed — so this one hook covers new fill spots, mode
+// switches, and develop changes that invalidate existing patches. Without the
+// model on disk the server refuses (consent contract) and the first refused
+// index opens the download dialog via fillConsent.
+async function esEnsureFills(client: ApiClient, allowDownload = false, only?: number) {
+  const s = useEditSession.getState();
+  if (s.photoId == null || !s.draft?.spots) return;
+  const pid = s.photoId;
+  const draft = s.draft;
+  for (let i = 0; i < (draft.spots?.length ?? 0); i++) {
+    const sp = draft.spots![i];
+    if (sp.mode !== 'fill' || sp.disabled) continue;
+    if (only != null && i !== only) continue;
+    if (useEditSession.getState().fillBusy.includes(i)) continue;
+    setState((st) => ({ fillBusy: [...st.fillBusy, i] }));
+    try {
+      const res = await generateFill(client, pid, draft, i, allowDownload);
+      if (useEditSession.getState().photoId !== pid) return;
+      if (res.generated) {
+        // New pixels for the same edit hash: refresh thumbs and the loupe.
+        bumpImgBust(pid);
+        schedulePreview(client, 'settle');
+      }
+    } catch (err) {
+      if (useEditSession.getState().photoId !== pid) return;
+      if (isModelNotDownloaded(err)) {
+        setState((st) => (st.fillConsent == null ? { fillConsent: i } : {}));
+      } else {
+        toast.error(`Content-aware fill failed: ${(err as Error).message}`);
+      }
+    } finally {
+      setState((st) => ({ fillBusy: st.fillBusy.filter((b) => b !== i) }));
+    }
+  }
+}
+
+// esConfirmFillDownload re-runs the consent-blocked fill with the download
+// allowed — the dialog's confirm action.
+export function esConfirmFillDownload(client: ApiClient) {
+  const index = useEditSession.getState().fillConsent;
+  setState({ fillConsent: null });
+  if (index == null) return;
+  void esEnsureFills(client, true, index);
+}
+
+// esDeclineFillDownload reverts the consent-blocked spot to heal mode (a fill
+// spot without a model would silently render nothing) and re-runs the source
+// suggestion so it heals from a sensible patch.
+export function esDeclineFillDownload(client: ApiClient) {
+  const s = useEditSession.getState();
+  const index = s.fillConsent;
+  setState({ fillConsent: null });
+  if (index == null || !s.draft?.spots?.[index]) return;
+  esUpdateSpot(client, index, { mode: undefined });
+  void esFinishSpot(client, index);
 }
 
 // esApplyParams replaces the whole draft (paste, picker result, undo) with

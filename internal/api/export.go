@@ -125,6 +125,7 @@ func (x *Export) StartExport(ctx context.Context, req ExportRequest) (*tasks.Tas
 			Copyright:        strings.TrimSpace(req.Copyright),
 			Watermark:        wmSpec,
 			AIMaps:           x.deps.Cache.AIMaps,
+			Fills:            x.deps.Cache.Fills,
 		}, func(it export.Item) {
 			mu.Lock()
 			done++
@@ -176,6 +177,7 @@ func (x *Export) RenderClipboard(ctx context.Context, req ClipboardRenderRequest
 		ExifMode:      "none",
 		Watermark:     wmSpec,
 		AIMaps:        x.deps.Cache.AIMaps,
+		Fills:         x.deps.Cache.Fills,
 	})
 	if err != nil {
 		return nil, err

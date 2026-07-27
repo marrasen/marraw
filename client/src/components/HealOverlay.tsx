@@ -318,6 +318,8 @@ export function HealOverlay({
           // A hidden (eye-toggled) spot keeps a ghost outline so it can still
           // be found and re-enabled, but clearly reads as off.
           const dim = spot.disabled ? 0.35 : undefined;
+          // A fill spot has no source patch: no source ring, no connector.
+          const hasSource = spot.mode !== 'fill';
           if (spot.kind === 'stroke') {
             const strokes = spot.strokes ?? [];
             const sw = (st: Stroke) => Math.max(3, 2 * st.radius * L * k);
@@ -349,19 +351,20 @@ export function HealOverlay({
             const dy = spot.sy - spot.cy;
             return (
               <g key={i} opacity={dim}>
-                {!hideDest && (
+                {hasSource && !hideDest && (
                   <line x1={dcx} y1={dcy} x2={scx} y2={scy} stroke="white" strokeOpacity=".7" strokeDasharray="4 3" />
                 )}
                 {/* Source region (translated copy, dashed outline effect via low opacity) */}
-                {strokes.map((st, j) => (
-                  <path
-                    key={`s${j}`}
-                    d={strokePath(st.pts, dx, dy)}
-                    fill="none" stroke="white" strokeOpacity=".35"
-                    strokeWidth={sw(st)} strokeLinecap="round" strokeLinejoin="round"
-                    strokeDasharray="5 3"
-                  />
-                ))}
+                {hasSource &&
+                  strokes.map((st, j) => (
+                    <path
+                      key={`s${j}`}
+                      d={strokePath(st.pts, dx, dy)}
+                      fill="none" stroke="white" strokeOpacity=".35"
+                      strokeWidth={sw(st)} strokeLinecap="round" strokeLinejoin="round"
+                      strokeDasharray="5 3"
+                    />
+                  ))}
                 {/* Destination region */}
                 {!hideDest &&
                   strokes.map((st, j) => (
@@ -405,11 +408,13 @@ export function HealOverlay({
           const [scx, scy] = toBoxPx(spot.sx, spot.sy);
           return (
             <g key={i} opacity={dim}>
-              {!hideDest && (
+              {hasSource && !hideDest && (
                 <line x1={dcx} y1={dcy} x2={scx} y2={scy} stroke="white" strokeOpacity=".7" strokeDasharray="4 3" />
               )}
               {/* Source ring (dashed) */}
-              <circle cx={scx} cy={scy} r={r} fill="transparent" stroke="white" strokeOpacity=".85" strokeDasharray="5 3" />
+              {hasSource && (
+                <circle cx={scx} cy={scy} r={r} fill="transparent" stroke="white" strokeOpacity=".85" strokeDasharray="5 3" />
+              )}
               {/* Destination ring (solid) */}
               {!hideDest && (
                 <circle cx={dcx} cy={dcy} r={r} fill="rgba(120,180,255,.12)" stroke="white" strokeOpacity=".95" strokeWidth={1.75} />
@@ -423,6 +428,7 @@ export function HealOverlay({
           spot={spots[activeSpot]}
           index={activeSpot}
           hideDest={hideDest}
+          hasSource={spots[activeSpot].mode !== 'fill'}
           toBoxPx={toBoxPx}
           radiusBoxPx={radiusBoxPx}
           begin={beginGrip}
@@ -457,6 +463,7 @@ function ActiveHandles({
   spot,
   index,
   hideDest,
+  hasSource,
   toBoxPx,
   radiusBoxPx,
   begin,
@@ -466,6 +473,7 @@ function ActiveHandles({
   spot: Spot;
   index: number;
   hideDest: boolean;
+  hasSource: boolean;
   toBoxPx: (fx: number, fy: number) => [number, number];
   radiusBoxPx: (spot: Spot) => number;
   begin: (e: React.PointerEvent, kind: string, index: number) => void;
@@ -481,7 +489,9 @@ function ActiveHandles({
       {!hideDest && (
         <Dot at={[dcx, dcy]} cursor="move" grip="dest" begin={beginAt} move={move} end={end} title="Move fill" />
       )}
-      <Dot at={[scx, scy]} cursor="move" grip="source" begin={beginAt} move={move} end={end} title="Move source" />
+      {hasSource && (
+        <Dot at={[scx, scy]} cursor="move" grip="source" begin={beginAt} move={move} end={end} title="Move source" />
+      )}
       {!hideDest && spot.kind !== 'stroke' && (
         <Dot at={[dcx + r, dcy]} cursor="ew-resize" grip="radius" begin={beginAt} move={move} end={end} title="Size" />
       )}

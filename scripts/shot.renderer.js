@@ -1345,6 +1345,37 @@ if (shot === 'cull') {
     overlay: !!document.querySelector('[data-testid="heal-overlay"]'),
     activeSpot: es.getState().activeSpot,
   };
+} else if (shot === 'healfill') {
+  // Content-aware fill: a fill-mode spot (no source ring, no source dot) with
+  // its ML patch generated — needs migan-1.onnx in the models dir; the ensure
+  // pass runs the inference after the commit.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200); // initial preview settles
+  mw.esUpdate({ spots: [] }); // idempotence: drop any persisted spots
+  mw.esCommit();
+  await sleep(300);
+  mw.esSetHealing(true);
+  mw.esSetSpotMode('fill');
+  const idx = mw.esBeginSpot({ cx: 0.5, cy: 0.5, radius: 0.05, sx: 0, sy: 0, feather: 0.5 });
+  await mw.esFinishSpot(idx);
+  mw.esSetActiveSpot(idx);
+  // The ensure pass (inference) runs after the commit; wait for it to drain.
+  await until(() => es.getState().fillBusy.length === 0, 60000).catch(() => {});
+  await until(() => mw.esPreviewSettled(), 30000).catch(() => {});
+  await sleep(400);
+  window.__healProbe = {
+    healing: es.getState().healing,
+    spotCount: es.getState().draft?.spots?.length ?? 0,
+    mode: es.getState().draft?.spots?.[0]?.mode ?? '',
+    overlay: !!document.querySelector('[data-testid="heal-overlay"]'),
+    sourceDot: !!document.querySelector('[title="Move source"]'),
+    destDot: !!document.querySelector('[title="Move fill"]'),
+    consentOpen: !!document.querySelector('[data-testid="ai-model-dialog"]'),
+    activeSpot: es.getState().activeSpot,
+  };
+  mw.esSetSpotMode('heal'); // leave the session default as found
 } else if (shot === 'spotvis') {
   // Visualize spots: the high-pass dust view over the loupe while healing.
   ui().setMode('develop');

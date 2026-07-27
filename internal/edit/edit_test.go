@@ -319,7 +319,7 @@ func TestSpotNormalize(t *testing.T) {
 	e := &Params{Spots: []Spot{
 		{Mode: SpotClone, CX: -3, CY: 0.5, Radius: 9, SX: 2, SY: 0.123456789, Feather: 3, Opacity: -1},
 		{Mode: "heal", CX: 0.3, CY: 0.3, Radius: 0.01, SX: 0.4, SY: 0.4}, // folds to ""
-		{Kind: "fill", CX: 0.5, CY: 0.5, Radius: 0.02},                   // unknown kind: dropped
+		{Kind: "polygon", CX: 0.5, CY: 0.5, Radius: 0.02},                // unknown kind: dropped
 		{Mode: "bogus", CX: 0.5, CY: 0.5, Radius: 0.02},                  // unknown mode: dropped
 	}}
 	e.Normalize()
@@ -398,6 +398,32 @@ func TestSpotHashing(t *testing.T) {
 	b, _ := json.Marshal(&l)
 	if bytes.Contains(b, []byte("spots")) {
 		t.Errorf("librawInputs must omit spots entirely, got %s", b)
+	}
+}
+
+func TestSpotNormalizeFill(t *testing.T) {
+	e := &Params{Spots: []Spot{
+		// A circle fill: kept, and the meaningless source reference zeroes
+		// so equivalent fills hash identically.
+		{Mode: SpotFill, CX: 0.5, CY: 0.5, Radius: 0.02, SX: 0.62, SY: 0.55, Feather: 0.5},
+		// Fill composes with the brush region too.
+		{Kind: "stroke", Mode: SpotFill, SX: 0.3, SY: 0.3,
+			Strokes: []Stroke{{Radius: 0.02, Pts: []float64{0.4, 0.4, 0.45, 0.4}}}},
+	}}
+	e.Normalize()
+	if len(e.Spots) != 2 {
+		t.Fatalf("fill spots must survive Normalize, got %d", len(e.Spots))
+	}
+	for i, s := range e.Spots {
+		if s.Mode != SpotFill {
+			t.Errorf("spot %d: mode = %q, want fill", i, s.Mode)
+		}
+		if s.SX != 0 || s.SY != 0 {
+			t.Errorf("spot %d: fill source reference must zero, got (%v,%v)", i, s.SX, s.SY)
+		}
+	}
+	if (&Params{Spots: []Spot{{Mode: SpotFill, CX: 0.5, CY: 0.5, Radius: 0.02}}}).IsNeutral() {
+		t.Error("a fill spot must not be neutral")
 	}
 }
 

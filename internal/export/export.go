@@ -63,6 +63,9 @@ type Request struct {
 	// AIMaps resolves model-generated mask maps so AI masks export exactly as
 	// previewed; nil renders them as no-ops.
 	AIMaps *pyramid.AIMapStore
+	// Fills resolves cached ML fill patches so fill spots export exactly as
+	// previewed; nil renders them as no-ops.
+	Fills *pyramid.FillStore
 }
 
 type Item struct {
@@ -255,7 +258,8 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, phot
 	// exactly as the pyramid renders do.
 	pyramid.ApplyExposureEV(rgba, params.ResidualExpEV(), params)
 	rgba = pyramid.ApplyGeometry(rgba, params)
-	pyramid.ApplyFinish(rgba, lookGamma, params, req.AIMaps.SetFor(photo.CacheKey, params))
+	pyramid.ApplyFinish(rgba, lookGamma, params,
+		req.AIMaps.SetFor(photo.CacheKey, params), req.Fills.SetFor(photo.CacheKey, params))
 	var out *image.RGBA
 	if req.Watermark != nil && req.Watermark.Frame != nil {
 		// Frame: the border grows around the photo — LongEdge constrains the

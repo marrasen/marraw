@@ -151,12 +151,16 @@ type Mask struct {
 // SpotMode selects how a retouch spot fills its destination. "" (the default)
 // heals: it copies the source patch's texture but tone-matches it to the
 // destination's surroundings, so a differently-lit source blends in. "clone"
-// copies the source verbatim (feathered at the edge).
+// copies the source verbatim (feathered at the edge). "fill" inpaints the
+// region with an ML model instead of a source patch — the pixels are not
+// derivable from the params alone, so renders composite a cached patch
+// (pyramid.FillStore) and skip the spot while none exists.
 type SpotMode string
 
 const (
 	SpotHeal  SpotMode = ""      // canonical default: tone-matched
 	SpotClone SpotMode = "clone" // verbatim copy
+	SpotFill  SpotMode = "fill"  // ML content-aware inpaint
 )
 
 // Spot is one retouch: a feathered destination region filled from a source
@@ -169,9 +173,10 @@ const (
 // "" is a circle of Radius at (CX,CY); "stroke" is a painted region — the
 // union of Strokes (each with its own radius/feather), with (CX,CY) a
 // reference point on the region (its enclosing-circle center) and the fill
-// sourced from the region translated by (SX-CX, SY-CY). A future "fill" kind
-// would carry an ML inpaint. Normalize drops kinds it doesn't know, the
-// unknown-mask-type precedent, so old builds ignore future spots gracefully.
+// sourced from the region translated by (SX-CX, SY-CY). Mode "fill" uses no
+// source: SX/SY are normalized to zero and the region is ML-inpainted.
+// Normalize drops kinds and modes it doesn't know, the unknown-mask-type
+// precedent, so old builds ignore future spots gracefully.
 type Spot struct {
 	Kind string `json:"kind,omitempty"`
 	// Disabled hides the spot from rendering without deleting it — the
@@ -440,6 +445,10 @@ func (e *Params) normalizeSpots() {
 		}
 		switch s.Mode {
 		case SpotHeal, SpotClone:
+		case SpotFill:
+			// Fill has no source patch; zero the reference so equivalent
+			// fills hash identically wherever the source dot happened to be.
+			s.SX, s.SY = 0, 0
 		default:
 			continue // unknown mode: drop, like an unknown mask type
 		}
@@ -614,6 +623,34 @@ func (e *Params) Hash() string {
 	n := *e
 	n.Normalize()
 	b, _ := json.Marshal(&n)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// SpotFillKey identifies the pixels an ML fill for s is generated from: the
+// spot's region geometry plus everything that shapes the pre-look oriented
+// frame it is inpainted against — the LibRaw decode subset (which also covers
+// the residual-exposure fold via ExpEV) and the quarter-rotate/mirror. Same
+// key ⇒ a cached fill patch is still valid; any input change re-keys so the
+// patch regenerates instead of compositing stale pixels. Composite-only
+// fields (Mode, Disabled, circle Feather, Opacity, SX/SY) stay out of the
+// key — tweaking them must not cost an inference. The model version is
+// appended by the store, the MapVer precedent.
+func (e *Params) SpotFillKey(s *Spot) string {
+	seed := struct {
+		Decode string   `json:"decode"`
+		Rotate int      `json:"rotate"`
+		FlipH  bool     `json:"flipH,omitempty"`
+		Kind   string   `json:"kind,omitempty"`
+		CX     float64  `json:"cx"`
+		CY     float64  `json:"cy"`
+		Radius float64  `json:"radius"`
+		Str    []Stroke `json:"strokes,omitempty"`
+	}{
+		Decode: e.LibrawInputsHash(), Rotate: e.RotateTurns(), FlipH: e.FlipH,
+		Kind: s.Kind, CX: s.CX, CY: s.CY, Radius: s.Radius, Str: s.Strokes,
+	}
+	b, _ := json.Marshal(&seed)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])[:12]
 }

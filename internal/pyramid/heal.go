@@ -20,7 +20,7 @@ import (
 // centers are mapped through the frame transform; the radius (a fraction of the
 // frame long edge) carries straight over because output→frame is a pure
 // rotation with no scale.
-func ApplyHeal(img *image.RGBA, e *edit.Params) {
+func ApplyHeal(img *image.RGBA, e *edit.Params, fills FillSet) {
 	if !e.HasSpots() {
 		return
 	}
@@ -36,10 +36,18 @@ func ApplyHeal(img *image.RGBA, e *edit.Params) {
 		if s.Disabled {
 			continue
 		}
+		// Fill mode composites a cached ML inpaint instead of a source patch;
+		// a spot whose patch is not generated yet composites nothing.
+		if s.Mode == edit.SpotFill {
+			if p := fills[e.SpotFillKey(s)]; p != nil {
+				applyFill(img, w, h, &f, long, s, p)
+			}
+			continue
+		}
 		// Skip kinds and modes this build doesn't know — the newMaskEvaluator
 		// precedent. A sidecar from a newer version renders here without a
-		// Normalize pass (editsForHash parses stored JSON as-is), so a future
-		// "fill" spot must be ignored, not misrendered as a circle.
+		// Normalize pass (editsForHash parses stored JSON as-is), so an
+		// unknown future spot must be ignored, not misrendered as a circle.
 		switch s.Kind {
 		case "":
 			applyHealSpot(img, w, h, &f, long, s)
@@ -57,6 +65,131 @@ func healModeKnown(m edit.SpotMode) bool {
 		return true
 	}
 	return false
+}
+
+// applyFill composites one fill-mode spot's cached inpaint patch. The patch
+// holds the spot's SpotFillWindow rendered pre-look and inpainted at
+// generation resolution; every render bilinear-samples it through the frame
+// mapping (the brushEval/aiEval precedent), so previews, tiles and export
+// composite the same pixels. Coverage is the same feathered disc / brush
+// plane the heal modes use — only the source of new pixels differs, and no
+// membrane fit is needed: the model already blended against the surround.
+func applyFill(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edit.Spot, p *FillPatch) {
+	if f.frameW == 0 || f.frameH == 0 {
+		return
+	}
+	wx0, wy0, wx1, wy1 := SpotFillWindow(f.frameW/f.frameH, s)
+	if wx1 <= wx0 || wy1 <= wy0 {
+		return
+	}
+	pb := p.Img.Bounds()
+	pw, ph := pb.Dx(), pb.Dy()
+	if pw == 0 || ph == 0 {
+		return
+	}
+	// patchAt samples the patch at an output-space coordinate: output → frame
+	// fractions → window-relative → patch pixels.
+	patchAt := func(ox, oy float64) (r, g, b float64, ok bool) {
+		fx, fy := f.framePoint(ox, oy)
+		u := (fx/f.frameW - wx0) / (wx1 - wx0)
+		v := (fy/f.frameH - wy0) / (wy1 - wy0)
+		if u < 0 || u > 1 || v < 0 || v > 1 {
+			return 0, 0, 0, false
+		}
+		r8, g8, b8, _ := sampleBilinear(p.Img, u*float64(pw-1), v*float64(ph-1))
+		return float64(r8), float64(g8), float64(b8), true
+	}
+
+	opQ := int32(256)
+	if s.Opacity > 0 {
+		opQ = int32(math.Round(s.Opacity * 256))
+	}
+
+	switch s.Kind {
+	case "": // circle: the applyHealSpot coverage with patchAt as the source
+		radPx := s.Radius * long
+		if radPx < 0.75 {
+			return
+		}
+		dcx, dcy := f.outputPoint(s.CX*f.frameW, s.CY*f.frameH)
+		var flut [weightLUTSize]uint16
+		feather := math.Max(s.Feather, 1.0/weightLUTSize)
+		for q := range flut {
+			d := math.Sqrt(float64(q) / (weightLUTSize - 1))
+			flut[q] = uint16(math.Round(256 * smoothstep01((1-d)/feather)))
+		}
+		invR2 := 1 / (radPx * radPx)
+		x0 := max(0, int(math.Floor(dcx-radPx)))
+		x1 := min(w-1, int(math.Ceil(dcx+radPx)))
+		y0 := max(0, int(math.Floor(dcy-radPx)))
+		y1 := min(h-1, int(math.Ceil(dcy+radPx)))
+		for y := y0; y <= y1; y++ {
+			dy := float64(y) - dcy
+			row := img.Pix[y*img.Stride:]
+			for x := x0; x <= x1; x++ {
+				dx := float64(x) - dcx
+				q := (dx*dx + dy*dy) * invR2
+				if q >= 1 {
+					continue
+				}
+				wq := int32(flut[int(q*(weightLUTSize-1))]) * opQ >> 8
+				if wq == 0 {
+					continue
+				}
+				blendFillPixel(row, x, wq, float64(x), float64(y), patchAt)
+			}
+		}
+	case "stroke": // the applyHealStroke coverage with patchAt as the source
+		if len(s.Strokes) == 0 {
+			return
+		}
+		pw2, ph2 := brushPlaneDims(f.frameW, f.frameH)
+		ev := &brushEval{
+			f: *f, plane: brushPlaneFor(s.Strokes, pw2, ph2), pw: pw2, ph: ph2,
+			covToW: covToWeight,
+			xMin:   0, xMax: 1 << 30, yMin: 0, yMax: 1 << 30,
+		}
+		ev.strokeBounds(s.Strokes)
+		x0 := max(0, ev.xMin)
+		x1 := min(w, ev.xMax)
+		y0 := max(0, ev.yMin)
+		y1 := min(h, ev.yMax)
+		if x0 >= x1 || y0 >= y1 {
+			return
+		}
+		wrow := make([]uint16, w)
+		for y := y0; y < y1; y++ {
+			rx0, rx1 := ev.weightRow(y, wrow)
+			if rx0 >= rx1 {
+				continue
+			}
+			row := img.Pix[y*img.Stride:]
+			for x := rx0; x < rx1; x++ {
+				wq := int32(wrow[x]) * opQ >> 8
+				if wq == 0 {
+					continue
+				}
+				blendFillPixel(row, x, wq, float64(x), float64(y), patchAt)
+			}
+		}
+	}
+}
+
+// blendFillPixel Q8-blends one patch sample into a pixel row — the shared
+// tail of both applyFill coverage loops.
+func blendFillPixel(row []uint8, x int, wq int32, ox, oy float64, patchAt func(x, y float64) (r, g, b float64, ok bool)) {
+	sr, sg, sb, ok := patchAt(ox, oy)
+	if !ok {
+		return
+	}
+	i := x * 4
+	r0, g0, b0 := int32(row[i]), int32(row[i+1]), int32(row[i+2])
+	nr := int32(clamp8(int32(math.Round(sr))))
+	ng := int32(clamp8(int32(math.Round(sg))))
+	nb := int32(clamp8(int32(math.Round(sb))))
+	row[i] = clamp8(r0 + (nr-r0)*wq>>8)
+	row[i+1] = clamp8(g0 + (ng-g0)*wq>>8)
+	row[i+2] = clamp8(b0 + (nb-b0)*wq>>8)
 }
 
 // applyHealSpot fills one circular spot from its source patch.
