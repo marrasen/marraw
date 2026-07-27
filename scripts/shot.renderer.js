@@ -259,15 +259,33 @@ if (shot === 'cull') {
   mw.esCommit();
   await sleep(800);
   document.querySelector('[data-testid="ai-mask-scene"]')?.click();
-  await until(() => document.querySelector('[data-testid="scene-chips"]'), 120000);
+  await until(() => document.querySelector('[data-testid="scene-chips"] button'), 120000);
   await sleep(300);
   const chips = [...document.querySelectorAll('[data-testid="scene-chips"] button')];
+  const cats = es.getState().aiDetect.class?.categories ?? [];
+  // Chip hover tints the region through the shared AI pick overlay — no arming
+  // needed, the overlay stays mounted through Develop.
+  let tintShown = false;
+  if (cats.length) {
+    mw.esSetAIHover({ kind: 'class', id: cats[0].id });
+    tintShown = await until(() => {
+      const img = document.querySelector('[data-testid="ai-pick-tint"] img');
+      return img && img.complete && img.naturalWidth > 0;
+    }, 30000).then(() => true, () => false);
+    await sleep(600); // tint fade-in
+    mw.esSetAIHover(null);
+  }
   chips[0]?.click();
   await until(() => (es.getState().draft?.masks ?? []).some((m) => m.aiKind === 'class'), 5000);
   await sleep(400);
   window.__maskProbe = {
     chips: chips.map((c) => c.textContent),
     classMaskAdded: (es.getState().draft?.masks ?? []).some((m) => m.aiKind === 'class'),
+    tintShown,
+    // The chips must survive an add (regression: they used to vanish), and the
+    // scene pick tool stays armed for more picks.
+    chipsAfterAdd: document.querySelectorAll('[data-testid="scene-chips"] button').length,
+    armedAfterAdd: es.getState().aiPickArmed,
   };
 } else if (shot === 'personpick') {
   // Person pick tool: click the People button (model + map must be present —
@@ -283,22 +301,23 @@ if (shot === 'cull') {
   mw.esCommit();
   await sleep(800);
   document.querySelector('[data-testid="ai-mask-person"]')?.click();
-  await until(() => es.getState().personPick != null, 120000);
+  await until(() => es.getState().aiDetect.person != null, 120000);
   await sleep(300);
-  const pick = es.getState().personPick;
+  const pick = es.getState().aiDetect.person;
   if (pick?.instances?.length) {
-    mw.esSetPersonHover(pick.instances[0].id);
+    mw.esSetAIHover({ kind: 'person', id: pick.instances[0].id });
     await until(() => {
-      const img = document.querySelector('[data-testid="person-pick-tint"] img');
+      const img = document.querySelector('[data-testid="ai-pick-tint"] img');
       return img && img.complete && img.naturalWidth > 0;
     }, 30000);
     await sleep(600); // tint fade-in
   }
   window.__maskProbe = {
-    overlayMounted: !!document.querySelector('[data-testid="person-pick-overlay"]'),
+    overlayMounted: !!document.querySelector('[data-testid="ai-pick-overlay"]'),
+    armed: es.getState().aiPickArmed,
     instances: pick?.instances?.length ?? 0,
     chips: [...document.querySelectorAll('[data-testid="person-chips"] button')].map((c) => c.textContent),
-    tintShown: !!document.querySelector('[data-testid="person-pick-tint"] img'),
+    tintShown: !!document.querySelector('[data-testid="ai-pick-tint"] img'),
   };
 } else if (shot === 'depthrange') {
   // Depth window as ONE two-thumb range row: generate a depth mask via the

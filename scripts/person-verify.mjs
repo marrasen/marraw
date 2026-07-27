@@ -1,7 +1,7 @@
 // End-to-end probe for per-person instance masks against a running marrawd:
 // runs real RF-DETR-Seg inference via Edits.GenerateAIMap (person), then
 // seeds a synthetic two-person plane (the subjsharp-verify precedent) for
-// the deterministic checks — instance chips, the AIInstancePlane hit-test
+// the deterministic checks — instance chips, the AIMapPlane hit-test
 // plane, per-instance tint separation, and render behavior — so the checks
 // hold even when the fixture photo contains no people.
 // Usage: node scripts/person-verify.mjs "<disposable raw folder>"
@@ -175,7 +175,7 @@ const insA = gen2.instances ?? [];
 check(insA.every((v, i) => i === 0 || insA[i - 1].cx <= v.cx), 'instances sorted left-to-right');
 
 // The real plane is fetchable and dimensioned like a 1024-long-edge map.
-const realPlane = decodeGrayPNG((await call('Edits.AIInstancePlane', [p.id, base])).bytes);
+const realPlane = decodeGrayPNG((await call('Edits.AIMapPlane', [p.id, 'person', base])).bytes);
 check(Math.max(realPlane.width, realPlane.height) === 1024,
   `instance plane long edge is 1024 (${realPlane.width}x${realPlane.height})`);
 {
@@ -185,7 +185,7 @@ check(Math.max(realPlane.width, realPlane.height) === 1024,
 }
 
 // --- 2. Missing map is a clean error, never a download ---
-const missErr = await call('Edits.AIInstancePlane', [photos[2].id, base]).then(() => null, (e) => e);
+const missErr = await call('Edits.AIMapPlane', [photos[2].id, 'person', base]).then(() => null, (e) => e);
 check(missErr != null && /no person map/.test(missErr.message), `missing map errors cleanly (${missErr?.message})`);
 
 // --- 3. Seed a deterministic two-person plane for photo[1] ---
@@ -216,11 +216,11 @@ try {
   check(ins.length === 2 && ins[0].cx < 0.5 && ins[1].cx > 0.5, 'centroids on the expected sides');
 
   // The oriented plane round-trips: same IDs, and rotate swaps the dims.
-  const plane = decodeGrayPNG((await call('Edits.AIInstancePlane', [q.id, qbase])).bytes);
+  const plane = decodeGrayPNG((await call('Edits.AIMapPlane', [q.id, 'person', qbase])).bytes);
   check(plane.width === pw && plane.height === ph, `plane dims match (${plane.width}x${plane.height})`);
   check(plane.pix[Math.round(ph * 0.5) * pw + Math.round(pw * 0.2)] === 1, 'left person samples as ID 1');
   check(plane.pix[Math.round(ph * 0.5) * pw + Math.round(pw * 0.8)] === 2, 'right person samples as ID 2');
-  const rotated = decodeGrayPNG((await call('Edits.AIInstancePlane', [q.id, { ...qbase, rotate: 1 }])).bytes);
+  const rotated = decodeGrayPNG((await call('Edits.AIMapPlane', [q.id, 'person', { ...qbase, rotate: 1 }])).bytes);
   check(rotated.width === ph && rotated.height === pw, `rotated plane swaps dims (${rotated.width}x${rotated.height})`);
 
   // --- 4. Per-instance tints are non-empty and differ from each other ---

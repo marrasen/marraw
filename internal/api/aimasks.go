@@ -211,24 +211,30 @@ func (e *Edits) fillDetections(res *AIMapResult, photoKey string, kind edit.AIKi
 	}
 }
 
-// AIInstancePlane returns the person-instance ID plane oriented into the
-// edit's frame (params carries rotate/flip) as a grayscale PNG — pixel value
-// = instance ID, 0 = background. The client hit-tests hover against it
-// locally, so picking runs at pointer speed with no round trips. Requires
-// the map to exist (call GenerateAIMap first — it owns consent and returns
-// the mapVer + instances); a missing map is an error, never a download.
-func (e *Edits) AIInstancePlane(ctx context.Context, photoID int64, params edit.Params) (*aprot.Blob, error) {
+// AIMapPlane returns a label-ID map oriented into the edit's frame (params
+// carries rotate/flip) as a grayscale PNG — pixel value = label ID, 0 =
+// background. Only the two label maps carry pickable IDs: person (pixel =
+// instance ID, 1..N left to right) and class (pixel = category ID); subject
+// and depth are continuous mattes with nothing to hit-test. The client
+// hit-tests hover against the plane locally, so picking runs at pointer speed
+// with no round trips. Requires the map to exist (call GenerateAIMap first —
+// it owns consent and returns the mapVer + detections); a missing map is an
+// error, never a download.
+func (e *Edits) AIMapPlane(ctx context.Context, photoID int64, kind edit.AIKind, params edit.Params) (*aprot.Blob, error) {
+	if kind != edit.AIPerson && kind != edit.AIClass {
+		return nil, fmt.Errorf("ai masks: %q has no ID plane (only person and class maps do)", kind)
+	}
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
 	if err != nil {
 		return nil, err
 	}
-	ver, ok := aimask.MapVerFor(edit.AIPerson)
+	ver, ok := aimask.MapVerFor(kind)
 	if !ok || e.deps.Cache.AIMaps == nil {
-		return nil, fmt.Errorf("ai masks: %q has no model available yet", edit.AIPerson)
+		return nil, fmt.Errorf("ai masks: %q has no model available yet", kind)
 	}
-	m := e.deps.Cache.AIMaps.LoadOriented(photo.CacheKey, edit.AIPerson, ver, params.RotateTurns(), params.FlipH)
+	m := e.deps.Cache.AIMaps.LoadOriented(photo.CacheKey, kind, ver, params.RotateTurns(), params.FlipH)
 	if m == nil {
-		return nil, fmt.Errorf("ai masks: no person map for this photo yet")
+		return nil, fmt.Errorf("ai masks: no %s map for this photo yet", kind)
 	}
 	var buf bytes.Buffer
 	g := &image.Gray{Pix: m.Pix, Stride: m.W, Rect: image.Rect(0, 0, m.W, m.H)}

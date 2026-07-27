@@ -1,16 +1,16 @@
 // Server-rendered mask-tint cache (Edits.MaskTintPreview PNGs as object
 // URLs), shared by MaskHoverTint (panel-hovered committed masks) and
-// PersonPickOverlay (loupe-hovered person candidates): hovering the same
-// mask twice shouldn't refetch. Keyed by everything that changes the
-// rendered plane; object URLs are revoked on eviction. Sized for a chips
-// row of people plus a handful of panel masks.
+// AIPickOverlay (chip/loupe-hovered person + scene candidates): hovering the
+// same mask twice shouldn't refetch. Keyed by everything that changes the
+// rendered plane; object URLs are revoked on eviction. Sized for both chip
+// rows (people + scene categories) plus a handful of panel masks.
 import type { ApiClient } from '@/api/client';
 import type { Mask, Params } from '@/api/edit';
 import { maskTintPreview } from '@/api/edits';
 
 const tintCache = new Map<string, string>();
 const tintOrder: string[] = [];
-const TINT_CACHE_CAP = 16;
+const TINT_CACHE_CAP = 32;
 
 // tintKey identifies one mask's rendered tint: the mask itself plus the
 // geometry that moves the display frame under it.

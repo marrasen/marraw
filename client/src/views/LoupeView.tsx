@@ -35,7 +35,7 @@ import { MaskOverlay } from '@/components/MaskOverlay';
 import { HealOverlay } from '@/components/HealOverlay';
 import { SpotVisualizeLayer } from '@/components/SpotVisualize';
 import { MaskHoverTint } from '@/components/MaskHoverTint';
-import { PersonPickOverlay } from '@/components/PersonPickOverlay';
+import { AIPickOverlay } from '@/components/AIPickOverlay';
 import { AIKind, type Params } from '@/api/edit';
 
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
@@ -454,7 +454,7 @@ export function CinemaImage({
   const wbPicking = useEditSession((s) => s.wbPicking);
   const cropping = useEditSession((s) => s.cropping);
   const healing = useEditSession((s) => s.healing);
-  const personPicking = useEditSession((s) => s.personPick != null);
+  const aiPicking = useEditSession((s) => s.aiPickArmed != null);
   const activeMask = useEditSession((s) => s.activeMask);
   const uiMode = useUIStore((s) => s.mode);
   const draft = useEditSession((s) => s.draft);
@@ -484,7 +484,7 @@ export function CinemaImage({
     !cropping &&
     !wbPicking &&
     !healing &&
-    !personPicking &&
+    !aiPicking &&
     esPhotoId === photo.id &&
     !!draft?.masks?.[activeMask];
   // The heal overlay places/edits retouch spots on the ordinary (cropped)
@@ -501,14 +501,16 @@ export function CinemaImage({
   const spotVisualize = useEditSession((s) => s.spotVisualize);
   const visualizeUI = healUI && spotVisualize;
   // The hover tint needs no selected mask — hovering any Masks-panel row
-  // shows that mask's weight over the ordinary Develop view.
+  // shows that mask's weight over the ordinary Develop view. Suppressed while
+  // AI picking: the pick overlay owns the tint then (chip + loupe hover).
   const tintUI =
-    uiMode === 'develop' && !cropping && !wbPicking && !healing && !personPicking && esPhotoId === photo.id;
-  // The person pick overlay hit-tests hover and click against the instance
-  // plane on the ordinary Develop view — same exclusions as the heal tool
-  // (its own tint replaces the panel hover tint while live).
-  const personUI =
-    uiMode === 'develop' && personPicking && !cropping && !wbPicking && !healing && esPhotoId === photo.id && !!draft;
+    uiMode === 'develop' && !cropping && !wbPicking && !healing && !aiPicking && esPhotoId === photo.id;
+  // The AI pick overlay tints person/scene regions on the ordinary Develop
+  // view. It stays mounted through normal Develop (so chip hover always tints)
+  // and only takes pointer events while armed — same tool exclusions as the
+  // panel hover tint above, minus the armed gate.
+  const aiTintUI =
+    uiMode === 'develop' && !cropping && !wbPicking && !healing && esPhotoId === photo.id && !!draft;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -901,9 +903,11 @@ export function CinemaImage({
   const [dragging, setDragging] = useState(false);
   // Slack means there is nearly always somewhere to drag the photo, zoomed
   // in or not — only crop mode pins it.
-  const pannable = haveDims && !cropping && !healUI && !personUI;
+  // AI picking does NOT block panning: the pick overlay lets pointerdown
+  // bubble here and only adds a mask when the drag stays under a few pixels.
+  const pannable = haveDims && !cropping && !healUI;
   const onPointerDown = (e: React.PointerEvent) => {
-    if (wbPicking || cropping || healUI || personUI || e.button !== 0 || !pannable) return;
+    if (wbPicking || cropping || healUI || e.button !== 0 || !pannable) return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -1119,7 +1123,7 @@ export function CinemaImage({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}
         onPointerCancel={onPointerEnd}
-        onDoubleClick={() => !wbPicking && setZoom(zoom === 'fit' ? 1 : 'fit')}
+        onDoubleClick={() => !wbPicking && !aiPicking && setZoom(zoom === 'fit' ? 1 : 'fit')}
       >
         {haveDims ? (
           // The slack wrapper is the actual scroll content: the box centered
@@ -1224,8 +1228,8 @@ export function CinemaImage({
                 boxH={boxH}
               />
             )}
-            {personUI && draft && (
-              <PersonPickOverlay
+            {aiTintUI && draft && (
+              <AIPickOverlay
                 client={client}
                 draft={draft}
                 photoId={photo.id}

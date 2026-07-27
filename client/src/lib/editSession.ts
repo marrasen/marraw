@@ -20,7 +20,7 @@ import {
   setEditParams,
   suggestHealSource,
 } from '@/api/edits';
-import type { AIInstance, Suggestion } from '@/api/edits';
+import type { AICategory, AIInstance, Suggestion } from '@/api/edits';
 import type { AIKindType, Mask, Params, Spot } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
@@ -58,6 +58,9 @@ export type GroupId = 'crop' | 'retouch' | 'tone' | 'presence' | 'wb' | 'color' 
 // SpotMode is the retouch fill mode a new spot is created with (and the toggle
 // the panel offers per spot). Mirrors the server's edit.SpotMode ("" = heal).
 export type SpotMode = 'heal' | 'clone';
+// The two AI maps whose regions can be picked (label maps with per-region
+// IDs): person instances and scene categories.
+export type AIPickKind = 'person' | 'class';
 
 // Default edge softness for a freshly placed spot (fraction of its radius).
 export const SPOT_FEATHER_DEFAULT = 0.5;
@@ -181,13 +184,20 @@ interface EditSessionState {
   // Mask row currently hovered in the Masks panel: the loupe shows that
   // mask's red weight tint while set (see MaskHoverTint).
   tintMask: number | null;
-  // Person pick tool: non-null = hovering the loupe highlights the person
-  // under the cursor and clicking adds that person's mask (the wbPicking
-  // pattern, carrying GenerateAIMap's person result for the overlay/chips).
-  personPick: { mapVer: string; instances: AIInstance[] } | null;
-  // Person instance ID currently hovered (loupe pointer or panel chip); the
-  // PersonPickOverlay tints that instance.
-  personHover: number | null;
+  // AI region-mask detections, kept per kind until the photo changes. Both
+  // chip rows (people + scene) can show at once; hovering a chip or — while
+  // armed — the loupe tints that region. mapVer pins the generating model.
+  aiDetect: {
+    person: { mapVer: string; instances: AIInstance[] } | null;
+    class: { mapVer: string; categories: AICategory[] } | null;
+  };
+  // The armed image-pick tool: while set, hovering the loupe tints the region
+  // under the cursor and clicking adds its mask. null = not armed (chips may
+  // still be visible). Panning by click-drag keeps working while armed.
+  aiPickArmed: AIPickKind | null;
+  // The region currently hovered (loupe pointer or a panel chip); the
+  // AIPickOverlay renders its tint.
+  aiHover: { kind: AIPickKind; id: number } | null;
   // Brush tool settings shared between the Masks panel and the paint overlay.
   // Radius is a fraction of the frame long edge (the server's stroke model).
   brushRadius: number;
@@ -230,8 +240,9 @@ export const useEditSession = create<EditSessionState>(() => ({
   activeMaskControl: null,
   maskPaint: false,
   tintMask: null,
-  personPick: null,
-  personHover: null,
+  aiDetect: { person: null, class: null },
+  aiPickArmed: null,
+  aiHover: null,
   brushRadius: 0.05,
   brushFeather: 0.5,
   brushFlow: 1,
@@ -468,8 +479,9 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     activeMaskControl: null,
     maskPaint: false,
     tintMask: null,
-    personPick: null,
-    personHover: null,
+    aiDetect: { person: null, class: null },
+    aiPickArmed: null,
+    aiHover: null,
     keyAdjust: false,
   }));
   const params = await getEditParams(client, photoId).catch(() => null);
@@ -525,7 +537,7 @@ useUIStore.subscribe((s, prev) => {
       es.activeMaskControl != null ||
       es.maskPaint ||
       es.healing ||
-      es.personPick != null
+      es.aiPickArmed != null
     ) {
       setState({
         activeControl: null,
@@ -536,8 +548,8 @@ useUIStore.subscribe((s, prev) => {
         healing: false,
         activeSpot: null,
         spotVisualize: false,
-        personPick: null,
-        personHover: null,
+        aiPickArmed: null,
+        aiHover: null,
       });
     }
   }
@@ -554,7 +566,7 @@ export function esSetWBPicking(on: boolean) {
   // control so +/- can't keep adjusting an invisible slider.
   setState(
     on
-      ? { wbPicking: true, wbPickBase: s.draft, activeControl: null, keyAdjust: false, personPick: null, personHover: null }
+      ? { wbPicking: true, wbPickBase: s.draft, activeControl: null, keyAdjust: false, aiPickArmed: null, aiHover: null }
       : { wbPicking: false, wbPickBase: null },
   );
 }
@@ -567,7 +579,7 @@ export function esSetCropping(client: ApiClient, on: boolean) {
   if (s.cropping === on) return;
   // Entering slides the develop drawer away — drop any keyboard-focused
   // control so +/- can't keep adjusting an invisible slider.
-  setState(on ? { cropping: true, activeControl: null, keyAdjust: false, personPick: null, personHover: null } : { cropping: false });
+  setState(on ? { cropping: true, activeControl: null, keyAdjust: false, aiPickArmed: null, aiHover: null } : { cropping: false });
   if (!on) {
     esCommit(client); // persist the crop; the commit re-renders the cropped frame
   } else {
@@ -591,41 +603,53 @@ export function esSetHealing(on: boolean) {
   if (on) useUIStore.getState().setDevelopTab('masks'); // the Retouch section lives on the Local tab
   setState(
     on
-      ? { healing: true, personPick: null, personHover: null }
+      ? { healing: true, aiPickArmed: null, aiHover: null }
       : { healing: false, activeSpot: null, spotVisualize: false },
   );
 }
 
-// --- Person pick tool ---
+// --- AI region pick tool (people + scene) ---
 
-// esSetPersonPick enters/exits the person pick tool (non-null = active).
-// Entering slides the develop drawer away like the other loupe tools, and
-// drops the heal tool — they share the Local tab, so both could otherwise be
-// live at once. Crop and WB can't race it: their overlays hide the panel
-// button, and they clear personPick on entry regardless. Exiting clears the
-// hover.
-export function esSetPersonPick(pick: { mapVer: string; instances: AIInstance[] } | null) {
+// esSetAIDetect stores a kind's detection result (the chip row). Kept until
+// the photo changes; both kinds can hold a result at once. No side effects —
+// arming the image-pick tool is separate (esArmAIPick).
+export function esSetAIDetect(kind: AIPickKind, result: EditSessionState['aiDetect'][AIPickKind]) {
+  setState((s) => ({ aiDetect: { ...s.aiDetect, [kind]: result } }));
+}
+
+// esArmAIPick enters/exits the image-pick tool for one kind (null = disarm).
+// Arming slides the develop drawer away like the other loupe tools and drops
+// the heal/paint tools it shares the Local tab with; it needs a detection for
+// that kind. Crop and WB can't race it: their overlays hide the panel button
+// and they disarm on entry regardless. Disarming leaves the chips (aiDetect)
+// in place — only a photo switch clears those.
+export function esArmAIPick(kind: AIPickKind | null) {
   const s = useEditSession.getState();
-  if (pick && !s.draft) return;
+  if (kind && (!s.draft || !s.aiDetect[kind])) return;
   setState(
-    pick
+    kind
       ? {
-          personPick: pick,
-          personHover: null,
+          aiPickArmed: kind,
+          aiHover: null,
           activeControl: null,
           keyAdjust: false,
           healing: false,
           activeSpot: null,
           spotVisualize: false,
+          maskPaint: false,
         }
-      : { personPick: null, personHover: null },
+      : { aiPickArmed: null, aiHover: null },
   );
 }
 
-// esSetPersonHover highlights one instance (from the loupe pointer or a
-// panel chip); the PersonPickOverlay renders the tint.
-export function esSetPersonHover(id: number | null) {
-  setState({ personHover: id });
+// esSetAIHover highlights one region (from the loupe pointer or a panel
+// chip); the AIPickOverlay renders its tint. Bails when the region is
+// unchanged so a stream of pointer moves over one region doesn't churn the
+// hover reference (and the tint fetch that keys off it).
+export function esSetAIHover(hover: { kind: AIPickKind; id: number } | null) {
+  const cur = useEditSession.getState().aiHover;
+  if (cur?.kind === hover?.kind && cur?.id === hover?.id) return;
+  setState({ aiHover: hover });
 }
 
 // esSetActiveSpot selects a spot (its overlay circles + expanded row).
@@ -751,6 +775,11 @@ export function esSetActiveMask(index: number | null) {
     activeMaskControl: null,
     maskPaint: index == null ? false : s.maskPaint,
     keyAdjust: false,
+    // Selecting a mask hands the loupe to its overlay handles — disarm the AI
+    // pick tool so the two don't fight over pointer events. Deselecting leaves
+    // the armed state untouched.
+    aiPickArmed: index == null ? s.aiPickArmed : null,
+    aiHover: index == null ? s.aiHover : null,
   }));
 }
 
@@ -813,9 +842,10 @@ export function esStepMask(client: ApiClient, dir: 1 | -1, big = false) {
   commitTimer = window.setTimeout(() => esCommit(client), 600);
 }
 
-// esSetMaskPaint toggles brush paint mode for the active brush mask.
+// esSetMaskPaint toggles brush paint mode for the active brush mask. Painting
+// owns the loupe pointer, so entering it disarms the AI pick tool.
 export function esSetMaskPaint(on: boolean) {
-  setState({ maskPaint: on });
+  setState(on ? { maskPaint: true, aiPickArmed: null, aiHover: null } : { maskPaint: false });
 }
 
 // esSetBrushTool updates the shared brush tool settings (radius/feather/flow/
@@ -847,7 +877,15 @@ export function esAddMaskObject(client: ApiClient, mask: Mask) {
   if (!s.draft || s.photoId == null) return;
   const masks = [...(s.draft.masks ?? []), mask];
   useUIStore.getState().setDevelopTab('masks');
-  setState({ activeMask: masks.length - 1, activeMaskControl: null, maskPaint: mask.type === 'brush' });
+  // AI adds (chips, image click, Subject/Depth) keep the pick tool armed so
+  // several regions can be added in a row; a parametric add (Linear/Radial/
+  // Brush) needs the loupe for handles, so it disarms.
+  setState({
+    activeMask: masks.length - 1,
+    activeMaskControl: null,
+    maskPaint: mask.type === 'brush',
+    ...(mask.type === 'ai' ? {} : { aiPickArmed: null, aiHover: null }),
+  });
   esCommit(client, { masks });
 }
 
