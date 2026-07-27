@@ -505,6 +505,12 @@ export function CinemaImage({
   // AI picking: the pick overlay owns the tint then (chip + loupe hover).
   const tintUI =
     uiMode === 'develop' && !cropping && !wbPicking && !healing && !aiPicking && esPhotoId === photo.id;
+  // Spot rows live in the Retouch section whether or not the heal tool is on,
+  // so their hover tint must show in ordinary Develop too — like the mask tint
+  // above but WITHOUT the !healing gate (it also rides on top while healing,
+  // where HealOverlay's rings sit above it).
+  const spotTintUI =
+    uiMode === 'develop' && !cropping && !wbPicking && !aiPicking && esPhotoId === photo.id && !!draft;
   // The AI pick overlay tints person/scene regions on the ordinary Develop
   // view. It stays mounted through normal Develop (so chip hover always tints)
   // and only takes pointer events while armed — same tool exclusions as the
@@ -1244,7 +1250,7 @@ export function CinemaImage({
               />
             )}
             {visualizeUI && <SpotVisualizeLayer src={shownSrc} boxW={boxW} boxH={boxH} />}
-            {healUI && draft && (
+            {spotTintUI && draft && (
               <SpotHoverTint draft={draft} frameW={rfw} frameH={rfh} boxW={boxW} boxH={boxH} />
             )}
             {healUI && draft && (
