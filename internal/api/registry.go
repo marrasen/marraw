@@ -11,6 +11,7 @@ import (
 	"github.com/marrasen/aprot/tasks"
 
 	"github.com/marrasen/marraw/internal/decode"
+	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/infer"
 	"github.com/marrasen/marraw/internal/pyramid"
@@ -45,6 +46,9 @@ type Deps struct {
 	// Infer runs ONNX models for the AI features (mask map generation). Nil
 	// is valid — the AI RPCs then report inference as unconfigured.
 	Infer *infer.Manager
+	// IOGate stages background full decodes through sequential per-device
+	// reads (see internal/diskio). Nil is valid — opens stay direct.
+	IOGate *diskio.Gate
 
 	mu     sync.RWMutex
 	server *aprot.Server

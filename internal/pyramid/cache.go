@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/marrasen/marraw/internal/decode"
+	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/store"
@@ -85,6 +86,10 @@ type Cache struct {
 	// Fixed-level renders stay silent — they are fast, and mostly background
 	// prerender work nobody is staring at.
 	Progress func(photoID int64, editHash string, frac float64)
+	// IOGate, when set, stages background/prefetch full decodes through
+	// sequential per-device reads (see internal/diskio); nil is valid and
+	// keeps every open direct.
+	IOGate *diskio.Gate
 }
 
 func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
@@ -348,16 +353,26 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		}
 	}
 
-	if err := proc.Open(photo.Path()); err != nil {
-		return err
+	// Fast path: unedited small levels from the embedded JPEG preview. The
+	// probe uses a direct open — a thumb hit reads a small slice of the file
+	// and must not cost a staged whole-file read.
+	opened := false
+	if n, _ := strconv.Atoi(level); edits == nil && level != "full" && n <= 1024 {
+		if err := proc.Open(photo.Path()); err != nil {
+			return err
+		}
+		opened = true
+		if ok, err := c.tryThumbRoute(proc, photo, n, editHash); ok {
+			return err
+		}
 	}
 
-	// Fast path: unedited small levels from the embedded JPEG preview.
-	if edits == nil && level != "full" {
-		if n, _ := strconv.Atoi(level); n <= 1024 {
-			if ok, err := c.tryThumbRoute(proc, photo, n, editHash); ok {
-				return err
-			}
+	// RAW route reads ~the whole file: stage it through the per-device gate
+	// for background/prefetch work. A thumb miss at visible priority keeps
+	// the already-open handle (direct path, unchanged behavior).
+	if !opened || decode.ShouldBuffer(c.IOGate, prio) {
+		if err := decode.OpenForDecode(ctx, c.IOGate, proc, photo.Path(), prio); err != nil {
+			return err
 		}
 	}
 

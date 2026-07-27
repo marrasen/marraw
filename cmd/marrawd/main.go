@@ -26,6 +26,7 @@ import (
 
 	"github.com/marrasen/marraw/internal/api"
 	"github.com/marrasen/marraw/internal/decode"
+	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/imghttp"
 	"github.com/marrasen/marraw/internal/infer"
 	"github.com/marrasen/marraw/internal/pyramid"
@@ -83,6 +84,12 @@ func main() {
 	pool := decode.NewPool(runtime.NumCPU())
 	defer pool.Close()
 
+	// Staged I/O for background full decodes: sequential per-device reads
+	// keep spinning disks at streaming speed. The budget bounds the C memory
+	// held in staged buffers (invisible to the Go memory limit above).
+	ioGate := diskio.NewGate()
+	log.Printf("staged-read budget %d MiB", ioGate.Budget()>>20)
+
 	// The preview cache lives under the data dir by default, but the user can
 	// relocate it (Settings). A stored custom directory wins at startup.
 	defaultCacheDir := filepath.Join(*dataDir, "cache", "previews")
@@ -97,6 +104,7 @@ func main() {
 	// AI-mask maps live beside (not inside) the preview cache: they cost an
 	// inference to regenerate, so preview Clear/Relocate must not touch them.
 	cache.AIMaps = pyramid.NewAIMapStore(filepath.Join(*dataDir, "aimaps"))
+	cache.IOGate = ioGate
 	handles := decode.NewHandleCache(3)
 	defer handles.Close()
 
@@ -118,7 +126,7 @@ func main() {
 	}
 
 	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir, WatermarkDir: watermarkDir,
-		Infer: infer.NewManager(filepath.Join(*dataDir, "models"))}
+		Infer: infer.NewManager(filepath.Join(*dataDir, "models")), IOGate: ioGate}
 	registry, library, _, _ := api.NewRegistry(deps)
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any

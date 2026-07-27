@@ -75,6 +75,11 @@ type Processor struct {
 	// onProgress, when set, receives a coarse 0..1 fraction of the running
 	// dcraw pipeline. Must not be changed while Process runs.
 	onProgress func(frac float64)
+	// buf backs the current open when it came from OpenBuffer. LibRaw's
+	// buffer datastream references this memory without copying, so it may
+	// only be freed right after libraw_recycle/libraw_close has destroyed
+	// the datastream — freeBuf is called nowhere else.
+	buf *FileBuf
 }
 
 func New() (*Processor, error) {
@@ -101,6 +106,13 @@ func lrErr(op string, code C.int) error {
 
 // Open reads and parses the file's metadata (no pixel decode).
 func (p *Processor) Open(path string) error {
+	if p.buf != nil {
+		// A previous OpenBuffer's memory is still referenced by the handle's
+		// datastream. LibRaw does recycle internally on open, but a failed
+		// open can bail out before that point — recycle explicitly so the
+		// buffer is provably unreferenced before it is freed.
+		p.Recycle()
+	}
 	// libraw_recycle deliberately preserves params, and a pool worker reuses one
 	// handle across jobs. Opening a file sizes it according to the params in
 	// effect at that moment, so a half-size decode (the calibration pass) would
@@ -115,6 +127,35 @@ func (p *Processor) Open(path string) error {
 	}
 	p.unpacked = false
 	return nil
+}
+
+// OpenBuffer parses a RAW held in memory (no pixel decode) — the staged-I/O
+// alternative to Open for files pre-read by the diskio gate. Ownership of buf
+// transfers to the Processor unconditionally: it is freed on the next
+// Recycle/Close/Open/OpenBuffer, or immediately if this open fails. Callers
+// must not touch buf afterwards.
+func (p *Processor) OpenBuffer(buf *FileBuf) error {
+	if p.buf != nil {
+		p.Recycle() // destroy the previous datastream, then free its buffer
+	}
+	DefaultParams().apply(p.h) // same load-bearing reset as Open
+	if ret := C.libraw_open_buffer(p.h, buf.ptr, C.size_t(buf.size)); ret != 0 {
+		// LibRaw deletes the new datastream on failure, so buf is unreferenced.
+		buf.Free()
+		return lrErr("open buffer", ret)
+	}
+	p.buf = buf
+	p.unpacked = false
+	return nil
+}
+
+// freeBuf releases a held OpenBuffer backing. Only call immediately after
+// libraw_recycle/libraw_close has destroyed the datastream referencing it.
+func (p *Processor) freeBuf() {
+	if p.buf != nil {
+		p.buf.Free()
+		p.buf = nil
+	}
 }
 
 type Metadata struct {
@@ -396,15 +437,17 @@ func (p *Processor) progressFrac() float64 {
 
 // Recycle resets the handle so it can Open another file.
 func (p *Processor) Recycle() {
-	C.libraw_recycle(p.h)
+	C.libraw_recycle(p.h) // destroys the datastream — must precede freeBuf
+	p.freeBuf()
 	p.unpacked = false
 }
 
 func (p *Processor) Close() {
 	if p.h != nil {
-		C.libraw_close(p.h)
+		C.libraw_close(p.h) // recycles internally — must precede freeBuf
 		p.h = nil
 	}
+	p.freeBuf()
 	if p.cb != nil {
 		C.free(unsafe.Pointer(p.cb))
 		p.cb = nil

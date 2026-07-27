@@ -199,10 +199,11 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 			// concurrent caller can't race in a zero measurement.
 			// Timed per stage (like pyramid's RAW-render log): a large wait=
 			// means the pool preempted us with higher-priority work, a large
-			// measure= means the pass is disk-read bound, a large rest= means
-			// the serialized side effects (DB writes, seed, sidecar) dominate.
+			// read= means the pass is disk-bound (I/O-gate wait + staged
+			// read), a large rest= means the serialized side effects (DB
+			// writes, seed, sidecar) dominate.
 			enq := time.Now()
-			var wait, fnD, thumbD, measureD time.Duration
+			var wait, fnD, readD, thumbD, measureD time.Duration
 			err := l.deps.Pool.Do(gctx, p.CacheKey+"|calibrate", decode.PriorityBackground,
 				func(jctx context.Context, proc *libraw.Processor) error {
 					wait = time.Since(enq)
@@ -211,7 +212,18 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 					if err := jctx.Err(); err != nil {
 						return err
 					}
-					if err := proc.Open(p.Path()); err != nil {
+					var err error
+					if !p.BaseExpEV.Valid {
+						// First calibration runs MeasureAutoBrightEV — a full
+						// unpack — so stage the whole file through the I/O gate.
+						err = decode.OpenForDecode(jctx, l.deps.IOGate, proc, p.Path(), decode.PriorityBackground)
+					} else {
+						// Steady state only reads the embedded thumb; buffering
+						// the whole file for that would be pure waste.
+						err = proc.Open(p.Path())
+					}
+					readD = time.Since(fnStart)
+					if err != nil {
 						return err
 					}
 					if !p.Sharpness.Valid || !p.PHash.Valid || needSubj {
@@ -240,7 +252,7 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 							}
 						}
 					}
-					thumbD = time.Since(fnStart)
+					thumbD = time.Since(fnStart) - readD
 					if p.BaseExpEV.Valid {
 						return nil // only the thumb-based backfills were missing
 					}
@@ -263,9 +275,10 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 					return nil
 				})
 			if gctx.Err() == nil {
-				log.Printf("calibrate: %s wait=%s thumb=%s measure=%s rest=%s",
-					p.FileName, wait.Round(time.Millisecond), thumbD.Round(time.Millisecond),
-					measureD.Round(time.Millisecond), (fnD - thumbD - measureD).Round(time.Millisecond))
+				log.Printf("calibrate: %s wait=%s read=%s thumb=%s measure=%s rest=%s",
+					p.FileName, wait.Round(time.Millisecond), readD.Round(time.Millisecond),
+					thumbD.Round(time.Millisecond), measureD.Round(time.Millisecond),
+					(fnD - readD - thumbD - measureD).Round(time.Millisecond))
 			}
 			if err != nil && gctx.Err() == nil {
 				task.Output(p.FileName + ": " + err.Error())
