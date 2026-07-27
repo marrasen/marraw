@@ -906,8 +906,16 @@ export function CinemaImage({
   // AI picking does NOT block panning: the pick overlay lets pointerdown
   // bubble here and only adds a mask when the drag stays under a few pixels.
   const pannable = haveDims && !cropping && !healUI;
+  // The right button is a dedicated pan grip: it pans in EVERY mode — including
+  // crop, WB, and mask picking — where the left button is busy placing/dragging.
+  // Each overlay lets right-clicks bubble through (they ignore non-left buttons),
+  // so the pan starts here. In crop there is nowhere to pan until Ctrl+scroll
+  // zooms the frame past fit; then the box overflows and the drag scrolls it.
+  // Cancel a mode with Esc, not right-click.
   const onPointerDown = (e: React.PointerEvent) => {
-    if (wbPicking || cropping || healUI || e.button !== 0 || !pannable) return;
+    const right = e.button === 2;
+    if (!right && e.button !== 0) return; // only left / right pan
+    if (right ? !haveDims : wbPicking || !pannable) return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -1123,6 +1131,10 @@ export function CinemaImage({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}
         onPointerCancel={onPointerEnd}
+        onContextMenu={(e) => {
+          // Right button pans everywhere; keep the browser menu off the photo.
+          if (haveDims) e.preventDefault();
+        }}
         onDoubleClick={() => !wbPicking && !aiPicking && setZoom(zoom === 'fit' ? 1 : 'fit')}
       >
         {haveDims ? (
@@ -1138,12 +1150,6 @@ export function CinemaImage({
             onClick={onImageClick}
             onPointerMove={onMagnifierMove}
             onPointerLeave={() => setCursor(null)}
-            onContextMenu={(e) => {
-              if (wbPicking) {
-                e.preventDefault();
-                esWBPickReset(client); // revert picks, stay in the picker
-              }
-            }}
           >
             {/* Low-res bridge: the always-warm 512 fills the same box and, as a
                 double-buffered DecodedImage, holds the previous frame until the

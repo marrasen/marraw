@@ -105,6 +105,7 @@ export function CropOverlay({
   };
 
   const beginDrag = (e: React.PointerEvent, grip: Grip) => {
+    if (e.button !== 0) return; // right button pans the frame (LoupeView), never drags the crop
     e.stopPropagation();
     e.preventDefault();
     try {

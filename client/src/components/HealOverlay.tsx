@@ -242,6 +242,7 @@ export function HealOverlay({
   // new selection — routing them by activeSpot would move the old spot.
   const grip = useRef<{ kind: string; index: number; start: Spot; startFrame: [number, number] } | null>(null);
   const beginGrip = (e: React.PointerEvent, kind: string, index: number) => {
+    if (e.button !== 0) return; // right button pans (LoupeView); don't grab the spot
     e.stopPropagation();
     e.preventDefault();
     esSetActiveSpot(index);

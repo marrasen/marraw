@@ -11,12 +11,13 @@
 //
 // The overlay stays mounted through normal Develop so chip hover always tints;
 // it only takes pointer events (and shows the crosshair) while armed. Armed,
-// it still lets click-drag PAN: pointerdown does not stop propagation (the pan
-// starts in LoupeView's container), and a window pointerup adds the mask only
-// when the pointer barely moved — a drag past a few pixels is a pan and adds
-// nothing. The tool stays armed after an add so several regions can be added
-// in a row; Esc (keyboard.ts), right-click, or re-pressing the panel button
-// disarm it.
+// the left button PICKS (a near-stationary click adds the hovered region) yet
+// still PANS: pointerdown does not stop propagation (the pan starts in
+// LoupeView's container), and a window pointerup adds the mask only when the
+// pointer barely moved — a drag past a few pixels is a pan and adds nothing.
+// The right button always pans (it never picks). The tool stays armed after an
+// add so several regions can be added in a row; Esc (keyboard.ts) or
+// re-pressing the panel button disarm it.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ApiClient } from '@/api/client';
 import type { Mask, Params } from '@/api/edit';
@@ -25,7 +26,6 @@ import { aiClassMask, aiPersonMask } from '@/lib/controlSpecs';
 import { frameFromDisplay } from '@/lib/crop';
 import {
   esAddMaskObject,
-  esArmAIPick,
   esSetAIHover,
   useEditSession,
   type AIPickKind,
@@ -214,11 +214,6 @@ export function AIPickOverlay({
         };
         window.addEventListener('pointerup', onUp);
         window.addEventListener('pointercancel', stop);
-      }}
-      onContextMenu={(e) => {
-        if (!armed) return;
-        e.preventDefault();
-        esArmAIPick(null); // leave without adding; chips persist
       }}
     >
       <div
