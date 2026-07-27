@@ -2,6 +2,8 @@ import { useRef, useState } from 'react';
 import type { Params, Spot, Stroke } from '@/api/edit';
 import type { ApiClient } from '@/api/client';
 import { displayFromFrame, frameFromDisplay, quant4 } from '@/lib/crop';
+import { useIdle } from '@/lib/useIdle';
+import { cn } from '@/lib/utils';
 import { Dot } from '@/components/MaskOverlay';
 import {
   SPOT_FEATHER_DEFAULT,
@@ -97,6 +99,18 @@ export function HealOverlay({
   const brushFeather = useEditSession((s) => s.spotBrushFeather);
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const [dragging, setDragging] = useState(false);
+  // Render-scope twin of grip.current.kind — the ref stays authoritative for
+  // routing pointermoves (see the comment at the grip ref); this only drives
+  // what renders. While the source is dragged the destination visuals hide so
+  // the live-healed pixels stay visible.
+  const [gripKind, setGripKind] = useState<string | null>(null);
+  const hideDest = gripKind === 'source';
+  // The overlay fades when the mouse rests so the result reads clean; any
+  // activity brings it back. Gated on !dragging: useIdle only sees pointer/key
+  // events, so a drag held still would otherwise go idle mid-gesture. Opacity
+  // only — hit-testing stays live, and any move wakes the UI before a click.
+  const idle = useIdle();
+  const concealed = idle && !dragging;
 
   const spots = draft.spots ?? [];
   const L = Math.max(frameW, frameH);
@@ -240,6 +254,7 @@ export function HealOverlay({
     }
     const [bx, by] = pointFrac(e);
     grip.current = { kind, index, start: spot, startFrame: toFrame(bx, by) };
+    setGripKind(kind);
     setDragging(true);
   };
   const gripMove = (e: React.PointerEvent) => {
@@ -277,6 +292,7 @@ export function HealOverlay({
   const gripEnd = (e: React.PointerEvent) => {
     if (!grip.current) return;
     grip.current = null;
+    setGripKind(null);
     setDragging(false);
     (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
     esCommit(client);
@@ -285,7 +301,10 @@ export function HealOverlay({
   return (
     <div
       ref={rootRef}
-      className="absolute inset-0 z-10 touch-none cursor-crosshair select-none"
+      className={cn(
+        'absolute inset-0 z-10 touch-none cursor-crosshair select-none transition-opacity duration-200',
+        concealed && 'opacity-0',
+      )}
       data-testid="heal-overlay"
       onPointerDown={beginCreate}
       onPointerMove={placeMove}
@@ -330,7 +349,9 @@ export function HealOverlay({
             const dy = spot.sy - spot.cy;
             return (
               <g key={i} opacity={dim}>
-                <line x1={dcx} y1={dcy} x2={scx} y2={scy} stroke="white" strokeOpacity=".7" strokeDasharray="4 3" />
+                {!hideDest && (
+                  <line x1={dcx} y1={dcy} x2={scx} y2={scy} stroke="white" strokeOpacity=".7" strokeDasharray="4 3" />
+                )}
                 {/* Source region (translated copy, dashed outline effect via low opacity) */}
                 {strokes.map((st, j) => (
                   <path
@@ -342,22 +363,24 @@ export function HealOverlay({
                   />
                 ))}
                 {/* Destination region */}
-                {strokes.map((st, j) => (
-                  <path
-                    key={`d${j}`}
-                    d={strokePath(st.pts)}
-                    fill="none" stroke="rgba(120,180,255,.35)"
-                    strokeWidth={sw(st)} strokeLinecap="round" strokeLinejoin="round"
-                  />
-                ))}
-                {strokes.map((st, j) => (
-                  <path
-                    key={`o${j}`}
-                    d={strokePath(st.pts)}
-                    fill="none" stroke="white" strokeOpacity=".95" strokeWidth={1.5}
-                    strokeLinecap="round" strokeLinejoin="round"
-                  />
-                ))}
+                {!hideDest &&
+                  strokes.map((st, j) => (
+                    <path
+                      key={`d${j}`}
+                      d={strokePath(st.pts)}
+                      fill="none" stroke="rgba(120,180,255,.35)"
+                      strokeWidth={sw(st)} strokeLinecap="round" strokeLinejoin="round"
+                    />
+                  ))}
+                {!hideDest &&
+                  strokes.map((st, j) => (
+                    <path
+                      key={`o${j}`}
+                      d={strokePath(st.pts)}
+                      fill="none" stroke="white" strokeOpacity=".95" strokeWidth={1.5}
+                      strokeLinecap="round" strokeLinejoin="round"
+                    />
+                  ))}
               </g>
             );
           }
@@ -382,11 +405,15 @@ export function HealOverlay({
           const [scx, scy] = toBoxPx(spot.sx, spot.sy);
           return (
             <g key={i} opacity={dim}>
-              <line x1={dcx} y1={dcy} x2={scx} y2={scy} stroke="white" strokeOpacity=".7" strokeDasharray="4 3" />
+              {!hideDest && (
+                <line x1={dcx} y1={dcy} x2={scx} y2={scy} stroke="white" strokeOpacity=".7" strokeDasharray="4 3" />
+              )}
               {/* Source ring (dashed) */}
               <circle cx={scx} cy={scy} r={r} fill="transparent" stroke="white" strokeOpacity=".85" strokeDasharray="5 3" />
               {/* Destination ring (solid) */}
-              <circle cx={dcx} cy={dcy} r={r} fill="rgba(120,180,255,.12)" stroke="white" strokeOpacity=".95" strokeWidth={1.75} />
+              {!hideDest && (
+                <circle cx={dcx} cy={dcy} r={r} fill="rgba(120,180,255,.12)" stroke="white" strokeOpacity=".95" strokeWidth={1.75} />
+              )}
             </g>
           );
         })}
@@ -395,6 +422,7 @@ export function HealOverlay({
         <ActiveHandles
           spot={spots[activeSpot]}
           index={activeSpot}
+          hideDest={hideDest}
           toBoxPx={toBoxPx}
           radiusBoxPx={radiusBoxPx}
           begin={beginGrip}
@@ -422,10 +450,13 @@ export function HealOverlay({
 // ActiveHandles draws the grabbable dots for the selected spot: move the
 // destination, move the source, and (circles only — a painted region has no
 // single radius) resize via a dot on the destination ring's east point.
-// Reuses MaskOverlay's Dot so the grip styling can't drift.
+// Reuses MaskOverlay's Dot so the grip styling can't drift. While the source
+// is dragged (hideDest) only the source dot stays — the dest and radius dots
+// sit on the destination and would cover the very pixels being previewed.
 function ActiveHandles({
   spot,
   index,
+  hideDest,
   toBoxPx,
   radiusBoxPx,
   begin,
@@ -434,6 +465,7 @@ function ActiveHandles({
 }: {
   spot: Spot;
   index: number;
+  hideDest: boolean;
   toBoxPx: (fx: number, fy: number) => [number, number];
   radiusBoxPx: (spot: Spot) => number;
   begin: (e: React.PointerEvent, kind: string, index: number) => void;
@@ -446,9 +478,11 @@ function ActiveHandles({
   const beginAt = (e: React.PointerEvent, kind: string) => begin(e, kind, index);
   return (
     <>
-      <Dot at={[dcx, dcy]} cursor="move" grip="dest" begin={beginAt} move={move} end={end} title="Move fill" />
+      {!hideDest && (
+        <Dot at={[dcx, dcy]} cursor="move" grip="dest" begin={beginAt} move={move} end={end} title="Move fill" />
+      )}
       <Dot at={[scx, scy]} cursor="move" grip="source" begin={beginAt} move={move} end={end} title="Move source" />
-      {spot.kind !== 'stroke' && (
+      {!hideDest && spot.kind !== 'stroke' && (
         <Dot at={[dcx + r, dcy]} cursor="ew-resize" grip="radius" begin={beginAt} move={move} end={end} title="Size" />
       )}
     </>
