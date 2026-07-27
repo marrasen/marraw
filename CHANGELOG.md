@@ -5,6 +5,20 @@ Only two constructs are parsed (client/src/lib/changelog.ts): `## X.Y.Z - YYYY-M
 version headers and `-` bullets; everything else is ignored. Newest release first.
 When cutting a release: bump the version in package.json and add a section here.
 
+## 0.7.0 - 2026-07-27
+
+- Remote connections: open a library hosted on another machine — turn on remote access where the photos live, pair a laptop with a token, and it browses and edits the library over the network (e.g. Tailscale) with nothing copied; exports, cache and watermark images all resolve on the host
+- Retouch: content-aware fill — a third spot mode that removes a region by ML-inpainting it, from a one-time on-device model download
+- Retouch: the heal source is picked by matching texture around the spot, with its tone matched to the surroundings
+- Retouch: heal chrome fades when idle and hides the target while you pick a source; hovering a spot's panel row tints its area on the loupe, in or out of healing mode
+- Local: per-person AI masks — hover a person in the loupe to mask just them; the People and Scene mask pickers are now one unified picker
+- Local: an eye toggle hides masks and retouch spots without deleting them
+- Undo: Ctrl+Z outside Develop undoes your most recent action — ratings, flags and other library strokes
+- Loupe: right-drag pans the photo in every mode
+- Export: save and reuse named presets in the export dialog
+- Watermarks: rectangle elements and a polaroid frame; rectangle height follows the short-edge rule so it scales the same at every export size
+- Performance: background full-resolution decodes are staged through a per-device I/O gate, so browsing stays smooth while renders catch up
+
 ## 0.6.0 - 2026-07-19
 
 - Presets: partial presets — choose which sections of the edit a preset carries when saving it
