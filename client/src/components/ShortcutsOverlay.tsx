@@ -2,9 +2,10 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 
 // The handoff "KEYBOARD" plate as an in-app reference, on ? (Shift+/).
-// `wide` cards span the grid and lay their rows out in two columns — used
-// for the develop-control key map, which is long but shallow.
-const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
+// `cols` cards span the full grid width and lay their rows out in that many
+// columns — used for the develop key maps, which are long but shallow, to
+// keep the overlay short enough to fit smaller screens.
+const CARDS: { title: string; rows: [string, string][]; cols?: 2 | 3 }[] = [
   {
     title: 'Navigate',
     rows: [
@@ -41,6 +42,7 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
   },
   {
     title: 'Develop',
+    cols: 2,
     rows: [
       ['Switch panel tab', 'Tab'],
       ['Prev / next control', '↑ / ↓'],
@@ -59,7 +61,7 @@ const CARDS: { title: string; rows: [string, string][]; wide?: boolean }[] = [
   // Mirrors CONTROL_KEYS in lib/keyboard.ts — press to focus, +/- to adjust.
   {
     title: 'Develop controls',
-    wide: true,
+    cols: 3,
     rows: [
       ['Exposure', 'E'],
       ['Brightness', 'B'],
@@ -88,7 +90,7 @@ export function ShortcutsOverlay() {
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-label="Keyboard shortcuts">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={() => setOpen(false)} />
-      <div className="absolute top-1/2 left-1/2 w-[720px] max-w-[90vw] -translate-x-1/2 -translate-y-1/2">
+      <div className="absolute top-1/2 left-1/2 max-h-[92vh] w-[720px] max-w-[90vw] -translate-x-1/2 -translate-y-1/2 overflow-y-auto">
         <div className="mb-3 flex items-baseline gap-3">
           <span className="font-mono text-xs text-primary">KEYBOARD</span>
           <span className="text-lg font-semibold text-white drop-shadow">Muscle memory, preserved</span>
@@ -100,13 +102,16 @@ export function ShortcutsOverlay() {
               key={card.title}
               className={cn(
                 'gap-[9px] rounded-xl border border-glass-border bg-card px-[18px] py-4 shadow-[0_30px_70px_-20px_rgba(0,0,0,.7)]',
-                card.wide ? 'col-span-2 grid grid-cols-2 gap-x-10' : 'flex flex-col',
+                card.cols === 3 && 'col-span-2 grid grid-cols-3 gap-x-10',
+                card.cols === 2 && 'col-span-2 grid grid-cols-2 gap-x-10',
+                !card.cols && 'flex flex-col',
               )}
             >
               <div
                 className={cn(
                   'mb-0.5 text-[10px] tracking-[.06em] text-muted-foreground uppercase',
-                  card.wide && 'col-span-2',
+                  card.cols === 3 && 'col-span-3',
+                  card.cols === 2 && 'col-span-2',
                 )}
               >
                 {card.title}
