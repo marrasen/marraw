@@ -17,6 +17,18 @@ import (
 const (
 	KindText  = "text"
 	KindImage = "image"
+	KindRect  = "rect"
+)
+
+// GradientDir is the direction a rect gradient runs: the start color sits at
+// the named edge's opposite (down = start at the rect top, fading downward).
+type GradientDir string
+
+const (
+	GradientDown  GradientDir = "down"
+	GradientUp    GradientDir = "up"
+	GradientRight GradientDir = "right"
+	GradientLeft  GradientDir = "left"
 )
 
 // Anchor is one of the nine placement positions.
@@ -44,6 +56,15 @@ type Element struct {
 	Color color.NRGBA // alpha ignored; Opacity is the single alpha control
 	// Image elements.
 	AssetPath string
+	// Rect elements: a filled box sized per canvas axis (unlike SizePct's
+	// short-edge rule) so a full-bleed bar is WidthPct 100. Solid fill uses
+	// Color/Opacity; Gradient blends to Color2/Opacity2 along GradientDir.
+	Gradient    bool
+	Color2      color.NRGBA
+	Opacity2    float64 // 0..1; 0 = fade to transparent
+	GradientDir GradientDir
+	WidthPct    float64 // % of canvas width
+	HeightPct   float64 // % of canvas height
 	// Shared geometry.
 	Anchor    Anchor
 	SizePct   float64 // % of short edge: text em size / image height
@@ -54,6 +75,7 @@ type Element struct {
 // Spec is a watermark ready to composite.
 type Spec struct {
 	Elements []Element
+	Frame    *Frame // optional border around the photo; nil = none
 }
 
 // Apply composites every element onto dst in place, after the final resize
@@ -75,6 +97,8 @@ func Apply(dst *image.RGBA, spec Spec) error {
 			err = drawText(dst, el, shortEdge)
 		case KindImage:
 			err = drawImage(dst, el, shortEdge)
+		case KindRect:
+			drawRect(dst, el, shortEdge)
 		}
 		if err != nil && firstErr == nil {
 			firstErr = err
@@ -95,6 +119,12 @@ func clamp01(v float64) float64 {
 // sizePx converts a percent-of-short-edge to pixels (minimum 1).
 func sizePx(pct float64, shortEdge int) int {
 	return max(1, int(math.Round(pct/100*float64(shortEdge))))
+}
+
+// marginPx is sizePx without the 1px floor: margin 0 must mean flush to the
+// edge (a full-bleed rect band would otherwise float 1px off it).
+func marginPx(pct float64, shortEdge int) int {
+	return max(0, int(math.Round(pct/100*float64(shortEdge))))
 }
 
 func hasText(el Element) bool { return strings.TrimSpace(el.Text) != "" }

@@ -46,7 +46,7 @@ func drawText(dst *image.RGBA, el Element, shortEdge int) error {
 	if w <= 0 || h <= 0 {
 		return nil
 	}
-	origin := anchorOrigin(dst.Bounds(), w, h, el.Anchor, sizePx(el.MarginPct, shortEdge))
+	origin := anchorOrigin(dst.Bounds(), w, h, el.Anchor, marginPx(el.MarginPct, shortEdge))
 
 	c := el.Color
 	c.A = alpha8(el.Opacity)

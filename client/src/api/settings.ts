@@ -72,8 +72,15 @@ export type WatermarkAnchorType = typeof WatermarkAnchor[keyof typeof WatermarkA
 export const WatermarkElementType = {
     Text: "text",
     Image: "image",
+    Rect: "rect",
 } as const;
 export type WatermarkElementTypeType = typeof WatermarkElementType[keyof typeof WatermarkElementType];
+
+export const WatermarkFill = {
+    Solid: "solid",
+    Gradient: "gradient",
+} as const;
+export type WatermarkFillType = typeof WatermarkFill[keyof typeof WatermarkFill];
 
 export const WatermarkFontID = {
     Sans: "sans",
@@ -82,6 +89,14 @@ export const WatermarkFontID = {
     Script: "script",
 } as const;
 export type WatermarkFontIDType = typeof WatermarkFontID[keyof typeof WatermarkFontID];
+
+export const WatermarkGradientDir = {
+    Down: "down",
+    Up: "up",
+    Right: "right",
+    Left: "left",
+} as const;
+export type WatermarkGradientDirType = typeof WatermarkGradientDir[keyof typeof WatermarkGradientDir];
 
 export interface AutoPreset {
     id: string;
@@ -155,6 +170,7 @@ export interface Watermark {
     id: string;
     name: string;
     elements: WatermarkElement[];
+    frame: WatermarkFrame;
 }
 
 export interface WatermarkAssetInfo {
@@ -172,10 +188,23 @@ export interface WatermarkElement {
     asset: string;
     assetWidth: number;
     assetHeight: number;
+    fill: WatermarkFillType;
+    color2: string;
+    opacity2: number;
+    gradientDir: WatermarkGradientDirType;
+    widthPct: number;
+    heightPct: number;
     anchor: WatermarkAnchorType;
     sizePct: number;
     marginPct: number;
     opacity: number;
+}
+
+export interface WatermarkFrame {
+    enabled: boolean;
+    widthPct: number;
+    bottomPct: number;
+    color: string;
 }
 
 

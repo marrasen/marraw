@@ -191,6 +191,8 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.RegisterEnumFor(settings, WatermarkElementTypeValues())
 	registry.RegisterEnumFor(settings, WatermarkAnchorValues())
 	registry.RegisterEnumFor(settings, WatermarkFontIDValues())
+	registry.RegisterEnumFor(settings, WatermarkFillValues())
+	registry.RegisterEnumFor(settings, WatermarkGradientDirValues())
 	registry.RegisterEnumFor(edits, edit.WBModeValues())
 	registry.RegisterEnumFor(edits, edit.DemosaicValues())
 	registry.RegisterEnumFor(edits, edit.AIKindValues())

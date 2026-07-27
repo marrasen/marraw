@@ -27,10 +27,40 @@ type WatermarkElementType string
 const (
 	WatermarkText  WatermarkElementType = "text"
 	WatermarkImage WatermarkElementType = "image"
+	WatermarkRect  WatermarkElementType = "rect"
 )
 
 func WatermarkElementTypeValues() []WatermarkElementType {
-	return []WatermarkElementType{WatermarkText, WatermarkImage}
+	return []WatermarkElementType{WatermarkText, WatermarkImage, WatermarkRect}
+}
+
+// WatermarkFill picks how a rect element is painted.
+type WatermarkFill string
+
+const (
+	WatermarkFillSolid    WatermarkFill = "solid"
+	WatermarkFillGradient WatermarkFill = "gradient"
+)
+
+func WatermarkFillValues() []WatermarkFill {
+	return []WatermarkFill{WatermarkFillSolid, WatermarkFillGradient}
+}
+
+// WatermarkGradientDir is the direction a rect gradient runs: the start
+// color sits at the opposite edge (down = start at the rect top).
+type WatermarkGradientDir string
+
+const (
+	WatermarkGradientDown  WatermarkGradientDir = "down"
+	WatermarkGradientUp    WatermarkGradientDir = "up"
+	WatermarkGradientRight WatermarkGradientDir = "right"
+	WatermarkGradientLeft  WatermarkGradientDir = "left"
+)
+
+func WatermarkGradientDirValues() []WatermarkGradientDir {
+	return []WatermarkGradientDir{
+		WatermarkGradientDown, WatermarkGradientUp, WatermarkGradientRight, WatermarkGradientLeft,
+	}
 }
 
 // WatermarkAnchor is one of the nine placement positions.
@@ -87,6 +117,16 @@ type WatermarkElement struct {
 	Asset       string `json:"asset"`
 	AssetWidth  int    `json:"assetWidth"`
 	AssetHeight int    `json:"assetHeight"`
+	// Rect elements: an anchored filled box. Width/height are % of the
+	// canvas width/height (unlike SizePct's short-edge rule) so a full-bleed
+	// bar is widthPct 100. Fill picks solid (Color/Opacity) or a linear
+	// gradient from Color/Opacity to Color2/Opacity2 along GradientDir.
+	Fill        WatermarkFill        `json:"fill"`
+	Color2      string               `json:"color2"`   // #rrggbb
+	Opacity2    float64              `json:"opacity2"` // 0..1; 0 = fade to transparent
+	GradientDir WatermarkGradientDir `json:"gradientDir"`
+	WidthPct    float64              `json:"widthPct"`  // % of canvas width
+	HeightPct   float64              `json:"heightPct"` // % of canvas height
 	// Shared geometry.
 	Anchor    WatermarkAnchor `json:"anchor"`
 	SizePct   float64         `json:"sizePct"`   // % of short edge (text em / image height)
@@ -94,11 +134,23 @@ type WatermarkElement struct {
 	Opacity   float64         `json:"opacity"`   // 0..1
 }
 
+// WatermarkFrame is an optional border added around the photo — the canvas
+// grows, no photo pixels are covered. Widths are % of the framed canvas
+// short edge; BottomPct adds extra height below the photo (polaroid chin).
+// A value (not a pointer) so older stored blobs unmarshal to Enabled false.
+type WatermarkFrame struct {
+	Enabled   bool    `json:"enabled"`
+	WidthPct  float64 `json:"widthPct"`
+	BottomPct float64 `json:"bottomPct"`
+	Color     string  `json:"color"` // #rrggbb
+}
+
 // Watermark is a named overlay set the user applies at export.
 type Watermark struct {
 	ID       string             `json:"id"`
 	Name     string             `json:"name"`
 	Elements []WatermarkElement `json:"elements"`
+	Frame    WatermarkFrame     `json:"frame"`
 }
 
 // Watermark geometry bounds — WATERMARK_LIMITS in
@@ -107,6 +159,11 @@ const (
 	watermarkSizeMin, watermarkSizeMax, watermarkSizeDefault = 0.5, 50.0, 4.0
 	watermarkMarginMax, watermarkMarginDefault               = 25.0, 3.0
 	watermarkTextMax                                         = 200
+
+	watermarkRectDimMin, watermarkRectDimMax              = 1.0, 100.0
+	watermarkRectWidthDefault, watermarkRectHeightDefault = 100.0, 14.0
+	watermarkFrameWidthMin, watermarkFrameWidthMax        = 0.5, 15.0
+	watermarkFrameWidthDefault, watermarkFrameBottomMax   = 3.0, 30.0
 )
 
 // watermarkAssetName is the only shape AddWatermarkAsset produces; enforcing
@@ -126,16 +183,28 @@ func normalizeWatermarkElement(e WatermarkElement) WatermarkElement {
 		e.Anchor = WatermarkBottomRight
 	}
 	e.Text = clampText(e.Text, watermarkTextMax)
-	// Store what the exporter will actually use, so the preview never lies:
-	// anything ParseHexColor would white-fall-back is stored as white.
-	if c := strings.ToLower(strings.TrimSpace(e.Color)); watermarkHexColor.MatchString(c) {
-		e.Color = c
-	} else {
-		e.Color = "#ffffff"
-	}
+	// Store what the exporter will actually use, so the preview never lies.
+	e.Color = normalizeHexColor(e.Color)
 	if !watermarkAssetName.MatchString(e.Asset) {
 		e.Asset, e.AssetWidth, e.AssetHeight = "", 0, 0
 	}
+	if !enumValid(e.Fill, WatermarkFillValues()) {
+		e.Fill = WatermarkFillSolid
+	}
+	if !enumValid(e.GradientDir, WatermarkGradientDirValues()) {
+		e.GradientDir = WatermarkGradientDown
+	}
+	e.Color2 = normalizeHexColor(e.Color2)
+	// Unlike Opacity, 0 is meaningful here: it is the fade-to-transparent end.
+	e.Opacity2 = clampF(e.Opacity2, 0, 1)
+	if e.WidthPct <= 0 {
+		e.WidthPct = watermarkRectWidthDefault
+	}
+	e.WidthPct = clampF(e.WidthPct, watermarkRectDimMin, watermarkRectDimMax)
+	if e.HeightPct <= 0 {
+		e.HeightPct = watermarkRectHeightDefault
+	}
+	e.HeightPct = clampF(e.HeightPct, watermarkRectDimMin, watermarkRectDimMax)
 	if e.SizePct <= 0 {
 		e.SizePct = watermarkSizeDefault
 	}
@@ -145,6 +214,27 @@ func normalizeWatermarkElement(e WatermarkElement) WatermarkElement {
 		e.Opacity = 1
 	}
 	return e
+}
+
+// normalizeWatermarkFrame maps missing or invalid frame fields to defaults,
+// like normalizeWatermarkElement does for elements.
+func normalizeWatermarkFrame(f WatermarkFrame) WatermarkFrame {
+	f.Color = normalizeHexColor(f.Color)
+	if f.WidthPct <= 0 {
+		f.WidthPct = watermarkFrameWidthDefault
+	}
+	f.WidthPct = clampF(f.WidthPct, watermarkFrameWidthMin, watermarkFrameWidthMax)
+	f.BottomPct = clampF(f.BottomPct, 0, watermarkFrameBottomMax)
+	return f
+}
+
+// normalizeHexColor stores what the exporter will actually use: anything
+// ParseHexColor would white-fall-back is stored as white.
+func normalizeHexColor(c string) string {
+	if c = strings.ToLower(strings.TrimSpace(c)); watermarkHexColor.MatchString(c) {
+		return c
+	}
+	return "#ffffff"
 }
 
 func clampF(v, lo, hi float64) float64 {
@@ -178,6 +268,7 @@ func (u *Settings) SetWatermarks(ctx context.Context, watermarks []Watermark) er
 			kept = append(kept, normalizeWatermarkElement(e))
 		}
 		watermarks[i].Elements = kept
+		watermarks[i].Frame = normalizeWatermarkFrame(watermarks[i].Frame)
 	}
 	return u.saveJSON(ctx, settingUIWatermarks, watermarks)
 }
@@ -272,12 +363,28 @@ func toWatermarkSpec(wm Watermark, assetDir string) *watermark.Spec {
 			// normalizeWatermarkElement enforced the content-hash name shape,
 			// so this join cannot escape assetDir.
 			el.AssetPath = filepath.Join(assetDir, e.Asset)
+		case WatermarkRect:
+			el.Kind = watermark.KindRect
+			el.Color = watermark.ParseHexColor(e.Color)
+			el.Gradient = e.Fill == WatermarkFillGradient
+			el.Color2 = watermark.ParseHexColor(e.Color2)
+			el.Opacity2 = e.Opacity2
+			el.GradientDir = watermark.GradientDir(e.GradientDir)
+			el.WidthPct, el.HeightPct = e.WidthPct, e.HeightPct
 		default:
 			continue
 		}
 		spec.Elements = append(spec.Elements, el)
 	}
-	if len(spec.Elements) == 0 {
+	if wm.Frame.Enabled {
+		f := normalizeWatermarkFrame(wm.Frame)
+		spec.Frame = &watermark.Frame{
+			WidthPct:  f.WidthPct,
+			BottomPct: f.BottomPct,
+			Color:     watermark.ParseHexColor(f.Color),
+		}
+	}
+	if len(spec.Elements) == 0 && spec.Frame == nil {
 		return nil
 	}
 	return spec

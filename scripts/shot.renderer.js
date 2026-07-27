@@ -813,6 +813,56 @@ if (shot === 'cull') {
     textDrawn = br > 50 && tl === 0;
   }
   window.__wmProbe = { textDrawn, canvas: !!canvas };
+} else if (shot === 'watermark-frame') {
+  // Rect element + polaroid frame: create a watermark, add a Rectangle, and
+  // enable the frame with a chin (through the store — the same state the
+  // Switch and sliders drive). Probe: corners and chin show the frame
+  // color, the photo area stays the dark placeholder.
+  const btn = (label) =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === label);
+  ui().setWatermarkEditorOpen(true);
+  await sleep(400);
+  btn('New watermark')?.click();
+  await sleep(300);
+  btn('Rectangle')?.click();
+  await sleep(300);
+  {
+    const st = ui();
+    const wm = st.watermarks[st.watermarks.length - 1];
+    if (wm) {
+      mw.useUIStore.setState({
+        watermarks: st.watermarks.map((w) =>
+          w.id === wm.id
+            ? { ...w, frame: { ...w.frame, enabled: true, widthPct: 5, bottomPct: 18 } }
+            : w,
+        ),
+      });
+    }
+  }
+  await sleep(800);
+  // Bring the rect card (last in the element list) into the capture.
+  const list = [...document.querySelectorAll('[role="dialog"] .overflow-y-auto')].pop();
+  if (list) list.scrollTop = list.scrollHeight;
+  await sleep(200);
+  const canvas = document.querySelector('[role="dialog"] canvas');
+  let frameDrawn = false;
+  let scrimDrawn = false;
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    const px = (x, y) => ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
+    const whiteish = (d) => d[0] > 235 && d[1] > 235 && d[2] > 235;
+    const corner = px(2, 2);
+    const side = px(3, canvas.height / 2);
+    // The chin sample sits above the 14%-tall rect scrim that darkens the
+    // very bottom; the scrim sample sits inside it (grey: black 55% over
+    // the white chin).
+    const chin = px(canvas.width / 2, canvas.height * 0.82);
+    const scrim = px(canvas.width / 2, canvas.height - 3);
+    const photo = px(canvas.width / 2, canvas.height / 3);
+    frameDrawn = whiteish(corner) && whiteish(side) && whiteish(chin) && !whiteish(photo);
+    scrimDrawn = scrim[0] > 60 && scrim[0] < 200 && Math.abs(scrim[0] - scrim[2]) < 12;
+  }
+  window.__wmProbe = { frameDrawn, scrimDrawn, canvas: !!canvas };
 } else if (shot === 'subjects' || shot === 'subjectscan') {
   // Library toolbar's subject-scan control (beside "Soft"). Hide the develop
   // panel for maximum toolbar width; on a 1500px window the @container is

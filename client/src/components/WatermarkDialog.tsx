@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, Copy, Image as ImageIcon, Plus, Type, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Copy, Image as ImageIcon, Plus, Square, Type, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { addWatermarkAsset, setWatermarks, type Watermark, type WatermarkElement } from '@/api/settings';
+import {
+  addWatermarkAsset,
+  setWatermarks,
+  type Watermark,
+  type WatermarkElement,
+  type WatermarkFrame,
+} from '@/api/settings';
 import { useApiClient } from '@/api/client';
 import type { ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -14,10 +20,19 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Segmented } from '@/components/ui/segmented';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import { watermarkAssetUrl } from '@/lib/backend';
 import { updateWatermarks } from '@/lib/uiSettings';
 import { cn } from '@/lib/utils';
-import { newImageElement, newTextElement, renderWatermark, WATERMARK_LIMITS } from '@/lib/watermarks';
+import {
+  frameInsets,
+  newImageElement,
+  newRectElement,
+  newTextElement,
+  renderWatermark,
+  sanitizeWatermarkFrame,
+  WATERMARK_LIMITS,
+} from '@/lib/watermarks';
 import { ensureWatermarkFonts, WATERMARK_FONTS, watermarkFontFamily } from '@/lib/watermarkFonts';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
@@ -93,6 +108,7 @@ export function WatermarkDialog() {
       id: crypto.randomUUID(),
       name: `Watermark ${watermarks.length + 1}`,
       elements: [{ ...newTextElement(), text: 'marraw' }],
+      frame: sanitizeWatermarkFrame(undefined),
     };
     commitNow([...watermarks, wm]);
     setSelectedId(wm.id);
@@ -102,6 +118,7 @@ export function WatermarkDialog() {
       id: crypto.randomUUID(),
       name: `${wm.name} copy`,
       elements: wm.elements.map((e) => ({ ...e, id: crypto.randomUUID() })),
+      frame: { ...wm.frame },
     };
     commitNow([...watermarks, copy]);
     setSelectedId(copy.id);
@@ -136,7 +153,7 @@ export function WatermarkDialog() {
           <div className="flex flex-col gap-0.5">
             <span className="text-base font-semibold">Watermarks</span>
             <span className="font-mono text-[11.5px] text-muted-foreground">
-              composited onto exports · sizes are % of the short edge
+              composited onto exports · sizes are % of the output
             </span>
           </div>
           <button
@@ -201,6 +218,12 @@ export function WatermarkDialog() {
               onAddText={() =>
                 patchSelected((w) => ({ ...w, elements: [...w.elements, newTextElement()] }), true)
               }
+              onAddRect={() =>
+                patchSelected((w) => ({ ...w, elements: [...w.elements, newRectElement()] }), true)
+              }
+              onPatchFrame={(patch, immediate) =>
+                patchSelected((w) => ({ ...w, frame: patch(w.frame) }), immediate)
+              }
               onAddImage={async () => {
                 const info = await pickImage();
                 if (!info) return;
@@ -247,6 +270,8 @@ function WatermarkEditor({
   onDuplicate,
   onAddText,
   onAddImage,
+  onAddRect,
+  onPatchFrame,
   onPatchElement,
   onRemoveElement,
   onMoveElement,
@@ -257,6 +282,8 @@ function WatermarkEditor({
   onDuplicate: () => void;
   onAddText: () => void;
   onAddImage: () => void;
+  onAddRect: () => void;
+  onPatchFrame: (patch: (f: WatermarkFrame) => WatermarkFrame, immediate?: boolean) => void;
   onPatchElement: (
     id: string,
     patch: (e: WatermarkElement) => WatermarkElement,
@@ -301,6 +328,52 @@ function WatermarkEditor({
 
       <WatermarkPreview wm={wm} aspect={aspect} />
 
+      <div className="flex h-[42px] items-center gap-2.5 border-t px-4">
+        <span className="text-[11px] tracking-[.06em] text-muted-foreground uppercase">Frame</span>
+        <Switch
+          checked={wm.frame.enabled}
+          onCheckedChange={(enabled) => onPatchFrame((f) => ({ ...f, enabled }), true)}
+          aria-label="Polaroid frame"
+        />
+        {wm.frame.enabled && (
+          <>
+            <span className="text-[11.5px] text-muted-foreground">Border</span>
+            <Slider
+              className="w-[90px]"
+              value={wm.frame.widthPct}
+              min={WATERMARK_LIMITS.frameWidthMin}
+              max={WATERMARK_LIMITS.frameWidthMax}
+              step={0.5}
+              onValueChange={(v) => onPatchFrame((f) => ({ ...f, widthPct: v as number }))}
+              aria-label="Frame border width"
+            />
+            <span className="w-10 text-right font-mono text-[11.5px] tabular-nums">
+              {wm.frame.widthPct.toFixed(1)}%
+            </span>
+            <span className="text-[11.5px] text-muted-foreground">Bottom</span>
+            <Slider
+              className="w-[90px]"
+              value={wm.frame.bottomPct}
+              min={0}
+              max={WATERMARK_LIMITS.frameBottomMax}
+              step={0.5}
+              onValueChange={(v) => onPatchFrame((f) => ({ ...f, bottomPct: v as number }))}
+              aria-label="Frame extra bottom height"
+            />
+            <span className="w-10 text-right font-mono text-[11.5px] tabular-nums">
+              {wm.frame.bottomPct.toFixed(1)}%
+            </span>
+            <input
+              type="color"
+              value={wm.frame.color}
+              onChange={(e) => onPatchFrame((f) => ({ ...f, color: e.target.value }))}
+              className="h-[24px] w-8 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-0.5"
+              aria-label="Frame color"
+            />
+          </>
+        )}
+      </div>
+
       <div className="flex items-center gap-2 border-t px-4 py-2">
         <span className="text-[11px] tracking-[.06em] text-muted-foreground uppercase">Elements</span>
         <div className="ml-auto flex gap-1.5">
@@ -314,13 +387,17 @@ function WatermarkEditor({
               Image
             </Button>
           )}
+          <Button size="sm" variant="outline" onClick={onAddRect}>
+            <Square data-icon="inline-start" />
+            Rectangle
+          </Button>
         </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
         {wm.elements.length === 0 && (
           <div className="py-3 text-xs text-muted-foreground">
-            No elements — add a text line or a logo image.
+            No elements — add a text line, a logo image, or a rectangle.
           </div>
         )}
         {wm.elements.map((el, idx) => (
@@ -378,14 +455,23 @@ function WatermarkPreview({ wm, aspect }: { wm: Watermark; aspect: 'landscape' |
     const H = Math.round(box.h * dpr);
     canvas.width = W;
     canvas.height = H;
+    // With a frame, the preview box IS the framed canvas: the placeholder
+    // photo insets by the border/chin, matching the export geometry.
+    let photo = { x: 0, y: 0, w: W, h: H };
+    if (wm.frame.enabled) {
+      const { border, chin } = frameInsets(wm.frame, W, H);
+      ctx.fillStyle = wm.frame.color;
+      ctx.fillRect(0, 0, W, H);
+      photo = { x: border, y: border, w: W - 2 * border, h: H - 2 * border - chin };
+    }
     // Neutral placeholder "photograph": a soft diagonal ramp, dark enough
     // that white text reads, light enough that black does too.
-    const g = ctx.createLinearGradient(0, 0, W, H);
+    const g = ctx.createLinearGradient(photo.x, photo.y, photo.x + photo.w, photo.y + photo.h);
     g.addColorStop(0, '#4a5060');
     g.addColorStop(0.55, '#343946');
     g.addColorStop(1, '#23262e');
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(photo.x, photo.y, photo.w, photo.h);
     renderWatermark(ctx, wm, W, H, assetsRef.current);
   }, [wm, box.w, box.h, fontsReady, assetTick]);
 
@@ -418,6 +504,9 @@ function ElementEditor({
   client: ApiClient;
 }) {
   const isText = el.type === 'text';
+  const isRect = el.type === 'rect';
+  const isImage = el.type === 'image';
+  const isGradient = isRect && el.fill === 'gradient';
   const fontLabel = useMemo(
     () => WATERMARK_FONTS.find((f) => f.id === el.font)?.label ?? 'Inter',
     [el.font],
@@ -444,9 +533,9 @@ function ElementEditor({
   return (
     <div
       className="mb-2 rounded-[10px] border bg-secondary/40 p-3 dark:bg-white/[.03]"
-      onDragOver={isText ? undefined : (e) => e.preventDefault()}
+      onDragOver={!isImage ? undefined : (e) => e.preventDefault()}
       onDrop={
-        isText
+        !isImage
           ? undefined
           : async (e) => {
               e.preventDefault();
@@ -464,8 +553,23 @@ function ElementEditor({
       <div className="mb-2.5 flex items-center gap-2">
         {isText ? (
           <Type className="size-3.5 shrink-0 text-muted-foreground" />
+        ) : isRect ? (
+          <Square className="size-3.5 shrink-0 text-muted-foreground" />
         ) : (
           <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        )}
+        {isRect && (
+          <Segmented
+            aria-label="Rectangle fill"
+            size="sm"
+            items={[
+              { value: 'solid', label: 'Solid' },
+              { value: 'gradient', label: 'Gradient' },
+            ]}
+            value={el.fill}
+            onValueChange={(fill) => onPatch((x) => ({ ...x, fill }), true)}
+            className="border-0 bg-secondary dark:bg-white/5"
+          />
         )}
         {isText ? (
           <input
@@ -478,7 +582,7 @@ function ElementEditor({
             onKeyDown={stop}
             aria-label="Watermark text"
           />
-        ) : (
+        ) : isImage ? (
           <>
             {el.asset ? (
               <img
@@ -495,7 +599,7 @@ function ElementEditor({
               </Button>
             )}
           </>
-        )}
+        ) : null}
         <div className="ml-auto flex shrink-0 items-center gap-0.5 text-muted-foreground">
           <button
             className="flex size-6 items-center justify-center rounded hover:text-foreground disabled:opacity-30"
@@ -556,7 +660,81 @@ function ElementEditor({
                 />
               </div>,
             )}
-          {control(
+          {isRect &&
+            control(
+              'Fill',
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <input
+                  type="color"
+                  value={el.color}
+                  onChange={(e) => onPatch((x) => ({ ...x, color: e.target.value }))}
+                  className="h-[28px] w-9 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-0.5"
+                  aria-label={isGradient ? 'Gradient start color' : 'Fill color'}
+                />
+                {isGradient && (
+                  <>
+                    <input
+                      type="color"
+                      value={el.color2}
+                      onChange={(e) => onPatch((x) => ({ ...x, color2: e.target.value }))}
+                      className="h-[28px] w-9 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-0.5"
+                      aria-label="Gradient end color"
+                    />
+                    <Segmented
+                      aria-label="Gradient direction"
+                      size="sm"
+                      items={[
+                        { value: 'down', label: '↓' },
+                        { value: 'up', label: '↑' },
+                        { value: 'right', label: '→' },
+                        { value: 'left', label: '←' },
+                      ]}
+                      value={el.gradientDir}
+                      onValueChange={(gradientDir) => onPatch((x) => ({ ...x, gradientDir }), true)}
+                      className="border-0 bg-secondary dark:bg-white/5"
+                    />
+                  </>
+                )}
+              </div>,
+            )}
+          {isRect &&
+            control(
+              'Width',
+              <>
+                <Slider
+                  className="flex-1"
+                  value={el.widthPct}
+                  min={WATERMARK_LIMITS.rectDimMin}
+                  max={WATERMARK_LIMITS.rectDimMax}
+                  step={1}
+                  onValueChange={(v) => onPatch((x) => ({ ...x, widthPct: v as number }))}
+                  aria-label="Rectangle width"
+                />
+                <span className="w-11 text-right font-mono text-[11.5px] tabular-nums">
+                  {Math.round(el.widthPct)}%
+                </span>
+              </>,
+            )}
+          {isRect &&
+            control(
+              'Height',
+              <>
+                <Slider
+                  className="flex-1"
+                  value={el.heightPct}
+                  min={WATERMARK_LIMITS.rectDimMin}
+                  max={WATERMARK_LIMITS.rectDimMax}
+                  step={1}
+                  onValueChange={(v) => onPatch((x) => ({ ...x, heightPct: v as number }))}
+                  aria-label="Rectangle height"
+                />
+                <span className="w-11 text-right font-mono text-[11.5px] tabular-nums">
+                  {Math.round(el.heightPct)}%
+                </span>
+              </>,
+            )}
+          {!isRect &&
+            control(
             'Size',
             <>
               <Slider
@@ -607,6 +785,24 @@ function ElementEditor({
               </span>
             </>,
           )}
+          {isGradient &&
+            control(
+              'End opac.',
+              <>
+                <Slider
+                  className="flex-1"
+                  value={Math.round(el.opacity2 * 100)}
+                  min={0}
+                  max={100}
+                  step={5}
+                  onValueChange={(v) => onPatch((x) => ({ ...x, opacity2: (v as number) / 100 }))}
+                  aria-label="Gradient end opacity"
+                />
+                <span className="w-11 text-right font-mono text-[11.5px] tabular-nums">
+                  {Math.round(el.opacity2 * 100)}%
+                </span>
+              </>,
+            )}
         </div>
 
         <div className="flex shrink-0 flex-col items-center gap-1">

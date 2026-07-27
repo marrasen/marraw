@@ -35,7 +35,7 @@ func drawImage(dst *image.RGBA, el Element, shortEdge int) error {
 	scaled := image.NewRGBA(image.Rect(0, 0, w, h))
 	xdraw.CatmullRom.Scale(scaled, scaled.Bounds(), src, sb, xdraw.Src, nil)
 
-	origin := anchorOrigin(dst.Bounds(), w, h, el.Anchor, sizePx(el.MarginPct, shortEdge))
+	origin := anchorOrigin(dst.Bounds(), w, h, el.Anchor, marginPx(el.MarginPct, shortEdge))
 	rect := image.Rectangle{Min: origin, Max: origin.Add(image.Point{X: w, Y: h})}
 	mask := image.NewUniform(color.Alpha{A: alpha8(el.Opacity)})
 	draw.DrawMask(dst, rect, scaled, image.Point{}, mask, image.Point{}, draw.Over)

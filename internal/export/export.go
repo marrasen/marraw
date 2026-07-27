@@ -256,8 +256,23 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, phot
 	pyramid.ApplyExposureEV(rgba, params.ResidualExpEV(), params)
 	rgba = pyramid.ApplyGeometry(rgba, params)
 	pyramid.ApplyFinish(rgba, lookGamma, params, req.AIMaps.SetFor(photo.CacheKey, params))
-	out := resizeRGBA(rgba, req.LongEdge)
-	pyramid.ApplyOutputSharpen(out, req.SharpenTarget, req.SharpenAmount)
+	var out *image.RGBA
+	if req.Watermark != nil && req.Watermark.Frame != nil {
+		// Frame: the border grows around the photo — LongEdge constrains the
+		// framed result, so Layout gives the final photo box directly and the
+		// photo is resized exactly once. Sharpening runs on the photo alone so
+		// the hard photo/border edge never rings; elements then land on the
+		// framed canvas (anchors, short edge, and margins are framed-relative,
+		// which is what lets text sit in the polaroid chin).
+		fr := *req.Watermark.Frame
+		l := fr.Layout(rgba.Bounds().Dx(), rgba.Bounds().Dy(), req.LongEdge)
+		out = resizeToRGBA(rgba, l.PhotoW, l.PhotoH)
+		pyramid.ApplyOutputSharpen(out, req.SharpenTarget, req.SharpenAmount)
+		out = fr.Compose(out, l)
+	} else {
+		out = resizeRGBA(rgba, req.LongEdge)
+		pyramid.ApplyOutputSharpen(out, req.SharpenTarget, req.SharpenAmount)
+	}
 	if req.Watermark != nil {
 		if err := watermark.Apply(out, *req.Watermark); err != nil {
 			return nil, err
@@ -301,6 +316,18 @@ func resizeRGBA(src *image.RGBA, longEdge int) *image.RGBA {
 		return src
 	}
 	w, h := fitLongEdge(b.Dx(), b.Dy(), longEdge)
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, b, xdraw.Src, nil)
+	return dst
+}
+
+// resizeToRGBA scales src to exactly w×h (no-op when the dims already
+// match) — the framed-export path, where the target box comes pre-solved.
+func resizeToRGBA(src *image.RGBA, w, h int) *image.RGBA {
+	b := src.Bounds()
+	if b.Dx() == w && b.Dy() == h {
+		return src
+	}
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, b, xdraw.Src, nil)
 	return dst
