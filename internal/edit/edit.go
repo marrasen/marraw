@@ -64,9 +64,12 @@ const (
 	AIClass AIKind = "class"
 	// AIDepth is the normalized relative depth map (255 = nearest).
 	AIDepth AIKind = "depth"
+	// AIPerson is the person instance map (pixel = instance ID, 0 =
+	// background, 1..N ordered left-to-right by centroid).
+	AIPerson AIKind = "person"
 )
 
-func AIKindValues() []AIKind { return []AIKind{AISubject, AIClass, AIDepth} }
+func AIKindValues() []AIKind { return []AIKind{AISubject, AIClass, AIDepth, AIPerson} }
 
 // MaskAdjust is the adjustment a mask applies inside its weighted region:
 // the tone and color basics, all with zero neutral. Kept slice-free so the
@@ -127,10 +130,11 @@ type Mask struct {
 	// reference lives here so sidecars stay small and portable. AIKind picks
 	// the map; MapVer pins the model version the map was generated with (part
 	// of the hash, so regenerating with a newer model re-renders). ClassID is
-	// the photographer category for "class" kinds; DepthLo/DepthHi bound the
-	// kept depth window (0..1, 1 = nearest) for "depth"; Threshold moves the
-	// subject matte cutoff (0 = default 0.5). Feather is reused as the edge
-	// softness control for all three kinds.
+	// the photographer category for "class" kinds and doubles as the person
+	// instance index (1..N, left-to-right) for "person"; DepthLo/DepthHi bound
+	// the kept depth window (0..1, 1 = nearest) for "depth"; Threshold moves
+	// the subject matte cutoff (0 = default 0.5). Feather is reused as the
+	// edge softness control for all kinds.
 	AIKind    AIKind  `json:"aiKind,omitempty"`
 	MapVer    string  `json:"mapVer,omitempty"`
 	ClassID   int     `json:"classId,omitempty"`
@@ -532,6 +536,10 @@ func (e *Params) normalizeMasks() {
 			case AIClass:
 				m.DepthLo, m.DepthHi, m.Threshold = 0, 0, 0
 				m.ClassID = int(clamp(float64(m.ClassID), 0, 255))
+			case AIPerson:
+				m.DepthLo, m.DepthHi, m.Threshold = 0, 0, 0
+				// 0 is background, never a valid instance pick.
+				m.ClassID = int(clamp(float64(m.ClassID), 1, 255))
 			case AIDepth:
 				m.ClassID, m.Threshold = 0, 0
 				m.DepthLo = quant4(clamp(m.DepthLo, 0, 1))

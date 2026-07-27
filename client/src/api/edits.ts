@@ -19,10 +19,18 @@ export interface AICategory {
     fraction: number;
 }
 
+export interface AIInstance {
+    id: number;
+    fraction: number;
+    cx: number;
+    cy: number;
+}
+
 export interface AIMapResult {
     mapVer: string;
     generated: boolean;
     categories?: AICategory[];
+    instances?: AIInstance[];
 }
 
 export interface AIMapsGeneratedEvent {
@@ -62,6 +70,19 @@ export interface Suggestion {
     id: string;
     label: string;
     params: Params;
+}
+
+
+export function aIInstancePlane(client: ApiClient, photoID: number, params: Params, options?: RequestOptions): Promise<Blob> {
+    return client.request<Blob>('Edits.AIInstancePlane', [photoID, params], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+aIInstancePlane.method = 'Edits.AIInstancePlane' as const;
+
+export function subscribeAIInstancePlane(client: ApiClient, photoID: number, params: Params, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Blob>('Edits.AIInstancePlane', [photoID, params], callback, onError, options);
 }
 
 
@@ -277,6 +298,21 @@ export function onAIMapsGeneratedEvent(client: ApiClient, handler: PushHandler<A
 }
 
 // React Hooks for Edits
+
+/**
+ * Subscribes to `Edits.AIInstancePlane` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useAIInstancePlane(photoID: number, params: Params, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params) => aIInstancePlane(client, photoID, params, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params], _subscribe: { method: 'Edits.AIInstancePlane', params: [photoID, params] } });
+}
 
 /**
  * Subscribes to `Edits.AIModelStatus` with the given parameters and re-renders

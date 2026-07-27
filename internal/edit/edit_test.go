@@ -187,6 +187,29 @@ func TestMaskNeutrality(t *testing.T) {
 	}
 }
 
+func TestNormalizePersonMask(t *testing.T) {
+	e := &Params{Masks: []Mask{
+		{Type: MaskAI, AIKind: AIPerson, MapVer: "rfdetrseg-1", ClassID: 3,
+			DepthLo: 0.4, DepthHi: 0.9, Threshold: 0.7, Feather: 0.2},
+		{Type: MaskAI, AIKind: AIPerson, MapVer: "rfdetrseg-1", ClassID: 0}, // background: clamps to 1
+		{Type: MaskAI, AIKind: "hologram", MapVer: "x"},                     // unknown kind: dropped
+	}}
+	e.Normalize()
+	if len(e.Masks) != 2 {
+		t.Fatalf("kept %d masks, want 2 (unknown AI kind dropped)", len(e.Masks))
+	}
+	m := e.Masks[0]
+	if m.ClassID != 3 || m.DepthLo != 0 || m.DepthHi != 0 || m.Threshold != 0 {
+		t.Errorf("person mask not normalized: %+v", m)
+	}
+	if m.Feather != 0.2 {
+		t.Errorf("feather = %v, want 0.2 kept", m.Feather)
+	}
+	if e.Masks[1].ClassID != 1 {
+		t.Errorf("background instance ID must clamp to 1, got %d", e.Masks[1].ClassID)
+	}
+}
+
 func TestMaskHashing(t *testing.T) {
 	base := &Params{Masks: []Mask{radialMask()}}
 	moved := &Params{Masks: []Mask{radialMask()}}

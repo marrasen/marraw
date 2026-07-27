@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"math"
 
 	xdraw "golang.org/x/image/draw"
 
@@ -61,6 +62,18 @@ var (
 		Bytes:   1375613437,
 		License: "MIT",
 	}
+	// personModel is RF-DETR-Seg-Large (Roboflow), exported by us to ONNX
+	// from the Apache-2.0 rfdetr package checkpoint and hosted on
+	// marrasen/marraw-models. DETR-style set prediction: no NMS, no custom
+	// ops. Pretraining lineage includes Objects365 — noted in
+	// THIRD_PARTY_NOTICES.md, the ISNet reading.
+	personModel = infer.ModelSpec{
+		ID: "rfdetrseg", Version: "1",
+		URL:     "https://github.com/marrasen/marraw-models/releases/download/models-v1/rfdetr-seg-large.onnx",
+		SHA256:  "ae7a47126f8b28e9c369b6171eb62b726d579e69857b794d1572df7568710c1d",
+		Bytes:   138295246,
+		License: "Apache-2.0",
+	}
 )
 
 // SpecFor returns the pinned model serving an AI-mask kind. ok=false means
@@ -74,6 +87,8 @@ func SpecFor(kind edit.AIKind) (infer.ModelSpec, bool) {
 		return depthModel, true
 	case edit.AIClass:
 		return classModel, true
+	case edit.AIPerson:
+		return personModel, true
 	}
 	return infer.ModelSpec{}, false
 }
@@ -108,6 +123,8 @@ func Generate(ctx context.Context, mgr *infer.Manager, kind edit.AIKind, src *im
 		return generateDepth(ctx, sess, src)
 	case edit.AIClass:
 		return generateClass(ctx, sess, src)
+	case edit.AIPerson:
+		return generatePerson(ctx, sess, src)
 	}
 	return nil, fmt.Errorf("aimask: no generator for kind %q", kind)
 }
@@ -211,6 +228,99 @@ func generateDepth(ctx context.Context, sess *infer.Session, src *image.RGBA) (*
 	plane := infer.NormalizePlane(vals)
 	w, h := mapDims(src)
 	return resizeGray(grayFromPlane(plane, iw, ih), w, h), nil
+}
+
+// personClassIndex is the person row in the export's class-logit layout
+// (COCO 91-class indexing; verified against fixtures at export time).
+const personClassIndex = 1
+
+// generatePerson: RF-DETR-Seg consumes a stretched 504×504 frame,
+// ImageNet-normalized, and emits DETR-style set predictions: per-query
+// boxes, class logits and mask logits. Sigmoid scores select confident
+// person queries, per-pixel argmax composes them into the instance-ID
+// plane, and the plane upscales NEAREST — instance IDs are labels, like
+// category IDs.
+func generatePerson(ctx context.Context, sess *infer.Session, src *image.RGBA) (*image.Gray, error) {
+	const side = 504
+	in := stretchRGBA(src, side, side)
+	data := infer.NCHWFromRGBA(in,
+		[3]float32{0.485, 0.456, 0.406}, [3]float32{0.229, 0.224, 0.225})
+	tensor, err := ort.NewTensor(ort.NewShape(1, 3, side, side), data)
+	if err != nil {
+		return nil, err
+	}
+	defer tensor.Destroy()
+
+	outs, err := sess.Run(ctx, tensor)
+	if err != nil {
+		return nil, err
+	}
+	defer destroyAll(outs)
+	insts, mw, mh, err := decodePersonInstances(outs)
+	if err != nil {
+		return nil, err
+	}
+	w, h := mapDims(src)
+	return resizeGrayNearest(ComposeInstancePlane(insts, mw, mh), w, h), nil
+}
+
+// decodePersonInstances splits the DETR outputs into per-person probability
+// masks at mask resolution. Outputs are identified by rank and trailing dim,
+// not name — export tooling renames across versions: boxes (1,Q,4
+// normalized cxcywh), class logits (1,Q,C), mask logits (1,Q,mh,mw). The
+// person logit's sigmoid is the score; mask logits sigmoid to
+// probabilities, zeroed outside the padded predicted box to suppress stray
+// far-field activations DETR mask heads sometimes leak.
+func decodePersonInstances(outs []ort.Value) ([]InstanceMask, int, int, error) {
+	var dets, labels, masks []float32
+	var q, classes, mh, mw int
+	for _, v := range outs {
+		t, ok := v.(*ort.Tensor[float32])
+		if !ok {
+			continue
+		}
+		s := t.GetShape()
+		switch {
+		case len(s) == 3 && s[2] == 4:
+			dets, q = t.GetData(), int(s[1])
+		case len(s) == 3:
+			labels, classes = t.GetData(), int(s[2])
+		case len(s) == 4:
+			masks, mh, mw = t.GetData(), int(s[2]), int(s[3])
+		}
+	}
+	if dets == nil || labels == nil || masks == nil ||
+		len(labels) != q*classes || len(masks) != q*mh*mw || personClassIndex >= classes {
+		return nil, 0, 0, fmt.Errorf("aimask: unexpected person model outputs")
+	}
+	sigmoid := func(x float32) float32 {
+		return float32(1 / (1 + math.Exp(-float64(x))))
+	}
+	var insts []InstanceMask
+	for i := 0; i < q; i++ {
+		score := sigmoid(labels[i*classes+personClassIndex])
+		if score < personScoreMin {
+			continue
+		}
+		// Padded box in mask pixels; boxes are frame fractions (stretched
+		// input and mask share the frame).
+		cx, cy := float64(dets[i*4]), float64(dets[i*4+1])
+		bw, bh := float64(dets[i*4+2]), float64(dets[i*4+3])
+		const pad = 1.1
+		x0 := max(0, int((cx-bw*pad/2)*float64(mw)))
+		x1 := min(mw, int((cx+bw*pad/2)*float64(mw))+1)
+		y0 := max(0, int((cy-bh*pad/2)*float64(mh)))
+		y1 := min(mh, int((cy+bh*pad/2)*float64(mh))+1)
+		prob := make([]float32, mw*mh)
+		logit := masks[i*mh*mw:]
+		for y := y0; y < y1; y++ {
+			for x := x0; x < x1; x++ {
+				prob[y*mw+x] = sigmoid(logit[y*mw+x])
+			}
+		}
+		insts = append(insts, InstanceMask{Prob: prob, Score: score})
+	}
+	return insts, mw, mh, nil
 }
 
 func destroyAll(vals []ort.Value) {

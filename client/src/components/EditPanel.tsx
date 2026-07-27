@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw,
   Image as ImageIcon, Plus, Trash2, Paintbrush, Circle, Eraser,
-  Focus, Layers, Loader2, Shapes, ScanSearch,
+  Focus, Layers, Loader2, Shapes, ScanSearch, Users,
 } from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
@@ -20,6 +20,7 @@ import {
   MASK_CONTROL_SPECS,
   aiClassMask,
   aiMask,
+  aiPersonMask,
   maskAdjustIsNeutral,
   maskLabel,
   type MaskControlId,
@@ -57,6 +58,8 @@ import {
   esSetSpotVisualize,
   esSetSpotVisualizeThreshold,
   esSetTintMask,
+  esSetPersonHover,
+  esSetPersonPick,
   esSetApplyIds,
   esSetBrushTool,
   esSetCropping,
@@ -1120,6 +1123,9 @@ const aiRestoreFired = new Set<string>();
 
 function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   const activeMask = useEditSession((s) => s.activeMask);
+  // People detection result lives in the session (it IS the pick-tool state,
+  // shared with PersonPickOverlay), unlike the panel-local scene chips.
+  const personPick = useEditSession((s) => s.personPick);
   const photoId = useEditSession((s) => s.photoId);
   const setMode = useUIStore((s) => s.setMode);
   const [generating, setGenerating] = useState<AIKindType | null>(null);
@@ -1162,6 +1168,12 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
         // Scene detection adds no mask by itself — it offers one chip per
         // detected category; clicking a chip adds that category's mask.
         setScene(res);
+      } else if (kind === 'person') {
+        // People detection enters the pick tool: hover the loupe (or the
+        // chips below) to highlight a person, click to add their mask.
+        setMode('develop');
+        esSetPersonPick({ mapVer: res.mapVer, instances: res.instances ?? [] });
+        if ((res.instances ?? []).length === 0) toast.info('No people detected in this photo.');
       } else {
         setMode('develop');
         esAddMaskObject(client, aiMask(kind as 'subject' | 'depth', res.mapVer));
@@ -1174,7 +1186,7 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   };
 
   // Button path: ask for consent first when the model isn't on disk yet.
-  const addAI = async (kind: 'subject' | 'depth' | 'class') => {
+  const addAI = async (kind: 'subject' | 'depth' | 'class' | 'person') => {
     if (photoId == null || generating) return;
     try {
       const status = await aiModelStatus(client, kind);
@@ -1271,6 +1283,22 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
           {generating === 'class' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Shapes data-icon="inline-start" />}
           Scene
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          title="Separate individual people — hover the photo to pick one to mask (runs a local model)"
+          disabled={generating != null}
+          onClick={() => {
+            // Toggle: a second press exits the pick tool without adding.
+            if (personPick) esSetPersonPick(null);
+            else void addAI('person');
+          }}
+          data-testid="ai-mask-person"
+        >
+          {generating === 'person' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Users data-icon="inline-start" />}
+          People
+        </Button>
       </div>
       {scene && (
         <div className="flex flex-wrap gap-1" role="group" aria-label="Detected regions" data-testid="scene-chips">
@@ -1289,6 +1317,27 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
               }}
             >
               {c.name} · {Math.round(c.fraction * 100)}%
+            </button>
+          ))}
+        </div>
+      )}
+      {personPick && personPick.instances.length > 0 && (
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Detected people" data-testid="person-chips">
+          {personPick.instances.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className="rounded-full border border-border px-2 py-0.5 text-[11px] text-secondary-foreground hover:border-primary/45 hover:text-foreground"
+              title={`Mask person ${p.id} (${Math.round(p.fraction * 100)}% of frame)`}
+              onMouseEnter={() => esSetPersonHover(p.id)}
+              onMouseLeave={() => esSetPersonHover(null)}
+              onClick={() => {
+                setMode('develop');
+                esAddMaskObject(client, aiPersonMask(p.id, personPick.mapVer));
+                esSetPersonPick(null);
+              }}
+            >
+              Person {p.id} · {Math.round(p.fraction * 100)}%
             </button>
           ))}
         </div>

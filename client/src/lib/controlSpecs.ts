@@ -305,6 +305,9 @@ export const MASK_TYPE_LABELS: Record<string, string> = {
 
 export function maskLabel(m: Mask, index: number): string {
   if (m.type === 'ai') {
+    // Person masks label by instance ID (their classId), not list position,
+    // so the row reads the same as the chip that added it.
+    if (m.aiKind === 'person') return `Person ${m.classId ?? 0}`;
     const kind =
       m.aiKind === 'subject' ? 'Subject'
       : m.aiKind === 'depth' ? 'Depth'
@@ -339,6 +342,13 @@ export function aiMask(kind: 'subject' | 'depth', mapVer: string): Mask {
 
 export function aiClassMask(classId: number, mapVer: string): Mask {
   return { type: 'ai', aiKind: 'class', mapVer, classId, feather: 0.25, adjust: {} };
+}
+
+// aiPersonMask targets one person in the instance map; classId doubles as
+// the instance ID (1..N, left to right). Lighter feather than class masks —
+// instance edges hug the person, and guided refinement sharpens hi-res.
+export function aiPersonMask(instanceId: number, mapVer: string): Mask {
+  return { type: 'ai', aiKind: 'person', mapVer, classId: instanceId, feather: 0.15, adjust: {} };
 }
 
 // Default geometry for a freshly added mask: centered and clearly visible,

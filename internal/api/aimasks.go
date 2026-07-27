@@ -35,6 +35,9 @@ type AIMapResult struct {
 	// Categories lists what a class map detected (class kind only), largest
 	// area first — the UI offers one mask chip per entry.
 	Categories []AICategory `json:"categories,omitempty"`
+	// Instances lists the people a person map separated (person kind only),
+	// left to right — one pick target / chip per entry.
+	Instances []AIInstance `json:"instances,omitempty"`
 }
 
 // AICategory is one detected semantic category in a class map.
@@ -42,6 +45,16 @@ type AICategory struct {
 	ID       int     `json:"id"`
 	Name     string  `json:"name"`
 	Fraction float64 `json:"fraction"`
+}
+
+// AIInstance is one person in a person map: its instance ID (what a mask's
+// classId references), area fraction, and centroid in fractions of the
+// oriented map — enough for the chips row without shipping the plane.
+type AIInstance struct {
+	ID       int     `json:"id"`
+	Fraction float64 `json:"fraction"`
+	CX       float64 `json:"cx"`
+	CY       float64 `json:"cy"`
 }
 
 // MaskTintPreview renders one mask's weight as a red-tinted transparent PNG
@@ -172,6 +185,59 @@ func (e *Edits) categoriesFor(photoKey, ver string) []AICategory {
 	return out
 }
 
+// instancesFor computes the person pick targets from a stored person map —
+// the categoriesFor twin.
+func (e *Edits) instancesFor(photoKey, ver string) []AIInstance {
+	m := e.deps.Cache.AIMaps.Load(photoKey, edit.AIPerson, ver)
+	if m == nil {
+		return nil
+	}
+	var out []AIInstance
+	for _, in := range aimask.DetectInstances(m.Pix, m.W, m.H) {
+		out = append(out, AIInstance{ID: in.ID, Fraction: in.Fraction, CX: in.CX, CY: in.CY})
+	}
+	return out
+}
+
+// fillDetections populates the kind-specific detection lists on an
+// AIMapResult — every path that returns a result funnels through here so the
+// chips never miss a path (fast path, on-disk path, fresh generation).
+func (e *Edits) fillDetections(res *AIMapResult, photoKey string, kind edit.AIKind) {
+	switch kind {
+	case edit.AIClass:
+		res.Categories = e.categoriesFor(photoKey, res.MapVer)
+	case edit.AIPerson:
+		res.Instances = e.instancesFor(photoKey, res.MapVer)
+	}
+}
+
+// AIInstancePlane returns the person-instance ID plane oriented into the
+// edit's frame (params carries rotate/flip) as a grayscale PNG — pixel value
+// = instance ID, 0 = background. The client hit-tests hover against it
+// locally, so picking runs at pointer speed with no round trips. Requires
+// the map to exist (call GenerateAIMap first — it owns consent and returns
+// the mapVer + instances); a missing map is an error, never a download.
+func (e *Edits) AIInstancePlane(ctx context.Context, photoID int64, params edit.Params) (*aprot.Blob, error) {
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	ver, ok := aimask.MapVerFor(edit.AIPerson)
+	if !ok || e.deps.Cache.AIMaps == nil {
+		return nil, fmt.Errorf("ai masks: %q has no model available yet", edit.AIPerson)
+	}
+	m := e.deps.Cache.AIMaps.LoadOriented(photo.CacheKey, edit.AIPerson, ver, params.RotateTurns(), params.FlipH)
+	if m == nil {
+		return nil, fmt.Errorf("ai masks: no person map for this photo yet")
+	}
+	var buf bytes.Buffer
+	g := &image.Gray{Pix: m.Pix, Stride: m.W, Rect: image.Rect(0, 0, m.W, m.H)}
+	if err := png.Encode(&buf, g); err != nil {
+		return nil, err
+	}
+	return &aprot.Blob{ContentType: "image/png", Data: buf.Bytes()}, nil
+}
+
 // AIModelInfo reports whether a kind's model weights are on disk, and how
 // large the download is when they aren't — what the client's consent dialog
 // shows before the first use of an AI feature.
@@ -222,9 +288,7 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 	if ver, ok := aimask.MapVerFor(kind); ok && e.deps.Cache.AIMaps != nil &&
 		e.deps.Cache.AIMaps.Has(photo.CacheKey, kind, ver) {
 		res := &AIMapResult{MapVer: ver}
-		if kind == edit.AIClass {
-			res.Categories = e.categoriesFor(photo.CacheKey, ver)
-		}
+		e.fillDetections(res, photo.CacheKey, kind)
 		return res, nil
 	}
 
@@ -261,9 +325,7 @@ func (e *Edits) generateAIMap(ctx context.Context, photo store.Photo, kind edit.
 	}
 	if store.Has(photo.CacheKey, kind, ver) {
 		res := &AIMapResult{MapVer: ver}
-		if kind == edit.AIClass {
-			res.Categories = e.categoriesFor(photo.CacheKey, ver)
-		}
+		e.fillDetections(res, photo.CacheKey, kind)
 		return res, false, nil
 	}
 	if spec, _ := aimask.SpecFor(kind); !allowDownload && !e.deps.Infer.HasModel(spec) {
@@ -304,9 +366,7 @@ func (e *Edits) generateAIMap(ctx context.Context, photo store.Photo, kind edit.
 		aprot.TriggerRefresh(ctx, modelsInfoKey) // Settings' model list is live
 	}
 	res := &AIMapResult{MapVer: ver, Generated: true}
-	if kind == edit.AIClass {
-		res.Categories = e.categoriesFor(photo.CacheKey, ver)
-	}
+	e.fillDetections(res, photo.CacheKey, kind)
 	return res, downloaded, nil
 }
 

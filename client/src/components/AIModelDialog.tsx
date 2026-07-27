@@ -24,6 +24,10 @@ const AI_KIND_INFO: Record<string, { title: string; feature: string }> = {
     title: 'Scene detection',
     feature: 'Labels the regions of a photo — sky, people, foliage, water, architecture and more — and offers each detected region as a one-click mask.',
   },
+  person: {
+    title: 'People detection',
+    feature: 'Separates the individual people in a photo, so you can hover over someone and mask just that person — not everyone at once.',
+  },
 };
 
 export interface PendingAIDownload {

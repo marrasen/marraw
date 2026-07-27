@@ -24,6 +24,7 @@ import {
   esSetActiveSpot,
   esSetCropping,
   esSetHealing,
+  esSetPersonPick,
   esSetSpotVisualize,
   esSetWBPicking,
   esRemoveSpot,
@@ -104,7 +105,7 @@ export function useKeyboard() {
       // focus and scroll the drawer back into view. The keys go dead instead
       // of falling back to photo navigation: loupe photo-nav is ←/→'s job,
       // and a surprise photo switch would silently end the crop session.
-      const overlayUp = es.cropping || es.wbPicking;
+      const overlayUp = es.cropping || es.wbPicking || es.personPick != null;
 
       const move = (delta: number) => {
         const ids = s.visibleIds;
@@ -456,6 +457,8 @@ export function useKeyboard() {
             esSetCropping(client, false);
           } else if (es.wbPicking) {
             esWBPickCancel(client); // revert to the pre-picker draft
+          } else if (es.personPick != null) {
+            esSetPersonPick(null); // leave without adding a mask
           } else if (es.healing) {
             // Drop a spot selection first, then exit the tool on a second Esc.
             if (es.activeSpot != null) esSetActiveSpot(null);

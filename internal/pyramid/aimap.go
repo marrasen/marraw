@@ -332,22 +332,10 @@ func deriveCoverage(am *AIMap, m *edit.Mask) []uint8 {
 		for i, v := range am.Pix {
 			out[i] = lut[v]
 		}
-	case edit.AIClass:
-		want := uint8(m.ClassID)
-		for i, v := range am.Pix {
-			if v == want {
-				out[i] = 255
-			}
-		}
-		// Feather softens the hard category boundary by blurring the binary
-		// plane; radius up to ~3% of the long edge.
-		if m.Feather > 0 {
-			long := max(am.W, am.H)
-			if r := int(math.Round(m.Feather * float64(long) * 0.03)); r > 0 {
-				boxBlurU8(out, am.W, am.H, r)
-				boxBlurU8(out, am.W, am.H, r) // two passes ≈ triangular
-			}
-		}
+	case edit.AIClass, edit.AIPerson:
+		// Both are label planes (category ID / person instance ID); ClassID
+		// picks the label either way.
+		labelCoverage(out, am, uint8(m.ClassID), m.Feather)
 	case edit.AIDepth:
 		// Keep depths inside [lo,hi] (1 = nearest), easing in/out over the
 		// feather width.
@@ -364,6 +352,24 @@ func deriveCoverage(am *AIMap, m *edit.Mask) []uint8 {
 		}
 	}
 	return out
+}
+
+// labelCoverage fills out with 255 where the plane equals the wanted label,
+// then softens the hard boundary by blurring the binary plane; radius up to
+// ~3% of the long edge.
+func labelCoverage(out []uint8, am *AIMap, want uint8, feather float64) {
+	for i, v := range am.Pix {
+		if v == want {
+			out[i] = 255
+		}
+	}
+	if feather > 0 {
+		long := max(am.W, am.H)
+		if r := int(math.Round(feather * float64(long) * 0.03)); r > 0 {
+			boxBlurU8(out, am.W, am.H, r)
+			boxBlurU8(out, am.W, am.H, r) // two passes ≈ triangular
+		}
+	}
 }
 
 // boxBlurU8 box-blurs a uint8 plane in place with a running-sum pass per

@@ -37,6 +37,7 @@ func modelCatalog() map[string]ModelFile {
 		edit.AISubject: {Name: "Subject (ISNet)", Purpose: "Finds the photo's main subject, for Subject AI masks."},
 		edit.AIDepth:   {Name: "Depth (Depth Anything V2 Small)", Purpose: "Estimates relative scene depth, for Depth AI masks."},
 		edit.AIClass:   {Name: "Semantic classes (DPT · ADE20K)", Purpose: "Detects regions like sky, people, and foliage, for category AI masks."},
+		edit.AIPerson:  {Name: "People (RF-DETR-Seg)", Purpose: "Separates individual people, for per-person AI masks."},
 	} {
 		if spec, ok := aimask.SpecFor(kind); ok {
 			catalog[spec.FileName()] = meta

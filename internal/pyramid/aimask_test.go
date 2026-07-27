@@ -91,6 +91,28 @@ func TestAIMaskAppliesInsideClassOnly(t *testing.T) {
 	}
 }
 
+// TestPersonCoverageMatchesClass: person instance planes are label planes
+// exactly like category maps — the derived coverage must be bit-identical
+// for the same plane, ID and feather.
+func TestPersonCoverageMatchesClass(t *testing.T) {
+	plane := paintedClassMap(96, 64)
+	for _, feather := range []float64{0, 0.4} {
+		amC := &AIMap{Pix: plane.Pix, W: 96, H: 64, Key: "c|" + "m1"}
+		amP := &AIMap{Pix: plane.Pix, W: 96, H: 64, Key: "p|" + "m1"}
+		cov := deriveCoverage(amC, &edit.Mask{
+			Type: edit.MaskAI, AIKind: edit.AIClass, MapVer: "m1", ClassID: 3, Feather: feather,
+		})
+		per := deriveCoverage(amP, &edit.Mask{
+			Type: edit.MaskAI, AIKind: edit.AIPerson, MapVer: "m1", ClassID: 3, Feather: feather,
+		})
+		for i := range cov {
+			if cov[i] != per[i] {
+				t.Fatalf("feather %v: coverage differs at %d: class %d person %d", feather, i, cov[i], per[i])
+			}
+		}
+	}
+}
+
 // TestAIMaskMissingMapIsNoOp: an AI mask whose map is absent must contribute
 // nothing (and certainly not fail the render).
 func TestAIMaskMissingMapIsNoOp(t *testing.T) {

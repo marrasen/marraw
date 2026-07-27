@@ -269,6 +269,37 @@ if (shot === 'cull') {
     chips: chips.map((c) => c.textContent),
     classMaskAdded: (es.getState().draft?.masks ?? []).some((m) => m.aiKind === 'class'),
   };
+} else if (shot === 'personpick') {
+  // Person pick tool: click the People button (model + map must be present —
+  // the wrapper seeds a plane when the fixture has no people), wait for pick
+  // mode + chips, hover person 1 through the session so the loupe tint
+  // renders deterministically, and capture the tinted loupe.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  ui().setDevelopTab('masks');
+  await sleep(600);
+  mw.esUpdate({ masks: [] }); // idempotence: drop persisted masks first
+  mw.esCommit();
+  await sleep(800);
+  document.querySelector('[data-testid="ai-mask-person"]')?.click();
+  await until(() => es.getState().personPick != null, 120000);
+  await sleep(300);
+  const pick = es.getState().personPick;
+  if (pick?.instances?.length) {
+    mw.esSetPersonHover(pick.instances[0].id);
+    await until(() => {
+      const img = document.querySelector('[data-testid="person-pick-tint"] img');
+      return img && img.complete && img.naturalWidth > 0;
+    }, 30000);
+    await sleep(600); // tint fade-in
+  }
+  window.__maskProbe = {
+    overlayMounted: !!document.querySelector('[data-testid="person-pick-overlay"]'),
+    instances: pick?.instances?.length ?? 0,
+    chips: [...document.querySelectorAll('[data-testid="person-chips"] button')].map((c) => c.textContent),
+    tintShown: !!document.querySelector('[data-testid="person-pick-tint"] img'),
+  };
 } else if (shot === 'depthrange') {
   // Depth window as ONE two-thumb range row: generate a depth mask via the
   // real button, move the window through the store, and assert the "Depth

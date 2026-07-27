@@ -64,6 +64,9 @@ if (import.meta.env.DEV) {
       esAddMask: (type: unknown) => es.esAddMask(client, type as never),
       esUpdateMask: (i: number, patch: unknown) => es.esUpdateMask(client, i, patch as never),
       esSetActiveMask: (i: number | null) => es.esSetActiveMask(i),
+      // Person pick tool (the `personpick` shot surface).
+      esSetPersonHover: (id: number | null) => es.esSetPersonHover(id),
+      esSetPersonPick: (p: unknown) => es.esSetPersonPick(p as never),
       // Retouch spots (the `heal` / `healbrush` / `spotvis` shot surfaces).
       esSetHealing: (on: boolean) => es.esSetHealing(on),
       esSetActiveSpot: (i: number | null) => es.esSetActiveSpot(i),

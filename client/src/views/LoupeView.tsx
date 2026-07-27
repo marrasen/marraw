@@ -35,6 +35,7 @@ import { MaskOverlay } from '@/components/MaskOverlay';
 import { HealOverlay } from '@/components/HealOverlay';
 import { SpotVisualizeLayer } from '@/components/SpotVisualize';
 import { MaskHoverTint } from '@/components/MaskHoverTint';
+import { PersonPickOverlay } from '@/components/PersonPickOverlay';
 import { AIKind, type Params } from '@/api/edit';
 
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
@@ -453,6 +454,7 @@ export function CinemaImage({
   const wbPicking = useEditSession((s) => s.wbPicking);
   const cropping = useEditSession((s) => s.cropping);
   const healing = useEditSession((s) => s.healing);
+  const personPicking = useEditSession((s) => s.personPick != null);
   const activeMask = useEditSession((s) => s.activeMask);
   const uiMode = useUIStore((s) => s.mode);
   const draft = useEditSession((s) => s.draft);
@@ -482,6 +484,7 @@ export function CinemaImage({
     !cropping &&
     !wbPicking &&
     !healing &&
+    !personPicking &&
     esPhotoId === photo.id &&
     !!draft?.masks?.[activeMask];
   // The heal overlay places/edits retouch spots on the ordinary (cropped)
@@ -499,7 +502,13 @@ export function CinemaImage({
   const visualizeUI = healUI && spotVisualize;
   // The hover tint needs no selected mask — hovering any Masks-panel row
   // shows that mask's weight over the ordinary Develop view.
-  const tintUI = uiMode === 'develop' && !cropping && !wbPicking && !healing && esPhotoId === photo.id;
+  const tintUI =
+    uiMode === 'develop' && !cropping && !wbPicking && !healing && !personPicking && esPhotoId === photo.id;
+  // The person pick overlay hit-tests hover and click against the instance
+  // plane on the ordinary Develop view — same exclusions as the heal tool
+  // (its own tint replaces the panel hover tint while live).
+  const personUI =
+    uiMode === 'develop' && personPicking && !cropping && !wbPicking && !healing && esPhotoId === photo.id && !!draft;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -892,9 +901,9 @@ export function CinemaImage({
   const [dragging, setDragging] = useState(false);
   // Slack means there is nearly always somewhere to drag the photo, zoomed
   // in or not — only crop mode pins it.
-  const pannable = haveDims && !cropping && !healUI;
+  const pannable = haveDims && !cropping && !healUI && !personUI;
   const onPointerDown = (e: React.PointerEvent) => {
-    if (wbPicking || cropping || healUI || e.button !== 0 || !pannable) return;
+    if (wbPicking || cropping || healUI || personUI || e.button !== 0 || !pannable) return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -1213,6 +1222,15 @@ export function CinemaImage({
                 frameH={rfh}
                 boxW={boxW}
                 boxH={boxH}
+              />
+            )}
+            {personUI && draft && (
+              <PersonPickOverlay
+                client={client}
+                draft={draft}
+                photoId={photo.id}
+                frameW={rfw}
+                frameH={rfh}
               />
             )}
             {visualizeUI && <SpotVisualizeLayer src={shownSrc} boxW={boxW} boxH={boxH} />}

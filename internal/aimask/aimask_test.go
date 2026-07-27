@@ -4,9 +4,12 @@ import (
 	"context"
 	"image"
 	"image/color"
+	_ "image/jpeg" // MARRAW_PERSON_TESTIMG decode
 	"os"
 	"testing"
 	"time"
+
+	xdraw "golang.org/x/image/draw"
 
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/infer"
@@ -122,11 +125,60 @@ func TestGenerateClassRealModel(t *testing.T) {
 	}
 }
 
+// TestGeneratePersonRealModel proves the RF-DETR-Seg export runs end-to-end
+// through our pre/post-processing: right dims and every pixel a valid
+// instance ID. The synthetic scene has no people, so the plane is normally
+// empty; set MARRAW_PERSON_TESTIMG to a JPEG with two or more people to also
+// pin instance separation.
+func TestGeneratePersonRealModel(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real-model test")
+	}
+	mgr := testManager(t, personModel)
+	src := scenePhoto(640, 480)
+	if path := os.Getenv("MARRAW_PERSON_TESTIMG"); path != "" {
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		img, _, err := image.Decode(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b := img.Bounds()
+		src = image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+		xdraw.Draw(src, src.Bounds(), img, b.Min, xdraw.Src)
+	}
+	start := time.Now()
+	gray, err := Generate(context.Background(), mgr, edit.AIPerson, src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("RF-DETR-Seg person plane on CPU: %s", time.Since(start))
+	w, h := mapDims(src)
+	if gray.Rect.Dx() != w || gray.Rect.Dy() != h {
+		t.Fatalf("map dims %dx%d, want %dx%d", gray.Rect.Dx(), gray.Rect.Dy(), w, h)
+	}
+	for i, v := range gray.Pix {
+		if v > maxInstances {
+			t.Fatalf("pixel %d holds %d — not an instance ID", i, v)
+		}
+	}
+	if ins := DetectInstances(gray.Pix, w, h); os.Getenv("MARRAW_PERSON_TESTIMG") != "" {
+		t.Logf("instances: %+v", ins)
+		if len(ins) < 2 {
+			t.Errorf("expected ≥2 separated people in the test image, got %d", len(ins))
+		}
+	}
+}
+
 func TestSpecFor(t *testing.T) {
 	for kind, want := range map[edit.AIKind]string{
 		edit.AISubject: "isnet-1",
 		edit.AIDepth:   "depthany2s-1",
 		edit.AIClass:   "adeseg-1",
+		edit.AIPerson:  "rfdetrseg-1",
 	} {
 		ver, ok := MapVerFor(kind)
 		if !ok || ver != want {
