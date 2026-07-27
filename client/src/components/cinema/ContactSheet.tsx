@@ -199,7 +199,7 @@ export function ContactSheet({
               </span>
               <div className="flex-1" />
               {g.gapBeforeMin != null && g.gapBeforeMin > 0 && (
-                <span className="rounded-md border border-primary/30 bg-primary/15 px-2 py-[3px] font-mono text-[11px] text-[#aab0ff]">
+                <span className="rounded-md border border-primary/30 bg-primary/15 px-2 py-[3px] font-mono text-[11px] text-accent-text">
                   {gapLabel(g.gapBeforeMin)} {gapSide}
                 </span>
               )}

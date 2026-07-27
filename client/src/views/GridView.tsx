@@ -263,7 +263,7 @@ function GroupHeaderRow({ group, multiDay, top }: { group: TimeGroup; multiDay: 
         </span>
         <div className="flex-1" />
         {group.gapBeforeMin != null && group.gapBeforeMin > 0 && (
-          <span className="rounded-md border border-primary/30 bg-primary/15 px-2 py-[2px] font-mono text-[10.5px] text-[#aab0ff]">
+          <span className="rounded-md border border-primary/30 bg-primary/15 px-2 py-[2px] font-mono text-[10.5px] text-accent-text">
             {gapLabel(group.gapBeforeMin)} {gapSide}
           </span>
         )}

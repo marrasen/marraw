@@ -147,7 +147,7 @@ export function ScrubberDeck({
         !conceal && 'pointer-events-auto',
       )}
     >
-      <div className="mr-2 flex shrink-0 flex-col justify-center gap-[3px] border-r border-white/12 pr-3">
+      <div className="mr-2 flex shrink-0 flex-col justify-center gap-[3px] border-r border-glass-border pr-3">
         <span className="text-[9px] tracking-[.06em] text-muted-foreground uppercase">Groups</span>
         <span className="font-mono text-[13px] text-accent-text">{groups.length}</span>
       </div>
@@ -161,7 +161,7 @@ export function ScrubberDeck({
             {g.gapBeforeMin != null && g.gapBeforeMin > 0 && (
               <div className="mx-0.5 flex items-center justify-center px-2">
                 <span
-                  className="rounded border border-primary/30 bg-primary/15 px-[3px] py-[5px] font-mono text-[9px] whitespace-nowrap text-[#aab0ff]"
+                  className="rounded border border-primary/30 bg-primary/15 px-[3px] py-[5px] font-mono text-[9px] whitespace-nowrap text-accent-text"
                   style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
                 >
                   {gapLabel(g.gapBeforeMin)}
