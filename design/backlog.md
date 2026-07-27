@@ -148,23 +148,62 @@ render/normalize, so new kinds degrade gracefully in old builds.
   every commit (fast-path no-op), consent rides the AIModelDialog. Design
   notes in design/ml-fill.md; verify with `node scripts/fill-verify.mjs
   /tmp/marraw-fixture` + the `healfill` shot surface.
-- **Spots in the RAW + XMP handoff.** Translate circular spots to Adobe
-  `crs:RetouchAreas` (intent-level, like the existing slider mapping) in
-  `internal/xmp` so Lightroom picks up the dust fixes.
-- **MVP polish candidates, after field testing:** the auto source picker only
-  probes 3 rings × 16 angles (could search smarter on busy textures).
-  ~~Per-spot opacity keyboard path~~ and ~~"visualize spots" dust view~~ done
+- **Spots in the RAW + XMP handoff.** _Assessed 2026-07-27 and **deferred** (not
+  a code problem — a verifiability one)._ Translating circular spots to Adobe
+  `crs:RetouchAreas` needs (1) a real writer change: `internal/xmp` is
+  attribute-only by design and explicitly drops nested `rdf:Seq` structures (the
+  same reason local-adjustment masks aren't exported), and RetouchAreas *is* such
+  a structure; and (2) empirical calibration of the coordinate space, radius
+  normalization, and feather/opacity ranges against a **real Lightroom-authored
+  `.xmp`** — none exists in `testdata/`, and `cropToNative` already admits its
+  own crop conventions are "NOT yet round-tripped through a real Lightroom." So we
+  can't verify the output without a Lightroom instance, which cuts against the
+  app's whole premise. Brush strokes map only lossily (Lightroom's per-mask single
+  radius vs. per-stroke radii) and fill-mode has no XMP representation at all.
+  Revisit only if a Lightroom calibration fixture becomes available; circles-only
+  would then be ~a day's work once the writer supports nesting.
+- ~~**Smarter heal-source picker.**~~ Done 2026-07-27: `SuggestHealSource`
+  (`internal/pyramid/heal.go`) no longer scores candidates by a 32-point
+  two-ring colour signature (which matched *mean colour*, ambiguous on busy
+  grain). It now compares a **mean-subtracted dense annular texture patch** (3
+  rings × 24 angles just outside the spot, per-channel mean removed so a
+  brightness offset between donor and destination — which the render-time plane
+  fit corrects anyway — doesn't mislead the search), over a wider coarse
+  candidate set (4 ring distances × 24 angles), then **hill-climbs the best hit
+  locally** (8-neighbourhood, halving step). Deterministic sampling order and the
+  in-frame / clears-the-disc invariants are preserved. New busy-texture unit test
+  (`TestSuggestHealSourceTexture`, stripes-over-a-brightness-ramp: the donor must
+  keep the spot's stripe phase despite the competing ramp) locks in the texture
+  awareness; `TestSuggestHealSource` and `scripts/spot-verify.mjs` still pass.
+- **MVP polish candidates, after field testing:** ~~the auto source picker only
+  probes 3 rings × 16 angles (could search smarter on busy textures)~~ done — see
+  above. ~~Per-spot opacity keyboard path~~ and ~~"visualize spots" dust view~~ done
   2026-07-16: digits 1-9/0 set the selected spot's opacity while healing, and
   A toggles `SpotVisualizeLayer` (client-side high-pass relief of the shown
   rendition, sensitivity slider in the Retouch group; `spotvis` shot surface).
 
 ## Pre-existing (not from the ML work)
 
-- **5 environmental ui-verify failures** (thumbSliderWidth, contrastSteps,
-  autoButtons, cropFitsAngle, crop-reset fatal timeout) — reproduce on
-  pre-ML baseline 7bdff31, so they're machine/environment drift, not code
-  regressions. The crop-reset fatal also leaves a stray 0.2 crop persisted
-  on the probe photo. Needs its own debugging session.
+- ~~**ui-verify failures.**~~ Debugged and fixed 2026-07-27. The failures that
+  actually reproduced on this Linux box were three, and each had a concrete
+  cause in the harness rather than the product:
+  - `thumbSliderWidth` (`width=0`) — the inline thumbnail slider is *designed*
+    to hide on a tight FilterBar (`@max-[1040px]` container query), and the
+    300px EditPanel (open by default) plus the left rail pushes the bar past
+    that breakpoint. The renderer now closes the EditPanel for the measurement
+    (the "roomy bar" precondition) and restores it after.
+  - `positionKept` (`focus at -1`) — the check excluded `visibleIds[9]` and
+    asserted focus lands on the photo that shifts into slot 9, which needs ≥11
+    photos; the dev fixture has 3. Generalized to exclude a photo that still has
+    a successor (`min(9, len-2)`), so it's meaningful on any library size.
+  - export `fatal` (`mkdir /tmp\marraw-uitest-export: permission denied`) — the
+    export destination hardcoded a `\\` separator, a literal filename on POSIX.
+    Switched to `/` (Go's `MkdirAll` accepts it on Windows too).
+  The renderer also now pins Library grid up front so the early presence checks
+  don't depend on the folder's persisted last view. `contrastSteps`,
+  `autoButtons`, `cropFitsAngle` and the crop-reset path all pass; ui-verify is
+  green twice consecutively. (The old note listed 5 different checks from an
+  earlier baseline — the set had drifted.)
 - ~~**Focus-prioritized pre-render order**~~ Done 2026-07-14: the background
   `prerenderPass` (and opt-in `fullresPass`) now render outward from the
   client's focused photo instead of front-to-back. New `Library.SetFocus`

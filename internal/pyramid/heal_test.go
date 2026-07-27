@@ -285,6 +285,52 @@ func TestSuggestHealSource(t *testing.T) {
 	}
 }
 
+// stripeRampImage is horizontal fine stripes (texture varies with y, period p)
+// laid over a horizontal brightness ramp (tone varies with x). The texture phase
+// is a function of y only, so the only seamless donor for a spot sits on the same
+// row; a same-column donor has matching absolute tone but the wrong phase. A picker
+// that matched mean colour would be pulled off-row by the ramp, so a same-row pick
+// proves the search is texture-structure aware and brightness-robust.
+func stripeRampImage(w, h, period int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		stripe := 60 * math.Sin(2*math.Pi*float64(y)/float64(period))
+		for x := range w {
+			ramp := -40 + 80*float64(x)/float64(w)
+			v := uint8(clampF(128+stripe+ramp, 0, 255))
+			i := img.PixOffset(x, y)
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = v, v, v, 0xff
+		}
+	}
+	return img
+}
+
+func TestSuggestHealSourceTexture(t *testing.T) {
+	const period = 16
+	img := stripeRampImage(240, 240, period)
+	e := &edit.Params{}
+	spot := edit.Spot{CX: 0.5, CY: 0.5, Radius: 0.05}
+	sx, sy := SuggestHealSource(img, e, spot)
+
+	sx2, sy2 := SuggestHealSource(img, e, spot)
+	if sx != sx2 || sy != sy2 {
+		t.Fatalf("must be deterministic: (%v,%v) vs (%v,%v)", sx, sy, sx2, sy2)
+	}
+	// The donor must land on the same stripe phase as the spot — within a
+	// quarter period in y — despite the competing brightness ramp in x.
+	if dy := math.Abs(sy-0.5) * 240; dy > period/4 {
+		t.Errorf("donor drifted off the spot's stripe phase: |Δy|=%.1fpx (period %d)", dy, period)
+	}
+	// It must still move off the spot (a real, distinct source was chosen).
+	f := newMaskFrame(240, 240, e)
+	long := math.Max(f.frameW, f.frameH)
+	scx, scy := f.outputPoint(sx*f.frameW, sy*f.frameH)
+	dcx, dcy := f.outputPoint(spot.CX*f.frameW, spot.CY*f.frameH)
+	if d := math.Hypot(scx-dcx, scy-dcy); d < 2*spot.Radius*long {
+		t.Errorf("suggested source overlaps the spot: distance %v", d)
+	}
+}
+
 // TestApplyHealResolutionStable checks a spot heals to the same tone whether
 // rendered large or downscaled — spot geometry is resolution independent.
 func TestApplyHealResolutionStable(t *testing.T) {

@@ -30,6 +30,14 @@ try {
   await until(() => ui().visibleIds.length > 0, 30000, 'photos loaded');
   R.photosLoaded = ui().visibleIds.length;
 
+  // The early presence checks (thumbnail slider, gap grouping, sorting) live in
+  // the Library grid's FilterBar. An interactive session persists the folder's
+  // last view, so a prior run could reopen straight into Develop and hide those
+  // controls (a width=0 read); pin Library grid so these probes are deterministic.
+  ui().setMode('library');
+  ui().setView('grid');
+  await until(() => ui().mode === 'library' && ui().view === 'grid', 5000, 'library grid for presence checks');
+
   // The control-presence checks need every collapsible edit group open; an
   // interactive session may have persisted some collapsed. The setter writes
   // the store optimistically, so it applies before the panel mounts.
@@ -39,12 +47,17 @@ try {
   // --- thumbnail-size slider renders at its designed width ------------------
   // Regression: width passed as className on the Slider root lost to the
   // root's own data-horizontal:w-full and the track collapsed to ~12px.
-  // Measures the inline FilterBar instance; it hides below the 780px
-  // container-query breakpoint, so a zoomed/narrow harness viewport reads 0
-  // (the harness pins zoomFactor=1 against persisted profile zoom for this).
+  // Measures the inline FilterBar instance. It is designed to hide on a tight
+  // bar (the @max-[1040px] container breakpoint), so the precondition is a roomy
+  // bar: the 300px EditPanel is open by default and shrinks the FilterBar past
+  // the breakpoint, so close it for the measurement, then restore.
+  const hadEditPanel = ui().showEditPanel;
+  ui().setShowEditPanel(false);
+  await sleep(100);
   const thumbSlider = document.querySelector('[title="Thumbnail size"] [data-slot="slider"]');
   const thumbW = thumbSlider ? thumbSlider.getBoundingClientRect().width : 0;
   R.thumbSliderWidth = thumbW >= 90 ? true : `width=${thumbW}px`;
+  ui().setShowEditPanel(hadEditPanel);
 
   // --- library grid groups by time gap -------------------------------------
   // GapControl lives in the FilterBar; grouping is driven through the server
@@ -570,17 +583,28 @@ try {
   mw.setFlagFilter('not-excluded');
   await sleep(300);
   const ids0 = ui().visibleIds.slice();
-  const target = ids0[9];
-  ui().focus(target);
-  key('x');
-  await until(() => !ui().visibleIds.includes(target), 5000, 'excluded photo removed');
-  R.positionKept = ui().focusId === ui().visibleIds[9] ? true : `focus at ${ui().visibleIds.indexOf(ui().focusId)}`;
+  // Exclude a photo that still has a successor, so "focus keeps its slot" is
+  // well-defined on any library size: index 9 on a real import, but mid-list on
+  // the small dev fixture (index 9 would be undefined on three photos).
+  const keepIdx = Math.min(9, ids0.length - 2);
+  const target = keepIdx >= 0 ? ids0[keepIdx] : null;
+  if (target == null) {
+    R.positionKept = `library too small (${ids0.length})`;
+  } else {
+    ui().focus(target);
+    key('x');
+    await until(() => !ui().visibleIds.includes(target), 5000, 'excluded photo removed');
+    R.positionKept =
+      ui().focusId === ui().visibleIds[keepIdx] ? true : `focus at ${ui().visibleIds.indexOf(ui().focusId)}`;
+  }
   // cleanup: unflag it again
   mw.setFlagFilter('all');
   await sleep(200);
-  ui().focus(target);
-  key('u');
-  await sleep(300);
+  if (target != null) {
+    ui().focus(target);
+    key('u');
+    await sleep(300);
+  }
 
   // --- selection bar takes over the filter row on multi-select --------------
   ui().focus(ids0[0]);
@@ -683,7 +707,10 @@ try {
   await until(() => ui().mode === 'develop', 5000, 'develop mode for export chip');
   await sleep(300);
   R.cinemaNoTopBar = !document.querySelector('[data-testid="task-tray"]');
-  const expDest = ui().folderPath.replace(/[\\/][^\\/]+[\\/]?$/, '') + '\\marraw-uitest-export';
+  // Forward slash, not '\\': on POSIX a backslash isn't a separator, so the
+  // server would try to mkdir a literal "tmp\marraw-uitest-export" and fail.
+  // Go's MkdirAll accepts '/' on Windows too, so this stays cross-platform.
+  const expDest = ui().folderPath.replace(/[\\/][^\\/]+[\\/]?$/, '') + '/marraw-uitest-export';
   // Export several photos so the job runs long enough to survive two mode
   // switches — the whole point of the persistence checks below.
   const expCount = Math.min(8, ui().visibleIds.length);

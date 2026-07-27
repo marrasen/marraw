@@ -713,13 +713,26 @@ func StrokeSpotCircle(w, h int, e *edit.Params, s *edit.Spot) (cx, cy, radius fl
 	return cx, cy, radius
 }
 
+// Probe geometry for SuggestHealSource. The signature is a band of concentric
+// rings just outside the spot boundary (the blemish itself sits inside the disc
+// and must not be matched): sampling that surround as a dense 2-D patch — not a
+// pair of thin rings — lets the picker match texture *structure*, so it holds up
+// on busy grain where mean colour alone is ambiguous.
+const (
+	healProbeAngles = 24
+	healProbeRings  = 3
+	healProbeCount  = healProbeAngles * healProbeRings
+)
+
 // SuggestHealSource picks a source center for a retouch spot on a post-geometry
-// render, deterministically, and returns it in oriented-frame fractions ready
-// to store in Spot.SX/SY. It samples candidate patches on rings around the spot
-// and scores each by how closely its surround matches the spot's own surround
-// (sum of squared RGB differences on two probe circles), returning the best. A
-// stable source belongs in the params — computing it in the pipeline would let
-// it drift with render size — so callers run this once at spot creation.
+// render, deterministically, and returns it in oriented-frame fractions ready to
+// store in Spot.SX/SY. It scores candidate patches by how closely their surround
+// texture matches the spot's own surround — a mean-subtracted sum of squared RGB
+// differences over a dense annular patch, so a brightness offset between donor
+// and destination (which the render-time plane fit corrects anyway) doesn't
+// mislead the search — then refines the best coarse hit locally. A stable source
+// belongs in the params — computing it in the pipeline would let it drift with
+// render size — so callers run this once at spot creation.
 func SuggestHealSource(img *image.RGBA, e *edit.Params, s edit.Spot) (sx, sy float64) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -728,61 +741,104 @@ func SuggestHealSource(img *image.RGBA, e *edit.Params, s edit.Spot) (sx, sy flo
 	radPx := s.Radius * long
 	dcx, dcy := f.outputPoint(s.CX*f.frameW, s.CY*f.frameH)
 
-	sample := func(x, y float64) (r, g, b float64) {
-		r8, g8, b8, _ := sampleBilinear(img, x, y)
-		return float64(r8), float64(g8), float64(b8)
-	}
-	// Fixed probe offsets on two circles around a center (0.6R, 1.1R).
-	const probeAngles = 16
-	var probes [probeAngles * 2][2]float64
+	// Fixed probe offsets: three rings in the band just outside the spot.
+	probeRings := [healProbeRings]float64{1.15, 1.5, 1.9}
+	var probes [healProbeCount][2]float64
 	pi := 0
-	for _, pr := range [2]float64{0.6, 1.1} {
-		for a := range probeAngles {
-			ang := 2 * math.Pi * float64(a) / probeAngles
+	for _, pr := range probeRings {
+		for a := range healProbeAngles {
+			ang := 2 * math.Pi * float64(a) / healProbeAngles
 			probes[pi] = [2]float64{pr * radPx * math.Cos(ang), pr * radPx * math.Sin(ang)}
 			pi++
 		}
 	}
-	// Reference: the spot's own surround.
-	var ref [probeAngles * 2][3]float64
-	for k, p := range probes {
-		r, g, bl := sample(dcx+p[0], dcy+p[1])
-		ref[k] = [3]float64{r, g, bl}
+	// signature samples the surround at a center and subtracts its per-channel
+	// mean, so only the texture (not the absolute tone) is compared.
+	signature := func(cx, cy float64) [healProbeCount][3]float64 {
+		var sig [healProbeCount][3]float64
+		var mr, mg, mb float64
+		for k, p := range probes {
+			r8, g8, b8, _ := sampleBilinear(img, cx+p[0], cy+p[1])
+			r, g, bl := float64(r8), float64(g8), float64(b8)
+			sig[k] = [3]float64{r, g, bl}
+			mr, mg, mb = mr+r, mg+g, mb+bl
+		}
+		inv := 1.0 / float64(healProbeCount)
+		mr, mg, mb = mr*inv, mg*inv, mb*inv
+		for k := range sig {
+			sig[k][0] -= mr
+			sig[k][1] -= mg
+			sig[k][2] -= mb
+		}
+		return sig
+	}
+	ref := signature(dcx, dcy)
+	scoreAt := func(cx, cy float64) float64 {
+		sig := signature(cx, cy)
+		var score float64
+		for k := range sig {
+			dr := sig[k][0] - ref[k][0]
+			dg := sig[k][1] - ref[k][1]
+			db := sig[k][2] - ref[k][2]
+			score += dr*dr + dg*dg + db*db
+		}
+		return score
 	}
 
-	margin := radPx * (healAnnulusOuter + 0.1)
+	// A candidate is usable if its whole probe band stays on the frame and it
+	// clears the destination disc (so a clone/heal never sources itself).
+	margin := radPx * (probeRings[healProbeRings-1] + 0.15)
+	valid := func(cx, cy float64) bool {
+		if cx < margin || cx > float64(w)-margin || cy < margin || cy > float64(h)-margin {
+			return false
+		}
+		return math.Hypot(cx-dcx, cy-dcy) >= 2*radPx
+	}
+
 	bestScore := math.Inf(1)
 	bestX, bestY := dcx, dcy
 	found := false
-	// Candidate centers: fixed angles × rising ring distances.
-	const candAngles = 16
-	for _, dist := range [3]float64{2.2, 3.2, 4.5} {
+	// Coarse search: fixed angles × rising ring distances.
+	const candAngles = 24
+	for _, dist := range [4]float64{2.0, 2.7, 3.5, 4.5} {
 		rd := dist * radPx
 		for a := range candAngles {
 			ang := 2 * math.Pi * float64(a) / candAngles
 			ccx := dcx + rd*math.Cos(ang)
 			ccy := dcy + rd*math.Sin(ang)
-			// Keep the candidate patch on the frame and clear of the spot.
-			if ccx < margin || ccx > float64(w)-margin || ccy < margin || ccy > float64(h)-margin {
+			if !valid(ccx, ccy) {
 				continue
 			}
-			if math.Hypot(ccx-dcx, ccy-dcy) < 2*radPx {
-				continue
-			}
-			var score float64
-			for k, p := range probes {
-				r, g, bl := sample(ccx+p[0], ccy+p[1])
-				dr, dg, db := r-ref[k][0], g-ref[k][1], bl-ref[k][2]
-				score += dr*dr + dg*dg + db*db
-			}
-			if score < bestScore {
+			if score := scoreAt(ccx, ccy); score < bestScore {
 				bestScore = score
 				bestX, bestY = ccx, ccy
 				found = true
 			}
 		}
 	}
-	if !found {
+	if found {
+		// Local refinement: hill-climb the 8-neighbourhood, halving the step
+		// when a round finds nothing better. Deterministic offset order.
+		neighbors := [8][2]float64{{1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}}
+		step := radPx * 0.5
+		for iter := 0; iter < 5 && step >= 1; iter++ {
+			improved := false
+			for _, d := range neighbors {
+				nx, ny := bestX+d[0]*step, bestY+d[1]*step
+				if !valid(nx, ny) {
+					continue
+				}
+				if score := scoreAt(nx, ny); score < bestScore {
+					bestScore = score
+					bestX, bestY = nx, ny
+					improved = true
+				}
+			}
+			if !improved {
+				step /= 2
+			}
+		}
+	} else {
 		// No on-frame candidate (a huge spot, or a tiny frame): offset toward
 		// the frame center so the source at least stays inside.
 		bestX = clampF(dcx+2.5*radPx, radPx, float64(w)-radPx)
