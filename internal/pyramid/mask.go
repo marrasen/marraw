@@ -37,7 +37,7 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) {
 	var wrow []uint16
 	for mi := range e.Masks {
 		m := &e.Masks[mi]
-		if m.Adjust.IsNeutral() {
+		if m.Disabled || m.Adjust.IsNeutral() {
 			continue
 		}
 		ev := newMaskEvaluator(m, f, ai, img)

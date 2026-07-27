@@ -385,6 +385,7 @@ function maskDiffLabel(prev: Mask[] | undefined, next: Mask[] | undefined): stri
   if (b.length < a.length) return 'Remove mask';
   for (let i = 0; i < b.length; i++) {
     if (JSON.stringify(a[i]) === JSON.stringify(b[i])) continue;
+    if (!a[i]?.disabled !== !b[i]?.disabled) return b[i]?.disabled ? 'Hide mask' : 'Show mask';
     if (JSON.stringify(a[i]?.strokes) !== JSON.stringify(b[i]?.strokes)) return 'Brush stroke';
     if (JSON.stringify(a[i]?.adjust) !== JSON.stringify(b[i]?.adjust)) return 'Adjust mask';
     return 'Move mask';
@@ -403,6 +404,7 @@ function spotDiffLabel(prev: Spot[] | undefined, next: Spot[] | undefined): stri
     if (JSON.stringify(a[i]) === JSON.stringify(b[i])) continue;
     const p = a[i];
     const n = b[i];
+    if (!p.disabled !== !n.disabled) return n.disabled ? 'Hide spot' : 'Show spot';
     if (p.cx !== n.cx || p.cy !== n.cy || p.sx !== n.sx || p.sy !== n.sy || p.radius !== n.radius) {
       return 'Move spot';
     }

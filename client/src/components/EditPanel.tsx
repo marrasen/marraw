@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw,
   Image as ImageIcon, Plus, Trash2, Paintbrush, Circle, Eraser,
-  Focus, Layers, Loader2, Shapes, ScanSearch, Users,
+  Eye, EyeOff, Focus, Layers, Loader2, Shapes, ScanSearch, Users,
 } from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
@@ -1009,10 +1009,25 @@ function SpotRow({
   return (
     <div className={cn('flex flex-col rounded-md border', selected ? 'border-primary/45' : 'border-border')}>
       <div className="flex items-center gap-1.5 px-2 py-1.5">
-        <button type="button" className="flex flex-1 items-center gap-1.5 text-left" onClick={onSelect} aria-pressed={selected}>
+        <button
+          type="button"
+          className={cn('flex flex-1 items-center gap-1.5 text-left', spot.disabled && 'opacity-45')}
+          onClick={onSelect}
+          aria-pressed={selected}
+        >
           <span className="text-[11.5px] text-secondary-foreground">
             {stroke ? 'Brush' : 'Spot'} {index + 1} · {mode}
           </span>
+        </button>
+        <button
+          type="button"
+          className={spot.disabled ? 'text-accent-text' : 'text-muted-foreground hover:text-foreground'}
+          title={spot.disabled ? 'Show spot' : 'Hide spot'}
+          aria-label={spot.disabled ? 'Show spot' : 'Hide spot'}
+          aria-pressed={!!spot.disabled}
+          onClick={() => commitPatch({ disabled: spot.disabled ? undefined : true })}
+        >
+          {spot.disabled ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
         </button>
         <button
           type="button"
@@ -1396,7 +1411,12 @@ function MaskRow({
         onMouseEnter={() => esSetTintMask(index)}
         onMouseLeave={() => esSetTintMask(null)}
       >
-        <button type="button" className="flex flex-1 items-center gap-1.5 text-left" onClick={onSelect} aria-pressed={selected}>
+        <button
+          type="button"
+          className={cn('flex flex-1 items-center gap-1.5 text-left', mask.disabled && 'opacity-45')}
+          onClick={onSelect}
+          aria-pressed={selected}
+        >
           <span className="text-[11.5px] text-secondary-foreground">{maskLabel(mask, index)}</span>
           {changed && <span className="size-[5px] shrink-0 rounded-full bg-primary" title="Has adjustments" />}
         </button>
@@ -1414,6 +1434,19 @@ function MaskRow({
           }}
         >
           Invert
+        </button>
+        <button
+          type="button"
+          className={mask.disabled ? 'text-accent-text' : 'text-muted-foreground hover:text-foreground'}
+          title={mask.disabled ? 'Show mask' : 'Hide mask'}
+          aria-label={mask.disabled ? 'Show mask' : 'Hide mask'}
+          aria-pressed={!!mask.disabled}
+          onClick={() => {
+            esUpdateMask(client, index, { disabled: mask.disabled ? undefined : true });
+            esCommit(client);
+          }}
+        >
+          {mask.disabled ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
         </button>
         <button
           type="button"

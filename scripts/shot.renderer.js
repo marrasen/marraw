@@ -1257,6 +1257,45 @@ if (shot === 'cull') {
     overlay: !!document.querySelector('[data-testid="heal-overlay"]'),
     activeSpot: es.getState().activeSpot,
   };
+} else if (shot === 'eyetoggle') {
+  // Eye toggle: two masks (one hidden via the real eye button) and a spot
+  // (hidden too), so the shot shows both row states; probes that the clicks
+  // actually set/clear `disabled` in the draft.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200); // initial preview settles
+  ui().setDevelopTab('masks');
+  mw.esUpdate({ masks: [], spots: [] }); // idempotence: drop persisted local edits
+  mw.esCommit();
+  await sleep(300);
+  mw.esAddMask('radial');
+  await sleep(200);
+  mw.esUpdateMask(0, { adjust: { expEV: 1.2, temp: 0.5 } });
+  mw.esCommit();
+  mw.esAddMask('linear');
+  await sleep(200);
+  mw.esUpdateMask(1, { adjust: { expEV: -1.5 } });
+  mw.esCommit();
+  mw.esSetHealing(true);
+  const idx = mw.esBeginSpot({ cx: 0.5, cy: 0.5, radius: 0.035, sx: 0.62, sy: 0.55, feather: 0.5 });
+  await mw.esFinishSpot(idx);
+  mw.esSetHealing(false);
+  await sleep(300);
+  // Hide mask 1 and the spot through the real buttons.
+  const hideButtons = () => [...document.querySelectorAll('[aria-label="Hide mask"], [aria-label="Hide spot"]')];
+  await until(() => hideButtons().length >= 3, 10000);
+  hideButtons()[1].click(); // mask 1's eye
+  await sleep(200);
+  document.querySelector('[aria-label="Hide spot"]')?.click();
+  await until(() => mw.esPreviewSettled(), 30000).catch(() => {});
+  await sleep(400);
+  const d = es.getState().draft;
+  window.__maskProbe = {
+    maskDisabled: [!!d.masks?.[0]?.disabled, !!d.masks?.[1]?.disabled],
+    spotDisabled: !!d.spots?.[0]?.disabled,
+    showButtons: document.querySelectorAll('[aria-label="Show mask"], [aria-label="Show spot"]').length,
+  };
 } else if (shot === 'healbrush') {
   // Heal brush: paint a stroke-kind spot, let the server pick the source, and
   // show the painted region + translated source copy + panel Brush row.

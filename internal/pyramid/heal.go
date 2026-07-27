@@ -33,6 +33,9 @@ func ApplyHeal(img *image.RGBA, e *edit.Params) {
 	long := math.Max(f.frameW, f.frameH)
 	for i := range e.Spots {
 		s := &e.Spots[i]
+		if s.Disabled {
+			continue
+		}
 		// Skip kinds and modes this build doesn't know — the newMaskEvaluator
 		// precedent. A sidecar from a newer version renders here without a
 		// Normalize pass (editsForHash parses stored JSON as-is), so a future

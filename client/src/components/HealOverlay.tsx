@@ -296,6 +296,9 @@ export function HealOverlay({
       <svg className="pointer-events-none absolute inset-0 size-full overflow-visible">
         {spots.map((spot, i) => {
           const active = i === activeSpot;
+          // A hidden (eye-toggled) spot keeps a ghost outline so it can still
+          // be found and re-enabled, but clearly reads as off.
+          const dim = spot.disabled ? 0.35 : undefined;
           if (spot.kind === 'stroke') {
             const strokes = spot.strokes ?? [];
             const sw = (st: Stroke) => Math.max(3, 2 * st.radius * L * k);
@@ -303,7 +306,7 @@ export function HealOverlay({
               // Inactive painted region: a faint pass over the stroke path,
               // clickable to select.
               return (
-                <g key={i}>
+                <g key={i} opacity={dim}>
                   {strokes.map((st, j) => (
                     <path
                       key={j}
@@ -326,7 +329,7 @@ export function HealOverlay({
             const dx = spot.sx - spot.cx;
             const dy = spot.sy - spot.cy;
             return (
-              <g key={i}>
+              <g key={i} opacity={dim}>
                 <line x1={dcx} y1={dcy} x2={scx} y2={scy} stroke="white" strokeOpacity=".7" strokeDasharray="4 3" />
                 {/* Source region (translated copy, dashed outline effect via low opacity) */}
                 {strokes.map((st, j) => (
@@ -366,6 +369,7 @@ export function HealOverlay({
               <circle
                 key={i}
                 cx={dcx} cy={dcy} r={r}
+                opacity={dim}
                 fill="transparent" stroke="white" strokeOpacity=".55" strokeWidth={1.5}
                 className="pointer-events-auto cursor-pointer"
                 onPointerDown={(e) => beginGrip(e, 'dest', i)}
@@ -377,7 +381,7 @@ export function HealOverlay({
           }
           const [scx, scy] = toBoxPx(spot.sx, spot.sy);
           return (
-            <g key={i}>
+            <g key={i} opacity={dim}>
               <line x1={dcx} y1={dcy} x2={scx} y2={scy} stroke="white" strokeOpacity=".7" strokeDasharray="4 3" />
               {/* Source ring (dashed) */}
               <circle cx={scx} cy={scy} r={r} fill="transparent" stroke="white" strokeOpacity=".85" strokeDasharray="5 3" />

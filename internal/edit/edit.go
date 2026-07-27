@@ -107,8 +107,11 @@ type Stroke struct {
 // space as the crop rectangle) so masks stay glued to image content across
 // recrop and re-straighten. Masks apply in list order.
 type Mask struct {
-	Type   MaskType `json:"type"`
-	Invert bool     `json:"invert,omitempty"`
+	Type MaskType `json:"type"`
+	// Disabled hides the mask from rendering without deleting it — the
+	// panel's eye toggle. Zero means visible, the zero-value contract.
+	Disabled bool `json:"disabled,omitempty"`
+	Invert   bool `json:"invert,omitempty"`
 	// Linear gradient: weight 1 at A(x0,y0) ramping to 0 at B(x1,y1);
 	// the A→B span is the feather.
 	X0 float64 `json:"x0,omitempty"`
@@ -170,8 +173,11 @@ const (
 // would carry an ML inpaint. Normalize drops kinds it doesn't know, the
 // unknown-mask-type precedent, so old builds ignore future spots gracefully.
 type Spot struct {
-	Kind    string   `json:"kind,omitempty"`
-	Mode    SpotMode `json:"mode,omitempty"`
+	Kind string `json:"kind,omitempty"`
+	// Disabled hides the spot from rendering without deleting it — the
+	// panel's eye toggle. Zero means visible, the zero-value contract.
+	Disabled bool     `json:"disabled,omitempty"`
+	Mode     SpotMode `json:"mode,omitempty"`
 	CX      float64  `json:"cx"` // destination reference point, frame fractions
 	CY      float64  `json:"cy"`
 	Radius  float64  `json:"radius"` // fraction of the frame long edge (circle kind; 0 for strokes)

@@ -300,10 +300,11 @@ export function lerpPresetAmount(base: Params, result: Params, t: number): Param
 // (which pins a generated map file) is cleared — applying re-runs detection
 // on the target photo and stamps a fresh version. Painted masks
 // (linear/radial/brush) are geometry tied to one photo's content and never
-// travel; undefined when the draft has no AI masks.
+// travel; hidden (disabled) masks aren't part of the look and don't travel
+// either; undefined when the draft has no AI masks.
 export function aiMaskRecipes(draft: Params): Mask[] | undefined {
   const recipes = (draft.masks ?? [])
-    .filter((m) => m.type === 'ai' && m.aiKind)
+    .filter((m) => m.type === 'ai' && m.aiKind && !m.disabled)
     .map((m) => ({ ...m, mapVer: '' }));
   return recipes.length > 0 ? recipes : undefined;
 }

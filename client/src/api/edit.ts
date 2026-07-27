@@ -27,6 +27,7 @@ export type WBModeType = typeof WBMode[keyof typeof WBMode];
 
 export interface Mask {
     type: string;
+    disabled?: boolean;
     invert?: boolean;
     x0?: number;
     y0?: number;
@@ -110,6 +111,7 @@ export interface Params {
 
 export interface Spot {
     kind?: string;
+    disabled?: boolean;
     mode?: string;
     cx: number;
     cy: number;
