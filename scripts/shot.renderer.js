@@ -532,6 +532,25 @@ if (shot === 'cull') {
     .map((e) => e.textContent)
     .filter((t) => t !== 'Downloaded models');
   window.__modelsProbe = { rows, text: dlg.textContent.includes('Not used by this version') };
+} else if (shot === 'remote') {
+  // Settings → Remote: persist enabled first so the section mounts with the
+  // Port row and pairing token shown (the dev-attach daemon leaves
+  // restartRequired false, so no amber banner). Then open Settings and click
+  // the Remote tab; wait for the server-side pairing token to land.
+  await window.marraw?.setRemoteAccess?.({ enabled: true, port: 8482 });
+  ui().setSettingsOpen(true);
+  await sleep(300);
+  [...document.querySelectorAll('button')].find((b) => b.textContent === 'Remote')?.click();
+  await sleep(400);
+  const dlg = document.querySelector('[role="dialog"]');
+  // The token row renders '…' until System.GetRemoteAccess resolves.
+  await until(() => dlg && !dlg.querySelector('.font-mono')?.textContent?.includes('…'), 8000);
+  await sleep(200);
+  window.__remoteProbe = {
+    hasToggle: !!dlg && dlg.textContent.includes('Allow remote connections'),
+    hasPort: !!dlg && dlg.textContent.includes('Remote machines connect to this port'),
+    tokenLoaded: !!dlg && !dlg.querySelector('.font-mono')?.textContent?.includes('…'),
+  };
 } else if (shot === 'presets') {
   // The Presets tab with saved looks: seeds two user presets (one full
   // absolute, one partial+relative), applies the first so the Amount

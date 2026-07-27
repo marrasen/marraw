@@ -12,12 +12,14 @@ a React front-end does the rest, and Electron holds it together.
 gaps — note the `+2 min gap` divider in the deck; the full-bleed loupe keeps
 your zoom and pan as you arrow through.</sup>
 
-> **Status: early.**
-> marraw is usable daily, and the scope has been growing fast — smart culling
-> and AI-masked local editing are in. The gaps that remain are real ones,
-> though: read [What marraw does *not* do](#what-marraw-does-not-do) before
-> you invest time in it. Windows is the primary platform; the macOS and Linux
-> builds are newer and less travelled — issue reports are very welcome.
+> **Status: early, but deep.**
+> marraw is usable daily, and the scope has grown fast — smart culling,
+> AI-masked local editing, healing and content-aware fill, presets that carry
+> the AI, and opening a library hosted on another machine are all in. The gaps
+> that remain are real ones, though: read
+> [What marraw does *not* do](#what-marraw-does-not-do) before you invest time
+> in it. Windows is the primary platform; the macOS and Linux builds are newer
+> and less travelled — issue reports are very welcome.
 
 ---
 
@@ -77,7 +79,10 @@ the out-of-focus rejects in one pass — and closed-eye detection badges the
 blinks, with a **Blinks** filter that narrows the grid to just those frames.
 All of it runs on your machine: the models download only after you say yes,
 nothing leaves your computer, and Settings shows the downloaded weights and
-lets you delete them.
+lets you delete them. The point is to change how you shoot: fire away all night
+at the concert, and let marraw do the first pass — collapse the bursts, judge
+the best of each, sweep the soft frames and the blinks — before you have taken
+your coat off. Hours of pixel-peeping become minutes of confirming.
 
 **Culling is keyboard-first, and the loupe remembers where you were.**
 Arrows navigate, `1`–`5` rate, `P` picks, `X` excludes, `Enter` goes deeper.
@@ -114,10 +119,38 @@ auto-presets, `Ctrl+⇧+1`–`9` your saved presets by position, and any look ca
 be saved as a named preset and applied from the Presets tab (the photo keeps
 its own crop).
 
+**Presets can carry the AI, not just the sliders.**
+A preset saves whatever slice of the edit you choose — tone only, everything,
+or just your masks — and it can apply *relative* to each photo's calibrated
+baseline instead of stamping one absolute value across a mixed batch. The part
+that feels like cheating: a preset's Subject / Depth / Scene masks are
+*recipes*, not frozen shapes. They re-detect on every photo you drop the preset
+onto — one frame or a whole selection — so "warm the sky, lift the subject"
+becomes a one-key look across an entire shoot, each photo masked to its own
+subject and its own sky. Hover a preset to preview it on the loupe, and scrub
+the amount after it lands.
+
 **`Ctrl+K` jumps to anything** — any mode, any panel, any single develop
 control, any preset.
 
 ![A command palette floating over a dimmed Develop window, prompting Jump to any mode, control, or action, listing Go to Library, Go to Cull, Go to Develop, Contact sheet, Export, Copy image to clipboard, Add folder to library, Settings](screenshots/marraw_jump.jpg)
+
+**Your photos can stay on the machine that holds them.**
+The daemon that does the pixel work can listen on the network, so the laptop on
+the couch can open a library that lives on the desktop in the other room — same
+Tailscale network, one pairing token, no copying a hundred gigabytes of RAW
+around. A remote window routes *everything* through the host: the directory
+picker, the preview cache, exports and watermark images all read and write on
+the machine with the photos, not the one you are sitting at, and a banner tells
+you the moment the connection drops. Turn it on in **Settings → Remote**;
+`--dev` builds refuse to bind past loopback, and access is gated on the token,
+not on who can reach the port.
+
+![Settings dialog open on the Remote tab: an Allow remote connections toggle switched on, a Port field reading 8482, a pairing token with Copy and Regenerate buttons, and a Connect to another library row](screenshots/marraw_remote.jpg)
+
+<sup>Settings → Remote on the machine that holds the photos. Flip the toggle,
+hand the pairing token to your laptop, and its connect screen opens the library
+over the network — no files copied.</sup>
 
 ---
 
