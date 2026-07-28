@@ -125,21 +125,24 @@ against package.json verbatim, so both must carry the suffix.
 
 ## 6. Publish
 
-When the run succeeds, electron-builder has created a draft release. The full
-asset set is NINE files: `marraw-Setup-X.Y.Z.exe` + `.exe.blockmap` +
-`latest.yml` (Windows), `-arm64.dmg` + `.dmg.blockmap` + `latest-mac.yml`
-(macOS), `-x86_64.AppImage` + `-amd64.deb` + `latest-linux.yml` (Linux).
+When the run succeeds, the workflow's `release` job has created ONE draft
+release. The full asset set is NINE files: `marraw-Setup-X.Y.Z.exe` +
+`.exe.blockmap` + `latest.yml` (Windows), `-arm64.dmg` + `.dmg.blockmap` +
+`latest-mac.yml` (macOS), `-x86_64.AppImage` + `-amd64.deb` +
+`latest-linux.yml` (Linux).
 
-**Known race (hit on v0.5.0-beta.2 AND v0.5.0):** the per-OS jobs sometimes
-create TWO drafts for the same tag — one with the exe + mac assets, one with
-the linux assets + the Windows blockmap. Check with
+**The old split-draft race is fixed** (2026-07-28, after it hit every release
+in the 0.8.0 cycle). The platform jobs no longer publish at all — they upload
+workflow artifacts, and a single `release` job assembles the draft and fails
+the build if any of the nine assets is missing or empty. So a split draft, or
+a draft with fewer than nine assets, now means a REGRESSION in
+`.github/workflows/release.yml`, not a routine hiccup to clean up by hand.
+Check with:
 `gh api repos/marrasen/marraw/releases --jq '.[] | select(.tag_name=="vX.Y.Z") | {id, assets: [.assets[].name]}'`.
-If split, consolidate BEFORE publishing: download the smaller draft's assets
-(`gh api repos/marrasen/marraw/releases/assets/<id> -H "Accept: application/octet-stream" > <name>`),
-DELETE that draft (`gh api -X DELETE .../releases/<id>`) — delete first, so
-the tag is unambiguous — then `gh release upload vX.Y.Z <files>`. A missing
-`latest-linux.yml` breaks Linux auto-update; a missing `.exe.blockmap` breaks
-Windows differential updates.
+(For the record, the manual repair was: download the smaller draft's assets,
+DELETE that draft first so the tag is unambiguous, then `gh release upload`.)
+A missing `latest-linux.yml` breaks Linux auto-update; a missing
+`.exe.blockmap` breaks Windows differential updates.
 
 Verify all nine assets (`gh release view vX.Y.Z`), then publish with the
 changelog section as notes:

@@ -20,23 +20,41 @@ env:
   NODE_VERSION: '24'
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  # The version gate, on its own so it fails in seconds and all three platform
+  # builds can then run in PARALLEL. (They used to chain behind the Windows job
+  # so that job could create the draft release alone; the draft is now assembled
+  # by the `release` job below, so the chain is gone.)
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
       # A tag whose version disagrees with package.json would publish an
       # installer that electron-updater's latest.yml never points at.
       - name: Check tag matches package.json version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
+        id: v
         run: |
-          $tag = '${{ github.ref_name }}' -replace '^v', ''
-          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($tag -ne $pkg) {
-            throw "tag v$tag does not match package.json version $pkg"
-          }
-          Write-Host "releasing $pkg"
+          set -euo pipefail
+          pkg=$(node -p "require('./package.json').version")
+          echo "version=$pkg" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "not a tag: building $pkg without publishing"
+            exit 0
+          fi
+          tag="${GITHUB_REF_NAME#v}"
+          if [[ "$tag" != "$pkg" ]]; then
+            echo "tag v$tag does not match package.json version $pkg" >&2
+            exit 1
+          fi
+          echo "releasing $pkg"
+
+  windows:
+    runs-on: windows-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
@@ -125,24 +143,17 @@ jobs:
       - name: Test inference runtime
         run: go test ./internal/infer -count=1
 
-      # Not a tag: prove the installer builds, keep it as an artifact.
+      # Build only -- this job never talks to GitHub Releases. The `release`
+      # job collects the artifacts and assembles the single draft.
       - name: Build installer
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: npm run dist
-
-      # A tag: build and upload to a *draft* GitHub Release. Nothing reaches
-      # users -- and electron-updater sees nothing -- until you publish it.
-      - name: Build and publish draft release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist:publish
 
       - uses: actions/upload-artifact@v4
         with:
           name: marraw-windows
           path: |
             dist/*.exe
+            dist/*.exe.blockmap
             dist/*.yml
           if-no-files-found: error
 
@@ -150,10 +161,8 @@ jobs:
 # macOS and Linux builds are UNTESTED at runtime: no physical test machine.
 # CI proves they compile and package; users report whether they run.
 #
-# Both jobs `needs: windows` -- partly as a gate (the tag-version check lives
-# there), partly so the Windows job creates the draft release alone before
-# the other two race electron-builder's find-or-create-draft logic (v0.2.0
-# already produced a split draft with a SINGLE job; see release notes ritual).
+# All three platform jobs gate on `check` only, so they run in parallel and
+# none of them publishes: each just uploads its packages as workflow artifacts.
 #
 # NOTE: macOS auto-update requires a Developer ID signature -- Squirrel.Mac
 # refuses to update an unsigned bundle. The unsigned .dmg installs (via
@@ -164,7 +173,7 @@ jobs:
 
   linux:
     runs-on: ubuntu-22.04 # oldest supported image = oldest glibc users can run
-    needs: windows
+    needs: check
     steps:
       - uses: actions/checkout@v4
 
@@ -229,14 +238,7 @@ jobs:
         run: go test ./...
 
       - name: Build installer
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: npm run dist
-
-      - name: Build and publish draft release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist:publish
 
       - uses: actions/upload-artifact@v4
         with:
@@ -249,7 +251,7 @@ jobs:
 
   macos:
     runs-on: macos-15 # arm64 (Apple Silicon) only for now
-    needs: windows
+    needs: check
     env:
       # No signing certificate: stop electron-builder from probing the
       # keychain and stalling or failing on whatever it finds there.
@@ -318,19 +320,86 @@ jobs:
         run: go test ./...
 
       - name: Build installer
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: npm run dist
-
-      - name: Build and publish draft release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist:publish
 
       - uses: actions/upload-artifact@v4
         with:
           name: marraw-macos
           path: |
             dist/*.dmg
+            dist/*.dmg.blockmap
             dist/*.yml
           if-no-files-found: error
+
+# ---------------------------------------------------------------------------
+# One writer, one draft. Letting each platform job publish meant three
+# concurrent runs of electron-builder's find-or-create-draft logic, and a
+# DRAFT release is not retrievable by tag (GET /releases/tags/{tag} only finds
+# published ones) -- so "find" is a list-and-match that races. Every release in
+# the 0.8.0 cycle came out split across two drafts, in a different shape each
+# time, each needing a manual download/delete/re-upload before publishing. A
+# split that goes unnoticed ships a release missing latest-linux.yml (no Linux
+# auto-update) or the .exe.blockmap (no Windows differential updates).
+#
+# So the platform jobs now only ever produce artifacts, and this job assembles
+# the draft alone. It refuses to create a partial release: the asset list is
+# checked against the exact nine files a complete release has.
+# ---------------------------------------------------------------------------
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [check, windows, linux, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          pattern: marraw-*
+          merge-multiple: true
+
+      - name: Verify the complete asset set
+        run: |
+          set -euo pipefail
+          cd assets
+          expected=(
+            "marraw-Setup-${VERSION}.exe"
+            "marraw-Setup-${VERSION}.exe.blockmap"
+            "latest.yml"
+            "marraw-${VERSION}-arm64.dmg"
+            "marraw-${VERSION}-arm64.dmg.blockmap"
+            "latest-mac.yml"
+            "marraw-${VERSION}-x86_64.AppImage"
+            "marraw-${VERSION}-amd64.deb"
+            "latest-linux.yml"
+          )
+          echo "found:"; ls -la
+          missing=()
+          for f in "${expected[@]}"; do
+            [[ -s "$f" ]] || missing+=("$f")
+          done
+          if (( ${#missing[@]} )); then
+            printf 'missing or empty asset: %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+          echo "all ${#expected[@]} assets present"
+
+      # --draft: nothing reaches users -- and electron-updater sees nothing --
+      # until the release is published. Notes are written at publish time.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # This job never checks out, so gh has no git remote to infer from.
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists -- refusing to clobber it" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --title "$VERSION" \
+            --notes "" \
+            assets/*
