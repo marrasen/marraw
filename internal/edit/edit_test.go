@@ -3,6 +3,7 @@ package edit
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/marrasen/marraw/internal/libraw"
@@ -41,14 +42,105 @@ func TestIsNeutralNewFields(t *testing.T) {
 		t.Error("a bare split hue (no amount) must stay neutral")
 	}
 	for name, p := range map[string]Params{
-		"contrast": {Contrast: 0.1},
-		"vignette": {Vignette: -0.2},
-		"demosaic": {Demosaic: DemosaicDHT},
-		"kelvin":   {WBMode: WBKelvin, WBKelvin: 5500},
+		"contrast":  {Contrast: 0.1},
+		"vignette":  {Vignette: -0.2},
+		"demosaic":  {Demosaic: DemosaicDHT},
+		"kelvin":    {WBMode: WBKelvin, WBKelvin: 5500},
+		"toneCurve":  {ToneCurve: []CurvePoint{{X: 0, Y: 0}, {X: 0.5, Y: 0.7}, {X: 1, Y: 1}}},
+		"toneCurveR": {ToneCurveR: []CurvePoint{{X: 0, Y: 0}, {X: 0.5, Y: 0.7}, {X: 1, Y: 1}}},
+		"toneCurveG": {ToneCurveG: []CurvePoint{{X: 0, Y: 0}, {X: 0.5, Y: 0.7}, {X: 1, Y: 1}}},
+		"toneCurveB": {ToneCurveB: []CurvePoint{{X: 0, Y: 0}, {X: 0.5, Y: 0.7}, {X: 1, Y: 1}}},
 	} {
 		if p.IsNeutral() {
 			t.Errorf("%s edit must not be neutral", name)
 		}
+	}
+	// A purely diagonal curve is identity and must stay neutral, master or
+	// per-channel.
+	diag := []CurvePoint{{X: 0, Y: 0}, {X: 0.4, Y: 0.4}, {X: 1, Y: 1}}
+	for name, p := range map[string]Params{
+		"master": {ToneCurve: diag},
+		"red":    {ToneCurveR: diag},
+		"green":  {ToneCurveG: diag},
+		"blue":   {ToneCurveB: diag},
+	} {
+		if !p.IsNeutral() {
+			t.Errorf("an all-diagonal %s curve must stay neutral", name)
+		}
+	}
+}
+
+// TestToneCurveChannelsNormalize: every channel curve normalizes independently
+// with the master's rules, and HasChannelCurves only counts the channels.
+func TestToneCurveChannelsNormalize(t *testing.T) {
+	bend := []CurvePoint{{X: 1.5, Y: 1}, {X: 0, Y: 0}, {X: 0.5, Y: 0.812345}}
+	e := &Params{ToneCurveR: bend, ToneCurveG: append([]CurvePoint(nil), bend...)}
+	e.Normalize()
+	want := []CurvePoint{{X: 0, Y: 0}, {X: 0.5, Y: 0.8123}, {X: 1, Y: 1}}
+	for name, got := range map[string][]CurvePoint{"R": e.ToneCurveR, "G": e.ToneCurveG} {
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: got %+v want %+v", name, got, want)
+		}
+	}
+	if e.ToneCurveB != nil || e.ToneCurve != nil {
+		t.Error("untouched curves must stay nil")
+	}
+	if !e.HasChannelCurves() {
+		t.Error("a bent channel curve must report HasChannelCurves")
+	}
+	if e.HasToneCurve() {
+		t.Error("channel curves must not report as a master curve")
+	}
+	// The master alone is not a channel curve.
+	m := &Params{ToneCurve: []CurvePoint{{X: 0, Y: 0}, {X: 0.5, Y: 0.7}, {X: 1, Y: 1}}}
+	if m.HasChannelCurves() || !m.HasToneCurve() {
+		t.Error("master/channel predicates crossed")
+	}
+	var nilP *Params
+	if nilP.HasChannelCurves() || nilP.HasToneCurve() {
+		t.Error("nil params must have no curves")
+	}
+}
+
+func TestToneCurveNormalize(t *testing.T) {
+	// Out-of-order, out-of-range points: sorted, clamped to the unit square,
+	// quantized, and (being off-diagonal) kept.
+	e := &Params{ToneCurve: []CurvePoint{
+		{X: 1.4, Y: 2}, {X: -0.5, Y: -1}, {X: 0.5, Y: 0.812345},
+	}}
+	e.Normalize()
+	want := []CurvePoint{{X: 0, Y: 0}, {X: 0.5, Y: 0.8123}, {X: 1, Y: 1}}
+	if !reflect.DeepEqual(e.ToneCurve, want) {
+		t.Fatalf("normalize: got %+v want %+v", e.ToneCurve, want)
+	}
+	// Duplicate input X: the later point wins, collapsing to one entry.
+	e = &Params{ToneCurve: []CurvePoint{{X: 0.5, Y: 0.2}, {X: 0.5, Y: 0.9}, {X: 1, Y: 1}}}
+	e.Normalize()
+	if len(e.ToneCurve) != 2 || e.ToneCurve[0] != (CurvePoint{X: 0.5, Y: 0.9}) {
+		t.Fatalf("duplicate X must collapse to last: %+v", e.ToneCurve)
+	}
+	// Identity and single-point curves fold to nil.
+	for _, in := range [][]CurvePoint{
+		{{X: 0, Y: 0}, {X: 1, Y: 1}},
+		{{X: 0.5, Y: 0.5}},
+		{},
+	} {
+		e = &Params{ToneCurve: in}
+		e.Normalize()
+		if e.ToneCurve != nil {
+			t.Errorf("identity/degenerate curve %+v must fold to nil, got %+v", in, e.ToneCurve)
+		}
+	}
+}
+
+// TestToneCurveNormalizeDoesNotAliasCaller: Normalize builds a fresh slice, so
+// hashing (which normalizes a shallow copy) must not mutate the caller's curve.
+func TestToneCurveNormalizeDoesNotAliasCaller(t *testing.T) {
+	orig := []CurvePoint{{X: 1, Y: 1}, {X: 0, Y: 0}, {X: 0.5, Y: 0.7}}
+	e := &Params{ToneCurve: orig}
+	_ = e.Hash()
+	if orig[0] != (CurvePoint{X: 1, Y: 1}) {
+		t.Errorf("Hash mutated the caller's curve: %+v", orig)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"sort"
 
 	"github.com/marrasen/marraw/internal/libraw"
 )
@@ -321,6 +322,64 @@ type Params struct {
 	// uses reflect.DeepEqual — and Normalize (not the wire validator) clamps
 	// the spot fields.
 	Spots []Spot `json:"spots,omitempty"`
+
+	// ToneCurve is a user point curve remapping the developed luminance in the
+	// look stage (composed into pyramid.buildLookLUT after the parametric tone,
+	// before saturation). Points are (input,output) in 0..1, sorted by X;
+	// monotone-cubic interpolated and clamped monotone at render. Empty (or an
+	// all-diagonal identity curve, which Normalize folds to nil) is neutral and
+	// marshals byte-identically to older builds — the Masks/Spots precedent, so
+	// existing hashes stay stable and the subset hashes never copy it. Also
+	// makes Params non-comparable: IsNeutral uses reflect.DeepEqual.
+	ToneCurve []CurvePoint `json:"toneCurve,omitempty"`
+
+	// ToneCurveR/G/B are the per-channel point curves, applied to each color
+	// channel AFTER the master ToneCurve (which shapes overall tone) — so the
+	// master is the tonal move and these are the color grade on top, the
+	// Lightroom split. Same storage rules as ToneCurve: normalized, identity
+	// folds to nil, omitempty so channel-free edits keep their hashes.
+	ToneCurveR []CurvePoint `json:"toneCurveR,omitempty"`
+	ToneCurveG []CurvePoint `json:"toneCurveG,omitempty"`
+	ToneCurveB []CurvePoint `json:"toneCurveB,omitempty"`
+}
+
+// CurvePoint is one control point of a ToneCurve: X is the input level and Y
+// the output level, both in 0..1 (0 = black, 1 = white). A point on the
+// diagonal (Y==X) is a no-op; the default identity curve is the two endpoints
+// (0,0) and (1,1), stored as nil.
+type CurvePoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+// CurveBends reports whether a curve bends anything — true only when it has
+// at least two points and one sits off the diagonal. A nil, single-point, or
+// purely diagonal curve is identity, so the render fast-path stays
+// byte-identical to a curve-free edit.
+func CurveBends(pts []CurvePoint) bool {
+	if len(pts) < 2 {
+		return false
+	}
+	for _, p := range pts {
+		if p.Y != p.X {
+			return true
+		}
+	}
+	return false
+}
+
+// HasToneCurve reports whether the MASTER tone curve bends anything. Nil-safe.
+func (e *Params) HasToneCurve() bool {
+	return e != nil && CurveBends(e.ToneCurve)
+}
+
+// HasChannelCurves reports whether any per-channel curve bends anything, i.e.
+// whether the look needs three distinct LUTs instead of one. Nil-safe.
+func (e *Params) HasChannelCurves() bool {
+	if e == nil {
+		return false
+	}
+	return CurveBends(e.ToneCurveR) || CurveBends(e.ToneCurveG) || CurveBends(e.ToneCurveB)
 }
 
 // RotateTurns returns the coarse rotation as canonical quarter turns
@@ -425,6 +484,51 @@ func (e *Params) Normalize() {
 	}
 	e.normalizeMasks()
 	e.normalizeSpots()
+	e.normalizeCurve()
+}
+
+// normalizeCurve canonicalizes the master and per-channel tone curves.
+func (e *Params) normalizeCurve() {
+	e.ToneCurve = normalizeCurvePoints(e.ToneCurve)
+	e.ToneCurveR = normalizeCurvePoints(e.ToneCurveR)
+	e.ToneCurveG = normalizeCurvePoints(e.ToneCurveG)
+	e.ToneCurveB = normalizeCurvePoints(e.ToneCurveB)
+}
+
+// normalizeCurvePoints canonicalizes one curve so equivalent states hash
+// identically: points are clamped to the unit square, quantized so
+// pointer-event float noise doesn't churn hashes, sorted by input, and
+// collapsed on duplicate X (last wins). An identity curve — fewer than two
+// points, or every point on the diagonal — returns nil so it hashes as
+// neutral (the CurveBends fast-path). Built into a fresh slice (never
+// mutating the caller's backing array — the normalizeMasks contract): Hash
+// and IsNeutral normalize a shallow copy of Params, so aliasing here would
+// corrupt the caller's curve.
+func normalizeCurvePoints(in []CurvePoint) []CurvePoint {
+	if len(in) == 0 {
+		return nil
+	}
+	pts := make([]CurvePoint, len(in))
+	for i, p := range in {
+		pts[i] = CurvePoint{X: quant4(clamp(p.X, 0, 1)), Y: quant4(clamp(p.Y, 0, 1))}
+	}
+	sort.SliceStable(pts, func(i, j int) bool { return pts[i].X < pts[j].X })
+	kept := pts[:0]
+	diagonal := true
+	for i, p := range pts {
+		if i > 0 && p.X == kept[len(kept)-1].X {
+			kept[len(kept)-1] = p // duplicate input: last point wins
+			continue
+		}
+		if p.Y != p.X {
+			diagonal = false
+		}
+		kept = append(kept, p)
+	}
+	if len(kept) < 2 || diagonal {
+		return nil
+	}
+	return kept
 }
 
 // normalizeSpots clamps and canonicalizes retouch spots so equivalent states

@@ -6,6 +6,52 @@ Small, unscheduled improvements noted while shipping the ML roadmap
 [ml-denoise.md](ml-denoise.md) with their unlock criteria — this list is the
 smaller stuff.
 
+## Editing (from the README "what marraw does not do" list)
+
+- ~~**No tone curve.**~~ Done 2026-07-28: a point **tone curve** now composes
+  into the look stage. `edit.Params.ToneCurve []CurvePoint` (`json:"toneCurve,
+  omitempty"`, after Spots — the Masks/Spots byte-identical-when-empty
+  precedent, kept out of the subset hashes, non-comparable so IsNeutral uses
+  DeepEqual); `Normalize` sorts/clamps/quantizes and folds an identity
+  (all-diagonal or <2-point) curve to nil; `HasToneCurve` gates the render.
+  `pyramid.buildCurveLUT` samples the curve with monotone-cubic
+  (Fritsch–Carlson) interpolation into the existing `[256]` look LUT, remapping
+  the developed value after the parametric tone and before saturation, so the
+  monotone clamp still guarantees no tone inversion. Presets carry it
+  (`presetLook` tone block + `presetSections.ts` `PRESET_FIELDS`, treated like
+  `wbMul` — position-valued/absolute). Client: `lib/toneCurve.ts` (client
+  mirror of the curve math for the preview line + the dirty check) and a
+  `ToneCurve` SVG widget in the Tone group (drag/add/double-click-remove,
+  Reset folds to neutral), modeled on `ColorMixer`. Verified: `go test
+  ./internal/edit ./internal/pyramid` (new curve LUT + Normalize tests),
+  `tsc -b` + eslint, and `node scripts/shot.mjs /tmp/marraw-fixture tonecurve`
+  (a midtone-lift curve brightened center luma 79→129, Reset → neutral).
+- ~~**No per-channel R/G/B curves.**~~ Done 2026-07-28, same day, on the same
+  plumbing: `ToneCurveR/G/B []CurvePoint` (same storage rules as the master),
+  `CurveBends` extracted as a shared predicate with `HasToneCurve` (master) and
+  `HasChannelCurves` (any channel). `buildLookLUT` is unchanged — the new
+  `pyramid.buildLookLUTs` builds the master once and composes each channel's
+  curve on top, returning three LUTs; **with no channel curve all three are the
+  same array**, so channel-free edits stay byte-identical and the pixel loops
+  cost the same (they already did three lookups, just into one array).
+  Composition is exact (the master's output is an integer 0..255 that indexes
+  the 256-sample channel curve directly) and monotone-through-monotone stays
+  monotone, so the no-inversion invariant holds per channel. `applyLookSimple`/
+  `applyLookFull` take `lutR, lutG, lutB` (the `buildMaskLUTs` idiom). Client:
+  `CURVE_CHANNELS`/`CURVE_KEYS`/`curveOf` in `lib/toneCurve.ts`, RGB/R/G/B tabs
+  in the widget (per-channel dot when bent, unselected channels drawn as faint
+  guides, Reset clears only the selected channel). Verified by the extended
+  `tonecurve` shot surface: a red-lift curve took the center pixel
+  `[128,129,133]` → `[210,125,129]` (R−B −5 → 81) with G/B held, Reset cleared
+  only R and kept the master.
+  **Footgun that cost a debug cycle:** a stale `marrawd` from an earlier
+  `npm run dev` still held :8483, so the new server silently failed to bind
+  ("address already in use", only in the dev log) and the harness talked to the
+  OLD binary — which dropped `toneCurveR` as an unknown JSON field. Symptom:
+  the client draft carried the curve but pixels were byte-identical. Check
+  `ss -ltnp | grep 8483` (and that the log says "listening") before believing a
+  backend change didn't take.
+
 ## AI features
 
 - ~~**Downloaded-models management in Settings.**~~ Done 2026-07-14 (commit

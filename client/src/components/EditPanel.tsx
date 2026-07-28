@@ -13,7 +13,16 @@ import { applyRating, applyFlag } from '@/lib/actions';
 import { aIModelStatus as aiModelStatus, applyBatchEdit, fillModelStatus, generateAIMap, type Delta } from '@/api/edits';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
-import type { AIKindType, Mask, MaskAdjust, Params, Spot } from '@/api/edit';
+import type { AIKindType, CurvePoint, Mask, MaskAdjust, Params, Spot } from '@/api/edit';
+import {
+  CURVE_CHANNELS,
+  CURVE_ENDPOINTS,
+  CURVE_KEYS,
+  curveOf,
+  curvePolyline,
+  hasToneCurve,
+  type CurveKey,
+} from '@/lib/toneCurve';
 import {
   DEPTH_WINDOW_DEFAULT,
   MASK_CONTROL_ORDER,
@@ -339,6 +348,7 @@ function DevelopPanel({
     tone: groupChanged(draft, [
       'expEV', 'expPreserve', 'bright', 'gamma', 'shadow',
       'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
+      'toneCurve', 'toneCurveR', 'toneCurveG', 'toneCurveB',
     ], seedExpEV),
     presence: groupChanged(draft, ['clarity', 'texture', 'dehaze']),
     wb: groupChanged(draft, ['wbMode', 'wbMul', 'wbTemp', 'wbTint', 'wbKelvin']),
@@ -505,6 +515,7 @@ function DevelopPanel({
         <PctSlider label="Blacks" field="blacks" draft={draft} update={update} commit={commit} {...num('blacks')} />
         <PctSlider label="Shadows" field="toneShadows" draft={draft} update={update} commit={commit} {...num('toneShadows')} />
         <PctSlider label="Highlights" field="toneHighlights" draft={draft} update={update} commit={commit} {...num('toneHighlights')} />
+        <ToneCurve draft={draft} update={update} commit={commit} clear={clear} />
       </Group>
 
       <Group id="presence" title="Presence" changed={changed.presence}>
@@ -746,6 +757,8 @@ function isDefault(draft: Params, key: keyof Params, seedExpEV = 0): boolean {
   if (key === 'expEV') return Math.abs(draft.expEV - seedExpEV) <= 1e-9;
   if (key === 'wbMode') return (v as string) === '' || v === 'camera';
   if (key === 'demosaic') return (v as string) === '';
+  // A tone curve (master or per-channel) is default when it bends nothing.
+  if (CURVE_KEYS.includes(key as CurveKey)) return !hasToneCurve(curveOf(draft, key as CurveKey));
   // Array-valued params (wbMul, the hsl mixer bands) default to all-zero.
   if (Array.isArray(v)) return v.every((m) => m === 0);
   return v === NEUTRAL[key];
@@ -1857,6 +1870,222 @@ const MIXER_BANDS = [
   { name: 'Magenta', color: '#d6409f' },
 ];
 type MixerKey = 'hslHue' | 'hslSat' | 'hslLum';
+
+// ToneCurve is the point-curve editor: a square canvas of draggable control
+// points over the developed luminance, mirrored on the render's monotone-cubic
+// LUT (pyramid.buildCurveLUT via lib/toneCurve). Endpoints are pinned in x
+// (0 and 1) and free in y; interior points slide between their neighbors.
+// Click empty space to add a point, double-click a point to remove it.
+//
+// The RGB/R/G/B tabs switch which channel is being edited: RGB is the master
+// (Params.toneCurve, overall tone), R/G/B the per-channel color grade applied
+// on top (Params.toneCurveR/G/B) — the render's composition order. The
+// unselected channels stay drawn as faint guides. An identity/empty curve
+// folds to undefined (neutral). Follows the ColorMixer widget contract.
+const CURVE_MAX_POINTS = 16;
+const CURVE_MIN_GAP = 0.02; // keep interior points from stacking on the wire
+
+function ToneCurve({
+  draft,
+  update,
+  commit,
+  clear,
+}: {
+  draft: Params;
+  update: (patch: Partial<Params>) => void;
+  commit: (patch?: Partial<Params>) => void;
+  clear: (patch: Partial<Params>) => void;
+}) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [chan, setChan] = useState<CurveKey>('toneCurve');
+  const channel = CURVE_CHANNELS.find((c) => c.key === chan)!;
+  const stored = curveOf(draft, chan);
+  // The displayed points: the stored curve, or the identity endpoints for an
+  // untouched curve (materialized into the draft on first edit).
+  const pts: CurvePoint[] = stored && stored.length >= 2 ? stored : CURVE_ENDPOINTS;
+  const active = hasToneCurve(stored);
+
+  const round4 = (v: number) => Math.round(v * 1e4) / 1e4;
+  const clampUnit = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+  // ptrUnit maps a pointer event to curve space (x right, y up), clamped.
+  const ptrUnit = (e: React.PointerEvent | React.MouseEvent): CurvePoint => {
+    const r = svgRef.current!.getBoundingClientRect();
+    return {
+      x: clampUnit((e.clientX - r.left) / r.width),
+      y: clampUnit(1 - (e.clientY - r.top) / r.height),
+    };
+  };
+
+  // withMoved returns a fresh point list with point `idx` moved to (x,y):
+  // endpoints keep their x, interior points are penned between neighbors.
+  const withMoved = (list: CurvePoint[], idx: number, x: number, y: number): CurvePoint[] => {
+    const next = list.map((p) => ({ ...p }));
+    const nx =
+      idx === 0
+        ? 0
+        : idx === next.length - 1
+          ? 1
+          : Math.min(next[idx + 1].x - CURVE_MIN_GAP, Math.max(next[idx - 1].x + CURVE_MIN_GAP, x));
+    next[idx] = { x: round4(nx), y: round4(clampUnit(y)) };
+    return next;
+  };
+
+  // emit previews (drag) or persists (release) for the SELECTED channel.
+  // Mid-drag it always keeps the explicit points so the dragged index stays
+  // valid; on release an identity curve folds to undefined (neutral).
+  const preview = (next: CurvePoint[]) => update({ [chan]: next });
+  const persist = (next: CurvePoint[]) =>
+    commit({ [chan]: hasToneCurve(next) ? next : undefined });
+
+  const onBackgroundDown = (e: React.PointerEvent) => {
+    if (pts.length >= CURVE_MAX_POINTS) return;
+    const u = ptrUnit(e);
+    // Don't add on top of an existing point's x — that's an ambiguous drag.
+    if (pts.some((p) => Math.abs(p.x - u.x) < CURVE_MIN_GAP)) return;
+    const next = [...pts.map((p) => ({ ...p })), { x: round4(u.x), y: round4(u.y) }].sort(
+      (a, b) => a.x - b.x,
+    );
+    const idx = next.findIndex((p) => p.x === round4(u.x));
+    svgRef.current!.setPointerCapture(e.pointerId);
+    setDragIdx(idx);
+    preview(next);
+  };
+
+  const onPointDown = (e: React.PointerEvent, idx: number) => {
+    e.stopPropagation();
+    svgRef.current!.setPointerCapture(e.pointerId);
+    setDragIdx(idx);
+  };
+
+  const onMove = (e: React.PointerEvent) => {
+    if (dragIdx == null) return;
+    const u = ptrUnit(e);
+    preview(withMoved(pts, dragIdx, u.x, u.y));
+  };
+
+  const onUp = (e: React.PointerEvent) => {
+    if (dragIdx == null) return;
+    if (svgRef.current!.hasPointerCapture(e.pointerId)) {
+      svgRef.current!.releasePointerCapture(e.pointerId);
+    }
+    setDragIdx(null);
+    persist(pts);
+  };
+
+  const removePoint = (idx: number) => {
+    if (idx === 0 || idx === pts.length - 1) return; // endpoints stay
+    persist(pts.filter((_, i) => i !== idx));
+  };
+
+  const polyOf = (list: CurvePoint[]) =>
+    curvePolyline(list).map((p) => `${p.x * 100},${(1 - p.y) * 100}`).join(' ');
+  const line = polyOf(pts);
+  // The other channels stay drawn faintly, so a color grade is readable while
+  // editing any one of them.
+  const guides = CURVE_CHANNELS.filter((c) => c.key !== chan)
+    .map((c) => ({ c, curve: curveOf(draft, c.key) }))
+    .filter((g) => hasToneCurve(g.curve));
+
+  return (
+    <div className="flex flex-col gap-1 pt-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">Curve</span>
+        <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-0.5" role="group" aria-label="Curve channel">
+            {CURVE_CHANNELS.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => setChan(c.key)}
+                aria-pressed={chan === c.key}
+                title={c.key === 'toneCurve' ? 'Master (RGB) curve' : `${c.label} channel curve`}
+                className={cn(
+                  'rounded px-1.5 py-0.5 font-mono text-[10px] leading-none transition-colors',
+                  chan === c.key
+                    ? 'bg-primary/15 text-foreground'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {c.label}
+                {hasToneCurve(curveOf(draft, c.key)) && (
+                  <span className="ml-0.5 align-super text-[8px] text-primary">•</span>
+                )}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => clear({ [chan]: undefined })}
+            className={cn(
+              'text-[11px] text-muted-foreground hover:text-foreground',
+              !active && 'invisible',
+            )}
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+      <svg
+        ref={svgRef}
+        viewBox="0 0 100 100"
+        className="aspect-square w-full touch-none rounded-md border border-border bg-muted/30"
+        role="group"
+        aria-label="Tone curve"
+        data-channel={chan}
+        onPointerDown={onBackgroundDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerCancel={onUp}
+      >
+        {[25, 50, 75].map((g) => (
+          <g key={g}>
+            <line x1={g} y1={0} x2={g} y2={100} className="stroke-border/50" strokeWidth={0.5} />
+            <line x1={0} y1={g} x2={100} y2={g} className="stroke-border/50" strokeWidth={0.5} />
+          </g>
+        ))}
+        <line x1={0} y1={100} x2={100} y2={0} className="stroke-border" strokeWidth={0.75} strokeDasharray="2 2" />
+        {guides.map(({ c, curve }) => (
+          <polyline
+            key={c.key}
+            points={polyOf(curve!)}
+            fill="none"
+            stroke={c.stroke === 'currentColor' ? undefined : c.stroke}
+            className={cn('opacity-35', c.stroke === 'currentColor' && 'stroke-primary')}
+            strokeWidth={1}
+            strokeLinejoin="round"
+          />
+        ))}
+        <polyline
+          points={line}
+          fill="none"
+          stroke={channel.stroke === 'currentColor' ? undefined : channel.stroke}
+          className={cn(channel.stroke === 'currentColor' && 'stroke-primary')}
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+        />
+        {pts.map((p, i) => (
+          <circle
+            key={i}
+            cx={p.x * 100}
+            cy={(1 - p.y) * 100}
+            r={dragIdx === i ? 3 : 2.4}
+            stroke={channel.stroke === 'currentColor' ? undefined : channel.stroke}
+            className={cn('fill-background', channel.stroke === 'currentColor' && 'stroke-primary')}
+            strokeWidth={1.25}
+            style={{ cursor: 'grab' }}
+            onPointerDown={(e) => onPointDown(e, i)}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              removePoint(i);
+            }}
+          />
+        ))}
+      </svg>
+    </div>
+  );
+}
 
 function ColorMixer({
   draft,

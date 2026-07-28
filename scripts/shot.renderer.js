@@ -348,6 +348,132 @@ if (shot === 'cull') {
     depthLo: mask.depthLo,
     depthHi: mask.depthHi,
   };
+} else if (shot === 'tonecurve') {
+  // Point tone curve: from a curve-free state, commit a midtone-lift curve
+  // and assert (a) the developed preview brightens the mids while the
+  // endpoints hold, and (b) the widget renders one control point per curve
+  // point. Then Reset must fold the curve back to neutral (undefined).
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200); // initial preview settles
+  const pixelsAt = async (blob) => {
+    const bmp = await createImageBitmap(blob, { resizeWidth: 64 });
+    const c = document.createElement('canvas');
+    c.width = bmp.width;
+    c.height = bmp.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bmp, 0, 0);
+    const d = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const px = (fx, fy) => {
+      const i = (Math.floor(fy * (bmp.height - 1)) * bmp.width + Math.floor(fx * (bmp.width - 1))) * 4;
+      return [d[i], d[i + 1], d[i + 2]];
+    };
+    return { center: px(0.5, 0.5), corner: px(0.03, 0.03) };
+  };
+  const luma = (p) => (p[0] * 299 + p[1] * 587 + p[2] * 114) / 1000;
+  // Idempotence: a previous run's curves persisted to the fixture photo.
+  mw.esUpdate({
+    toneCurve: undefined,
+    toneCurveR: undefined,
+    toneCurveG: undefined,
+    toneCurveB: undefined,
+  });
+  mw.esCommit();
+  await until(() => es.getState().preview?.blob && mw.esPreviewSettled(), 30000);
+  const before = await pixelsAt(es.getState().preview.blob);
+  const lift = [
+    { x: 0, y: 0 },
+    { x: 0.5, y: 0.75 },
+    { x: 1, y: 1 },
+  ];
+  mw.esUpdate({ toneCurve: lift });
+  mw.esCommit();
+  await until(() => mw.esPreviewSettled(), 30000);
+  const after = await pixelsAt(es.getState().preview.blob);
+  const svg = document.querySelector('svg[aria-label="Tone curve"]');
+  const pointCount = svg?.querySelectorAll('circle').length ?? 0;
+  const polyline = svg?.querySelector('polyline')?.getAttribute('points') ?? '';
+
+  // Per-channel: a red-lift curve on top of the master must push the center
+  // pixel warm (r up relative to b) — the master curve alone can't do that.
+  const chanBtn = (label) =>
+    [...(svg?.parentElement?.querySelectorAll('button') ?? [])].find(
+      (b) => b.textContent.trim().replace(/•$/, '') === label,
+    );
+  chanBtn('R')?.click();
+  await sleep(150);
+  const chanAfterTab = svg?.dataset.channel;
+  mw.esUpdate({
+    toneCurveR: [
+      { x: 0, y: 0 },
+      { x: 0.5, y: 0.8 },
+      { x: 1, y: 1 },
+    ],
+  });
+  mw.esCommit();
+  await until(() => mw.esPreviewSettled(), 30000);
+  const red = await pixelsAt(es.getState().preview.blob);
+  // Guide lines: the master curve stays drawn faintly while R is selected.
+  const polylineCount = svg?.querySelectorAll('polyline').length ?? 0;
+
+  // Reset clears only the SELECTED channel (R), leaving the master curve.
+  const resetBtn = () =>
+    [...(svg?.parentElement?.querySelectorAll('button') ?? [])].find(
+      (b) => b.textContent.trim() === 'Reset',
+    );
+  resetBtn()?.click();
+  await sleep(250);
+  const afterResetR = {
+    r: es.getState().draft.toneCurveR == null,
+    masterKept: es.getState().draft.toneCurve != null,
+  };
+  // Back to the master tab and reset it too — both channels now neutral.
+  chanBtn('RGB')?.click();
+  await sleep(150);
+  resetBtn()?.click();
+  await sleep(250);
+  const resetToNeutral =
+    es.getState().draft.toneCurve == null && es.getState().draft.toneCurveR == null;
+
+  // Re-apply a master + red grade purely so the capture shows a real curve
+  // (the idempotence step at the top clears all four, so repeat runs are
+  // unaffected by what's left on screen here).
+  mw.esUpdate({
+    toneCurve: [
+      { x: 0, y: 0 },
+      { x: 0.25, y: 0.18 },
+      { x: 0.75, y: 0.85 },
+      { x: 1, y: 1 },
+    ],
+    toneCurveR: [
+      { x: 0, y: 0 },
+      { x: 0.5, y: 0.62 },
+      { x: 1, y: 1 },
+    ],
+  });
+  mw.esCommit();
+  await until(() => mw.esPreviewSettled(), 30000);
+
+  window.__maskProbe = {
+    widgetPresent: !!svg,
+    pointCount,
+    polylineDrawn: polyline.split(' ').length >= 10,
+    centerLumaBefore: Math.round(luma(before.center)),
+    centerLumaAfter: Math.round(luma(after.center)),
+    // A midtone-lift curve must brighten mids; the corner (near black) barely
+    // moves since the curve pins (0,0).
+    centerBrightened: luma(after.center) > luma(before.center) + 8,
+    // Per-channel probes.
+    chanAfterTab,
+    // R−B of the center pixel: master-only vs. master+red-lift.
+    redRB: [after.center[0] - after.center[2], red.center[0] - red.center[2]],
+    redWarmed: red.center[0] - red.center[2] > after.center[0] - after.center[2] + 4,
+    // master + R drawn (the selected line plus one guide)
+    polylineCount,
+    afterResetR,
+    resetToNeutral,
+  };
 } else if (shot.startsWith('browse')) {
   // Browse latency probe: arrow-step through the folder at a human culling
   // pace and measure how long the render chip stays busy per step. On a

@@ -190,7 +190,11 @@ are the controls you chose to keep at hand.</sup>
   they survive recrops and re-straightens, and render identically in
   previews, 1:1 tiles and exports.
 - **Tone** — exposure (±5 EV), preserve highlights, brightness, gamma, shadow
-  slope, contrast, whites, blacks, shadows, highlights.
+  slope, contrast, whites, blacks, shadows, highlights, and a point **tone
+  curve** with RGB / R / G / B channels (drag, add, or double-click-to-remove
+  control points; monotone so it can't invert tones). The RGB master shapes
+  overall tone and the per-channel curves grade color on top of it;
+  unselected channels stay drawn as guides.
 - **Presence** — clarity, texture, dehaze.
 - **White balance** — as shot / auto / Kelvin, temperature, tint, and an
   eyedropper (`W`).
@@ -260,9 +264,6 @@ them is load-bearing for your work, marraw is not ready for you yet.
   and drawn masks exist — see Editing tools — but there is no luma/color
   range selection, and local adjustments are not carried into RAW + XMP
   handoffs.
-- ❌ **No tone curve.** Contrast and the whites/blacks/shadows/highlights
-  sliders drive a fixed parametric curve. There is no point curve and no
-  per-channel R/G/B curves.
 - ⚠️ **Retouch is not carried into the RAW + XMP handoff.** Spots and the
   heal brush heal/clone from another patch of the same photo, and Fill mode
   inpaints the region with an on-device ML model (a one-time ~28 MB download,

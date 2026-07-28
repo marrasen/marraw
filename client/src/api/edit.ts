@@ -25,6 +25,11 @@ export const WBMode = {
 } as const;
 export type WBModeType = typeof WBMode[keyof typeof WBMode];
 
+export interface CurvePoint {
+    x: number;
+    y: number;
+}
+
 export interface Mask {
     type: string;
     disabled?: boolean;
@@ -107,6 +112,10 @@ export interface Params {
     cropAngle: number;
     masks?: Mask[];
     spots?: Spot[];
+    toneCurve?: CurvePoint[];
+    toneCurveR?: CurvePoint[];
+    toneCurveG?: CurvePoint[];
+    toneCurveB?: CurvePoint[];
 }
 
 export interface Spot {

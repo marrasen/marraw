@@ -11,6 +11,7 @@
 import type { Mask, Params } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import { CONTROL_SPECS, NEUTRAL } from '@/lib/controlSpecs';
+import { CURVE_KEYS, type CurveKey } from '@/lib/toneCurve';
 
 // The look subset of the develop panel's GroupId — crop and retouch never
 // travel in a preset. Mirrored (ids only) in internal/api/uisettings.go.
@@ -64,6 +65,15 @@ export const PRESET_FIELDS = {
   blacks: { group: 'tone', mode: 'add' },
   toneShadows: { group: 'tone', mode: 'add' },
   toneHighlights: { group: 'tone', mode: 'add' },
+  // Position-valued like wbMul: a point curve has no meaningful "delta from
+  // neutral", so it lands absolutely (and only when non-empty in relative
+  // mode). Special-cased in applyUserPreset; the generic 'absolute' branch
+  // in adaptiveLookDiff/lerpPresetAmount already snaps arrays by reference.
+  // The per-channel curves travel with the master (they're one widget).
+  toneCurve: { group: 'tone', mode: 'absolute' },
+  toneCurveR: { group: 'tone', mode: 'absolute' },
+  toneCurveG: { group: 'tone', mode: 'absolute' },
+  toneCurveB: { group: 'tone', mode: 'absolute' },
   clarity: { group: 'presence', mode: 'add' },
   texture: { group: 'presence', mode: 'add' },
   dehaze: { group: 'presence', mode: 'add' },
@@ -154,6 +164,18 @@ export function applyUserPreset(draft: Params, preset: UserPreset, targetBaseExp
       // Custom multipliers: absolute-only; in relative mode a neutral
       // [0,0,0,0] (unset) is indistinguishable from untouched, so skip it.
       if (!relative || src.wbMul.some((v) => v !== 0)) out.wbMul = [...src.wbMul];
+      continue;
+    }
+
+    if (CURVE_KEYS.includes(key as CurveKey)) {
+      // Point curves (master + per-channel): position-valued, so they land as
+      // stored. In relative mode an empty/undefined curve is indistinguishable
+      // from untouched, so only a non-empty curve overwrites the draft's.
+      const k = key as CurveKey;
+      const curve = src[k];
+      if (!relative || (curve && curve.length > 0)) {
+        out[k] = curve ? curve.map((p) => ({ ...p })) : undefined;
+      }
       continue;
     }
 

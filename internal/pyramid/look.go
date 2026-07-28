@@ -118,7 +118,7 @@ func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fi
 // the base look. Applied only to RAW-decoded renditions — embedded JPEG
 // thumbnails already carry the camera curve.
 func ApplyLook(img *image.RGBA, gamma float64, e *edit.Params) {
-	lut := buildLookLUT(gamma, e)
+	lutR, lutG, lutB := buildLookLUTs(gamma, e)
 	satQ := int32(115) // base boost ×1.15 in 1/100 units
 	if e != nil {
 		satQ = int32(math.Round(115 * (1 + e.Saturation)))
@@ -126,9 +126,9 @@ func ApplyLook(img *image.RGBA, gamma float64, e *edit.Params) {
 	// The plain LUT+saturation loop covers most edits; only vibrance, split
 	// toning and vignette need per-pixel position or chroma math.
 	if e == nil || (e.Vibrance == 0 && e.SplitShadowAmt == 0 && e.SplitHighlightAmt == 0 && e.Vignette == 0) {
-		applyLookSimple(img, &lut, satQ)
+		applyLookSimple(img, &lutR, &lutG, &lutB, satQ)
 	} else {
-		applyLookFull(img, &lut, satQ, e)
+		applyLookFull(img, &lutR, &lutG, &lutB, satQ, e)
 	}
 	// The HSL mixer runs last, over the developed color: gated so neutral
 	// mixers cost nothing and existing renders stay bit-identical.
@@ -137,12 +137,12 @@ func ApplyLook(img *image.RGBA, gamma float64, e *edit.Params) {
 	}
 }
 
-func applyLookSimple(img *image.RGBA, lut *[256]uint8, satQ int32) {
+func applyLookSimple(img *image.RGBA, lutR, lutG, lutB *[256]uint8, satQ int32) {
 	pix := img.Pix
 	for i := 0; i+3 < len(pix); i += 4 {
-		r := int32(lut[pix[i]])
-		g := int32(lut[pix[i+1]])
-		b := int32(lut[pix[i+2]])
+		r := int32(lutR[pix[i]])
+		g := int32(lutG[pix[i+1]])
+		b := int32(lutB[pix[i+2]])
 		// Saturation around Rec.601 luma, in integer math.
 		luma := (299*r + 587*g + 114*b) / 1000
 		pix[i] = clamp8(luma + (r-luma)*satQ/100)
@@ -155,7 +155,7 @@ func applyLookSimple(img *image.RGBA, lut *[256]uint8, satQ int32) {
 // saturation boost by how unsaturated the pixel already is, split toning
 // pushes shadows/highlights toward their tint hues, and the vignette gain
 // falls off radially from the image center.
-func applyLookFull(img *image.RGBA, lut *[256]uint8, satQ int32, e *edit.Params) {
+func applyLookFull(img *image.RGBA, lutR, lutG, lutB *[256]uint8, satQ int32, e *edit.Params) {
 	bnd := img.Bounds()
 	w, h := bnd.Dx(), bnd.Dy()
 	vibQ := int32(math.Round(e.Vibrance * 100))
@@ -195,9 +195,9 @@ func applyLookFull(img *image.RGBA, lut *[256]uint8, satQ int32, e *edit.Params)
 		}
 		for x := range w {
 			i := x * 4
-			r := int32(lut[row[i]])
-			g := int32(lut[row[i+1]])
-			b := int32(lut[row[i+2]])
+			r := int32(lutR[row[i]])
+			g := int32(lutG[row[i+1]])
+			b := int32(lutB[row[i+2]])
 			luma := (299*r + 587*g + 114*b) / 1000
 
 			sat := satQ
@@ -293,6 +293,14 @@ func buildLookLUT(gamma float64, e *edit.Params) [256]uint8 {
 		ts = 0.3 * e.ToneShadows
 		th = 0.3 * e.ToneHighlights
 	}
+	// The user point curve remaps the developed value last, after the
+	// parametric tone. Built once here (256 samples) only when it bends
+	// something, so curve-free edits stay on the identity fast path.
+	var curve *[256]float64
+	if e.HasToneCurve() {
+		c := buildCurveLUT(e.ToneCurve)
+		curve = &c
+	}
 	prev := 0
 	for i := range lut {
 		x := math.Pow(float64(i)/255, gamma)
@@ -301,10 +309,146 @@ func buildLookLUT(gamma float64, e *edit.Params) [256]uint8 {
 		y += th * 6.75 * y * y * (1 - y)
 		y += bk * (1 - y) * (1 - y) * (1 - y)
 		y += wh * y * y * y
+		if curve != nil {
+			y = evalCurveLUT(curve, y)
+		}
 		v := int(y*255 + 0.5)
 		v = max(prev, min(255, max(0, v)))
 		lut[i] = uint8(v)
 		prev = v
 	}
 	return lut
+}
+
+// buildLookLUTs returns the per-channel look LUTs: the shared master curve
+// from buildLookLUT (parametric tone + the master point curve), with each
+// channel's own point curve composed on top. With no per-channel curve all
+// three are the same array, so a channel-free edit renders byte-identically to
+// before this existed — and the pixel loops cost the same either way (they
+// already did three lookups, just into one array).
+//
+// Composition is exact: the master LUT's output is already an integer 0..255,
+// which indexes the 256-sample channel curve directly — no interpolation. A
+// monotone LUT through a monotone curve stays monotone, so the "no slider
+// combination may invert tones" invariant survives per channel.
+func buildLookLUTs(gamma float64, e *edit.Params) (lutR, lutG, lutB [256]uint8) {
+	master := buildLookLUT(gamma, e)
+	if !e.HasChannelCurves() {
+		return master, master, master
+	}
+	apply := func(pts []edit.CurvePoint) [256]uint8 {
+		if !edit.CurveBends(pts) {
+			return master
+		}
+		curve := buildCurveLUT(pts)
+		var out [256]uint8
+		for i, v := range master {
+			out[i] = uint8(min(255, max(0, int(curve[v]*255+0.5))))
+		}
+		return out
+	}
+	return apply(e.ToneCurveR), apply(e.ToneCurveG), apply(e.ToneCurveB)
+}
+
+// buildCurveLUT samples a tone curve into 256 output levels over input 0..1
+// using monotone cubic (Fritsch–Carlson) interpolation, which never
+// overshoots or inverts between control points — so a curve editor can't
+// produce a non-monotone tone response even with steep segments. The curve is
+// extended flat past its first/last control points (Lightroom's clamped
+// endpoints), and both axes are clamped to [0,1]. Callers pass a normalized
+// curve (sorted, ≥2 points, off-diagonal — see edit.Params.HasToneCurve).
+func buildCurveLUT(pts []edit.CurvePoint) [256]float64 {
+	n := len(pts)
+	xs := make([]float64, n)
+	ys := make([]float64, n)
+	for i, p := range pts {
+		xs[i], ys[i] = p.X, p.Y
+	}
+	// Secant slopes between points, then Fritsch–Carlson tangents that
+	// preserve monotonicity (zero the tangent at any local extremum, and
+	// clamp interior tangents to 3× the smaller adjacent secant).
+	d := make([]float64, n-1)
+	for i := range d {
+		dx := xs[i+1] - xs[i]
+		if dx <= 0 {
+			d[i] = 0
+		} else {
+			d[i] = (ys[i+1] - ys[i]) / dx
+		}
+	}
+	m := make([]float64, n)
+	m[0] = d[0]
+	m[n-1] = d[n-2]
+	for i := 1; i < n-1; i++ {
+		if d[i-1]*d[i] <= 0 {
+			m[i] = 0
+		} else {
+			m[i] = (d[i-1] + d[i]) / 2
+		}
+	}
+	for i := range d {
+		if d[i] == 0 {
+			m[i], m[i+1] = 0, 0
+			continue
+		}
+		a := m[i] / d[i]
+		b := m[i+1] / d[i]
+		if h := a*a + b*b; h > 9 {
+			t := 3 / math.Sqrt(h)
+			m[i] = t * a * d[i]
+			m[i+1] = t * b * d[i]
+		}
+	}
+	var lut [256]float64
+	seg := 0
+	for i := range lut {
+		x := float64(i) / 255
+		switch {
+		case x <= xs[0]:
+			lut[i] = clampUnit(ys[0])
+			continue
+		case x >= xs[n-1]:
+			lut[i] = clampUnit(ys[n-1])
+			continue
+		}
+		for seg < n-1 && x > xs[seg+1] {
+			seg++
+		}
+		h := xs[seg+1] - xs[seg]
+		t := (x - xs[seg]) / h
+		t2 := t * t
+		t3 := t2 * t
+		h00 := 2*t3 - 3*t2 + 1
+		h10 := t3 - 2*t2 + t
+		h01 := -2*t3 + 3*t2
+		h11 := t3 - t2
+		y := h00*ys[seg] + h10*h*m[seg] + h01*ys[seg+1] + h11*h*m[seg+1]
+		lut[i] = clampUnit(y)
+	}
+	return lut
+}
+
+// evalCurveLUT reads a 256-sample curve at y in 0..1 with linear
+// interpolation between samples (out-of-range y clamps to the ends).
+func evalCurveLUT(lut *[256]float64, y float64) float64 {
+	p := y * 255
+	if p <= 0 {
+		return lut[0]
+	}
+	if p >= 255 {
+		return lut[255]
+	}
+	i := int(p)
+	f := p - float64(i)
+	return lut[i]*(1-f) + lut[i+1]*f
+}
+
+func clampUnit(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }

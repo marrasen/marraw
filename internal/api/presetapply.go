@@ -66,6 +66,10 @@ func presetLook(p UserPreset, baseEV float64) edit.Params {
 		out.Blacks = src.Blacks
 		out.ToneShadows = src.ToneShadows
 		out.ToneHighlights = src.ToneHighlights
+		out.ToneCurve = src.ToneCurve
+		out.ToneCurveR = src.ToneCurveR
+		out.ToneCurveG = src.ToneCurveG
+		out.ToneCurveB = src.ToneCurveB
 	}
 	if s["presence"] {
 		out.Clarity = src.Clarity
