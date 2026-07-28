@@ -354,7 +354,7 @@ export function useKeyboard() {
         if (s.settingsOpen || s.addFolderOpen || s.shortcutsOpen) return;
         e.preventDefault();
         if (s.mode === 'develop') {
-          const order: DevelopTab[] = ['develop', 'masks', 'presets', 'info'];
+          const order: DevelopTab[] = ['develop', 'curve', 'masks', 'presets', 'info'];
           const i = order.indexOf(s.developTab);
           s.setDevelopTab(order[(i + (e.shiftKey ? order.length - 1 : 1)) % order.length]);
         }

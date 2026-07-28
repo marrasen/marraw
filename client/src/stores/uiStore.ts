@@ -36,7 +36,7 @@ export type FlagFilter = 'all' | 'pick' | 'not-excluded' | 'exclude';
 // a dialog, not a mode.
 export type Mode = 'library' | 'cull' | 'develop';
 // Tabs of the develop drawer / library edit aside.
-export type DevelopTab = 'develop' | 'masks' | 'presets' | 'info';
+export type DevelopTab = 'develop' | 'curve' | 'masks' | 'presets' | 'info';
 // Per-photo flag + rating as currently displayed (server rows merged with
 // optimistic overrides), for readers outside React.
 export interface PhotoMeta {

@@ -158,7 +158,8 @@ if (shot === 'cull') {
 
   // Keyboard tour: with a second mask added (selected, no slider focused),
   // ↓ enters its first slider, ↑↑ crosses back onto the previous mask's last
-  // slider, +/- steps the focused slider, Tab cycles develop→masks.
+  // slider, +/- steps the focused slider, Tab cycles develop→curve (the tab
+  // order is develop, curve, masks, presets, info).
   const press = (key, opts = {}) =>
     window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...opts }));
   mw.esAddMask('linear'); // becomes index 1, selected
@@ -353,9 +354,11 @@ if (shot === 'cull') {
   // and assert (a) the developed preview brightens the mids while the
   // endpoints hold, and (b) the widget renders one control point per curve
   // point. Then Reset must fold the curve back to neutral (undefined).
+  // The editor lives on its own Curve tab (right of Develop).
   ui().setMode('develop');
   const es = mw.useEditSession;
   await until(() => es.getState().draft != null);
+  ui().setDevelopTab('curve');
   await sleep(1200); // initial preview settles
   const pixelsAt = async (blob) => {
     const bmp = await createImageBitmap(blob, { resizeWidth: 64 });
@@ -456,6 +459,11 @@ if (shot === 'cull') {
   await until(() => mw.esPreviewSettled(), 30000);
 
   window.__maskProbe = {
+    // The editor lives on the Curve tab, not inline in Develop.
+    onCurveTab: ui().developTab === 'curve',
+    curveTabLabels: [...document.querySelectorAll('[aria-label="Panel"] [role="radio"]')].map(
+      (b) => b.textContent.trim(),
+    ),
     widgetPresent: !!svg,
     pointCount,
     polylineDrawn: polyline.split(' ').length >= 10,

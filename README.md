@@ -190,11 +190,13 @@ are the controls you chose to keep at hand.</sup>
   they survive recrops and re-straightens, and render identically in
   previews, 1:1 tiles and exports.
 - **Tone** — exposure (±5 EV), preserve highlights, brightness, gamma, shadow
-  slope, contrast, whites, blacks, shadows, highlights, and a point **tone
-  curve** with RGB / R / G / B channels (drag, add, or double-click-to-remove
-  control points; monotone so it can't invert tones). The RGB master shapes
-  overall tone and the per-channel curves grade color on top of it;
-  unselected channels stay drawn as guides.
+  slope, contrast, whites, blacks, shadows, highlights.
+- **Curve** — a point **tone curve** on its own tab, with RGB / R / G / B
+  channels: drag a point to move it, click the grid to add one, double-click
+  to remove it. The RGB master shapes overall tone and the per-channel curves
+  grade color on top of it, with the channels you are not editing drawn as
+  guides. Monotone by construction, so no combination of points can invert
+  tones.
 - **Presence** — clarity, texture, dehaze.
 - **White balance** — as shot / auto / Kelvin, temperature, tint, and an
   eyedropper (`W`).

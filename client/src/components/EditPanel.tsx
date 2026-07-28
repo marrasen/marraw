@@ -161,6 +161,9 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
 // persists across the two mount sites (Develop drawer ⇄ Library aside).
 const TAB_ITEMS = [
   { value: 'develop' as const, label: 'Develop' },
+  // The point curve gets its own tab: the editor is a square canvas, which
+  // crowds the Develop slider stack out of view when it sits inline.
+  { value: 'curve' as const, label: 'Curve' },
   // "Local" holds the local, targeted corrections — masks and retouch spots —
   // as opposed to Develop's global sliders. The value stays 'masks' (it is
   // client-only uiStore state, but keyboard.ts and the palette key off it).
@@ -180,17 +183,42 @@ function SinglePhotoPanel({
 }) {
   const tab = useUIStore((s) => s.developTab);
   const setTab = useUIStore((s) => s.setDevelopTab);
+  // The Curve tab carries the same "has adjustments" dot as a panel group —
+  // otherwise a curve set on another tab is invisible from Develop.
+  const curveSet = useEditSession((s) => {
+    const d = s.draft ?? s.lastDraft;
+    return !!d && CURVE_KEYS.some((k) => hasToneCurve(curveOf(d, k)));
+  });
+  const items = TAB_ITEMS.map((t) =>
+    t.value === 'curve' && curveSet
+      ? {
+          ...t,
+          label: (
+            <span className="flex items-center gap-1">
+              {t.label}
+              <span className="size-[5px] rounded-full bg-primary" title="Has adjustments" />
+            </span>
+          ),
+        }
+      : t,
+  );
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {photo && <PhotoHeader photo={photo} />}
       <div className="px-4 pt-[11px] pb-1">
-        <Segmented size="sm" aria-label="Panel" value={tab} onValueChange={setTab} items={TAB_ITEMS} />
+        <Segmented size="sm" aria-label="Panel" value={tab} onValueChange={setTab} items={items} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === 'develop' && (
           <>
             {photo && <Histogram photo={photo} />}
             <DevelopPanel client={client} photo={photo} targetCount={targetCount} />
+          </>
+        )}
+        {tab === 'curve' && (
+          <>
+            {photo && <Histogram photo={photo} />}
+            <CurvePanel client={client} targetCount={targetCount} />
           </>
         )}
         {tab === 'masks' && (
@@ -348,7 +376,6 @@ function DevelopPanel({
     tone: groupChanged(draft, [
       'expEV', 'expPreserve', 'bright', 'gamma', 'shadow',
       'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
-      'toneCurve', 'toneCurveR', 'toneCurveG', 'toneCurveB',
     ], seedExpEV),
     presence: groupChanged(draft, ['clarity', 'texture', 'dehaze']),
     wb: groupChanged(draft, ['wbMode', 'wbMul', 'wbTemp', 'wbTint', 'wbKelvin']),
@@ -515,7 +542,6 @@ function DevelopPanel({
         <PctSlider label="Blacks" field="blacks" draft={draft} update={update} commit={commit} {...num('blacks')} />
         <PctSlider label="Shadows" field="toneShadows" draft={draft} update={update} commit={commit} {...num('toneShadows')} />
         <PctSlider label="Highlights" field="toneHighlights" draft={draft} update={update} commit={commit} {...num('toneHighlights')} />
-        <ToneCurve draft={draft} update={update} commit={commit} clear={clear} />
       </Group>
 
       <Group id="presence" title="Presence" changed={changed.presence}>
@@ -1148,6 +1174,50 @@ function SpotRow({
 // Develop loupe, driven by the same activeMask state. Mirrors DevelopPanel's
 // shell: held lastDraft through photo switches (inert input meanwhile),
 // undo/redo in the header.
+// CurvePanel is the Curve tab: the point-curve editor on its own, where the
+// square canvas has room to be big. Mirrors LocalPanel's shell (header, target
+// badge, undo/redo) and reuses the same draft/commit plumbing as DevelopPanel.
+function CurvePanel({ client, targetCount }: { client: ApiClient; targetCount: number }) {
+  const liveDraft = useEditSession((s) => s.draft);
+  const draft = useEditSession((s) => s.draft ?? s.lastDraft);
+  const canUndo = useEditSession(esCanUndo);
+  const canRedo = useEditSession(esCanRedo);
+  if (!draft) return <div className="p-4 text-sm text-muted-foreground">Loading edits…</div>;
+  const update = (patch: Partial<Params>) => esUpdate(client, patch);
+  const commit = (patch?: Partial<Params>) => esCommit(client, patch);
+  const clear = (patch: Partial<Params>) => {
+    update(patch);
+    commit(patch);
+  };
+  return (
+    <div className={cn('flex flex-col px-4 pt-1 pb-3 text-sm', !liveDraft && 'pointer-events-none')}>
+      <div className="mb-2 flex items-center gap-2">
+        <h2 className="text-[13px] font-medium">Curve</h2>
+        {targetCount > 1 && (
+          <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">
+            applies to {targetCount} photos
+          </span>
+        )}
+        <span className="ml-auto flex items-center gap-1">
+          <Button size="icon-sm" variant="ghost" disabled={!canUndo} onClick={() => esUndo(client)} title="Undo (Ctrl+Z)">
+            <Undo2 />
+          </Button>
+          <Button size="icon-sm" variant="ghost" disabled={!canRedo} onClick={() => esRedo(client)} title="Redo (Ctrl+Y)">
+            <Redo2 />
+          </Button>
+        </span>
+      </div>
+      <ToneCurve draft={draft} update={update} commit={commit} clear={clear} />
+      <p className="mt-4 text-xs text-muted-foreground">
+        Drag a point to move it, click the grid to add one, double-click a
+        point to remove it. RGB shapes overall tone; the R, G and B channels
+        grade color on top of it, and the channels you are not editing stay
+        drawn as guides. The curve can never invert tones.
+      </p>
+    </div>
+  );
+}
+
 function LocalPanel({ client, targetCount }: { client: ApiClient; targetCount: number }) {
   const liveDraft = useEditSession((s) => s.draft);
   const draft = useEditSession((s) => s.draft ?? s.lastDraft);
