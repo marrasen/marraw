@@ -154,7 +154,7 @@ jobs:
           path: |
             dist/*.exe
             dist/*.exe.blockmap
-            dist/*.yml
+            dist/latest*.yml
           if-no-files-found: error
 
 # ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@ jobs:
           path: |
             dist/*.AppImage
             dist/*.deb
-            dist/*.yml
+            dist/latest*.yml
           if-no-files-found: error
 
   macos:
@@ -328,7 +328,7 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.dmg.blockmap
-            dist/*.yml
+            dist/latest*.yml
           if-no-files-found: error
 
 # ---------------------------------------------------------------------------
@@ -383,7 +383,21 @@ jobs:
             printf 'missing or empty asset: %s\n' "${missing[@]}" >&2
             exit 1
           fi
-          echo "all ${#expected[@]} assets present"
+          # And nothing BUT those: the artifacts are the release's source of
+          # truth now, so any stray that electron-builder leaves in dist/
+          # (builder-debug.yml was one) would otherwise ship as an asset.
+          extra=()
+          for f in *; do
+            for e in "${expected[@]}"; do
+              [[ "$f" == "$e" ]] && continue 2
+            done
+            extra+=("$f")
+          done
+          if (( ${#extra[@]} )); then
+            printf 'unexpected file in the asset set: %s\n' "${extra[@]}" >&2
+            exit 1
+          fi
+          echo "exactly the ${#expected[@]} expected assets are present"
 
       # --draft: nothing reaches users -- and electron-updater sees nothing --
       # until the release is published. Notes are written at publish time.
