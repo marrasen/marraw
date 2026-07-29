@@ -1,6 +1,7 @@
 # ML denoise + super resolution — design & measured feasibility
 
-Status: **infrastructure shipped, user-facing feature HELD** · 2026-07-13
+Status: **infrastructure shipped, user-facing feature HELD** · measured
+2026-07-13, unlock criteria revised 2026-07-29
 (The roadmap gates Milestone 3 on a design doc; this is it, with measured
 numbers instead of estimates.)
 
@@ -62,6 +63,68 @@ lands.
 3. **Alternative runtime** — ncnn/Vulkan builds (what Real-ESRGAN's shipping
    apps use) sidestep DML entirely; big packaging change, only worth it if
    ORT stays unstable.
+4. **Bounded pixel budget** — the only unlock we can *build* rather than wait
+   for. Cost is linear in megapixels, and the 65-minute figure is entirely
+   because it denoises the 42 MP master. Denoise the cropped region at native
+   scale capped by a budget, then resize: cost becomes `min(crop MP, budget)`,
+   which puts a 1600 px web export at ~2.6 min even on the measured CPU path.
+   Skip ML entirely when the export downscale factor is ≥ ~2 — averaging 25
+   source pixels per output pixel already cuts noise σ by ~5×, and what
+   survives is out of distribution for a model trained on native-scale sensor
+   noise. Scoped this way it needs no denoised-master cache, no
+   `LinearInputsHash` key, and no renderVersion bump — one stage in
+   `export.renderFinal`, where the job is already async with progress.
+   Caveat: this only helps exports; the loupe still needs criteria 1-3.
+
+### Pending measurement: NVIDIA / Windows (2026-07-29)
+
+Everything above was measured on ONE machine — a Lunar Lake iGPU. The next
+data point is a Windows desktop with an **RTX 3070 (8 GB)**, which needs no
+code changes: DirectML is vendor-neutral D3D12 and `PreferGPU` already
+appends it on Windows. Run there first:
+
+```
+set MARRAW_TEST_GPU=1
+go test ./internal/infer -run TestRunTiled     # needs the DirectML ORT build
+```
+
+A green 100-tile soak satisfies criterion 1 and turns this whole doc from
+"held" into "afternoon of wiring".
+
+**Expectations — ESTIMATES, not measurements.** Extrapolated from the Arc
+140V DML number by compute (20.3 vs ~3.8 TFLOPS fp32) and bandwidth (448 vs
+~135 GB/s), so ~4-5× sustained. Treat as ±2×: it is a cross-architecture
+guess from a single data point, and SCUNet's swin-transformer blocks may not
+track raw FLOPS. Record what actually happens and replace this table.
+
+| Path | s/MP (est.) | 42 MP master | 1600 px export |
+|---|---|---|---|
+| CPU (measured, any OS) | 93 | ~65 min | ~2.6 min |
+| DirectML fp32 — no code change | ~10-13 | ~7-9 min | ~20 s |
+| CUDA EP fp32 | ~6-8 | ~4-6 min | ~13 s |
+| CUDA/TensorRT fp16 | ~3-5 | ~2-3.5 min ✅ target | ~7 s |
+
+Swin2SR ×2 scales the same way (~30 s/MP DML fp32 → a 1.7 MP export upscales
+in ~50 s). Full-res SR stays out of reach.
+
+Notes for whoever runs this:
+
+- **8 GB VRAM is not a constraint.** `RunTiled` bounds the working set by tile
+  edge, not image size — a 512² fp32 tile through SCUNet is roughly 1-3 GB of
+  activations, 256² comfortably under 1 GB, weights are 91 MB. Keep the
+  one-resident-GPU-session policy; with a desktop and browser already holding
+  1-2 GB, two sessions would be tight even without the crash reason.
+- **The Arc failures were probably an Intel driver bug**, not an ORT-DML
+  architecture flaw — native access violations inside the driver. NVIDIA's
+  D3D12 path is far more heavily exercised by shipping DML apps, so there is a
+  decent chance this just passes.
+- **Linux gets nothing today** — `newSession` appends no provider there (see
+  `infer.go`), so a 3070 on Linux falls back to 93 s/MP CPU. The pinned
+  onnxruntime_go v1.27.0 does expose `AppendExecutionProviderCUDA` and
+  `...TensorRT`, so the Go side is a small change; the cost is shipping the
+  CUDA/cuDNN provider libs, which is why it was deferred.
+- If one machine class passes and another hard-crashes, gate at runtime with a
+  probe plus a short self-test — not a hand-maintained driver allowlist.
 
 ### Architecture (unchanged from the roadmap, ready when unlocked)
 

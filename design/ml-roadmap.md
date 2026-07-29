@@ -197,7 +197,10 @@ Status: **infrastructure shipped 2026-07-13, user-facing feature HELD** —
 tiled inference + GPU execution providers landed and tested, but measured
 throughput (93 s/MP CPU, DirectML unstable on Arc) makes the feature a trap
 on this hardware class. Full data, decision, and unlock criteria in
-[ml-denoise.md](ml-denoise.md).
+[ml-denoise.md](ml-denoise.md) — including a pending NVIDIA/Windows
+measurement that needs no code changes, and a fourth unlock criterion
+(bound the work by output pixels, not sensor pixels) that would make
+export-only denoise viable on the CPU path today.
 
 Restoration-model denoise (NAFNet/SCUNet-class): one joint denoise + detail-recovery
 pass on **scene-linear** data, before look/masks/detail. Classical sharpening stays
