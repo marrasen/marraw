@@ -10,7 +10,7 @@ import type { Photo } from '@/api/library';
 import { cn } from '@/lib/utils';
 import { applyRating, applyFlag } from '@/lib/actions';
 // (aprot's camelCasing lowercases exactly one leading character: aIModelStatus.)
-import { aIModelStatus as aiModelStatus, applyBatchEdit, fillModelStatus, generateAIMap, type Delta } from '@/api/edits';
+import { aIModelStatus as aiModelStatus, applyBatchEdit, fillModelStatus, generateAIMap, lensProfile, type Delta, type LensProfileInfo } from '@/api/edits';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
 import type { AIKindType, CurvePoint, Mask, MaskAdjust, Params, Spot } from '@/api/edit';
@@ -393,6 +393,7 @@ function DevelopPanel({
     detail: groupChanged(draft, [
       'sharpen', 'highlight', 'nrThreshold', 'fbddNoiseRd', 'medPasses',
       'demosaic', 'caRed', 'caBlue',
+      'lensMode', 'lensDistortion', 'lensVignetting', 'lensCA',
     ]),
   };
 
@@ -756,6 +757,16 @@ function DevelopPanel({
         />
         <PctSlider label="CA red/cyan" field="caRed" draft={draft} update={update} commit={commit} {...num('caRed')} />
         <PctSlider label="CA blue/yellow" field="caBlue" draft={draft} update={update} commit={commit} {...num('caBlue')} />
+
+        <LensRows
+          client={client}
+          photoId={photo?.id}
+          draft={draft}
+          update={update}
+          commit={commit}
+          clear={clear}
+          num={num}
+        />
       </Group>
 
       <p className="mt-4 mb-1 text-xs text-muted-foreground">
@@ -1922,6 +1933,145 @@ function BrushToolRow({ client, mask, index }: { client: ApiClient; mask: Mask; 
       />
     </div>
   );
+}
+
+// LensRows renders the lens-profile section: what was matched, whether the
+// correction is on, and how far each of its three components goes.
+//
+// The controls are deliberately offsets from the profile rather than raw
+// amounts. A profile is a measurement of what the lens did to the frame, so
+// its own figure is the neutral — 100% — and the slider exists for the cases
+// where the photographer disagrees: keeping some of a wide lens's vignette
+// because it flatters the subject, or backing distortion off on a portrait
+// where perfectly straight edges look worse than slightly curved ones.
+function LensRows({
+  client,
+  photoId,
+  draft,
+  update,
+  commit,
+  clear,
+  num,
+}: {
+  client: ApiClient;
+  photoId?: number;
+  draft: Params;
+  update: (patch: Partial<Params>) => void;
+  commit: (patch?: Partial<Params>) => void;
+  clear: (patch: Partial<Params>) => void;
+  num: (control: ControlId) => { active: boolean; onFocusControl: () => void };
+}) {
+  const info = useLensProfileInfo(client, photoId);
+  const off = draft.lensMode === 'off';
+
+  // Nothing to say before the lookup lands, and nothing worth a section on a
+  // file that records no lens at all (adapted and manual glass, mostly) —
+  // there is no correction to offer and no setting that would change that.
+  if (!info || (!info.lens && !info.profile)) return null;
+
+  const amount = (field: 'lensDistortion' | 'lensVignetting' | 'lensCA') =>
+    ((draft[field] ?? 0) + 1) * 100;
+
+  const row = (
+    label: string,
+    field: 'lensDistortion' | 'lensVignetting' | 'lensCA',
+    control: ControlId,
+    available: boolean,
+  ) => (
+    <EditSlider
+      label={label}
+      value={amount(field)}
+      display={available ? `${Math.round(amount(field))}%` : '—'}
+      min={0}
+      max={200}
+      step={5}
+      neutral={100}
+      // A slider for a correction this profile never measured would be a
+      // lie: the lens is matched, but that component of it isn't in the
+      // database.
+      disabled={off || !available}
+      onChange={(v) => update({ [field]: v / 100 - 1 })}
+      onCommit={(v) => commit({ [field]: v / 100 - 1 })}
+      onClear={() => clear({ [field]: 0 })}
+      {...num(control)}
+    />
+  );
+
+  return (
+    <div className="flex flex-col gap-1.5 border-t pt-3">
+      <ButtonRow
+        label="Lens correction"
+        options={LENS_MODE_OPTIONS}
+        value={off ? 'off' : 'auto'}
+        onChange={(v) => {
+          const patch = { lensMode: (v === 'off' ? 'off' : '') as Params['lensMode'] };
+          update(patch);
+          commit(patch);
+        }}
+      />
+      <p className="text-xs text-muted-foreground">
+        {info.profile ? (
+          <>
+            {info.profile}
+            {info.focal > 0 && ` · ${formatFocal(info.focal)}`}
+            {info.aperture > 0 && ` · f/${trimNum(info.aperture)}`}
+          </>
+        ) : info.cameraKnown ? (
+          <>No profile for “{info.lens}”.</>
+        ) : (
+          <>This camera body isn’t in the lens database, so no profile can be matched.</>
+        )}
+      </p>
+      {info.profile && (
+        <>
+          {row('Distortion', 'lensDistortion', 'lensDistortion', info.hasDistortion)}
+          {row('Vignetting', 'lensVignetting', 'lensVignetting', info.hasVignetting)}
+          {row('Chromatic aberration', 'lensCA', 'lensCA', info.hasCA)}
+        </>
+      )}
+    </div>
+  );
+}
+
+const LENS_MODE_OPTIONS = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'off', label: 'Off' },
+];
+
+// trimNum drops the trailing zeros EXIF rationals leave behind (2.7999999).
+function trimNum(v: number): string {
+  return String(Math.round(v * 10) / 10);
+}
+
+function formatFocal(mm: number): string {
+  return `${trimNum(mm)}mm`;
+}
+
+// useLensProfileInfo fetches the matched profile for one photo. The answer
+// depends only on the file's EXIF, so it is refetched on photo change and
+// never during an edit.
+function useLensProfileInfo(client: ApiClient, photoId?: number): LensProfileInfo | null {
+  // The photo the answer belongs to is stored WITH it, so switching photos
+  // reads as "not loaded yet" without an effect that clears state on the way
+  // in — a synchronous setState in an effect body is a cascading render.
+  const [loaded, setLoaded] = useState<{ photoId: number; info: LensProfileInfo | null } | null>(null);
+  useEffect(() => {
+    if (!photoId) return;
+    let live = true;
+    lensProfile(client, photoId)
+      .then((info) => {
+        if (live) setLoaded({ photoId, info });
+      })
+      .catch(() => {
+        // A failed lookup is indistinguishable from an unprofiled lens as
+        // far as the panel is concerned: no profile, no section.
+        if (live) setLoaded({ photoId, info: null });
+      });
+    return () => {
+      live = false;
+    };
+  }, [client, photoId]);
+  return loaded && loaded.photoId === photoId ? loaded.info : null;
 }
 
 // The ±1 params rendered as ±100 sliders share everything but the field.

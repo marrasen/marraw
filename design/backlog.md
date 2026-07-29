@@ -8,6 +8,60 @@ smaller stuff.
 
 ## Editing (from the README "what marraw does not do" list)
 
+- ~~**No lens profile corrections.**~~ Done 2026-07-29: distortion, lateral
+  chromatic aberration and vignetting are now corrected from a matched lens
+  profile, on by default. New `internal/lens` package: the Lensfun
+  calibration database (CC-BY-SA 3.0) distilled by `tools/lensdb` into a
+  437 KB gzipped JSON blob embedded via `go:embed` (1045 cameras, 1555
+  calibrated lenses), plus a from-scratch Go implementation of Lensfun's
+  math — the poly3/poly5/ptlens distortion models, poly3/linear TCA, the
+  "pa" vignetting model, the Hermite-spline interpolation over focal length,
+  the inverse-distance weighting over the (focal, aperture, distance)
+  vignetting cloud, and the coefficient rescaling between Hugin's, "pa"'s
+  and the normalized coordinate systems. No link against liblensfun.
+  `pyramid.ApplyLens` runs FIRST in every render path — before
+  `ApplyGeometry`, and before `lookGammaFor`, so the camera-mimic tone
+  calibration compares a devignetted render against a camera JPEG that is
+  also devignetted. Output dims are preserved via a bisection auto-scale
+  (lensfun's `GetAutoScale`, with bisection replacing Newton so ultra-wide
+  fits can't diverge). `edit.Params` gains `LensMode` (""=auto / "off") and
+  `LensDistortion`/`LensVignetting`/`LensCA` as ±1 offsets from the
+  profile's own figure, all `omitempty` so pre-existing edits keep their
+  bytes — and, because the zero value means "corrected", *start* corrected.
+  `Edits.LensProfile` reports the match to a Lens section in the Detail
+  group. Verify: `node scripts/lens-verify.mjs /tmp/marraw-fixture` and
+  `node scripts/shot.mjs /tmp/marraw-fixture lens`.
+
+  **Design notes worth keeping:**
+  - **Matching is deliberately stricter than Lensfun's.** Upstream takes the
+    best fuzzy score whatever it is; a wrong profile silently warps every
+    pixel, so here nothing the EXIF asserts may be contradicted by the
+    candidate (focal range, descriptive words and remaining numbers must all
+    be subsets), and a tie matches nothing. The case that motivated it:
+    Nikon's 24-70/2.8 G and E VR are different optical designs whose names
+    are near-subsets, and score-based matching picks the G for an E VR file.
+  - **Fixed-lens compacts record no lens string at all.** They resolve
+    through the body's pseudo-mount instead, guarded on that mount having
+    exactly one lens — a real mount like "Sony E" has hundreds and never
+    fires. The dev fixture (Panasonic DC-LX100M2) is one of these, so the
+    verify script covers this path and not the interchangeable one.
+  - **Vignetting is corrected in LINEAR light** (`linearCodec`, via the same
+    dcraw gamma the decode carries). Applying the gain to gamma-encoded
+    values roughly doubles the correction in stops — it looks plausible on
+    screen and is wrong.
+  - **An unknown camera body means no correction at all**, even for a lens
+    that matched: without the body's crop factor there is no way to place
+    the coefficients in the frame. That is also why `Correction` stores crop
+    and real focal rather than a `NormScale` — it makes the resolved profile
+    independent of render size, so one lookup serves every pyramid level.
+  - **Cost:** ~1.1 s for a 42 MP frame (8 threads, i7-6700K), so the 1:1 and
+    export paths pay it in full. The interactive path does not: `RenderPreview`
+    downscales the frame first (to `previewFrameEdge`, which is larger than
+    longEdge when a crop is set, so the crop still lands at full preview
+    size) and corrects there, and the fold path corrects the already-
+    downscaled `foldScale` buffer. `renderVersion` r8 → r9.
+  - **Still absent:** axial CA / defringe, which no profile can describe.
+
 - ~~**No luminance or color range masks.**~~ Done 2026-07-28: a new
   `MaskRange` ("range") mask type selects pixels by their own **developed
   value** — a soft luminance band-pass times a soft hue band-pass gated by a

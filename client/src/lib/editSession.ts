@@ -80,6 +80,7 @@ const CONTROL_GROUP: Record<ControlId, GroupId> = {
   vignette: 'effects',
   sharpen: 'detail', highlight: 'detail', nrThreshold: 'detail', fbddNoiseRd: 'detail',
   medPasses: 'detail', demosaic: 'detail', caRed: 'detail', caBlue: 'detail',
+  lensDistortion: 'detail', lensVignetting: 'detail', lensCA: 'detail',
 };
 
 // esMoveActive walks the keyboard focus to the previous/next develop control

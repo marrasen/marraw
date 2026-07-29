@@ -123,6 +123,40 @@ upstream), verifying each against a SHA-256 baked into `internal/aimask`,
 
 ---
 
+## Lens correction database (Lensfun)
+
+Lens profile correction (distortion, lateral chromatic aberration and
+vignetting) is driven by the **Lensfun** project's calibration database.
+
+- **Upstream source:** <https://github.com/lensfun/lensfun> (`data/db`,
+  master as of 2026-07-29, post-0.3.4 development series)
+- **Copyright:** © the Lensfun contributors and the photographers who
+  submitted each calibration
+- **License:** **CC-BY-SA 3.0** — <https://creativecommons.org/licenses/by-sa/3.0/>
+  (the database only; Lensfun's library code is LGPL-3.0, and marraw does
+  **not** link against it)
+
+marraw ships an adaptation of that database, not a copy: `tools/lensdb`
+distills the upstream XML into the compact gzipped JSON blob embedded at
+`internal/lens/lensfun.json.gz`, keeping the camera crop factors and the
+per-lens distortion / TCA / vignetting calibration points and dropping
+localized names, mount graphs and documentation. As an adaptation of a
+CC-BY-SA work, that blob is itself licensed **CC-BY-SA 3.0**; it is
+published in this repository alongside the generator that produces it, so
+the adapted data is available on the same terms. Regenerate with:
+
+```
+go run ./tools/lensdb -src /path/to/lensfun/data/db
+```
+
+The correction math in `internal/lens` (the coefficient models, their
+coordinate conventions, the spline and inverse-distance interpolation) is an
+independent Go implementation of the algorithms Lensfun documents, written
+against its source as a reference; the comments name the upstream file each
+formula corresponds to.
+
+---
+
 ## Regenerating this file
 
 The tables above list direct dependencies only. To produce an exhaustive,

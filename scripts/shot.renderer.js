@@ -349,6 +349,67 @@ if (shot === 'cull') {
     depthLo: mask.depthLo,
     depthHi: mask.depthHi,
   };
+} else if (shot === 'lens') {
+  // Lens profile correction: open Develop's Detail group, assert the section
+  // names the matched profile and offers a slider per correction the profile
+  // actually carries, then flip Off and back and assert the render responds.
+  // The fixture body is a fixed-lens compact, so this also covers the
+  // match-by-mount path.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  ui().setDevelopTab('develop');
+  mw.setEditGroupOpen('detail', true);
+  // Idempotence: a previous run may have left the correction switched off.
+  mw.esUpdate({ lensMode: undefined, lensDistortion: undefined, lensVignetting: undefined, lensCA: undefined });
+  mw.esCommit();
+  await sleep(1500); // the profile lookup + a corrected preview
+  const sectionOf = () =>
+    [...document.querySelectorAll('span')]
+      .find((n) => n.textContent?.trim() === 'Lens correction')
+      ?.closest('div.border-t');
+  await until(() => sectionOf() != null, 20000);
+  const section = sectionOf();
+  const sliderLabels = () =>
+    [...(section?.querySelectorAll('span') ?? [])].map((n) => n.textContent?.trim());
+  const enabledSliders = () =>
+    [...(section?.querySelectorAll('[data-slot="slider-thumb"]') ?? [])].length;
+
+  const lumaOf = async () => {
+    const img = document.querySelector('[data-testid="loupe-image"]') ?? document.querySelector('main img');
+    if (!img || !img.complete || !img.naturalWidth) return null;
+    const c = document.createElement('canvas');
+    c.width = 48;
+    c.height = Math.max(1, Math.round((48 * img.naturalHeight) / img.naturalWidth));
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    // The extreme corner is where vignetting lives.
+    const i = 0;
+    return (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+  };
+  const cornerOn = await lumaOf();
+  mw.esUpdate({ lensMode: 'off' });
+  mw.esCommit();
+  await sleep(2000);
+  const cornerOff = await lumaOf();
+  mw.esUpdate({ lensMode: undefined });
+  mw.esCommit();
+  await sleep(2000);
+
+  // Bring the section into view so the screenshot shows what was asserted.
+  section?.scrollIntoView({ block: 'center' });
+  await sleep(400);
+
+  window.__lensProbe = {
+    sectionFound: !!section,
+    profileLine: section?.querySelector('p')?.textContent ?? '',
+    labels: sliderLabels(),
+    thumbs: enabledSliders(),
+    cornerOn,
+    cornerOff,
+    modeAfterReset: es.getState().draft?.lensMode ?? '',
+  };
 } else if (shot === 'tonecurve') {
   // Point tone curve: from a curve-free state, commit a midtone-lift curve
   // and assert (a) the developed preview brightens the mids while the
@@ -1565,6 +1626,7 @@ const probe =
   window.__neardupProbe ??
   window.__modelsProbe ??
   window.__maskProbe ??
+  window.__lensProbe ??
   window.__presetsProbe ??
   window.__suggestProbe ??
   window.__featuresProbe ??

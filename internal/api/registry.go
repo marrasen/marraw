@@ -204,6 +204,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.RegisterEnumFor(edits, edit.WBModeValues())
 	registry.RegisterEnumFor(edits, edit.DemosaicValues())
 	registry.RegisterEnumFor(edits, edit.AIKindValues())
+	registry.RegisterEnumFor(edits, edit.LensModeValues())
 	registry.RegisterEnumFor(export, ExportFormatValues())
 	registry.RegisterEnumFor(export, ColorSpaceValues())
 	registry.RegisterEnumFor(export, SharpenTargetValues())

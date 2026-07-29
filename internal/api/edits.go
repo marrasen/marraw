@@ -174,7 +174,8 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 	}
 	return jpegBlob(pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta,
 		e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep),
-		e.deps.Cache.Fills.SetFor(photo.CacheKey, ep)))
+		e.deps.Cache.Fills.SetFor(photo.CacheKey, ep),
+		e.deps.Cache.Lenses.For(photo)))
 }
 
 // jpegBlob encodes a transient preview frame. The quality is slightly below
@@ -228,7 +229,7 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 	}
 	// WritePreview never mutates its input, so handing it the shared cached
 	// decode is safe.
-	if err := e.deps.Cache.WritePreview(rgba, photo.CacheKey, hash, gamma, ep); err != nil {
+	if err := e.deps.Cache.WritePreview(rgba, photo, hash, gamma, ep); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -360,7 +361,7 @@ func (e *Edits) previewLinear(ctx context.Context, photoID int64, photo store.Ph
 	fp := foldParamsFor(ep, entry.refMul, entry.camXYZ)
 	ai := e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep)
 	fills := e.deps.Cache.Fills.SetFor(photo.CacheKey, ep)
-	return pyramid.RenderPreviewLinear(entry.lin, longEdge, fp, gamma, ep, ai, fills), true, nil
+	return pyramid.RenderPreviewLinear(entry.lin, longEdge, fp, gamma, ep, ai, fills, e.deps.Cache.Lenses.For(photo)), true, nil
 }
 
 // linearMaster returns the cached scene-linear reference for the photo at ep's
@@ -639,7 +640,8 @@ func (e *Edits) developedBaseForMask(ctx context.Context, photoID int64, photo s
 	}
 	return pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta,
 		e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep),
-		e.deps.Cache.Fills.SetFor(photo.CacheKey, ep)), nil
+		e.deps.Cache.Fills.SetFor(photo.CacheKey, ep),
+		e.deps.Cache.Lenses.For(photo)), nil
 }
 
 // PickRangeColor samples the developed colour at the clicked spot and seeds the
@@ -788,7 +790,10 @@ func (e *Edits) SuggestHealSource(ctx context.Context, photoID int64, params edi
 	if err != nil {
 		return nil, err
 	}
-	geo := pyramid.ApplyGeometry(rgba, ep)
+	geo := pyramid.ApplyGeometry(
+		pyramid.ApplyLens(rgba,
+			pyramid.LensWarp(e.deps.Cache.Lenses.For(photo), ep, rgba.Bounds().Dx(), rgba.Bounds().Dy()), ep),
+		ep)
 	// Pass &params (never nil) for the frame mapping: it carries the crop and
 	// rotation that place the fractional coordinates, and newMaskFrame derefs it.
 	out := spot

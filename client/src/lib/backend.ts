@@ -41,7 +41,7 @@ export interface ImgRef {
 // RENDER_VERSION must match pyramid.renderVersion in the Go backend: image
 // responses are cached as immutable, so a rendering-pipeline change must
 // change the URL or clients keep serving the old pixels forever.
-const RENDER_VERSION = 'r8';
+const RENDER_VERSION = 'r9';
 
 // imgUrl builds a content-addressed image URL: cacheKey (v), editHash (e),
 // and render version (r) are part of the URL, so the browser cache never

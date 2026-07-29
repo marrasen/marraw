@@ -29,6 +29,7 @@ import (
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/lens"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/store"
 )
@@ -81,6 +82,9 @@ type Cache struct {
 	// Fills resolves cached ML fill patches for renders; nil is valid
 	// (patches unavailable → fill spots render as no-ops).
 	Fills *FillStore
+	// Lenses resolves lens-correction profiles for renders; nil is valid
+	// (no profile → no correction, the same as an unknown lens).
+	Lenses *LensProfiles
 	// OnPhotoChanged, when set, is called after the cache corrects a photo
 	// row (dimension healing) so folder subscribers can refresh.
 	OnPhotoChanged func(folderID int64)
@@ -99,7 +103,7 @@ func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	c := &Cache{pool: pool, db: db}
+	c := &Cache{pool: pool, db: db, Lenses: NewLensProfiles()}
 	c.dir.Store(&dir)
 	return c, nil
 }
@@ -176,7 +180,7 @@ func nested(a, b string) bool {
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r8"
+const renderVersion = "r9"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
@@ -437,6 +441,11 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	if level == "full" {
 		c.healDimensions(photo, rgba.Bounds().Dx(), rgba.Bounds().Dy())
 	}
+	// Lens correction comes before the tone calibration on purpose: the
+	// camera's embedded JPEG that lookGammaFor measures against has the
+	// lens's vignetting already taken out, so comparing an uncorrected
+	// render to it would read the dark corners as a tone difference.
+	rgba = ApplyLens(rgba, LensWarp(c.Lenses.For(photo), edits, rgba.Bounds().Dx(), rgba.Bounds().Dy()), edits)
 	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
 	ai := c.AIMaps.SetFor(photo.CacheKey, edits)
 	fills := c.Fills.SetFor(photo.CacheKey, edits)
@@ -578,7 +587,7 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 // (reused across an exposure-only change to skip the demosaic); the accurate
 // cache render passes edits.ResidualExpEV() — its decode is exact except for
 // the stops beyond LibRaw's exp_shift range.
-func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit.Params, expDeltaEV float64, ai AIMapSet, fills FillSet) *image.RGBA {
+func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit.Params, expDeltaEV float64, ai AIMapSet, fills FillSet, lensc *lens.Correction) *image.RGBA {
 	scale := func(img *image.RGBA) *image.RGBA {
 		b := img.Bounds()
 		long := max(b.Dx(), b.Dy())
@@ -597,9 +606,27 @@ func RenderPreview(src *image.RGBA, longEdge int, lookGamma float64, edits *edit
 	// resolution. A pure crop is a cheap sub-image, so crop first to keep the
 	// preview at longEdge of the cropped region rather than of the frame.
 	var dst *image.RGBA
-	if edits != nil && edits.CropAngle != 0 {
+	switch {
+	case lensc != nil && edits.LensCorrects():
+		// Lens correction has to see the whole frame, so it cannot follow a
+		// crop — and warping the full decode would put a 42 MP resample on
+		// every interactive frame. Instead the frame is downscaled first, to
+		// whatever size leaves the CROP at longEdge, and corrected there.
+		// The warp is defined in normalized coordinates, so working small
+		// changes the sampling density and nothing else; the committed cache
+		// render corrects at full resolution.
+		work := scaleToLongEdge(src, previewFrameEdge(src, longEdge, edits))
+		if work == src {
+			// The vignetting-only path corrects in place, and src may be a
+			// shared cached decode that other renders are reading.
+			work = copyRGBA(src, src.Bounds())
+		}
+		b := work.Bounds()
+		work = ApplyLens(work, LensWarp(lensc, edits, b.Dx(), b.Dy()), edits)
+		dst = scale(ApplyGeometry(work, edits))
+	case edits != nil && edits.CropAngle != 0:
 		dst = ApplyGeometry(scale(src), edits)
-	} else {
+	default:
 		dst = scale(ApplyGeometry(src, edits))
 	}
 	// Runs on the scaled copy, never on src (which may be a shared cached
@@ -666,10 +693,12 @@ func outputEncoding(edits *edit.Params) (pwr, ts float64) {
 
 // WritePreview writes the 2048 rendition on the interactive path so a
 // following commit serves the same pixels over /img.
-func (c *Cache) WritePreview(src *image.RGBA, cacheKey, editHash string, lookGamma float64, edits *edit.Params) error {
+func (c *Cache) WritePreview(src *image.RGBA, photo store.Photo, editHash string, lookGamma float64, edits *edit.Params) error {
+	cacheKey := photo.CacheKey
 	ai := c.AIMaps.SetFor(cacheKey, edits)
 	fills := c.Fills.SetFor(cacheKey, edits)
-	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits, edits.ResidualExpEV(), ai, fills), cacheKey, "2048", editHash, 80)
+	lensc := c.Lenses.For(photo)
+	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits, edits.ResidualExpEV(), ai, fills, lensc), cacheKey, "2048", editHash, 80)
 }
 
 // WriteLevels writes a chain of downscaled renditions from src, skipping
@@ -749,4 +778,28 @@ func writeJPEGFile(path string, img image.Image, quality int) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// previewFrameEdge is the long edge to downscale a FULL frame to so that,
+// after the edit's crop is taken from it, the result lands at about
+// longEdge. Without a crop that is just longEdge; a half-frame crop needs
+// the frame at twice the size to hold its detail.
+//
+// Only the lens-correction path needs this: every other preview can crop
+// first and scale the (smaller) result, but a correction defined over the
+// whole image circle has to run before the crop, and running it on the full
+// decode would cost a full-resolution resample per interactive frame.
+func previewFrameEdge(src *image.RGBA, longEdge int, e *edit.Params) int {
+	b := src.Bounds()
+	full := max(b.Dx(), b.Dy())
+	if !e.HasCrop() {
+		return longEdge
+	}
+	cw, ch := e.OutputDims(b.Dx(), b.Dy())
+	crop := max(cw, ch)
+	if crop <= 0 {
+		return longEdge
+	}
+	// Round up, and never ask for more than the decode actually has.
+	return min(full, (longEdge*full+crop-1)/crop)
 }

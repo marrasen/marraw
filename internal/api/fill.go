@@ -97,12 +97,19 @@ func (e *Edits) generateFill(ctx context.Context, photo store.Photo, params *edi
 	if err != nil {
 		return nil, err
 	}
+	// Lens correction first, for the same reason the render paths run it
+	// first: the patch is composited by ApplyHeal onto an already-corrected
+	// frame, so it has to be inpainted from corrected pixels or the fill
+	// would be cut from a slightly different geometry than it lands on.
+	corrected := pyramid.ApplyLens(decode,
+		pyramid.LensWarp(e.deps.Cache.Lenses.For(photo), params, decode.Bounds().Dx(), decode.Bounds().Dy()),
+		params)
 	// Orient only — the window lives in oriented-frame fractions, before
 	// straighten and crop. ApplyGeometry may return the shared cached decode
 	// unchanged (no rotate, no flip), so nothing below may mutate `oriented`;
 	// the window crop always copies.
 	geo := edit.Params{Rotate: params.RotateTurns(), FlipH: params.FlipH}
-	oriented := pyramid.ApplyGeometry(decode, &geo)
+	oriented := pyramid.ApplyGeometry(corrected, &geo)
 	ob := oriented.Bounds()
 	frameW, frameH := float64(ob.Dx()), float64(ob.Dy())
 	if frameW == 0 || frameH == 0 {

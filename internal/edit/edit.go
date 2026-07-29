@@ -44,6 +44,19 @@ func DemosaicValues() []Demosaic {
 	return []Demosaic{DemosaicVNG, DemosaicPPG, DemosaicAHD, DemosaicDHT}
 }
 
+// LensMode selects whether the matched lens profile is applied. Empty is
+// automatic, which is the default for every photo: a profile is a
+// measurement of what the lens did to the frame, so undoing it is the
+// neutral starting point, not an effect.
+type LensMode string
+
+const (
+	LensAuto LensMode = ""
+	LensOff  LensMode = "off"
+)
+
+func LensModeValues() []LensMode { return []LensMode{LensAuto, LensOff} }
+
 // MaskType tags the geometry variant of a local adjustment mask.
 type MaskType string
 
@@ -303,6 +316,22 @@ type Params struct {
 	CARed    float64  `json:"caRed" validate:"gte=-1,lte=1"`
 	CABlue   float64  `json:"caBlue" validate:"gte=-1,lte=1"`
 
+	// Lens profile correction (pyramid.ApplyLens), applied to the full frame
+	// before the geometry stage. LensMode is "" for automatic — the profile
+	// matched from the photo's own camera and lens EXIF is applied whenever
+	// one is found — or LensOff to leave the frame as the lens drew it.
+	//
+	// The three amounts are offsets from the profile's own measurement, on
+	// the ±1 scale the rest of the sliders use: 0 is the full correction, -1
+	// switches that component off, +1 doubles it. Written that way so the
+	// zero value means "correct this photo the way the profile says", which
+	// is what an edit made before this feature existed should now do, and so
+	// every lens field stays omitempty and leaves old hashes untouched.
+	LensMode       LensMode `json:"lensMode,omitempty" validate:"omitempty,oneof=off"`
+	LensDistortion float64  `json:"lensDistortion,omitempty" validate:"gte=-1,lte=1"`
+	LensVignetting float64  `json:"lensVignetting,omitempty" validate:"gte=-1,lte=1"`
+	LensCA         float64  `json:"lensCA,omitempty" validate:"gte=-1,lte=1"`
+
 	// Crop + straighten, applied as a post-decode geometry stage in display
 	// (orientation-corrected) space. Rotate turns the frame in quarter turns
 	// clockwise (0..3) and FlipH then mirrors it about the vertical axis,
@@ -400,6 +429,25 @@ func (e *Params) HasChannelCurves() bool {
 	return CurveBends(e.ToneCurveR) || CurveBends(e.ToneCurveG) || CurveBends(e.ToneCurveB)
 }
 
+// LensCorrects reports whether the lens profile should be applied at all.
+// Nil-safe, and true for a nil or zero Params: automatic is the default.
+func (e *Params) LensCorrects() bool {
+	return e == nil || e.LensMode != LensOff
+}
+
+// LensAmounts converts the stored ±1 offsets into the strength multipliers
+// the renderer wants, where 1 is the profile's own measurement. Returns
+// zeros when the correction is switched off entirely.
+func (e *Params) LensAmounts() (distortion, vignetting, ca float64) {
+	if !e.LensCorrects() {
+		return 0, 0, 0
+	}
+	if e == nil {
+		return 1, 1, 1
+	}
+	return 1 + e.LensDistortion, 1 + e.LensVignetting, 1 + e.LensCA
+}
+
 // RotateTurns returns the coarse rotation as canonical quarter turns
 // clockwise in 0..3 (nil-safe; stored values outside the range wrap).
 func (e *Params) RotateTurns() int {
@@ -493,6 +541,12 @@ func (e *Params) Normalize() {
 	}
 	// Full turns are neutral; canonicalize so 4 hashes like 0.
 	e.Rotate = e.RotateTurns()
+	// A switched-off lens correction ignores its amounts, so clear them —
+	// otherwise the same visible result hashes differently depending on
+	// where the sliders happened to be left (the WBMode precedent).
+	if e.LensMode == LensOff {
+		e.LensDistortion, e.LensVignetting, e.LensCA = 0, 0, 0
+	}
 	// Mixer bands are unvalidated arrays (the wire validator doesn't dive
 	// into them), so clamp here instead.
 	for i := range e.HSLHue {

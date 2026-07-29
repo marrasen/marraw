@@ -172,6 +172,14 @@ are the controls you chose to keep at hand.</sup>
 
 - **Geometry** — crop & straighten via an interactive overlay (±15°), 90°
   rotation and mirroring from the overlay toolbar.
+- **Lens corrections** — marraw reads the camera and lens out of the RAW,
+  matches a profile from a built-in database of ~1,500 calibrated lenses, and
+  undoes what the lens did to the frame: barrel and pincushion distortion,
+  lateral chromatic aberration, and corner vignetting. It happens
+  automatically, before everything else, so the frame you start editing is
+  already the one the camera's own JPEG shows. Each of the three corrections
+  has its own amount — 100% is the profile's measurement — and the whole
+  thing switches off in one click when a lens's own signature is the point.
 - **Retouch** — spot removal (`Q`): click a dust spot or blemish (drag to
   size it), or paint over any shape with the heal brush, and it fills from a
   source patch marraw picks for you — heal (source texture tone-matched to
@@ -272,8 +280,9 @@ them is load-bearing for your work, marraw is not ready for you yet.
   heal brush heal/clone from another patch of the same photo, and Fill mode
   inpaints the region with an on-device ML model (a one-time ~28 MB download,
   after asking) — but none of it translates to Lightroom's retouch on export.
-- ❌ **No lens profile corrections.** No distortion or vignetting profiles, no
-  automatic defringe — only a manual CA slider and a creative vignette.
+- ❌ **No automatic defringe.** Lens profiles correct distortion, vignetting
+  and lateral CA (see above), but there is no purple-fringe remover for the
+  axial CA that a profile cannot describe — only the manual CA sliders.
 - ❌ **No modern denoise.** You get LibRaw's wavelet/FBDD/median, not
   ML-assisted luminance and color NR.
 - ❌ **No HDR editing or output**, and no wide-gamut working space. The look

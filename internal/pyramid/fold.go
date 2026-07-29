@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/lens"
 	"github.com/marrasen/marraw/internal/libraw"
 )
 
@@ -163,11 +164,13 @@ func dcrawGammaDecoder(pwr, ts float64) func(float64) float64 {
 // RenderPreviewLinear renders an interactive-path frame off the scene-linear
 // reference lin: it bilinearly resamples to longEdge and folds the raw stage
 // (WB/exposure/brightness/gamma via fp) in a single pass, then runs the same
-// geometry, look and detail stages as RenderPreview. Because WB and exposure
-// live in fp, dragging them reuses lin with no demosaic. Geometry runs on the
-// downscaled buffer (a pure-crop preview is therefore taken from the frame's
-// longEdge rather than the crop's — the deferred settle crops at full res).
-func RenderPreviewLinear(lin *image.RGBA64, longEdge int, fp FoldParams, lookGamma float64, edits *edit.Params, ai AIMapSet, fills FillSet) *image.RGBA {
+// lens, geometry, look and detail stages as RenderPreview. Because WB and
+// exposure live in fp, dragging them reuses lin with no demosaic. Geometry
+// runs on the downscaled buffer (a pure-crop preview is therefore taken from
+// the frame's longEdge rather than the crop's — the deferred settle crops at
+// full res), which also hands the lens stage exactly what it needs: the
+// whole frame, uncropped, at preview size.
+func RenderPreviewLinear(lin *image.RGBA64, longEdge int, fp FoldParams, lookGamma float64, edits *edit.Params, ai AIMapSet, fills FillSet, lensc *lens.Correction) *image.RGBA {
 	b := lin.Bounds()
 	sw, sh := b.Dx(), b.Dy()
 	ow, oh := sw, sh
@@ -175,6 +178,9 @@ func RenderPreviewLinear(lin *image.RGBA64, longEdge int, fp FoldParams, lookGam
 		ow, oh = sw*longEdge/long, sh*longEdge/long
 	}
 	disp := foldScale(lin, max(1, ow), max(1, oh), fp)
+	// foldScale always returns a fresh buffer, so the lens stage may correct
+	// it in place when the profile carries no geometry.
+	disp = ApplyLens(disp, LensWarp(lensc, edits, disp.Bounds().Dx(), disp.Bounds().Dy()), edits)
 	disp = ApplyGeometry(disp, edits)
 	ApplyFinish(disp, lookGamma, edits, ai, fills)
 	return disp

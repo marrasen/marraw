@@ -63,6 +63,9 @@ type Request struct {
 	// AIMaps resolves model-generated mask maps so AI masks export exactly as
 	// previewed; nil renders them as no-ops.
 	AIMaps *pyramid.AIMapStore
+	// Lenses resolves lens-correction profiles so an exported frame carries
+	// the same distortion, CA and vignetting correction the loupe showed.
+	Lenses *pyramid.LensProfiles
 	// Fills resolves cached ML fill patches so fill spots export exactly as
 	// previewed; nil renders them as no-ops.
 	Fills *pyramid.FillStore
@@ -257,6 +260,8 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, phot
 	// Exposure stops beyond LibRaw's exp_shift range fold in post-decode,
 	// exactly as the pyramid renders do.
 	pyramid.ApplyExposureEV(rgba, params.ResidualExpEV(), params)
+	rgba = pyramid.ApplyLens(rgba,
+		pyramid.LensWarp(req.Lenses.For(photo), params, rgba.Bounds().Dx(), rgba.Bounds().Dy()), params)
 	rgba = pyramid.ApplyGeometry(rgba, params)
 	pyramid.ApplyFinish(rgba, lookGamma, params,
 		req.AIMaps.SetFor(photo.CacheKey, params), req.Fills.SetFor(photo.CacheKey, params))

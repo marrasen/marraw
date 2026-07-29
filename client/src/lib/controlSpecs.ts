@@ -44,6 +44,14 @@ export const NEUTRAL: Params = {
   demosaic: '' as Params['demosaic'],
   caRed: 0,
   caBlue: 0,
+  // Lens profile correction. The stored default is "auto with the profile's
+  // own strength" — an uncorrected frame is the deviation here, not the
+  // neutral, because a profile describes what the lens did rather than an
+  // effect someone chose. Same generated-union lie as wbMode for the mode.
+  lensMode: '' as Params['lensMode'],
+  lensDistortion: 0,
+  lensVignetting: 0,
+  lensCA: 0,
   rotate: 0,
   flipH: false,
   cropX: 0,
@@ -88,6 +96,9 @@ export type ControlId =
   | 'demosaic'
   | 'caRed'
   | 'caBlue'
+  | 'lensDistortion'
+  | 'lensVignetting'
+  | 'lensCA'
   | 'cropAngle';
 
 interface NumericSpec {
@@ -177,6 +188,11 @@ export const CONTROL_SPECS: Record<ControlId, ControlSpec> = {
   },
   caRed: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.caRed, set: (v) => ({ caRed: v }) },
   caBlue: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.caBlue, set: (v) => ({ caBlue: v }) },
+  // Offsets from the profile's own measurement: 0 is the full correction,
+  // -1 switches that component off, +1 doubles it.
+  lensDistortion: { kind: 'numeric', min: -1, max: 1, step: 0.05, bigStep: 0.25, get: (p) => p.lensDistortion ?? 0, set: (v) => ({ lensDistortion: v }) },
+  lensVignetting: { kind: 'numeric', min: -1, max: 1, step: 0.05, bigStep: 0.25, get: (p) => p.lensVignetting ?? 0, set: (v) => ({ lensVignetting: v }) },
+  lensCA: { kind: 'numeric', min: -1, max: 1, step: 0.05, bigStep: 0.25, get: (p) => p.lensCA ?? 0, set: (v) => ({ lensCA: v }) },
   cropAngle: { kind: 'numeric', min: -15, max: 15, step: 0.1, bigStep: 1, get: (p) => p.cropAngle, set: (v) => ({ cropAngle: v }) },
 };
 
@@ -195,6 +211,7 @@ export const CONTROL_ORDER: ControlId[] = [
   'vignette',
   'sharpen', 'highlight', 'nrThreshold', 'fbddNoiseRd', 'medPasses',
   'demosaic', 'caRed', 'caBlue',
+  'lensDistortion', 'lensVignetting', 'lensCA',
 ];
 
 // Human labels for every editable param, keyed to match the develop panel's
@@ -237,6 +254,10 @@ const PARAM_LABELS: Partial<Record<keyof Params, string>> = {
   demosaic: 'Demosaic',
   caRed: 'CA red/cyan',
   caBlue: 'CA blue/yellow',
+  lensMode: 'Lens correction',
+  lensDistortion: 'Lens distortion',
+  lensVignetting: 'Lens vignetting',
+  lensCA: 'Lens CA',
   rotate: 'Rotate',
   flipH: 'Flip',
   cropX: 'Crop',

@@ -17,6 +17,12 @@ export const Demosaic = {
 } as const;
 export type DemosaicType = typeof Demosaic[keyof typeof Demosaic];
 
+export const LensMode = {
+    "": "",
+    Off: "off",
+} as const;
+export type LensModeType = typeof LensMode[keyof typeof LensMode];
+
 export const WBMode = {
     Camera: "camera",
     Auto: "auto",
@@ -108,6 +114,10 @@ export interface Params {
     demosaic: DemosaicType;
     caRed: number;
     caBlue: number;
+    lensMode?: LensModeType;
+    lensDistortion?: number;
+    lensVignetting?: number;
+    lensCA?: number;
     rotate: number;
     flipH: boolean;
     cropX: number;

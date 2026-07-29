@@ -14,6 +14,7 @@ const pct = (v: number) => (v === 0 ? '0' : `${v > 0 ? '+' : ''}${Math.round(v *
 const ev = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
 const pct0 = (v: number) => String(Math.round(v * 100));
 const mult = (v: number) => `${v.toFixed(2)}×`;
+const lensPct = (v: number) => `${Math.round((v + 1) * 100)}%`;
 const num2 = (v: number) => v.toFixed(2);
 const num1 = (v: number) => v.toFixed(1);
 const kelvin = (v: number) => `${Math.round(v)}K`;
@@ -98,6 +99,11 @@ const META: Record<
   },
   caRed: { label: 'CA red', group: 'Detail' },
   caBlue: { label: 'CA blue', group: 'Detail' },
+  // Stored as an offset from the profile's own figure, shown as the strength
+  // it produces: 0 reads as 100 %, the full correction.
+  lensDistortion: { label: 'Lens dist', group: 'Detail', display: lensPct },
+  lensVignetting: { label: 'Lens vign', group: 'Detail', display: lensPct },
+  lensCA: { label: 'Lens CA', group: 'Detail', display: lensPct },
 };
 
 export const DIALS: DialDef[] = CONTROL_ORDER.map((key): DialDef => {

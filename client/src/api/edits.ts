@@ -58,6 +58,17 @@ export interface FillResult {
     generated: boolean;
 }
 
+export interface LensProfileInfo {
+    lens: string;
+    profile: string;
+    cameraKnown: boolean;
+    focal: number;
+    aperture: number;
+    hasDistortion: boolean;
+    hasVignetting: boolean;
+    hasCA: boolean;
+}
+
 export interface SubjectBoundsResult {
     found: boolean;
     x: number;
@@ -205,6 +216,19 @@ getEditParams.method = 'Edits.GetEditParams' as const;
 
 export function subscribeGetEditParams(client: ApiClient, photoID: number, callback: (data: Params) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<Params>('Edits.GetEditParams', [photoID], callback, onError, options);
+}
+
+
+export function lensProfile(client: ApiClient, photoID: number, options?: RequestOptions): Promise<LensProfileInfo> {
+    return client.request<LensProfileInfo>('Edits.LensProfile', [photoID], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+lensProfile.method = 'Edits.LensProfile' as const;
+
+export function subscribeLensProfile(client: ApiClient, photoID: number, callback: (data: LensProfileInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<LensProfileInfo>('Edits.LensProfile', [photoID], callback, onError, options);
 }
 
 
@@ -490,6 +514,21 @@ export function useGetEditParams(photoID: number, options?: UseQueryOptions<Para
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID], _subscribe: { method: 'Edits.GetEditParams', params: [photoID] } });
+}
+
+/**
+ * Subscribes to `Edits.LensProfile` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useLensProfile(photoID: number, options?: UseQueryOptions<LensProfileInfo>): UseQueryResult<LensProfileInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number) => lensProfile(client, photoID, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID], _subscribe: { method: 'Edits.LensProfile', params: [photoID] } });
 }
 
 /**

@@ -100,6 +100,13 @@ export const PRESET_FIELDS = {
   demosaic: { group: 'detail', mode: 'enum' },
   caRed: { group: 'detail', mode: 'add' },
   caBlue: { group: 'detail', mode: 'add' },
+  // The profile itself is matched per photo, so what travels in a preset is
+  // only the photographer's opinion of it: whether to correct at all, and
+  // how far. A preset built on one lens therefore lands sensibly on another.
+  lensMode: { group: 'detail', mode: 'enum' },
+  lensDistortion: { group: 'detail', mode: 'add' },
+  lensVignetting: { group: 'detail', mode: 'add' },
+  lensCA: { group: 'detail', mode: 'add' },
 } as const satisfies Record<LookParamKey, FieldInfo>;
 
 const LOOK_KEYS = Object.keys(PRESET_FIELDS) as LookParamKey[];
