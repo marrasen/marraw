@@ -182,7 +182,9 @@ are the controls you chose to keep at hand.</sup>
   survive recrops and re-straightens and render identically in previews,
   1:1 tiles and exports.
 - **Local adjustments** — linear (graduated) filters, radial filters, a
-  feathered brush with flow and eraser, and AI masks: Subject, Depth (a
+  feathered brush with flow and eraser, a **range** mask that selects by
+  luminance and hue (two-thumb tone window, hue centre/range, and an
+  eyedropper to pick a colour off the photo), and AI masks: Subject, Depth (a
   two-thumb near/far range) and Scene selections, with mask edges refined
   automatically at high zoom and a mask row's region tinted on hover. Each
   mask carries its own exposure, contrast, highlights/shadows, whites/blacks,
@@ -262,10 +264,10 @@ them is load-bearing for your work, marraw is not ready for you yet.
 
 **Editing**
 
-- ❌ **No luminance or color range masks.** AI masks (subject/depth/scene)
-  and drawn masks exist — see Editing tools — but there is no luma/color
-  range selection, and local adjustments are not carried into RAW + XMP
-  handoffs.
+- ⚠️ **Local adjustments are not carried into RAW + XMP handoffs.** Every
+  mask type — AI (subject/depth/scene), drawn, and the luminance/color
+  **range** mask (select by tone and hue, with an eyedropper) — works inside
+  marraw, but none of it translates to Lightroom's local adjustments on export.
 - ⚠️ **Retouch is not carried into the RAW + XMP handoff.** Spots and the
   heal brush heal/clone from another patch of the same photo, and Fill mode
   inpaints the region with an on-device ML model (a one-time ~28 MB download,

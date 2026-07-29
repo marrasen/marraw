@@ -45,10 +45,12 @@ export function MaskHoverTint({
     if (tintMask != null) setShown(tintMask);
   }
 
-  // AI masks: fetch the server-rendered tint for the hovered mask.
+  // AI and range masks have no client-side weight function (range coverage
+  // needs the developed pixels): fetch the server-rendered tint for the
+  // hovered mask.
   useEffect(() => {
     const m = tintMask != null ? draft.masks?.[tintMask] : undefined;
-    if (tintMask == null || photoId == null || !m || m.type !== 'ai') return;
+    if (tintMask == null || photoId == null || !m || (m.type !== 'ai' && m.type !== 'range')) return;
     const key = tintKey(photoId, m, draft);
     const cached = cachedTint(key);
     if (cached) {
@@ -73,7 +75,7 @@ export function MaskHoverTint({
       style={{ opacity: visible ? 1 : 0 }}
       data-testid="mask-hover-tint"
     >
-      {mask.type === 'ai' ? (
+      {mask.type === 'ai' || mask.type === 'range' ? (
         aiUrl && <img src={aiUrl} alt="" className="absolute inset-0 size-full" draggable={false} />
       ) : (
         <MaskTint mask={mask} draft={draft} frameW={frameW} frameH={frameH} boxW={boxW} boxH={boxH} k={boxW / ((draft.cropW > 0 ? draft.cropW : 1) * frameW)} />

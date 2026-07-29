@@ -318,16 +318,19 @@ export function lerpPresetAmount(base: Params, result: Params, t: number): Param
   return out;
 }
 
-// aiMaskRecipes extracts the draft's AI masks as portable RECIPES: mapVer
-// (which pins a generated map file) is cleared — applying re-runs detection
-// on the target photo and stamps a fresh version. Painted masks
-// (linear/radial/brush) are geometry tied to one photo's content and never
-// travel; hidden (disabled) masks aren't part of the look and don't travel
-// either; undefined when the draft has no AI masks.
+// aiMaskRecipes extracts the draft's content-relative "smart" masks as
+// portable RECIPES — the masks that select by image content, not by drawn
+// geometry, so they mean something on any photo. AI masks travel with mapVer
+// (which pins a generated map file) cleared, so applying re-runs detection on
+// the target and stamps a fresh version; range (luma/colour) masks travel
+// as-is — they need no model, just the tone/hue window. Painted masks
+// (linear/radial/brush) are geometry tied to one photo and never travel;
+// hidden (disabled) masks aren't part of the look and don't travel either;
+// undefined when the draft has none.
 export function aiMaskRecipes(draft: Params): Mask[] | undefined {
   const recipes = (draft.masks ?? [])
-    .filter((m) => m.type === 'ai' && m.aiKind && !m.disabled)
-    .map((m) => ({ ...m, mapVer: '' }));
+    .filter((m) => !m.disabled && ((m.type === 'ai' && m.aiKind) || m.type === 'range'))
+    .map((m) => (m.type === 'ai' ? { ...m, mapVer: '' } : { ...m }));
   return recipes.length > 0 ? recipes : undefined;
 }
 

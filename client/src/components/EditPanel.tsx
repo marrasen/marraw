@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw,
   Image as ImageIcon, Plus, Trash2, Paintbrush, Circle, Eraser,
-  Eye, EyeOff, Focus, Layers, Loader2, Shapes, ScanSearch, Users, Check,
+  Eye, EyeOff, Focus, Layers, Loader2, Shapes, ScanSearch, Users, Check, Blend,
 } from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
@@ -25,6 +25,8 @@ import {
 } from '@/lib/toneCurve';
 import {
   DEPTH_WINDOW_DEFAULT,
+  RANGE_LUMA_DEFAULT,
+  RANGE_HUE_DEFAULT,
   MASK_CONTROL_ORDER,
   MASK_CONTROL_SPECS,
   aiClassMask,
@@ -61,6 +63,7 @@ import {
   esSetActiveMaskControl,
   esSetActiveSpot,
   esSetHealing,
+  esSetRangePicking,
   esConfirmFillDownload,
   esDeclineFillDownload,
   esSetSpotMode,
@@ -120,6 +123,8 @@ const pct = (v: number) => (v === 0 ? '0' : `${v > 0 ? '+' : ''}${Math.round(v *
 // WB dial gradient tracks per the handoff eyedropper plate.
 const TEMP_GRADIENT = 'bg-gradient-to-r from-[#6fa8ff] via-[#e9e3d0] to-[#ffb066]';
 const TINT_GRADIENT = 'bg-gradient-to-r from-[#5cd06e] via-[#d9d9d9] to-[#c86fd0]';
+// Full hue wheel left→right (0→1), for the range mask's hue-window track.
+const HUE_GRADIENT = 'bg-[linear-gradient(to_right,#ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)]';
 
 export function EditPanel({ photos }: { photos: Photo[] }) {
   const client = useApiClient();
@@ -1391,6 +1396,16 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
           <Paintbrush data-icon="inline-start" />
           Brush
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1"
+          title="Add a luminance / colour range mask — select pixels by tone and hue"
+          onClick={() => add('range')}
+        >
+          <Blend data-icon="inline-start" />
+          Range
+        </Button>
       </div>
       <div className="flex gap-1.5" role="group" aria-label="Add AI mask">
         <Button
@@ -1621,6 +1636,7 @@ function MaskRow({
         <div className="flex flex-col gap-[7px] px-2 pb-2">
           {mask.type === 'brush' && <BrushToolRow client={client} mask={mask} index={index} />}
           {mask.type === 'ai' && <AIShapeRows client={client} mask={mask} index={index} />}
+          {mask.type === 'range' && <RangeShapeRows client={client} mask={mask} index={index} />}
           {MASK_CONTROL_ORDER.map((key) => {
             const spec = MASK_CONTROL_SPECS[key];
             const raw = adjust[key] ?? 0;
@@ -1709,6 +1725,122 @@ function AIShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; i
         />
       )}
       {shapeSlider('Edge feather', mask.feather ?? 0, 0, (v) => ({ feather: v }))}
+    </>
+  );
+}
+
+// RangeShapeRows: the window controls for a luminance/colour range mask. All
+// are photo state (the windows live in the mask params and pick pixels), so
+// every move flows through esUpdateMask. Luminance is a plain two-thumb window;
+// hue is circular, so it is edited as centre (0–360°, rainbow track) + range
+// (±°) and converted to/from the stored [lo,hi] window, which may wrap through
+// red. The eyedropper seeds the hue window from a pixel on the photo.
+function RangeShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; index: number }) {
+  const picking = useEditSession((s) => s.rangePicking && s.activeMask === index);
+  const patch = (p: Partial<Mask>) => esUpdateMask(client, index, p);
+  const commit = (p: Partial<Mask>) => {
+    esUpdateMask(client, index, p);
+    esCommit(client);
+  };
+
+  const lumaLo = mask.rangeLumaLo ?? 0;
+  const lumaHi = mask.rangeLumaHi ?? 1;
+
+  // Stored hue window → centre + tolerance. span uses the wrap-aware branch
+  // (matching the server), so the full 0..1 window reads as tol 0.5 (all hues)
+  // rather than collapsing to zero.
+  const hueLo = mask.rangeHueLo ?? 0;
+  const hueHi = mask.rangeHueHi ?? 1;
+  let span = hueHi - hueLo;
+  if (span < 0) span += 1;
+  const tol = span / 2; // 0.5 = the whole wheel
+  const center = (hueLo + span / 2) % 1;
+  // centreDeg 0..360, tolDeg 0..180 → stored window (wrapping when narrow and
+  // near the red seam). tol ≥ 180° means "all hues": the canonical full window.
+  const setHue = (centreDeg: number, tolDeg: number, done: boolean) => {
+    const t = tolDeg / 360;
+    const c = (((centreDeg / 360) % 1) + 1) % 1;
+    const next: Partial<Mask> =
+      t >= 0.5
+        ? { ...RANGE_HUE_DEFAULT }
+        : { rangeHueLo: (((c - t) % 1) + 1) % 1, rangeHueHi: (c + t) % 1 };
+    (done ? commit : patch)(next);
+  };
+
+  const satMin = mask.rangeSatMin ?? 0;
+  const feather = mask.feather ?? 0;
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant={picking ? 'default' : 'outline'}
+        className="w-full justify-start"
+        title="Pick a colour off the photo to select similar hues"
+        onClick={() => esSetRangePicking(!picking)}
+      >
+        <Pipette data-icon="inline-start" />
+        {picking ? 'Picking colour…' : 'Pick colour'}
+      </Button>
+      <EditRangeSlider
+        label="Luminance"
+        value={[lumaLo * 100, lumaHi * 100]}
+        display={`${Math.round(lumaLo * 100)}–${Math.round(lumaHi * 100)}`}
+        min={0}
+        max={100}
+        step={1}
+        neutral={[RANGE_LUMA_DEFAULT.rangeLumaLo * 100, RANGE_LUMA_DEFAULT.rangeLumaHi * 100]}
+        onChange={([lo, hi]) => patch({ rangeLumaLo: lo / 100, rangeLumaHi: hi / 100 })}
+        onCommit={([lo, hi]) => commit({ rangeLumaLo: lo / 100, rangeLumaHi: hi / 100 })}
+        onClear={() => commit({ ...RANGE_LUMA_DEFAULT })}
+      />
+      <EditSlider
+        label="Hue centre"
+        value={center * 360}
+        display={`${Math.round(center * 360)}°`}
+        min={0}
+        max={360}
+        step={1}
+        gradient={HUE_GRADIENT}
+        onChange={(v) => setHue(v, tol * 360, false)}
+        onCommit={(v) => setHue(v, tol * 360, true)}
+      />
+      <EditSlider
+        label="Hue range"
+        value={tol * 360}
+        display={tol >= 0.5 ? 'All' : `±${Math.round(tol * 360)}°`}
+        min={0}
+        max={180}
+        step={1}
+        neutral={180}
+        onChange={(v) => setHue(center * 360, v, false)}
+        onCommit={(v) => setHue(center * 360, v, true)}
+        onClear={() => commit({ ...RANGE_HUE_DEFAULT })}
+      />
+      <EditSlider
+        label="Min saturation"
+        value={satMin * 100}
+        display={pct(satMin)}
+        min={0}
+        max={100}
+        step={1}
+        neutral={0}
+        onChange={(v) => patch({ rangeSatMin: v / 100 })}
+        onCommit={(v) => commit({ rangeSatMin: v / 100 })}
+        onClear={() => commit({ rangeSatMin: 0 })}
+      />
+      <EditSlider
+        label="Edge feather"
+        value={feather * 100}
+        display={pct(feather)}
+        min={0}
+        max={100}
+        step={1}
+        neutral={0}
+        onChange={(v) => patch({ feather: v / 100 })}
+        onCommit={(v) => commit({ feather: v / 100 })}
+        onClear={() => commit({ feather: 0 })}
+      />
     </>
   );
 }

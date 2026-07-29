@@ -14,6 +14,7 @@ import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
 import {
   esClearPreview,
   esCommit,
+  esPickRangeColor,
   esPickWB,
   esPreviewSettled,
   esSetCropping,
@@ -452,6 +453,7 @@ export function CinemaImage({
   const setZoom = useUIStore((s) => s.setLoupeZoom);
   const preview = useEditSession((s) => s.preview);
   const wbPicking = useEditSession((s) => s.wbPicking);
+  const rangePicking = useEditSession((s) => s.rangePicking);
   const cropping = useEditSession((s) => s.cropping);
   const healing = useEditSession((s) => s.healing);
   const aiPicking = useEditSession((s) => s.aiPickArmed != null);
@@ -483,6 +485,7 @@ export function CinemaImage({
     activeMask != null &&
     !cropping &&
     !wbPicking &&
+    !rangePicking &&
     !healing &&
     !aiPicking &&
     esPhotoId === photo.id &&
@@ -921,7 +924,7 @@ export function CinemaImage({
   const onPointerDown = (e: React.PointerEvent) => {
     const right = e.button === 2;
     if (!right && e.button !== 0) return; // only left / right pan
-    if (right ? !haveDims : wbPicking || !pannable) return;
+    if (right ? !haveDims : wbPicking || rangePicking || !pannable) return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -1029,12 +1032,13 @@ export function CinemaImage({
   };
 
   const onImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!wbPicking) return;
+    if (!wbPicking && !rangePicking) return;
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-    void esPickWB(client, Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y)));
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    if (rangePicking) void esPickRangeColor(client, x, y);
+    else void esPickWB(client, x, y);
   };
 
   // Rendering indicator: tiles mounted but not decoded yet.
@@ -1129,7 +1133,7 @@ export function CinemaImage({
         ref={containerRef}
         className={cn(
           'no-scrollbar flex size-full touch-none overflow-auto select-none',
-          wbPicking ? 'cursor-none' : dragging ? 'cursor-grabbing' : pannable && 'cursor-grab',
+          wbPicking ? 'cursor-none' : rangePicking ? 'cursor-crosshair' : dragging ? 'cursor-grabbing' : pannable && 'cursor-grab',
         )}
         onScroll={onScroll}
         onWheel={onWheel}

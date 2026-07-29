@@ -382,6 +382,43 @@ func TestMaskNormalize(t *testing.T) {
 // TestMaskNormalizeDoesNotAliasCaller pins the copy-on-normalize contract:
 // Hash and IsNeutral normalize a shallow copy, which must never mutate the
 // caller's mask slices through shared backing arrays.
+func TestRangeMaskNormalize(t *testing.T) {
+	e := &Params{Masks: []Mask{
+		// Luma window given inverted (hi < lo) and out of range: reordered and
+		// clamped. Hue window given inverted: NOT reordered (circular). Stray
+		// geometry/AI fields must be zeroed.
+		{Type: MaskRange, RangeLumaHi: 0.2, RangeLumaLo: 0.8, RangeHueLo: 0.9, RangeHueHi: 0.1,
+			RangeSatMin: 2, Feather: 0.5, X0: 0.3, CX: 0.4, AIKind: AISubject, MapVer: "x",
+			Adjust: MaskAdjust{ExpEV: 1}},
+	}}
+	e.Normalize()
+	if len(e.Masks) != 1 {
+		t.Fatalf("want the range mask kept, got %d", len(e.Masks))
+	}
+	m := e.Masks[0]
+	if m.RangeLumaLo != 0.2 || m.RangeLumaHi != 0.8 {
+		t.Errorf("luma window must be reordered ascending, got lo=%v hi=%v", m.RangeLumaLo, m.RangeLumaHi)
+	}
+	if m.RangeHueLo != 0.9 || m.RangeHueHi != 0.1 {
+		t.Errorf("hue window must NOT be reordered (wraps), got lo=%v hi=%v", m.RangeHueLo, m.RangeHueHi)
+	}
+	if m.RangeSatMin != 1 {
+		t.Errorf("satMin must clamp to 1, got %v", m.RangeSatMin)
+	}
+	if m.X0 != 0 || m.CX != 0 || m.AIKind != "" || m.MapVer != "" {
+		t.Errorf("range mask must zero geometry/AI fields: %+v", m)
+	}
+}
+
+func TestRangeMaskFieldsOmittedFromNonRangeJSON(t *testing.T) {
+	// omitempty on the range fields is load-bearing: a non-range mask must
+	// marshal byte-identical to older builds so existing edit hashes stay stable.
+	b, _ := json.Marshal(&Params{Masks: []Mask{{Type: MaskLinear, X1: 1, Adjust: MaskAdjust{ExpEV: 1}}}})
+	if bytes.Contains(b, []byte("range")) {
+		t.Errorf("non-range mask must omit all range keys, got %s", b)
+	}
+}
+
 func TestMaskNormalizeDoesNotAliasCaller(t *testing.T) {
 	e := &Params{Masks: []Mask{
 		{Type: "unknown"}, // dropped by Normalize — must not shift caller's slice

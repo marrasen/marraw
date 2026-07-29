@@ -8,6 +8,35 @@ smaller stuff.
 
 ## Editing (from the README "what marraw does not do" list)
 
+- ~~**No luminance or color range masks.**~~ Done 2026-07-28: a new
+  `MaskRange` ("range") mask type selects pixels by their own **developed
+  value** — a soft luminance band-pass times a soft hue band-pass gated by a
+  saturation floor — rather than by geometry or a model map. Coverage is
+  computed analytically from the render's own pixels (no cached plane), reusing
+  the seam `guidedEval` uses to read the image and the depth-window smoothstep
+  from `deriveCoverage`; `ApplyMasks` snapshots the post-Look image once when a
+  range mask is present so selection is independent of mask order. Fields
+  (`RangeLumaLo/Hi`, `RangeHueLo/Hi`, `RangeSatMin`, reusing `Feather`) are
+  `omitempty` so non-range masks stay byte-identical; the luma pair reorders in
+  Normalize, the hue pair does **not** (it's circular — Hi < Lo wraps through
+  red). The tint (`MaskTintPreview`) develops a masks-stripped preview for
+  range masks (their coverage needs pixels, unlike parametric/AI); the client
+  routes range through the same server-PNG path as AI. An **eyedropper**
+  (`Edits.PickRangeColor`, mirroring `PickWhiteBalance`) samples the developed
+  colour and seeds the hue window ±0.045 + a saturation floor. Client: a Range
+  add button, `RangeShapeRows` (luminance two-thumb, hue centre on a rainbow
+  track + hue range, min-saturation, feather, eyedropper), `rangePicking`
+  session state + `esPickRangeColor` (WB-picker pattern). Range masks travel in
+  presets like AI masks (content-relative, no model). Verified: `go test
+  ./internal/edit ./internal/pyramid ./internal/api` (Normalize + coverage +
+  hue-seeding), `tsc -b`/eslint, and `node scripts/rangemask-verify.mjs
+  /tmp/marraw-fixture` (render/invert/hue-window/eyedropper end-to-end).
+  **Design note:** hue is edited as centre + range, not a two-thumb band — a
+  linear two-thumb slider can't express a window that wraps the 0/1 (red) seam,
+  which the eyedropper produces for reds. **Footgun:** aprot blob RPCs
+  (`MaskTintPreview`) return over the WS as **binary** frames — a JSON-only
+  hand-rolled WS probe silently never resolves them (looks like a server hang;
+  it isn't). The tint is covered by the app + the `MaskWeightPlane` unit tests.
 - ~~**No tone curve.**~~ Done 2026-07-28: a point **tone curve** now composes
   into the look stage. `edit.Params.ToneCurve []CurvePoint` (`json:"toneCurve,
   omitempty"`, after Spots — the Masks/Spots byte-identical-when-empty

@@ -598,6 +598,147 @@ func samplePatchLinearRef(img *image.RGBA64, x, y float64) (r, g, b float64) {
 	return r / n, g / n, b / n
 }
 
+// developedBaseForMask renders the developed (post-Look) image with masks
+// stripped, at the given long edge — the pixels a range mask selects on. It
+// mirrors PreviewEdit's non-cached render (fold path when foldable, exact
+// decode otherwise) but returns the RGBA rather than a JPEG blob, and it is
+// display-oriented (cropped, rotated, mirrored) like the frame the client
+// shows, so a range mask's tint and the eyedropper sample both align 1:1 with
+// what the user sees.
+func (e *Edits) developedBaseForMask(ctx context.Context, photoID int64, photo store.Photo, params edit.Params, longEdge int) (*image.RGBA, error) {
+	params.Masks = nil // select against the post-Look image, before any mask
+	var ep *edit.Params
+	if !params.IsNeutral() {
+		ep = &params
+	}
+	gamma := photo.LookGamma
+	if gamma == 0 {
+		gamma = pyramid.FallbackLookGamma
+	}
+	if img, ok, err := e.previewLinear(ctx, photoID, photo, ep, longEdge, gamma); err != nil {
+		return nil, err
+	} else if ok {
+		return img, nil
+	}
+	var rgba *image.RGBA
+	var expDelta float64
+	if reused, baked, ok := e.approxDecode(photoID, ep); ok {
+		rgba = reused
+		if ep != nil {
+			expDelta = ep.ExpEV - baked
+		}
+	} else {
+		var err error
+		rgba, err = e.previewDecode(ctx, photoID, photo, ep)
+		if err != nil {
+			return nil, err
+		}
+		if ep != nil {
+			expDelta = ep.ResidualExpEV()
+		}
+	}
+	return pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta,
+		e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep),
+		e.deps.Cache.Fills.SetFor(photo.CacheKey, ep)), nil
+}
+
+// PickRangeColor samples the developed colour at the clicked spot and seeds the
+// target range mask's hue window (centred on the picked hue) and saturation
+// floor (just below the picked saturation), so the eyedropper selects the
+// clicked colour and its near neighbours. Like the WB picker it only PREVIEWS
+// — the draft updates, nothing commits until the client applies it. x,y are
+// fractions of the displayed (cropped, oriented) frame, which is exactly the
+// space developedBaseForMask renders, so no crop/flip/rotate remap is needed.
+func (e *Edits) PickRangeColor(ctx context.Context, photoID int64, params edit.Params, x, y float64, maskIndex int) (*edit.Params, error) {
+	if x < 0 || x > 1 || y < 0 || y > 1 {
+		return nil, aprot.ErrInvalidParams("pick coordinates must be within 0..1")
+	}
+	if maskIndex < 0 || maskIndex >= len(params.Masks) {
+		return nil, aprot.ErrInvalidParams("maskIndex out of range")
+	}
+	if params.Masks[maskIndex].Type != edit.MaskRange {
+		return nil, aprot.ErrInvalidParams("mask is not a range mask")
+	}
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	base, err := e.developedBaseForMask(ctx, photoID, photo, params, 1024)
+	if err != nil {
+		return nil, err
+	}
+	r, g, b := samplePatchRGBA(base, x, y)
+	hueLo, hueHi, satMin, err := rangeColorWindow(r, g, b)
+	if err != nil {
+		return nil, err
+	}
+	out := params
+	out.Masks = append([]edit.Mask(nil), params.Masks...) // don't mutate caller's backing array
+	m := &out.Masks[maskIndex]
+	m.RangeHueLo, m.RangeHueHi, m.RangeSatMin = hueLo, hueHi, satMin
+	return &out, nil
+}
+
+// rangeColorWindow turns a sampled display colour (0..255) into a range mask's
+// hue window and saturation floor: a ±0.045 (~16°) hue band centred on the
+// pick — wrapping through red, so the pair may come back with hi < lo, which
+// Normalize preserves — and a floor a little below the pick's saturation so
+// similar colours are kept but greys are excluded. Too-dark or too-grey picks
+// (no meaningful hue) are refused with a helpful message.
+func rangeColorWindow(r, g, b int) (hueLo, hueHi, satMin float64, err error) {
+	maxc, minc := max(r, g, b), min(r, g, b)
+	if maxc < 12 {
+		return 0, 0, 0, aprot.ErrInvalidParams("picked area is too dark — pick a brighter, more colourful spot")
+	}
+	delta := maxc - minc
+	sat := float64(delta) / float64(maxc)
+	if delta == 0 || sat < 0.12 {
+		return 0, 0, 0, aprot.ErrInvalidParams("picked area has no colour — pick a more saturated spot")
+	}
+	var h float64 // 0..6
+	switch maxc {
+	case r:
+		h = float64(g-b) / float64(delta)
+	case g:
+		h = float64(b-r)/float64(delta) + 2
+	default:
+		h = float64(r-g)/float64(delta) + 4
+	}
+	h /= 6
+	if h < 0 {
+		h += 1
+	}
+	const tol = 0.045
+	return math.Mod(h-tol+1, 1), math.Mod(h+tol, 1), math.Max(0, sat-0.25), nil
+}
+
+// samplePatchRGBA averages a small patch of a display-encoded RGBA image around
+// the given relative coordinates (0..1), returning 0..255 channels — the
+// eyedropper's noise-robust point sample.
+func samplePatchRGBA(img *image.RGBA, x, y float64) (r, g, b int) {
+	bnd := img.Bounds()
+	cx := bnd.Min.X + int(x*float64(bnd.Dx()-1))
+	cy := bnd.Min.Y + int(y*float64(bnd.Dy()-1))
+	const rad = 2
+	var sr, sg, sb, n int
+	for py := cy - rad; py <= cy+rad; py++ {
+		for px := cx - rad; px <= cx+rad; px++ {
+			if px < bnd.Min.X || px >= bnd.Max.X || py < bnd.Min.Y || py >= bnd.Max.Y {
+				continue
+			}
+			o := img.PixOffset(px, py)
+			sr += int(img.Pix[o])
+			sg += int(img.Pix[o+1])
+			sb += int(img.Pix[o+2])
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, 0, 0
+	}
+	return sr / n, sg / n, sb / n
+}
+
 // SuggestHealSource picks a source patch for a new retouch spot and returns
 // the spot with SX/SY filled in (oriented-frame fractions). The chosen source
 // is stored in the params so it stays stable and portable — computing it in

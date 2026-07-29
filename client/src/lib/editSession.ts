@@ -15,6 +15,7 @@ import {
   generateFill,
   getEditParams,
   pasteEditParams,
+  pickRangeColor,
   pickWhiteBalance,
   previewEdit,
   resetEdits,
@@ -147,6 +148,10 @@ interface EditSessionState {
   // Draft snapshot from when the WB eyedropper opened: the revert target for
   // Reset/Cancel. Null when the picker is closed.
   wbPickBase: Params | null;
+  // Colour eyedropper for a range mask: while on, loupe clicks sample the
+  // developed colour and seed the active range mask's hue window (each pick is
+  // one committed history entry; the picker stays open for repeated sampling).
+  rangePicking: boolean;
   // Transient render override while a preset card is hovered: the loupe
   // paints these params instead of the draft. Never touches the draft,
   // history, or persistence — clearing it reverts by construction.
@@ -238,6 +243,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   preview: null,
   wbPicking: false,
   wbPickBase: null,
+  rangePicking: false,
   hoverParams: null,
   lastPresetApply: null,
   cropping: false,
@@ -487,6 +493,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     loading: true,
     wbPicking: false,
     wbPickBase: null,
+    rangePicking: false,
     cropping: false,
     healing: false,
     activeSpot: null,
@@ -554,6 +561,7 @@ useUIStore.subscribe((s, prev) => {
       es.activeMaskControl != null ||
       es.maskPaint ||
       es.healing ||
+      es.rangePicking ||
       es.aiPickArmed != null
     ) {
       setState({
@@ -563,6 +571,7 @@ useUIStore.subscribe((s, prev) => {
         activeMaskControl: null,
         maskPaint: false,
         healing: false,
+        rangePicking: false,
         activeSpot: null,
         spotVisualize: false,
         aiPickArmed: null,
@@ -583,9 +592,46 @@ export function esSetWBPicking(on: boolean) {
   // control so +/- can't keep adjusting an invisible slider.
   setState(
     on
-      ? { wbPicking: true, wbPickBase: s.draft, activeControl: null, keyAdjust: false, aiPickArmed: null, aiHover: null }
+      ? { wbPicking: true, wbPickBase: s.draft, rangePicking: false, activeControl: null, keyAdjust: false, aiPickArmed: null, aiHover: null }
       : { wbPicking: false, wbPickBase: null },
   );
+}
+
+// esSetRangePicking opens/closes the range mask's colour eyedropper. It only
+// opens when a range mask is selected; opening drops any other picker/tool so
+// they don't fight over the loupe pointer.
+export function esSetRangePicking(on: boolean) {
+  const s = useEditSession.getState();
+  if (on) {
+    if (s.activeMask == null) return;
+    const m = s.draft?.masks?.[s.activeMask];
+    if (!m || m.type !== 'range') return;
+  }
+  setState(
+    on
+      ? { rangePicking: true, wbPicking: false, wbPickBase: null, activeControl: null, keyAdjust: false, aiPickArmed: null, aiHover: null }
+      : { rangePicking: false },
+  );
+}
+
+// esPickRangeColor samples the developed colour at the clicked loupe point and
+// seeds the active range mask's hue window + saturation floor, committing one
+// history entry. The eyedropper stays open so several picks can be compared;
+// esApplyParams leaves rangePicking untouched.
+export async function esPickRangeColor(client: ApiClient, x: number, y: number) {
+  const s = useEditSession.getState();
+  if (s.photoId == null || !s.draft || s.activeMask == null) return;
+  const idx = s.activeMask;
+  const m = s.draft.masks?.[idx];
+  if (!m || m.type !== 'range') return;
+  try {
+    const params = await pickRangeColor(client, s.photoId, s.draft, x, y, idx);
+    const cur = useEditSession.getState();
+    if (cur.photoId !== s.photoId || !cur.rangePicking) return; // superseded / closed
+    esApplyParams(client, params, { label: 'Pick range colour' });
+  } catch (err) {
+    toast.error(`Colour pick failed: ${(err as Error).message}`);
+  }
 }
 
 // esSetCropping toggles the crop overlay. Entering re-renders the preview
@@ -596,7 +642,7 @@ export function esSetCropping(client: ApiClient, on: boolean) {
   if (s.cropping === on) return;
   // Entering slides the develop drawer away — drop any keyboard-focused
   // control so +/- can't keep adjusting an invisible slider.
-  setState(on ? { cropping: true, activeControl: null, keyAdjust: false, aiPickArmed: null, aiHover: null } : { cropping: false });
+  setState(on ? { cropping: true, rangePicking: false, activeControl: null, keyAdjust: false, aiPickArmed: null, aiHover: null } : { cropping: false });
   if (!on) {
     esCommit(client); // persist the crop; the commit re-renders the cropped frame
   } else {
@@ -620,7 +666,7 @@ export function esSetHealing(on: boolean) {
   if (on) useUIStore.getState().setDevelopTab('masks'); // the Retouch section lives on the Local tab
   setState(
     on
-      ? { healing: true, aiPickArmed: null, aiHover: null }
+      ? { healing: true, rangePicking: false, aiPickArmed: null, aiHover: null }
       : { healing: false, activeSpot: null, spotVisualize: false },
   );
 }
@@ -651,6 +697,7 @@ export function esArmAIPick(kind: AIPickKind | null) {
           activeControl: null,
           keyAdjust: false,
           healing: false,
+          rangePicking: false,
           activeSpot: null,
           spotVisualize: false,
           maskPaint: false,
@@ -797,6 +844,9 @@ export function esSetActiveMask(index: number | null) {
     activeMask: index,
     activeMaskControl: null,
     maskPaint: index == null ? false : s.maskPaint,
+    // The colour eyedropper belongs to one range mask; changing selection
+    // closes it (re-open from the newly selected mask's controls).
+    rangePicking: false,
     keyAdjust: false,
     // Selecting a mask hands the loupe to its overlay handles — disarm the AI
     // pick tool so the two don't fight over pointer events. Deselecting leaves
@@ -1486,9 +1536,11 @@ export async function esApplyPresetMasks(
   // Person masks ride along like any AI recipe: "person 2" on another photo
   // means THAT photo's second person from the left — deterministic but
   // semantically arbitrary. Kept by design (stripping would surprise more);
-  // the mask is visible and deletable where it misses.
+  // the mask is visible and deletable where it misses. Range (luma/colour)
+  // masks travel too but need no model — they append verbatim.
   const recipes = (preset.params.masks ?? []).filter((m) => m.type === 'ai' && m.aiKind);
-  if (recipes.length === 0) return { status: 'none' };
+  const rangeRecipes = (preset.params.masks ?? []).filter((m) => m.type === 'range');
+  if (recipes.length === 0 && rangeRecipes.length === 0) return { status: 'none' };
   const pid = s.photoId;
   const kinds = [...new Set(recipes.map((m) => m.aiKind!))];
   const vers: Partial<Record<AIKindType, string>> = {};
@@ -1510,6 +1562,7 @@ export async function esApplyPresetMasks(
     // a duplicate from re-applying is visible and deletable.
     ...(cur.draft.masks ?? []),
     ...recipes.map((m) => ({ ...m, mapVer: vers[m.aiKind!]! })),
+    ...rangeRecipes,
   ];
   // esApplyParams clears the amount scrubber (any whole-draft replacement
   // does); the look phase's record stays valid — scrubs preserve the
@@ -1567,7 +1620,7 @@ export function esHoverAutoPreset(client: ApiClient, preset: AutoPreset) {
 }
 
 function hoverSuppressed(s: EditSessionState): boolean {
-  return s.wbPicking || s.cropping || s.healing || s.maskPaint || s.keyAdjust;
+  return s.wbPicking || s.rangePicking || s.cropping || s.healing || s.maskPaint || s.keyAdjust;
 }
 
 function hoverStart(client: ApiClient, resolve: (s: EditSessionState) => Params | Promise<Params>) {

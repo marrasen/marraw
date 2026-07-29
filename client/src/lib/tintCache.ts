@@ -13,12 +13,16 @@ const tintOrder: string[] = [];
 const TINT_CACHE_CAP = 32;
 
 // tintKey identifies one mask's rendered tint: the mask itself plus the
-// geometry that moves the display frame under it.
+// geometry that moves the display frame under it. A range mask selects on the
+// developed pixels, so its tint also depends on the whole look/heal state —
+// fold the rest of the draft (minus the mask list) into the key so a look edit
+// can't serve a stale cached tint.
 export function tintKey(photoId: number, mask: Mask, draft: Params): string {
   return JSON.stringify({
     p: photoId,
     m: mask,
     c: [draft.cropX, draft.cropY, draft.cropW, draft.cropH, draft.cropAngle, draft.rotate, draft.flipH],
+    L: mask.type === 'range' ? { ...draft, masks: undefined } : undefined,
   });
 }
 

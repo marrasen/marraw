@@ -52,6 +52,11 @@ const (
 	MaskRadial MaskType = "radial"
 	MaskBrush  MaskType = "brush"
 	MaskAI     MaskType = "ai"
+	// MaskRange selects pixels by their own developed value: a luminance
+	// window and/or a color (hue) window, rather than by geometry or a model
+	// map. Coverage is computed from the render's own pixels, so it needs no
+	// stored plane.
+	MaskRange MaskType = "range"
 )
 
 // AIKind selects which model-generated map an AI mask samples.
@@ -145,6 +150,19 @@ type Mask struct {
 	DepthLo   float64 `json:"depthLo,omitempty"`
 	DepthHi   float64 `json:"depthHi,omitempty"`
 	Threshold float64 `json:"threshold,omitempty"`
+	// Range mask: a soft band-pass over the pixel's own developed value.
+	// RangeLumaLo/Hi bound the kept luminance window (0..1 over display luma);
+	// RangeHueLo/Hi bound the kept hue window (0..1 around the hue wheel — the
+	// window wraps when Hi < Lo, so this pair is NOT reordered); RangeSatMin
+	// gates out near-greys below that saturation. Feather (above) softens all
+	// three band edges. Each window defaults fully-open (Lo 0, Hi 1, SatMin 0),
+	// so an unset dimension contributes a factor of 1. omitempty keeps non-range
+	// masks byte-identical to older builds.
+	RangeLumaLo float64 `json:"rangeLumaLo,omitempty"`
+	RangeLumaHi float64 `json:"rangeLumaHi,omitempty"`
+	RangeHueLo  float64 `json:"rangeHueLo,omitempty"`
+	RangeHueHi  float64 `json:"rangeHueHi,omitempty"`
+	RangeSatMin float64 `json:"rangeSatMin,omitempty"`
 
 	Adjust MaskAdjust `json:"adjust"`
 }
@@ -626,12 +644,14 @@ func (e *Params) normalizeMasks() {
 			m.CX, m.CY, m.RX, m.RY, m.Angle, m.Feather = 0, 0, 0, 0, 0, 0
 			m.Strokes = nil
 			m.clearAI()
+			m.clearRange()
 			m.X0, m.Y0 = clampFrac(m.X0), clampFrac(m.Y0)
 			m.X1, m.Y1 = clampFrac(m.X1), clampFrac(m.Y1)
 		case MaskRadial:
 			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
 			m.Strokes = nil
 			m.clearAI()
+			m.clearRange()
 			m.CX, m.CY = clampFrac(m.CX), clampFrac(m.CY)
 			m.RX = clamp(m.RX, 0.001, 2)
 			m.RY = clamp(m.RY, 0.001, 2)
@@ -642,11 +662,30 @@ func (e *Params) normalizeMasks() {
 			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
 			m.CX, m.CY, m.RX, m.RY, m.Angle, m.Feather = 0, 0, 0, 0, 0, 0
 			m.clearAI()
+			m.clearRange()
 			m.Strokes = normalizeStrokes(m.Strokes)
+		case MaskRange:
+			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
+			m.CX, m.CY, m.RX, m.RY, m.Angle = 0, 0, 0, 0, 0
+			m.Strokes = nil
+			m.clearAI()
+			m.Feather = quant4(clamp(m.Feather, 0, 1))
+			m.RangeLumaLo = quant4(clamp(m.RangeLumaLo, 0, 1))
+			m.RangeLumaHi = quant4(clamp(m.RangeLumaHi, 0, 1))
+			// The luma window is linear, so an inverted pair is just reordered.
+			if m.RangeLumaHi < m.RangeLumaLo {
+				m.RangeLumaLo, m.RangeLumaHi = m.RangeLumaHi, m.RangeLumaLo
+			}
+			// Hue is circular: Hi < Lo means the window wraps through red, so
+			// the pair is clamped/quantized but never reordered.
+			m.RangeHueLo = quant4(clamp(m.RangeHueLo, 0, 1))
+			m.RangeHueHi = quant4(clamp(m.RangeHueHi, 0, 1))
+			m.RangeSatMin = quant4(clamp(m.RangeSatMin, 0, 1))
 		case MaskAI:
 			m.X0, m.Y0, m.X1, m.Y1 = 0, 0, 0, 0
 			m.CX, m.CY, m.RX, m.RY, m.Angle = 0, 0, 0, 0, 0
 			m.Strokes = nil
+			m.clearRange()
 			m.Feather = quant4(clamp(m.Feather, 0, 1))
 			switch m.AIKind {
 			case AISubject:
@@ -695,6 +734,14 @@ func (m *Mask) clearAI() {
 	m.AIKind, m.MapVer = "", ""
 	m.ClassID = 0
 	m.DepthLo, m.DepthHi, m.Threshold = 0, 0, 0
+}
+
+// clearRange zeroes the range-mask fields on non-range mask types so
+// equivalent states hash identically.
+func (m *Mask) clearRange() {
+	m.RangeLumaLo, m.RangeLumaHi = 0, 0
+	m.RangeHueLo, m.RangeHueHi = 0, 0
+	m.RangeSatMin = 0
 }
 
 // clampFrac bounds a fractional frame coordinate; masks may hang partly

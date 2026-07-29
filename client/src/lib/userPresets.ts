@@ -84,16 +84,17 @@ function finite(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
 
-// sanitizeMaskRecipes keeps only AI-mask recipes from an imported preset:
-// known kind, numeric tuning, numeric adjust — mapVer always cleared
-// (applying re-runs detection and stamps the local model's version).
+// sanitizeMaskRecipes keeps only content-relative mask recipes from an
+// imported (untrusted) preset — AI masks (known kind, mapVer always cleared so
+// applying re-runs detection and stamps the local model's version) and range
+// (luma/colour) masks (numeric windows). Drawn masks and unknown shapes are
+// dropped; every numeric field is validated.
 function sanitizeMaskRecipes(raw: unknown): Mask[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const out: Mask[] = [];
   for (const m of raw) {
     if (typeof m !== 'object' || m === null) continue;
     const r = m as Record<string, unknown>;
-    if (r.type !== 'ai' || typeof r.aiKind !== 'string' || !AI_KINDS.has(r.aiKind)) continue;
     const adjust: MaskAdjust = {};
     if (typeof r.adjust === 'object' && r.adjust !== null) {
       for (const k of ADJUST_KEYS) {
@@ -101,18 +102,32 @@ function sanitizeMaskRecipes(raw: unknown): Mask[] | undefined {
         if (v !== undefined && v !== 0) adjust[k] = v;
       }
     }
-    out.push({
-      type: 'ai',
-      aiKind: r.aiKind as Mask['aiKind'],
-      mapVer: '',
-      invert: r.invert === true || undefined,
-      classId: finite(r.classId),
-      depthLo: finite(r.depthLo),
-      depthHi: finite(r.depthHi),
-      threshold: finite(r.threshold),
-      feather: finite(r.feather),
-      adjust,
-    });
+    if (r.type === 'ai' && typeof r.aiKind === 'string' && AI_KINDS.has(r.aiKind)) {
+      out.push({
+        type: 'ai',
+        aiKind: r.aiKind as Mask['aiKind'],
+        mapVer: '',
+        invert: r.invert === true || undefined,
+        classId: finite(r.classId),
+        depthLo: finite(r.depthLo),
+        depthHi: finite(r.depthHi),
+        threshold: finite(r.threshold),
+        feather: finite(r.feather),
+        adjust,
+      });
+    } else if (r.type === 'range') {
+      out.push({
+        type: 'range',
+        invert: r.invert === true || undefined,
+        rangeLumaLo: finite(r.rangeLumaLo),
+        rangeLumaHi: finite(r.rangeLumaHi),
+        rangeHueLo: finite(r.rangeHueLo),
+        rangeHueHi: finite(r.rangeHueHi),
+        rangeSatMin: finite(r.rangeSatMin),
+        feather: finite(r.feather),
+        adjust,
+      });
+    }
   }
   return out.length > 0 ? out : undefined;
 }

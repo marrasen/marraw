@@ -226,7 +226,9 @@ function UserPresetsSection({
   // A preset whose AI-mask phase hit a missing model, waiting on download
   // consent; non-null renders the AIModelDialog.
   const [maskConsent, setMaskConsent] = useState<{ preset: UserPreset; pending: PendingAIDownload } | null>(null);
-  const draftAIMaskCount = (draft?.masks ?? []).filter((m) => m.type === 'ai').length;
+  // Smart (content-relative) masks that travel in presets: AI masks and range
+  // (luma/colour) masks — mirrors aiMaskRecipes's filter.
+  const draftAIMaskCount = (draft?.masks ?? []).filter((m) => m.type === 'ai' || m.type === 'range').length;
   const importInput = useRef<HTMLInputElement>(null);
   const thumbs = useUserPresetThumbs(client, photo, presets);
 
@@ -403,7 +405,7 @@ function UserPresetsSection({
                     onMasksNeedDownload: (kind) => void requestMaskConsent(p, kind),
                   })
                 }
-                title={`Apply ${p.name} (keeps the photo's crop)${(p.params.masks?.length ?? 0) > 0 ? ' + AI masks' : ''}${i < 9 ? ` (Ctrl+Shift+${i + 1})` : ''} — drag to reorder`}
+                title={`Apply ${p.name} (keeps the photo's crop)${(p.params.masks?.length ?? 0) > 0 ? ' + smart masks' : ''}${i < 9 ? ` (Ctrl+Shift+${i + 1})` : ''} — drag to reorder`}
               >
                 <div className="aspect-[3/2] w-full overflow-hidden bg-black/40">
                   {thumbs[p.id] ? (
@@ -598,9 +600,9 @@ function UserPresetsSection({
                       : 'border-input text-muted-foreground hover:text-foreground',
                   )}
                   onClick={() => setWithMasks((w) => !w)}
-                  title="Include this photo's AI masks as recipes — applying re-detects the subject/scene/depth on each target photo"
+                  title="Include this photo's smart masks as recipes — AI masks re-detect the subject/scene/depth on each target photo; range masks re-select by tone and colour"
                 >
-                  AI masks ({draftAIMaskCount})
+                  Smart masks ({draftAIMaskCount})
                 </button>
               </>
             )}

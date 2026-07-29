@@ -51,6 +51,11 @@ export interface Mask {
     depthLo?: number;
     depthHi?: number;
     threshold?: number;
+    rangeLumaLo?: number;
+    rangeLumaHi?: number;
+    rangeHueLo?: number;
+    rangeHueHi?: number;
+    rangeSatMin?: number;
     adjust: MaskAdjust;
 }
 

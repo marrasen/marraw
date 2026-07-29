@@ -234,6 +234,19 @@ export function subscribePasteEditParams(client: ApiClient, ids: number[], param
 }
 
 
+export function pickRangeColor(client: ApiClient, photoID: number, params: Params, x: number, y: number, maskIndex: number, options?: RequestOptions): Promise<Params> {
+    return client.request<Params>('Edits.PickRangeColor', [photoID, params, x, y, maskIndex], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+pickRangeColor.method = 'Edits.PickRangeColor' as const;
+
+export function subscribePickRangeColor(client: ApiClient, photoID: number, params: Params, x: number, y: number, maskIndex: number, callback: (data: Params) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Params>('Edits.PickRangeColor', [photoID, params, x, y, maskIndex], callback, onError, options);
+}
+
+
 export function pickWhiteBalance(client: ApiClient, photoID: number, params: Params, x: number, y: number, options?: RequestOptions): Promise<Params> {
     return client.request<Params>('Edits.PickWhiteBalance', [photoID, params, x, y], options);
 }
@@ -507,6 +520,21 @@ export function usePasteEditParams(ids: number[], params: Params, options?: UseQ
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [ids, params], _subscribe: { method: 'Edits.PasteEditParams', params: [ids, params] } });
+}
+
+/**
+ * Subscribes to `Edits.PickRangeColor` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function usePickRangeColor(photoID: number, params: Params, x: number, y: number, maskIndex: number, options?: UseQueryOptions<Params>): UseQueryResult<Params> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, x: number, y: number, maskIndex: number) => pickRangeColor(client, photoID, params, x, y, maskIndex, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, x, y, maskIndex], _subscribe: { method: 'Edits.PickRangeColor', params: [photoID, params, x, y, maskIndex] } });
 }
 
 /**

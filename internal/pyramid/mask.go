@@ -34,13 +34,33 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) {
 		return
 	}
 	f := newMaskFrame(w, h, e)
+	// Range masks select by the developed pixel's own value. Masks apply in
+	// order and each mutates img, so a naive range mask would "see" earlier
+	// masks' adjustments. Snapshot the post-Look image once (only when a live
+	// range mask exists) so every range mask selects against the same base,
+	// independent of mask order.
+	var base *image.RGBA
+	for mi := range e.Masks {
+		m := &e.Masks[mi]
+		if m.Type == edit.MaskRange && !m.Disabled && !m.Adjust.IsNeutral() {
+			base = image.NewRGBA(bnd)
+			copy(base.Pix, img.Pix)
+			break
+		}
+	}
 	var wrow []uint16
 	for mi := range e.Masks {
 		m := &e.Masks[mi]
 		if m.Disabled || m.Adjust.IsNeutral() {
 			continue
 		}
-		ev := newMaskEvaluator(m, f, ai, img)
+		// AI masks refine against the live image; range masks read the base
+		// snapshot; parametric/brush masks ignore the image.
+		src := img
+		if m.Type == edit.MaskRange {
+			src = base
+		}
+		ev := newMaskEvaluator(m, f, ai, src)
 		if ev == nil {
 			continue
 		}
@@ -84,14 +104,16 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) {
 // MaskWeightPlane rasterizes one mask's weight into an outW×outH byte plane
 // (255 = full weight) in display space — the develop overlay's hover-tint
 // source. A missing/degenerate mask (or an AI mask whose map isn't in ai)
-// yields an all-zero plane, never an error.
-func MaskWeightPlane(outW, outH int, e *edit.Params, index int, ai AIMapSet) []uint8 {
+// yields an all-zero plane, never an error. img is the developed (post-Look)
+// render at outW×outH, needed only by range masks (which select on pixel
+// values); pass nil for the parametric/AI hover-tint callers.
+func MaskWeightPlane(outW, outH int, e *edit.Params, index int, ai AIMapSet, img *image.RGBA) []uint8 {
 	plane := make([]uint8, outW*outH)
 	if e == nil || index < 0 || index >= len(e.Masks) || outW <= 0 || outH <= 0 {
 		return plane
 	}
 	f := newMaskFrame(outW, outH, e)
-	ev := newMaskEvaluator(&e.Masks[index], f, ai, nil)
+	ev := newMaskEvaluator(&e.Masks[index], f, ai, img)
 	if ev == nil {
 		return plane
 	}
@@ -191,6 +213,15 @@ func newMaskEvaluator(m *edit.Mask, f maskFrame, ai AIMapSet, img *image.RGBA) m
 			}
 			return ev
 		}
+	case edit.MaskRange:
+		// Range coverage is computed from the developed pixels themselves, so
+		// it needs no guided refinement (it would snap to the same edges it
+		// already tracks). img is the post-Look base snapshot; nil (e.g. a
+		// tint call with no developed image) means the mask contributes
+		// nothing.
+		if ev := newRangeEval(m, img); ev != nil {
+			return ev
+		}
 	}
 	return nil
 }
@@ -208,6 +239,146 @@ func smoothstep01(t float64) float64 {
 		return 1
 	}
 	return t * t * (3 - 2*t)
+}
+
+// --- Range (luminance / color window) ---
+
+// rangeHueSteps is the resolution of the baked hue-window curve over the 0..1
+// hue wheel; 256 is finer than any perceptible hue edge under the feather.
+const rangeHueSteps = 256
+
+// rangeEval selects pixels by their own developed value: a soft band-pass over
+// display luminance times a soft band-pass over hue gated by a saturation
+// floor. Coverage is read from a snapshot of the post-Look image (img), so it
+// is independent of the other masks in the stack. When the color dimension is
+// fully open (whole hue wheel, no saturation floor) the per-pixel HSV
+// conversion is skipped and only the luma factor applies.
+type rangeEval struct {
+	img         *image.RGBA
+	w           int
+	invert      bool
+	colorActive bool
+	lumaW       [256]float64 // luma factor per 0..255 luminance
+	hueW        [rangeHueSteps]float64
+	satW        [256]float64 // saturation-gate factor per 0..255 HSV S
+}
+
+func newRangeEval(m *edit.Mask, img *image.RGBA) *rangeEval {
+	if img == nil {
+		return nil
+	}
+	b := img.Bounds()
+	if b.Dx() == 0 || b.Dy() == 0 {
+		return nil
+	}
+	ev := &rangeEval{img: img, w: b.Dx(), invert: m.Invert}
+
+	// Luminance band-pass over [lo,hi] with a feather half-width, the depth
+	// window formula (aimap.go deriveCoverage). A full-open 0..1 window is a
+	// flat factor of 1.
+	{
+		lo, hi := m.RangeLumaLo, m.RangeLumaHi
+		f := math.Max(m.Feather*0.25, 0.02)
+		for v := range ev.lumaW {
+			d := float64(v) / 255
+			ev.lumaW[v] = smoothstep01((d-(lo-f))/f) * (1 - smoothstep01((d-hi)/f))
+		}
+	}
+
+	// Hue is a wheel: [lo,hi] wraps through red when hi < lo. Express the
+	// window as center + half-width and weight by circular distance, so a
+	// wrapped window and a full 0..1 window both fall out of one formula
+	// (full → half-width 0.5 → factor 1 everywhere).
+	hueFull := m.RangeHueLo == 0 && m.RangeHueHi == 1
+	ev.colorActive = !hueFull || m.RangeSatMin > 0
+	if ev.colorActive {
+		width := m.RangeHueHi - m.RangeHueLo
+		if width < 0 {
+			width += 1 // wraparound window
+		}
+		half := width / 2
+		center := math.Mod(m.RangeHueLo+half, 1)
+		f := math.Max(m.Feather*0.25, 0.02)
+		for i := range ev.hueW {
+			h := float64(i) / rangeHueSteps
+			d := math.Abs(h - center)
+			if d > 0.5 {
+				d = 1 - d // shortest way around the wheel
+			}
+			ev.hueW[i] = 1 - smoothstep01((d-half)/f)
+		}
+		// Saturation floor: ramp from 0 at (satMin-f) to 1 at satMin, so a
+		// satMin of 0 passes everything (greys included) and a positive floor
+		// excludes near-greys where hue is meaningless.
+		sf := math.Max(m.Feather*0.25, 0.02)
+		for s := range ev.satW {
+			ev.satW[s] = smoothstep01((float64(s)/255 - (m.RangeSatMin - sf)) / sf)
+		}
+	}
+	return ev
+}
+
+func (ev *rangeEval) weightRow(y int, w []uint16) (int, int) {
+	row := ev.img.Pix[y*ev.img.Stride : y*ev.img.Stride+ev.w*4]
+	for x := 0; x < ev.w; x++ {
+		i := x * 4
+		r, g, b := int(row[i]), int(row[i+1]), int(row[i+2])
+		luma := (299*r + 587*g + 114*b) / 1000
+		wf := ev.lumaW[luma]
+		if wf > 0 && ev.colorActive {
+			wf *= ev.colorFactor(r, g, b)
+		}
+		if ev.invert {
+			wf = 1 - wf
+		}
+		w[x] = uint16(math.Round(wf * 256))
+	}
+	return 0, ev.w
+}
+
+// colorFactor is the hue-window weight gated by the saturation floor for one
+// pixel, both in 0..1. Greys (delta 0) get HSV saturation 0, so the floor
+// drives them to 0 whenever a floor is set.
+func (ev *rangeEval) colorFactor(r, g, b int) float64 {
+	maxc, minc := r, g
+	if g > maxc {
+		maxc = g
+	}
+	if b > maxc {
+		maxc = b
+	}
+	if g < minc {
+		minc = g
+	}
+	if r < minc {
+		minc = r
+	}
+	if b < minc {
+		minc = b
+	}
+	delta := maxc - minc
+	if maxc == 0 || delta == 0 {
+		return ev.hueW[0] * ev.satW[0] // grey: saturation 0
+	}
+	sat := delta * 255 / maxc
+	var h float64 // 0..6
+	switch maxc {
+	case r:
+		h = float64(g-b) / float64(delta)
+	case g:
+		h = float64(b-r)/float64(delta) + 2
+	default:
+		h = float64(r-g)/float64(delta) + 4
+	}
+	h /= 6
+	if h < 0 {
+		h += 1
+	}
+	hi := int(h * rangeHueSteps)
+	if hi >= rangeHueSteps {
+		hi = rangeHueSteps - 1
+	}
+	return ev.hueW[hi] * ev.satW[sat]
 }
 
 // --- Radial (ellipse) ---

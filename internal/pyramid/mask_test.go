@@ -298,6 +298,124 @@ func TestMaskLUTNeutralIsIdentityish(t *testing.T) {
 	}
 }
 
+// greyRamp is a horizontal grey ramp: luma rises 0→255 with x.
+func greyRamp(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			v := uint8(x * 255 / (w - 1))
+			i := img.PixOffset(x, y)
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = v, v, v, 0xff
+		}
+	}
+	return img
+}
+
+// hueBands paints three vertical thirds: pure red, green, blue (fully
+// saturated), for hue-window selection tests.
+func hueBands(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			i := img.PixOffset(x, y)
+			img.Pix[i+3] = 0xff
+			switch 3 * x / w {
+			case 0:
+				img.Pix[i] = 255 // red, hue 0
+			case 1:
+				img.Pix[i+1] = 255 // green, hue 1/3
+			default:
+				img.Pix[i+2] = 255 // blue, hue 2/3
+			}
+		}
+	}
+	return img
+}
+
+// TestRangeLumaWindow: a mid-tone luminance window selects the middle of a grey
+// ramp and rejects the shadows/highlights, independent of hue (full-open color).
+func TestRangeLumaWindow(t *testing.T) {
+	const w, h = 120, 8
+	img := greyRamp(w, h)
+	m := &edit.Mask{Type: edit.MaskRange, RangeLumaLo: 0.4, RangeLumaHi: 0.6, Feather: 0.2,
+		RangeHueLo: 0, RangeHueHi: 1} // color dimension fully open
+	f := newMaskFrame(w, h, &edit.Params{})
+	ev := newMaskEvaluator(m, f, nil, img)
+	if ev == nil {
+		t.Fatal("range mask must yield an evaluator when given an image")
+	}
+	mid := weightAt(ev, w/2, h/2, w) // luma ~0.5
+	lo := weightAt(ev, w/10, h/2, w) // luma ~0.1
+	hi := weightAt(ev, 9*w/10, h/2, w)
+	if mid < 230 {
+		t.Errorf("mid-tone weight = %d, want near full", mid)
+	}
+	if lo > 8 || hi > 8 {
+		t.Errorf("out-of-window weights lo=%d hi=%d, want ~0", lo, hi)
+	}
+	// A nil image (e.g. a tint with no developed frame) contributes nothing.
+	if newMaskEvaluator(m, f, nil, nil) != nil {
+		t.Error("range mask must yield a nil evaluator without an image")
+	}
+}
+
+// TestRangeHueWindow: a hue window around green selects the green band only.
+func TestRangeHueWindow(t *testing.T) {
+	const w, h = 120, 8
+	img := hueBands(w, h)
+	m := &edit.Mask{Type: edit.MaskRange, RangeHueLo: 0.28, RangeHueHi: 0.40, RangeLumaHi: 1}
+	f := newMaskFrame(w, h, &edit.Params{})
+	ev := newMaskEvaluator(m, f, nil, img)
+	red := weightAt(ev, w/6, h/2, w)
+	green := weightAt(ev, w/2, h/2, w)
+	blue := weightAt(ev, 5*w/6, h/2, w)
+	if green < 230 {
+		t.Errorf("green weight = %d, want near full", green)
+	}
+	if red > 8 || blue > 8 {
+		t.Errorf("off-hue weights red=%d blue=%d, want ~0", red, blue)
+	}
+	// Invert flips: weight + inverted weight = 256 everywhere.
+	inv := *m
+	inv.Invert = true
+	evInv := newMaskEvaluator(&inv, f, nil, img)
+	for _, x := range []int{w / 6, w / 2, 5 * w / 6} {
+		a := weightAt(ev, x, h/2, w)
+		b := weightAt(evInv, x, h/2, w)
+		if a+b != 256 {
+			t.Errorf("weight + inverted = %d at x=%d, want 256", a+b, x)
+		}
+	}
+}
+
+// TestRangeSatGate: a saturation floor excludes near-greys whose hue is
+// meaningless while keeping a saturated pixel of the same hue.
+func TestRangeSatGate(t *testing.T) {
+	const w, h = 4, 4
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	// x=0: saturated green; x>0: neutral grey (same luma-ish, no hue).
+	for y := range h {
+		for x := range w {
+			i := img.PixOffset(x, y)
+			img.Pix[i+3] = 0xff
+			if x == 0 {
+				img.Pix[i+1] = 200 // green
+			} else {
+				img.Pix[i], img.Pix[i+1], img.Pix[i+2] = 128, 128, 128
+			}
+		}
+	}
+	m := &edit.Mask{Type: edit.MaskRange, RangeHueLo: 0.28, RangeHueHi: 0.40, RangeSatMin: 0.3, RangeLumaHi: 1}
+	f := newMaskFrame(w, h, &edit.Params{})
+	ev := newMaskEvaluator(m, f, nil, img)
+	if g := weightAt(ev, 0, 0, w); g < 200 {
+		t.Errorf("saturated green weight = %d, want near full", g)
+	}
+	if grey := weightAt(ev, 2, 0, w); grey > 4 {
+		t.Errorf("grey weight = %d, want ~0 under the saturation floor", grey)
+	}
+}
+
 // remapMaskCW applies the display-space quarter-turn (CW) remap rule the
 // client uses in crop.ts (rotateCropPatch): points map (x,y)→(1−y,x), radial
 // radii swap with no aspect factor and the tilt angle keeps, brush points map

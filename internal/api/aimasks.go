@@ -87,7 +87,19 @@ func (e *Edits) MaskTintPreview(ctx context.Context, photoID int64, params edit.
 	ow, oh = max(1, ow), max(1, oh)
 
 	ai := e.deps.Cache.AIMaps.SetFor(photo.CacheKey, &params)
-	plane := pyramid.MaskWeightPlane(ow, oh, &params, maskIndex, ai)
+	// A range mask selects on the developed pixels themselves, so its tint
+	// needs the post-Look image (masks stripped) — parametric/AI masks don't.
+	// Size the plane to that image's exact bounds so the two align.
+	var base *image.RGBA
+	if params.Masks[maskIndex].Type == edit.MaskRange {
+		base, err = e.developedBaseForMask(ctx, photoID, photo, params, longEdge)
+		if err != nil {
+			return nil, err
+		}
+		b := base.Bounds()
+		ow, oh = b.Dx(), b.Dy()
+	}
+	plane := pyramid.MaskWeightPlane(ow, oh, &params, maskIndex, ai, base)
 
 	// The overlay red at 40% peak alpha — MaskTint's rgba(240,64,64,.4).
 	img := image.NewNRGBA(image.Rect(0, 0, ow, oh))

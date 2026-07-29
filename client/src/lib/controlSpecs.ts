@@ -301,6 +301,7 @@ export const MASK_TYPE_LABELS: Record<string, string> = {
   radial: 'Radial',
   brush: 'Brush',
   ai: 'AI',
+  range: 'Range',
 };
 
 export function maskLabel(m: Mask, index: number): string {
@@ -351,6 +352,12 @@ export function aiPersonMask(instanceId: number, mapVer: string): Mask {
   return { type: 'ai', aiKind: 'person', mapVer, classId: instanceId, feather: 0.15, adjust: {} };
 }
 
+// Range-mask window defaults: both dimensions fully open (select everything)
+// until the user narrows the luminance/hue sliders or picks a colour, the
+// Lightroom luminance-range convention. neutral targets for the range sliders.
+export const RANGE_LUMA_DEFAULT = { rangeLumaLo: 0, rangeLumaHi: 1 } as const;
+export const RANGE_HUE_DEFAULT = { rangeHueLo: 0, rangeHueHi: 1 } as const;
+
 // Default geometry for a freshly added mask: centered and clearly visible,
 // so the user immediately sees what the handles do. Fractions of the
 // oriented frame, matching the server model.
@@ -361,6 +368,8 @@ export function defaultMask(type: Mask['type']): Mask {
       return { type, x0: 0.5, y0: 0.3, x1: 0.5, y1: 0.6, adjust: {} };
     case 'radial':
       return { type, cx: 0.5, cy: 0.5, rx: 0.3, ry: 0.25, feather: 0.5, adjust: {} };
+    case 'range':
+      return { type, ...RANGE_LUMA_DEFAULT, ...RANGE_HUE_DEFAULT, rangeSatMin: 0, feather: 0.25, adjust: {} };
     default:
       return { type: 'brush', strokes: [], adjust: {} };
   }

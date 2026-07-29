@@ -8,6 +8,37 @@ import (
 	"github.com/marrasen/marraw/internal/edit"
 )
 
+func TestRangeColorWindow(t *testing.T) {
+	// A saturated green pick centres a wrap-free hue window on ~1/3 and sets a
+	// floor below its saturation.
+	lo, hi, sat, err := rangeColorWindow(0, 200, 0)
+	if err != nil {
+		t.Fatalf("green pick: %v", err)
+	}
+	if math.Abs(lo-(1.0/3-0.045)) > 1e-9 || math.Abs(hi-(1.0/3+0.045)) > 1e-9 {
+		t.Errorf("green window = [%v,%v], want ~[%v,%v]", lo, hi, 1.0/3-0.045, 1.0/3+0.045)
+	}
+	if sat <= 0 || sat >= 1 {
+		t.Errorf("green satMin = %v, want a floor in (0,1)", sat)
+	}
+	// A red pick (hue 0) wraps: lo near 1, hi near 0 (hi < lo), which Normalize
+	// keeps as a circular window.
+	lo, hi, _, err = rangeColorWindow(220, 0, 0)
+	if err != nil {
+		t.Fatalf("red pick: %v", err)
+	}
+	if lo <= hi {
+		t.Errorf("red window should wrap (lo > hi), got [%v,%v]", lo, hi)
+	}
+	// Grey and near-black picks have no hue and must be refused.
+	if _, _, _, err := rangeColorWindow(128, 128, 128); err == nil {
+		t.Error("grey pick must be refused")
+	}
+	if _, _, _, err := rangeColorWindow(3, 5, 2); err == nil {
+		t.Error("too-dark pick must be refused")
+	}
+}
+
 // TestFoldParamsForUnitScales guards the fold's WB ratio against a
 // normalization-unit mismatch: a picked custom WBMul is normalized to green=1,
 // while the reference cam_mul is in raw units (green ~1024 on many cameras).
