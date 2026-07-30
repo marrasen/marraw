@@ -86,9 +86,9 @@ npm --prefix client install
 npm run gen            # aprot codegen -> client/src/api
 ```
 
-`setup:libraw` compiles with `ForEach-Object -Parallel` and so needs
-PowerShell 7 (`pwsh`), not the Windows PowerShell 5.1 that `powershell` resolves
-to.
+All setup scripts run on stock Windows PowerShell 5.1; PowerShell 7 is optional.
+(`setup:libraw` drives a pool of `g++` processes directly rather than using the
+7-only `ForEach-Object -Parallel`.)
 
 marraw builds against the published `aprot` module in `go.mod`. To develop the
 two side by side, create a `go.work` — it is deliberately untracked, because a
@@ -118,6 +118,79 @@ Go tests (the libraw wrapper tests need real RAW files; set
 go test ./internal/...
 npm run typecheck
 ```
+
+### ML inference and GPU throughput
+
+The toy-model tests in `internal/infer` run anywhere `setup:ort` has run. The
+real restoration models (denoise, super resolution) are dev fixtures staged
+out-of-band and their tests skip when absent:
+
+```powershell
+npm run setup:devmodels   # hash-pinned SCUNet + Swin2SR into .devdata/models (~140 MB)
+$env:MARRAW_TEST_TILES="100"
+go test ./internal/infer -run TestRunTiledThroughput -v -count=1 -timeout 60m
+```
+
+`-v` matters: the numbers arrive as `t.Logf` `RESULT` lines. Measuring the GPU
+path needs a DirectML-enabled runtime, which `setup:ort` stages into a separate
+tree so the CPU build stays usable in the same checkout:
+
+```powershell
+npm run setup:ort -- -DirectML
+$env:MARRAW_ORT_LIB="$PWD\third_party\onnxruntime-directml\lib\onnxruntime.dll"
+$env:MARRAW_TEST_GPU="1"
+go test ./internal/infer -run 'TestRunTiled(Throughput|Soak)|TestGPUSessionChurn' -v -count=1 -timeout 60m
+```
+
+**Always confirm `session <model> OnGPU=true` in the output.** A CPU-only ORT
+build rejects the DirectML provider and `newSession` falls back to CPU with only
+a log line, so the easiest mistake here is recording a CPU number as a GPU one.
+
+| Env var | Effect |
+|---|---|
+| `MARRAW_ORT_LIB` | Explicit path to the ORT shared library, ahead of the exe dir and `third_party` |
+| `MARRAW_TEST_GPU` | `1` sets `ModelSpec.PreferGPU` (DirectML on Windows, CoreML on macOS) |
+| `MARRAW_GPU_EP` | `cuda` selects the CUDA provider instead of DirectML on Windows |
+| `MARRAW_TEST_TILES` | Tile budget for the throughput/soak tests (default 6) |
+| `MARRAW_TEST_TILE_SIZE` | Override the tile edge; a GPU crash can be tile-size dependent |
+| `MARRAW_TEST_MODELS_DIR` | Override `.devdata/models` |
+| `MARRAW_TEST_RESTORE_SLOW` | `1` enables the minutes-long export restoration e2e tests |
+| `MARRAW_TEST_OUT_DIR` | Keep e2e export JPEGs here instead of a temp dir, to look at them |
+
+The export restoration stage (ML denoise / super resolution, `internal/export`)
+has end-to-end tests that run a real RAW through the full pipeline. The fast one
+asserts the denoise skip guard produces byte-identical output on a normal web
+export; the slow ones actually run the models and write JPEGs you can open:
+
+```powershell
+$env:MARRAW_TEST_RAW_DIR="<folder of RAWs>"
+$env:MARRAW_TEST_OUT_DIR="$HOME\Desktop\restore-out"
+$env:MARRAW_TEST_RESTORE_SLOW="1"
+go test ./internal/export -run TestExportDenoise -v -count=1 -timeout 45m
+```
+
+Add the CUDA env vars above to cut those from minutes to about one. Note that
+denoise cost tracks the **source** region's megapixels, not the output's, so a
+full-resolution export of a 33 MP frame is ~8 min on CPU by design — see
+[design/ml-denoise.md](design/ml-denoise.md) criterion 4.
+
+ORT ships no DirectML build on its GitHub releases page; the `-DirectML` switch
+pulls it from NuGet, where the newest version is **1.24.4**. That is a ceiling,
+not a lagging pin.
+
+The CUDA provider is the other GPU option, opt-in because neither its ORT build
+nor the NVIDIA runtime libraries ship with the app:
+
+```powershell
+npm run setup:ort -- -CUDA    # ORT gpu_cuda12 + CUDA runtime/cuDNN (~1.4 GB download)
+$env:MARRAW_ORT_LIB="$PWD\third_party\onnxruntime-cuda\lib\onnxruntime.dll"
+$env:MARRAW_TEST_GPU="1"; $env:MARRAW_GPU_EP="cuda"
+```
+
+`-CUDA` takes the CUDA runtime and cuDNN from NVIDIA's PyPI wheels rather than
+the CUDA toolkit installer — same binaries, no installer, and no NVIDIA account
+for cuDNN. It needs only a recent NVIDIA driver. Measured results and what they
+gate live in [design/ml-denoise.md](design/ml-denoise.md).
 
 Backend smoke test (needs a folder of RAW files and a running dev server):
 
