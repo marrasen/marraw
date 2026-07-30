@@ -193,14 +193,36 @@ Size: **M**.
 
 ## Milestone 3 — ML denoise (builds the heavy-compute layer)
 
-Status: **infrastructure shipped 2026-07-13, user-facing feature HELD** —
-tiled inference + GPU execution providers landed and tested, but measured
-throughput (93 s/MP CPU, DirectML unstable on Arc) makes the feature a trap
-on this hardware class. Full data, decision, and unlock criteria in
-[ml-denoise.md](ml-denoise.md) — including a pending NVIDIA/Windows
-measurement that needs no code changes, and a fourth unlock criterion
-(bound the work by output pixels, not sensor pixels) that would make
-export-only denoise viable on the CPU path today.
+Status: **infrastructure shipped 2026-07-13; throughput unlock MET on NVIDIA
+2026-07-30, shipping decision open.** Measured on an RTX 3070: the **CUDA**
+execution provider denoises at **1.7 s/MP** — a 42 MP master in ~1.2 min against
+the ≤3.5 min target — with a green 100-tile soak. **DirectML cannot run SCUNet
+at all** (4/4 native access violations from an unsupported operator in its
+transformer block), though it runs Swin2SR fine, so on the DML path the blocker
+is the model rather than the vendor. Full data and the control that isolates the
+execution provider in [ml-denoise.md](ml-denoise.md).
+
+What now gates this milestone is **distribution, not compute**:
+
+- The CUDA runtime is **~2.3 GB of provider libraries** that do not ship with
+  the app, and it is NVIDIA-only. Offering it means an optional, consent-gated
+  GPU pack two orders of magnitude larger than anything the model registry
+  downloads today.
+- **CPU is 6× faster than the original figure** on a desktop part (15.5 s/MP on
+  an i7-13700KF vs 93 s/MP on Lunar Lake). With criterion 4's budget set to
+  ~2-4 MP that makes a **~31-60 s** per-image operation on any vendor with no
+  download — enough for a deliberate crop rescue, not for a batch. A typical
+  downscaled web export is skipped outright, by design.
+- **Quality is good where there is real noise and harmful where there is not**
+  (measured on two real frames), so the strength default must come from measured
+  noise rather than a constant.
+
+**Status 2026-07-30: findings documented, shipping deferred.** The export stage
+is built and tested behind a nil-means-disabled option
+(`internal/export/restore.go`), so nothing user-visible changed. The
+denoised-master cache and its `renderVersion` bump stay parked until a fast path
+exists, since that risk only pays off once full-res denoise is quick. See
+ml-denoise.md, "Current state of the code" and "What is left".
 
 Restoration-model denoise (NAFNet/SCUNet-class): one joint denoise + detail-recovery
 pass on **scene-linear** data, before look/masks/detail. Classical sharpening stays
@@ -228,17 +250,71 @@ Size: **L** (the largest single item on this roadmap).
 
 ## Milestone 4 — Super resolution
 
-Status: **same holding pattern as Milestone 3** (Swin2SR ×2 measured at
-822 s/MP CPU / 148 s/MP DML-unstable; the tiling harness already supports
-Scale=2, so wiring is trivial once the throughput unlock lands — see
-ml-denoise.md).
+Status: **no longer blocked on throughput, but held on packaging and semantics**
+(measured 2026-07-30). Swin2SR ×2 on DirectML/RTX 3070 runs at **18.3 s/MP**,
+stable across a 100-tile throughput run plus a 100-tile soak, ~600 MiB of VRAM.
+CUDA is only modestly quicker (14.3 s/MP), which is the useful part: **SR does
+not need the 2.3 GB CUDA pack — DirectML is enough, and that is only ~20 MB.**
+
+Three things still stand in the way, none of them throughput:
+
+- **DirectML is not in the installer.** Verified: CI runs `npm run setup:ort`
+  with no variant flag and packaging ships the CPU-only build, so `PreferGPU`
+  falls back to CPU today. Adding the DML build is cheap in bytes but drops
+  Windows ORT from 1.27.1 to 1.24.4, so all seven existing models need a
+  re-verification pass. That test time is the real cost.
+- **`LongEdge` has no upscaling semantics** — see the block below.
+- **CPU SR is poor value** at 97.9 s/MP of input, so without DirectML there is
+  no sensible fallback; the UX would have to state the duration up front
+  (`Session.OnGPU` already exposes what is needed).
+
+The tiling harness supports Scale=2 and the export stage is written
+(`internal/export/restore.go`), so the remaining work is packaging, the semantics
+decision, and UI. macOS/CoreML remains unmeasured; Linux has no GPU provider.
+Note also that SR is inherently narrow: it only helps when the output exceeds the
+source, which on a high-megapixel body is rare. See ml-denoise.md for numbers,
+the reproduction recipe, and the current state of the code.
 
 2× upscale at export. Same compute class as denoise but architecturally simple: one
 extra stage in `export.renderFinal` before output sharpening, reusing M3's tiling +
 GPU providers wholesale. No interactive path, no cache design (export is already an
-async job with progress). Interaction to specify: SR before output resize; watermark
-math must use final dimensions (respect the TS/Go twin-math contract).
+async job with progress). Watermark math must use final dimensions (respect the
+TS/Go twin-math contract).
 Size: **M** once M3 exists.
+
+**The "interaction to specify" is now pinned down (2026-07-30), and it is a
+product decision, not a technical one.** `export.resizeRGBA` treats `LongEdge`
+as a *cap* and returns early when the source already fits — **export has no
+upscaling semantics at all**. Verified end to end: a request for
+`LongEdge: 8000` from a 7028 px source yields 7028 px. Consequences:
+
+- SR only does anything when the requested output *exceeds* the source
+  resolution, which is a shape the exporter currently cannot express.
+- When the SR stage does fire it therefore changes the output dimensions
+  relative to the plain path (measured: plain 7028 px, SR 8000 px). That is a
+  change to what export means, not a quality improvement within existing
+  behaviour.
+- Resizing to half the target and letting SR restore the last 2× (which is what
+  the ml-denoise.md cost model assumes) is only sensible when the target is
+  above the source. Below it, plain downscaling from the full source is strictly
+  better — you would otherwise discard detail and have the model invent it back.
+
+So M4 needs one of these decided before it can ship:
+
+1. **`LongEdge` may exceed native when SR is on** — SR fills the gap, plain
+   exports keep today's cap. Smallest change, but "long edge" quietly means two
+   different things depending on a checkbox.
+2. **SR is an explicit "upscale 2×" output option** (the Lightroom Super
+   Resolution model): output becomes 2× native, `LongEdge` still caps
+   afterwards. Clearest to explain; full-frame SR on a 33 MP body is ~3 min on
+   CUDA and far worse on CPU, so it needs the duration shown up front.
+3. **SR is scoped to crops and small sources only** — offer it when the export
+   would otherwise upscale, i.e. exactly when the crop or source is smaller than
+   the requested output. Narrowest and cheapest, and honest about the fact that
+   exports above ~7000 px are unusual on a modern body.
+
+Also worth weighing: on a high-megapixel camera SR is a narrow feature. Its real
+audience is heavy crops and older/smaller sensors.
 
 ---
 
