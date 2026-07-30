@@ -268,6 +268,13 @@ func newSession(id ModelID, path string, preferGPU bool) (*Session, error) {
 // provider appended: DirectML on Windows (requires the DirectML-enabled ORT
 // build — the CPU-only library rejects the provider and the caller falls
 // back), CoreML on macOS. Linux has no bundled GPU provider yet.
+//
+// MARRAW_GPU_EP=cuda selects the CUDA provider instead of DirectML. It exists
+// because DirectML cannot execute every model we care about — SCUNet faults in
+// its transformer block on both vendors tested — and the CUDA provider is the
+// candidate replacement. It is deliberately opt-in: CUDA needs a separate ORT
+// build plus the NVIDIA runtime libraries, neither of which ships with the app,
+// so the default must stay DirectML. See design/ml-denoise.md.
 func gpuSessionOptions() (*ort.SessionOptions, error) {
 	opts, err := ort.NewSessionOptions()
 	if err != nil {
@@ -276,7 +283,11 @@ func gpuSessionOptions() (*ort.SessionOptions, error) {
 	var eperr error
 	switch runtime.GOOS {
 	case "windows":
-		eperr = opts.AppendExecutionProviderDirectML(0)
+		if os.Getenv("MARRAW_GPU_EP") == "cuda" {
+			eperr = appendCUDA(opts)
+		} else {
+			eperr = opts.AppendExecutionProviderDirectML(0)
+		}
 	case "darwin":
 		eperr = opts.AppendExecutionProviderCoreML(0)
 	default:
@@ -287,6 +298,16 @@ func gpuSessionOptions() (*ort.SessionOptions, error) {
 		return nil, eperr
 	}
 	return opts, nil
+}
+
+// appendCUDA appends the CUDA execution provider with default options.
+func appendCUDA(opts *ort.SessionOptions) error {
+	cudaOpts, err := ort.NewCUDAProviderOptions()
+	if err != nil {
+		return fmt.Errorf("creating CUDA provider options: %w", err)
+	}
+	defer cudaOpts.Destroy()
+	return opts.AppendExecutionProviderCUDA(cudaOpts)
 }
 
 // Run executes one forward pass. Inputs must match the model's input order.

@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"os"
 	"testing"
-	"time"
 )
 
 func TestRampWeight(t *testing.T) {
@@ -26,8 +25,11 @@ func TestRampWeight(t *testing.T) {
 	}
 }
 
-// devModel loads a model staged under .devdata/models, skipping when absent.
-func devModel(t *testing.T, id ModelID) *Session {
+// devManager opens the dev-model staging dir (npm run setup:devmodels),
+// skipping when it or the runtime is unavailable. Tests that need the
+// one-resident-GPU-session eviction to actually engage must share a single
+// Manager across their model loads, hence the split from devModel.
+func devManager(t *testing.T) *Manager {
 	t.Helper()
 	dir := os.Getenv("MARRAW_TEST_MODELS_DIR")
 	if dir == "" {
@@ -39,16 +41,30 @@ func devModel(t *testing.T, id ModelID) *Session {
 	if err := EnsureRuntime(); err != nil {
 		t.Skipf("runtime unavailable: %v", err)
 	}
-	m := NewManager(dir)
+	return NewManager(dir)
+}
+
+// devSession loads one staged model through a caller-owned Manager.
+func devSession(t *testing.T, m *Manager, id ModelID) *Session {
+	t.Helper()
 	spec := ModelSpec{ID: id, Version: "1", PreferGPU: os.Getenv("MARRAW_TEST_GPU") == "1"}
 	s, err := m.Session(context.Background(), spec, nil)
 	if err != nil {
 		t.Skipf("model %s unavailable: %v", id, err)
 	}
 	if spec.PreferGPU {
-		t.Logf("session OnGPU=%v", s.OnGPU)
+		// A CPU-only ORT build rejects the DirectML provider and newSession
+		// falls back with only a log line, so this is the one place that says
+		// whether a GPU number is actually a GPU number.
+		t.Logf("session %s OnGPU=%v", id, s.OnGPU)
 	}
 	return s
+}
+
+// devModel loads a model staged under .devdata/models, skipping when absent.
+func devModel(t *testing.T, id ModelID) *Session {
+	t.Helper()
+	return devSession(t, devManager(t), id)
 }
 
 func noisyImage(w, h int) *image.RGBA {
@@ -65,22 +81,20 @@ func noisyImage(w, h int) *image.RGBA {
 	return img
 }
 
-// TestRunTiledSCUNet proves the tiled harness against the real denoiser and
-// logs per-megapixel CPU cost — the number the denoise design doc quotes.
+// TestRunTiledSCUNet proves the tiled harness against the real denoiser.
+// Throughput is NOT measured here: see throughput_test.go, which separates
+// warmup from steady state and reports per-tile timings. Two tests logging
+// s/MP meant two numbers to reconcile when transcribing the design doc.
 func TestRunTiledSCUNet(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real-model benchmark")
+		t.Skip("real-model test")
 	}
 	sess := devModel(t, "scunet")
 	src := noisyImage(512, 384)
-	start := time.Now()
 	out, err := RunTiled(context.Background(), sess, src, TileConfig{Size: 256, Overlap: 16, Scale: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dur := time.Since(start)
-	mp := float64(512*384) / 1e6
-	t.Logf("SCUNet CPU: %.2f MP in %s → %.1f s/MP", mp, dur, dur.Seconds()/mp)
 
 	if got := out.Bounds(); got.Dx() != 512 || got.Dy() != 384 {
 		t.Fatalf("output dims %v", got)
@@ -92,21 +106,17 @@ func TestRunTiledSCUNet(t *testing.T) {
 	}
 }
 
-// TestRunTiledSwin2SR proves the 2x SR path: doubled dims, sane runtime.
+// TestRunTiledSwin2SR proves the 2x SR path: doubled dims.
 func TestRunTiledSwin2SR(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real-model benchmark")
+		t.Skip("real-model test")
 	}
 	sess := devModel(t, "swin2sr")
 	src := noisyImage(256, 192)
-	start := time.Now()
 	out, err := RunTiled(context.Background(), sess, src, TileConfig{Size: 128, Overlap: 8, Scale: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dur := time.Since(start)
-	mp := float64(256*192) / 1e6
-	t.Logf("Swin2SR CPU: %.2f MP in %s → %.1f s/MP", mp, dur, dur.Seconds()/mp)
 	if got := out.Bounds(); got.Dx() != 512 || got.Dy() != 384 {
 		t.Fatalf("SR output dims %v, want 512x384", got)
 	}
