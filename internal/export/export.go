@@ -69,6 +69,10 @@ type Request struct {
 	// Fills resolves cached ML fill patches so fill spots export exactly as
 	// previewed; nil renders them as no-ops.
 	Fills *pyramid.FillStore
+	// Restore enables the ML denoise / super-resolution export stages; nil
+	// disables both. Unlike the resolvers above these have no loupe
+	// equivalent — the exported frame is the only place they run.
+	Restore *RestoreOptions
 }
 
 type Item struct {
@@ -193,7 +197,7 @@ func renderPhoto(ctx context.Context, photo store.Photo, req Request) (*image.RG
 		gamma = pyramid.FallbackLookGamma
 	}
 
-	return renderFinal(img, gamma, params, photo, req)
+	return renderFinal(ctx, img, gamma, params, photo, req)
 }
 
 // RenderOne renders a single photo to final pixels without writing anything
@@ -243,7 +247,7 @@ func exportOne(ctx context.Context, photo store.Photo, outPath string, req Reque
 // saw in the loupe: crop and straighten, the look, detail, then the output
 // resize and sharpening. Both encoders share it — a JPEG and a TIFF of the
 // same photo differ only in how the pixels are written down.
-func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, photo store.Photo, req Request) (*image.RGBA, error) {
+func renderFinal(ctx context.Context, img *libraw.Image, lookGamma float64, params *edit.Params, photo store.Photo, req Request) (*image.RGBA, error) {
 	if img.Bits != 8 {
 		return nil, fmt.Errorf("export: needs 8-bit output, got %d", img.Bits)
 	}
@@ -263,6 +267,17 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, phot
 	rgba = pyramid.ApplyLens(rgba,
 		pyramid.LensWarp(req.Lenses.For(photo), params, rgba.Bounds().Dx(), rgba.Bounds().Dy()), params)
 	rgba = pyramid.ApplyGeometry(rgba, params)
+	// ML restoration sits after geometry and before the look, which is what
+	// puts each stage where it belongs: the denoiser sees cropped native-scale
+	// sensor pixels (and only the cropped region, which is what bounds its
+	// cost), and it runs before ApplyDetail's sharpening rather than after it.
+	// Super resolution lands before the output resize below, so an export asked
+	// for more pixels than the source has resolves from model detail instead of
+	// interpolation; the watermark/frame layout still solves against final dims.
+	var err error
+	if rgba, err = req.Restore.apply(ctx, rgba, req.LongEdge); err != nil {
+		return nil, err
+	}
 	pyramid.ApplyFinish(rgba, lookGamma, params,
 		req.AIMaps.SetFor(photo.CacheKey, params), req.Fills.SetFor(photo.CacheKey, params))
 	var out *image.RGBA
