@@ -5,6 +5,13 @@ Only two constructs are parsed (client/src/lib/changelog.ts): `## X.Y.Z - YYYY-M
 version headers and `-` bullets; everything else is ignored. Newest release first.
 When cutting a release: bump the version in package.json and add a section here.
 
+## 0.8.0 - 2026-07-30
+
+- Lens corrections: marraw reads the camera and lens out of the RAW, matches a profile from a built-in database of ~1,500 calibrated lenses, and undoes what the lens did to the frame — barrel and pincushion distortion, lateral chromatic aberration, and corner vignetting. It runs automatically, before every other stage, so the frame you start editing is already the one your camera's own JPEG shows; each correction has its own amount in Develop → Detail → Lens correction (100 % is the profile's measurement), and the whole thing switches off in one click when a lens's own signature is the point. Photos you edited before this release re-render slightly straighter, with brighter corners — set Lens correction to Off to get the previous rendering back
+- Curve: a point tone curve on its own tab, with RGB / R / G / B channels — drag a point to move it, click empty space to add one, double-click to remove it. The RGB master shapes overall tone and the per-channel curves grade colour on top of it; the curve is monotone by construction, so no combination of points can invert tones, and it renders identically in previews, 1:1 tiles and exports and travels in presets with the rest of the Tone section
+- Masks: a range mask that selects by the photo's own tone and colour — a two-thumb luminance window, a hue centre and range on a rainbow track, a minimum-saturation gate and feather, plus an eyedropper to pick the colour straight off the image. Like AI masks, range masks travel in presets and carry their own local adjustments
+- Help overlay: Develop lays out in two columns and its controls in three, and the overlay scrolls on short screens instead of clipping
+
 ## 0.7.0 - 2026-07-27
 
 - Remote connections: open a library hosted on another machine — turn on remote access where the photos live, pair a laptop with a token, and it browses and edits the library over the network (e.g. Tailscale) with nothing copied; exports, cache and watermark images all resolve on the host
