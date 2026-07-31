@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -53,6 +54,12 @@ func (j *Janitor) sweep() {
 	var total int64
 	filepath.WalkDir(j.Cache.Dir(), func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
+			return nil
+		}
+		// Never evict a half-written file: the writer would then fail its
+		// rename and the request would surface "render failed". They are
+		// transient and tiny, so leaving them out of the total is harmless.
+		if strings.HasSuffix(path, ".tmp") {
 			return nil
 		}
 		info, err := d.Info()

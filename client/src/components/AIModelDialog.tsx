@@ -41,6 +41,10 @@ export interface PendingAIDownload {
   // What confirmed consent should do: add a fresh mask ('add') or just
   // regenerate the maps an existing mask references ('restore').
   mode: 'add' | 'restore';
+  // Which mask the subject matte should become: the subject itself, or its
+  // inverse pre-loaded with the background-defocus recipe. Only meaningful
+  // for kind 'subject'.
+  variant?: 'subject' | 'background';
 }
 
 export function AIModelDialog({

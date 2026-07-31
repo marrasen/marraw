@@ -64,6 +64,19 @@ Non-destructive, stored as JSON in SQLite. Three stages, in order:
 `sharpen` and `texture` use fixed *output-pixel* radii, so a fit-to-screen
 preview is only indicative; the true result appears at 1:1 and on export.
 
+Local adjustment masks run between the look and the detail stage
+(`internal/pyramid/mask.go`). Their tone/colour sliders are point operations
+served by a per-row weight seam, but the **spatial effects** — blur, motion and
+zoom smears, light streaks, mosaic — gather neighbouring pixels, so they run as
+a separate earlier pass per mask (`internal/pyramid/maskfx.go`) that
+materializes the mask's weight plane and gathers *through* it: weight-normalized
+(`Σw·c / Σw`, so a masked-out subject cannot bleed into the blurred surround)
+and in linear light. That pass runs at a fixed `fxPlaneLongEdge` working
+resolution, so the 1024 draft, the 2048 settle, the 1:1 tiles and the export all
+compute the identical effect. `ApplyMasks` returns a detail-suppression plane
+that damps `ApplyDetail` where a mask deliberately destroyed detail — otherwise
+clarity re-etches a rim around a sharp subject against a defocused background.
+
 While a slider drags, the backend re-processes the photo's already-unpacked
 handle at half size (~400 ms warm on 42 MP files) and the loupe swaps in the
 new rendition flicker-free. Transient drags decode once to scene-linear and

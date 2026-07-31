@@ -137,6 +137,17 @@ smaller stuff.
 
 ## AI features
 
+- **Disc bokeh for the mask blur.** The mask FX defocus
+  (`internal/pyramid/maskfx.go`) is a 3-pass separable box, so out-of-focus
+  highlights render as soft blobs where a real lens renders discs. The light
+  streaks carry the look today; a true 2D disc gather (or the rotated-box
+  trick) would make the defocus itself convincing. Deliberately deferred — the
+  separable blur is O(px) per pass at any radius, a disc gather is not.
+- **Zoom/spin blur.** `MaskAdjust.ZoomBlur` is 0..1 (zoom only). Widening the
+  clamp to ±1 and flipping the tap offset's sign gives spin; back-compat safe
+  in both directions (old sidecars never hold a negative, old builds clamp one
+  away).
+
 - ~~**Downloaded-models management in Settings.**~~ Done 2026-07-14 (commit
   `528a6f0`): `System.GetModelsInfo`/`DeleteModel` (`internal/api/models.go`),
   `infer.Manager.InstalledModels`/`DeleteModel`, Settings → Models section in

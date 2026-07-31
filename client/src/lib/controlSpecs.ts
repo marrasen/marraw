@@ -286,6 +286,10 @@ export interface MaskControlSpec {
   max: number;
   step: number;
   bigStep: number;
+  // Display convention. Default is the ±1 slider shown as ±100; 'ev' shows
+  // the raw stops, 'deg' the raw degrees. MaskRow derives scale and format
+  // from this rather than special-casing each control.
+  unit?: 'ev' | 'deg';
 }
 
 // Panel order. Ranges mirror the server's Normalize clamps (edit.go).
@@ -294,9 +298,20 @@ export const MASK_CONTROL_ORDER: MaskControlId[] = [
   'temp', 'tint', 'saturation',
 ];
 
+// Spatial effects, rendered as their own collapsible sub-block: these gather
+// neighbouring pixels rather than remapping each one, so they read as a
+// different kind of control and would drown the tone sliders in one flat list.
+export const MASK_FX_ORDER: MaskControlId[] = [
+  'blur', 'motionBlur', 'zoomBlur', 'streaks', 'mosaic', 'fxAngle',
+];
+
+// Every mask slider in panel order — what the keyboard walk steps through.
+export const MASK_ALL_CONTROLS: MaskControlId[] = [...MASK_CONTROL_ORDER, ...MASK_FX_ORDER];
+
 const pm1 = { min: -1, max: 1, step: 0.02, bigStep: 0.1 };
+const fx01 = { min: 0, max: 1, step: 0.02, bigStep: 0.1 };
 export const MASK_CONTROL_SPECS: Record<MaskControlId, MaskControlSpec> = {
-  expEV: { label: 'Exposure', min: -4, max: 4, step: 0.05, bigStep: 0.25 },
+  expEV: { label: 'Exposure', min: -4, max: 4, step: 0.05, bigStep: 0.25, unit: 'ev' },
   contrast: { label: 'Contrast', ...pm1 },
   toneHighlights: { label: 'Highlights', ...pm1 },
   toneShadows: { label: 'Shadows', ...pm1 },
@@ -305,16 +320,33 @@ export const MASK_CONTROL_SPECS: Record<MaskControlId, MaskControlSpec> = {
   temp: { label: 'Temperature', ...pm1 },
   tint: { label: 'Tint', ...pm1 },
   saturation: { label: 'Saturation', ...pm1 },
+  blur: { label: 'Blur', ...fx01 },
+  motionBlur: { label: 'Motion blur', ...fx01 },
+  zoomBlur: { label: 'Zoom blur', ...fx01 },
+  streaks: { label: 'Light streaks', ...fx01 },
+  mosaic: { label: 'Mosaic', ...fx01 },
+  fxAngle: { label: 'Direction', min: 0, max: 180, step: 1, bigStep: 15, unit: 'deg' },
 };
 
 export const NEUTRAL_MASK_ADJUST: Required<MaskAdjust> = {
   expEV: 0, contrast: 0, toneHighlights: 0, toneShadows: 0,
   whites: 0, blacks: 0, temp: 0, tint: 0, saturation: 0,
+  blur: 0, motionBlur: 0, zoomBlur: 0, streaks: 0, mosaic: 0, fxAngle: 0,
 };
 
+// Must walk MASK_ALL_CONTROLS, not just the tone block: a blur-only mask is a
+// real edit and would otherwise report as neutral (no changed dot, and the
+// server would still render it — a mismatch the compiler can't catch).
 export function maskAdjustIsNeutral(a: MaskAdjust | undefined): boolean {
   if (!a) return true;
-  return MASK_CONTROL_ORDER.every((k) => (a[k] ?? 0) === 0);
+  return MASK_ALL_CONTROLS.every((k) => (a[k] ?? 0) === 0);
+}
+
+// maskHasFX mirrors the server's MaskAdjust.HasFX: fxAngle alone is inert (the
+// server zeroes it), so it never counts as an effect.
+export function maskHasFX(a: MaskAdjust | undefined): boolean {
+  if (!a) return false;
+  return MASK_FX_ORDER.some((k) => k !== 'fxAngle' && (a[k] ?? 0) !== 0);
 }
 
 export const MASK_TYPE_LABELS: Record<string, string> = {
@@ -360,6 +392,14 @@ export function aiMask(kind: 'subject' | 'depth', mapVer: string): Mask {
     return { type: 'ai', aiKind: kind, mapVer, ...DEPTH_WINDOW_DEFAULT, feather: 0.3, adjust: {} };
   }
   return { type: 'ai', aiKind: kind, mapVer, adjust: {} };
+}
+
+// backgroundMask is the one-click fake-bokeh recipe: the subject matte,
+// INVERTED so it selects everything the subject is not, pre-loaded with a
+// defocus and anamorphic streaks. Everything after is the photographer's to
+// tune — the same mask the Subject button makes, with the invert chip flipped.
+export function backgroundMask(mapVer: string): Mask {
+  return { type: 'ai', aiKind: 'subject', mapVer, invert: true, adjust: { blur: 0.45, streaks: 0.35 } };
 }
 
 export function aiClassMask(classId: number, mapVer: string): Mask {

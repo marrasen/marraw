@@ -180,7 +180,7 @@ func nested(a, b string) bool {
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r9"
+const renderVersion = "r10"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
@@ -457,9 +457,9 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		ApplyHeal(rgba, edits, fills)
 		ApplyLook(rgba, gamma, edits)
 		report(0.78)
-		ApplyMasks(rgba, edits, ai)
+		suppress := ApplyMasks(rgba, edits, ai)
 		report(0.82)
-		ApplyDetail(rgba, edits)
+		ApplyDetail(rgba, edits, suppress)
 		report(0.90)
 		if err := c.writeTiles(rgba, photo.CacheKey, editHash, func(done, total int) {
 			// The downscale chain after the tiles claims the last 2 %.
@@ -756,6 +756,9 @@ func (c *Cache) writeJPEG(img *image.RGBA, cacheKey, level, editHash string, qua
 	return writeJPEGFile(c.PathFor(cacheKey, level, editHash), img, quality)
 }
 
+// tmpSeq disambiguates concurrent writes of the same cache file.
+var tmpSeq atomic.Uint64
+
 func writeJPEGFile(path string, img image.Image, quality int) error {
 	if _, err := os.Stat(path); err == nil {
 		return nil
@@ -763,7 +766,13 @@ func writeJPEGFile(path string, img image.Image, quality int) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
+	// Unique per CALL, not per process: two workers can render the same
+	// (cacheKey, level, editHash) concurrently — the Stat above only
+	// short-circuits once one of them has finished — and a shared tmp name
+	// makes them clobber each other, so the loser's Rename fails with ENOENT
+	// and the request surfaces "render failed". Warm caches hide this; a
+	// renderVersion bump makes every path cold and it shows up immediately.
+	tmp := fmt.Sprintf("%s.%d.%d.tmp", path, os.Getpid(), tmpSeq.Add(1))
 	f, err := os.Create(tmp)
 	if err != nil {
 		return err

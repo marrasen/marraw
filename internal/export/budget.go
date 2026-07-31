@@ -6,9 +6,12 @@ const (
 	// plus LibRaw's transient C-side 4ch/16-bit intermediates (≈ 8–11 B/px).
 	// Measured ≈ 21–26 B/px on a 42 MP file; use the high end.
 	estBytesPerPixel = 26
-	// estJobFloor absorbs fixed overhead (LibRaw handle, encode slack) so
-	// tiny images don't get an unrealistically small estimate.
-	estJobFloor = 64 << 20 // 64 MiB
+	// estJobFloor absorbs fixed overhead (LibRaw handle, encode slack, and the
+	// mask-FX working buffers — capped at pyramid.fxPlaneLongEdge, so ~25 MB
+	// regardless of megapixels, which is why they belong here and not in
+	// estBytesPerPixel) so tiny images don't get an unrealistically small
+	// estimate.
+	estJobFloor = 128 << 20 // 128 MiB
 	// defaultJobPixels is assumed when a photo's dimensions are unknown
 	// (metadata not yet backfilled): a 62 MP full-frame body, conservative.
 	defaultJobPixels = 62_000_000

@@ -107,8 +107,8 @@ func MeanLuma(img *image.RGBA) float64 {
 func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fills FillSet) {
 	ApplyHeal(img, e, fills)
 	ApplyLook(img, gamma, e)
-	ApplyMasks(img, e, ai)
-	ApplyDetail(img, e)
+	suppress := ApplyMasks(img, e, ai)
+	ApplyDetail(img, e, suppress)
 }
 
 // ApplyLook warms up LibRaw's flat output to sit close to the camera's own

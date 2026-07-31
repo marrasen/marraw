@@ -33,8 +33,8 @@ func clonePix(img *image.RGBA) []uint8 {
 func TestApplyDetailNeutralNoOp(t *testing.T) {
 	img := gradientImage(64, 48)
 	before := clonePix(img)
-	ApplyDetail(img, nil)
-	ApplyDetail(img, &edit.Params{})
+	ApplyDetail(img, nil, nil)
+	ApplyDetail(img, &edit.Params{}, nil)
 	for i := range before {
 		if img.Pix[i] != before[i] {
 			t.Fatalf("neutral ApplyDetail changed pixel %d: %d -> %d", i, before[i], img.Pix[i])
@@ -55,7 +55,7 @@ func edgeContrast(img *image.RGBA) int {
 func TestApplyDetailSharpenIncreasesEdgeContrast(t *testing.T) {
 	base := gradientImage(64, 48)
 	sharp := gradientImage(64, 48)
-	ApplyDetail(sharp, &edit.Params{Sharpen: 1})
+	ApplyDetail(sharp, &edit.Params{Sharpen: 1}, nil)
 	if got, want := edgeContrast(sharp), edgeContrast(base); got <= want {
 		t.Fatalf("sharpen did not increase edge contrast: %d <= %d", got, want)
 	}
@@ -64,8 +64,8 @@ func TestApplyDetailSharpenIncreasesEdgeContrast(t *testing.T) {
 func TestApplyDetailClaritySigns(t *testing.T) {
 	pos := gradientImage(128, 96)
 	neg := gradientImage(128, 96)
-	ApplyDetail(pos, &edit.Params{Clarity: 1})
-	ApplyDetail(neg, &edit.Params{Clarity: -1})
+	ApplyDetail(pos, &edit.Params{Clarity: 1}, nil)
+	ApplyDetail(neg, &edit.Params{Clarity: -1}, nil)
 	if edgeContrast(pos) <= edgeContrast(neg) {
 		t.Fatalf("positive clarity (%d) should exceed negative clarity (%d) edge contrast",
 			edgeContrast(pos), edgeContrast(neg))
@@ -75,7 +75,7 @@ func TestApplyDetailClaritySigns(t *testing.T) {
 func TestApplyDetailTextureIncreasesEdgeContrast(t *testing.T) {
 	base := gradientImage(64, 48)
 	tex := gradientImage(64, 48)
-	ApplyDetail(tex, &edit.Params{Texture: 1})
+	ApplyDetail(tex, &edit.Params{Texture: 1}, nil)
 	if got, want := edgeContrast(tex), edgeContrast(base); got <= want {
 		t.Fatalf("texture did not increase edge contrast: %d <= %d", got, want)
 	}
@@ -93,12 +93,12 @@ func TestApplyDetailDehaze(t *testing.T) {
 		return img
 	}
 	pos := mk()
-	ApplyDetail(pos, &edit.Params{Dehaze: 1})
+	ApplyDetail(pos, &edit.Params{Dehaze: 1}, nil)
 	if got := pos.Pix[0]; got >= 80 {
 		t.Fatalf("positive dehaze did not darken the veil floor: %d >= 80", got)
 	}
 	neg := mk()
-	ApplyDetail(neg, &edit.Params{Dehaze: -1})
+	ApplyDetail(neg, &edit.Params{Dehaze: -1}, nil)
 	if got := neg.Pix[0]; got <= 80 {
 		t.Fatalf("negative dehaze did not lift toward the veil: %d <= 80", got)
 	}
@@ -120,7 +120,7 @@ func TestApplyDetailClarityProtectsExtremes(t *testing.T) {
 		}
 	}
 	before := clonePix(img)
-	ApplyDetail(img, &edit.Params{Clarity: 1})
+	ApplyDetail(img, &edit.Params{Clarity: 1}, nil)
 	y := 16
 	darkDelta := abs(int(img.Pix[img.PixOffset(44, y)]) - int(before[img.PixOffset(44, y)]))
 	midDelta := abs(int(img.Pix[img.PixOffset(52, y)]) - int(before[img.PixOffset(52, y)]))

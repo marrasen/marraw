@@ -201,6 +201,91 @@ if (shot === 'cull') {
     tabAfterDevelop,
     escCleared: es.getState().activeMask == null && es.getState().activeMaskControl == null,
   };
+} else if (shot === 'maskfx') {
+  // Mask FX: the one-click Background button — an inverted subject matte
+  // pre-loaded with a defocus and light streaks. The probe is the visual
+  // proof of the whole feature: the corner (background) must change and the
+  // centre (subject) must not.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  ui().setDevelopTab('masks');
+  await sleep(600);
+  const pixelsAt = async (blob) => {
+    const bmp = await createImageBitmap(blob, { resizeWidth: 64 });
+    const c = document.createElement('canvas');
+    c.width = bmp.width;
+    c.height = bmp.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bmp, 0, 0);
+    const d = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const px = (fx, fy) => {
+      const i = (Math.floor(fy * (bmp.height - 1)) * bmp.width + Math.floor(fx * (bmp.width - 1))) * 4;
+      return [d[i], d[i + 1], d[i + 2]];
+    };
+    // Local variation around a point: how much detail is left there. A
+    // defocus flattens it; the sharp subject keeps it.
+    const detail = (fx, fy, r = 3) => {
+      const cx = Math.floor(fx * (bmp.width - 1));
+      const cy = Math.floor(fy * (bmp.height - 1));
+      let sum = 0;
+      let n = 0;
+      for (let y = Math.max(1, cy - r); y <= Math.min(bmp.height - 1, cy + r); y++) {
+        for (let x = Math.max(1, cx - r); x <= Math.min(bmp.width - 1, cx + r); x++) {
+          const i = (y * bmp.width + x) * 4;
+          sum += Math.abs(d[i] - d[i - 4]);
+          n++;
+        }
+      }
+      return n ? sum / n : 0;
+    };
+    return {
+      centre: px(0.5, 0.5),
+      corner: px(0.06, 0.06),
+      centreDetail: detail(0.5, 0.5),
+      cornerDetail: detail(0.06, 0.06),
+    };
+  };
+  // Idempotence: a previous run's masks persisted to the fixture photo. The
+  // commit also lands the sharp settle, so before/after is settle-to-settle.
+  mw.esUpdate({ masks: [] });
+  mw.esCommit();
+  await until(() => es.getState().preview?.blob && mw.esPreviewSettled(), 30000);
+  const before = await pixelsAt(es.getState().preview.blob);
+
+  document.querySelector('[data-testid="ai-mask-background"]')?.click();
+  // Generation runs a local model (seconds warm) and adds the mask on success.
+  await until(
+    () => (es.getState().draft?.masks ?? []).some((m) => m.type === 'ai' && m.invert && m.adjust?.blur),
+    120000,
+  );
+  await until(() => mw.esPreviewSettled(), 60000);
+  const after = await pixelsAt(es.getState().preview.blob);
+
+  // Select the mask and open the Effects sub-block so the screenshot shows
+  // the new sliders.
+  mw.esSetActiveMask((es.getState().draft.masks?.length ?? 1) - 1);
+  await sleep(300);
+  const fxToggle = document.querySelector('[data-testid="mask-fx-toggle"]');
+  if (fxToggle?.getAttribute('aria-expanded') === 'false') fxToggle.click();
+  await sleep(300);
+
+  const mask = es.getState().draft.masks.at(-1);
+  window.__maskProbe = {
+    fx: true,
+    invert: !!mask.invert,
+    blur: mask.adjust?.blur ?? 0,
+    streaks: mask.adjust?.streaks ?? 0,
+    cornerDetailBefore: Math.round(before.cornerDetail * 10) / 10,
+    cornerDetailAfter: Math.round(after.cornerDetail * 10) / 10,
+    centreDetailBefore: Math.round(before.centreDetail * 10) / 10,
+    centreDetailAfter: Math.round(after.centreDetail * 10) / 10,
+    // The background lost detail…
+    cornerSoftened: after.cornerDetail < before.cornerDetail * 0.8,
+    // …and the subject kept its pixels.
+    centreUnchanged: before.centre.every((v, i) => Math.abs(v - after.centre[i]) <= 4),
+    fxRowsShown: document.querySelectorAll('[data-testid="mask-fx-toggle"]').length,
+  };
 } else if (shot === 'aitint') {
   // AI mask hover tint: generate an AI mask via the real button (subject by
   // default; ?shotAI=depth|scene picks another kind), hover its row header,

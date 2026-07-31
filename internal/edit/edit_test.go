@@ -302,6 +302,88 @@ func TestNormalizePersonMask(t *testing.T) {
 	}
 }
 
+// TestMaskFXFields covers the spatial-FX half of MaskAdjust: the clamps, the
+// inert-angle rule, and the two gates the render stage keys off.
+func TestMaskFXFields(t *testing.T) {
+	e := &Params{Masks: []Mask{{
+		Type: MaskRadial, CX: 0.5, CY: 0.5, RX: 0.3, RY: 0.3,
+		Adjust: MaskAdjust{Blur: 3, MotionBlur: -1, ZoomBlur: 0.5, Streaks: 9, Mosaic: -0.2, FXAngle: 200},
+	}}}
+	e.Normalize()
+	a := e.Masks[0].Adjust
+	if a.Blur != 1 || a.MotionBlur != 0 || a.ZoomBlur != 0.5 || a.Streaks != 1 || a.Mosaic != 0 {
+		t.Errorf("FX amounts not clamped to 0..1: %+v", a)
+	}
+	// Streaks is live, so the angle survives — wrapped into 0..180.
+	if a.FXAngle != 20 {
+		t.Errorf("FXAngle = %v, want 20 (200 mod 180)", a.FXAngle)
+	}
+
+	// An FX-only mask is a real edit, and an FX-free one is still tone-only.
+	if (&MaskAdjust{Blur: 0.5}).IsNeutral() {
+		t.Error("a blur-only adjustment must not be neutral")
+	}
+	if (&MaskAdjust{Blur: 0.5}).HasTone() {
+		t.Error("a blur-only adjustment has no tone")
+	}
+	if !(&MaskAdjust{ExpEV: 1}).HasTone() || (&MaskAdjust{ExpEV: 1}).HasFX() {
+		t.Error("an exposure-only adjustment is tone, not FX")
+	}
+	for _, a := range []MaskAdjust{{Blur: 1}, {MotionBlur: 1}, {ZoomBlur: 1}, {Streaks: 1}, {Mosaic: 1}} {
+		if !a.HasFX() {
+			t.Errorf("%+v must report HasFX", a)
+		}
+	}
+}
+
+// TestMaskFXInertAngle: an angle nothing reads must not fork the hash, or a
+// stray drag on the direction slider would invalidate every cached rendition
+// and make a neutral mask look adjusted.
+func TestMaskFXInertAngle(t *testing.T) {
+	with := func(a MaskAdjust) *Params {
+		m := radialMask()
+		m.Adjust = a
+		return &Params{Masks: []Mask{m}}
+	}
+	plain := with(MaskAdjust{})
+	angled := with(MaskAdjust{FXAngle: 90})
+	if plain.Hash() != angled.Hash() {
+		t.Error("an inert FXAngle must not change the hash")
+	}
+	if !angled.IsNeutral() != !plain.IsNeutral() {
+		t.Error("an inert FXAngle must not change neutrality")
+	}
+	// With a smear live, the angle is load-bearing and must hash.
+	if with(MaskAdjust{Streaks: 0.5}).Hash() == with(MaskAdjust{Streaks: 0.5, FXAngle: 90}).Hash() {
+		t.Error("a live FXAngle must change the hash")
+	}
+
+	// FX rides inside MaskAdjust, so the decode-subset hashes stay mask-blind:
+	// dragging Blur must never force a re-demosaic.
+	base := &Params{Contrast: 0.5, Masks: []Mask{radialMask()}}
+	fx := &Params{Contrast: 0.5, Masks: []Mask{radialMask()}}
+	fx.Masks[0].Adjust.Blur = 0.6
+	if base.LibrawInputsHash() != fx.LibrawInputsHash() {
+		t.Error("LibrawInputsHash must ignore mask FX")
+	}
+	if base.LinearInputsHash() != fx.LinearInputsHash() {
+		t.Error("LinearInputsHash must ignore mask FX")
+	}
+}
+
+// TestMaskFXJSONBackCompat: the FX fields are appended and omitempty, so a
+// pre-FX edit still serializes byte-for-byte as it always did.
+func TestMaskFXJSONBackCompat(t *testing.T) {
+	e := &Params{Masks: []Mask{radialMask()}}
+	e.Normalize()
+	b, _ := json.Marshal(e)
+	for _, k := range []string{"blur", "motionBlur", "zoomBlur", "streaks", "mosaic", "fxAngle"} {
+		if bytes.Contains(b, []byte(`"`+k+`"`)) {
+			t.Errorf("unset %s must be omitted, got %s", k, b)
+		}
+	}
+}
+
 func TestMaskHashing(t *testing.T) {
 	base := &Params{Masks: []Mask{radialMask()}}
 	moved := &Params{Masks: []Mask{radialMask()}}

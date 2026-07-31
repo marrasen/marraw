@@ -17,7 +17,13 @@ import (
 // the true result and the fit preview an indication, like every raw editor),
 // while clarity's radius scales with the rendition so its midtone
 // local-contrast look is resolution-independent.
-func ApplyDetail(img *image.RGBA, e *edit.Params) {
+//
+// suppress is ApplyMasks' detail-suppression plane (nil for every edit without
+// a defocusing mask FX, which is the historical behaviour): 0..255 per pixel of
+// how strongly to damp the local-contrast ops there. Without it, clarity's
+// large-radius unsharp mask straddling a sharp subject against a deliberately
+// blurred background prints a bright rim around the subject.
+func ApplyDetail(img *image.RGBA, e *edit.Params, suppress []uint8) {
 	if e == nil || (e.Dehaze == 0 && e.Clarity == 0 && e.Texture == 0 && e.Sharpen == 0) {
 		return
 	}
@@ -72,6 +78,11 @@ func ApplyDetail(img *image.RGBA, e *edit.Params) {
 				// fades at the ends, protecting shadows and highlights.
 				m := 4 * l * (255 - l) / 255
 				d += clarQ * (l - int32(clarB[j])) * m / 255
+			}
+			if d != 0 && suppress != nil {
+				if s := int32(suppress[j]); s != 0 {
+					d = d * (255 - s) / 255
+				}
 			}
 			if d == 0 {
 				continue
@@ -160,6 +171,90 @@ func boxBlurV(src, dst []uint8, w, h, r int) {
 			sums[x] += int32(add[x]) - int32(sub[x])
 		}
 	}
+}
+
+// boxBlurPlaneU16 is boxBlurPlane for 16-bit planes — the premultiplied
+// linear-light planes the mask FX gathers through. Same separable running-sum
+// structure, on int64 sums: a 65535-valued plane over a wide window overflows
+// int32. Two differences from the u8 original, both because this one runs on
+// four planes at once inside an interactive frame: the window division is a
+// fixed-point reciprocal multiply (a variable int64 divide in the innermost
+// loop dominated everything else), and each axis is banded across cores. The
+// buffers ping-pong, so a three-pass blur allocates twice, not six times.
+func boxBlurPlaneU16(src []uint16, w, h, r, passes int) []uint16 {
+	out := make([]uint16, w*h)
+	if r < 1 || passes < 1 || w == 0 || h == 0 {
+		copy(out, src)
+		return out
+	}
+	tmp := make([]uint16, w*h)
+	in := src
+	for range passes {
+		// H reads in and writes tmp, V reads tmp and writes out, so aliasing
+		// in == out on the passes after the first is safe.
+		boxBlurHU16(in, tmp, w, h, r)
+		boxBlurVU16(tmp, out, w, h, r)
+		in = out
+	}
+	return out
+}
+
+// boxNormU16 is the 32-bit fixed-point reciprocal of a window width, plus the
+// rounding bias, so `(sum*inv + bias) >> 32` equals `(sum + n/2) / n`.
+func boxNormU16(n int64) (inv, bias int64) {
+	inv = (int64(1)<<32 + n - 1) / n
+	return inv, int64(1) << 31
+}
+
+func boxBlurHU16(src, dst []uint16, w, h, r int) {
+	if r >= w {
+		r = w - 1
+	}
+	inv, bias := boxNormU16(int64(2*r + 1))
+	fxBands(h, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			row := src[y*w : y*w+w]
+			out := dst[y*w : y*w+w]
+			var sum int64
+			for x := -r; x <= r; x++ {
+				sum += int64(row[clampInt(x, 0, w-1)])
+			}
+			for x := range w {
+				out[x] = uint16((sum*inv + bias) >> 32)
+				sum += int64(row[min(x+r+1, w-1)]) - int64(row[max(x-r, 0)])
+			}
+		}
+	})
+}
+
+func boxBlurVU16(src, dst []uint16, w, h, r int) {
+	if r >= h {
+		r = h - 1
+	}
+	inv, bias := boxNormU16(int64(2*r + 1))
+	// Banded by COLUMN strips: the running sum walks down the image, so the
+	// rows cannot be split, but the columns are independent.
+	fxBands(w, func(x0, x1 int) {
+		n := x1 - x0
+		sums := make([]int64, n)
+		for y := -r; y <= r; y++ {
+			row := src[clampInt(y, 0, h-1)*w+x0:]
+			for x := range n {
+				sums[x] += int64(row[x])
+			}
+		}
+		for y := range h {
+			out := dst[y*w+x0 : y*w+x1]
+			for x := range n {
+				out[x] = uint16((sums[x]*inv + bias) >> 32)
+			}
+			add := src[min(y+r+1, h-1)*w+x0:]
+			sub := src[max(y-r, 0)*w+x0:]
+			for x := range n {
+				sums[x] += int64(add[x]) - int64(sub[x])
+			}
+		}
+	})
 }
 
 // applyDehaze estimates the atmospheric veil as a low percentile of the

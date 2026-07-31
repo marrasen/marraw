@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw,
   Image as ImageIcon, Plus, Trash2, Paintbrush, Circle, Eraser,
-  Eye, EyeOff, Focus, Layers, Loader2, Shapes, ScanSearch, Users, Check, Blend,
+  Eye, EyeOff, Focus, Layers, Loader2, Shapes, ScanSearch, Users, Check, Blend, Aperture,
 } from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
@@ -29,10 +29,13 @@ import {
   RANGE_HUE_DEFAULT,
   MASK_CONTROL_ORDER,
   MASK_CONTROL_SPECS,
+  MASK_FX_ORDER,
   aiClassMask,
   aiMask,
   aiPersonMask,
+  backgroundMask,
   maskAdjustIsNeutral,
+  maskHasFX,
   maskLabel,
   type MaskControlId,
 } from '@/lib/controlSpecs';
@@ -1307,7 +1310,12 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   // runAI generates the map (downloading only with explicit consent) and
   // applies the mode: add a fresh mask / show scene chips, or — for a
   // restore — nudge a preview re-render so the now-live mask shows.
-  const runAI = async (kind: AIKindType, allowDownload: boolean, mode: 'add' | 'restore') => {
+  const runAI = async (
+    kind: AIKindType,
+    allowDownload: boolean,
+    mode: 'add' | 'restore',
+    variant: 'subject' | 'background' = 'subject',
+  ) => {
     if (photoId == null) return;
     setGenerating(kind);
     try {
@@ -1338,7 +1346,12 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
         }
       } else {
         setMode('develop');
-        esAddMaskObject(client, aiMask(kind as 'subject' | 'depth', res.mapVer));
+        esAddMaskObject(
+          client,
+          kind === 'subject' && variant === 'background'
+            ? backgroundMask(res.mapVer)
+            : aiMask(kind as 'subject' | 'depth', res.mapVer),
+        );
       }
     } catch (err) {
       toast.error(`AI mask failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1348,19 +1361,22 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   };
 
   // Button path: ask for consent first when the model isn't on disk yet.
-  const addAI = async (kind: 'subject' | 'depth' | 'class' | 'person') => {
+  const addAI = async (
+    kind: 'subject' | 'depth' | 'class' | 'person',
+    variant: 'subject' | 'background' = 'subject',
+  ) => {
     if (photoId == null || generating) return;
     try {
       const status = await aiModelStatus(client, kind);
       if (!status.downloaded) {
-        setPendingAI({ kind, bytes: status.bytes, mode: 'add' });
+        setPendingAI({ kind, bytes: status.bytes, mode: 'add', variant });
         return;
       }
     } catch (err) {
       toast.error(`AI mask failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
-    void runAI(kind, false, 'add');
+    void runAI(kind, false, 'add', variant);
   };
 
   // Restore maps for AI masks that arrived without local map files (sidecar
@@ -1418,11 +1434,14 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
           Range
         </Button>
       </div>
-      <div className="flex gap-1.5" role="group" aria-label="Add AI mask">
+      {/* Five buttons no longer fit one line at the drawer's width, so this
+          row wraps; basis-[30%] keeps it to three per line rather than
+          letting one long label strand the others. */}
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Add AI mask">
         <Button
           size="sm"
           variant="outline"
-          className="flex-1"
+          className="flex-1 basis-[30%]"
           title="Detect the subject and mask it (runs a local model)"
           disabled={generating != null}
           onClick={() => addAI('subject')}
@@ -1434,7 +1453,19 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
         <Button
           size="sm"
           variant="outline"
-          className="flex-1"
+          className="flex-1 basis-[30%]"
+          title="Mask everything except the subject and defocus it with light streaks (runs a local model)"
+          disabled={generating != null}
+          onClick={() => addAI('subject', 'background')}
+          data-testid="ai-mask-background"
+        >
+          {generating === 'subject' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Aperture data-icon="inline-start" />}
+          Background
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1 basis-[30%]"
           title="Estimate depth and mask a distance range (runs a local model)"
           disabled={generating != null}
           onClick={() => addAI('depth')}
@@ -1446,7 +1477,7 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
         <Button
           size="sm"
           variant="outline"
-          className={cn('flex-1', aiPickArmed === 'class' && 'border-primary/60 text-foreground')}
+          className={cn('flex-1 basis-[30%]', aiPickArmed === 'class' && 'border-primary/60 text-foreground')}
           title="Detect scene regions (sky, foliage, architecture, …) — hover the photo or a chip to pick one to mask (runs a local model)"
           disabled={generating != null}
           aria-pressed={aiPickArmed === 'class'}
@@ -1466,7 +1497,7 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
         <Button
           size="sm"
           variant="outline"
-          className={cn('flex-1', aiPickArmed === 'person' && 'border-primary/60 text-foreground')}
+          className={cn('flex-1 basis-[30%]', aiPickArmed === 'person' && 'border-primary/60 text-foreground')}
           title="Separate individual people — hover the photo or a chip to pick one to mask (runs a local model)"
           disabled={generating != null}
           aria-pressed={aiPickArmed === 'person'}
@@ -1559,7 +1590,7 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
         onConfirm={(p) => {
           setPendingAI(null);
           // This section's pending is always an AI-mask kind, never 'fill'.
-          if (p.kind !== 'fill') void runAI(p.kind, true, p.mode);
+          if (p.kind !== 'fill') void runAI(p.kind, true, p.mode, p.variant);
         }}
         onCancel={() => setPendingAI(null)}
       />
@@ -1583,9 +1614,54 @@ function MaskRow({
   const activeMaskControl = useEditSession((s) => s.activeMaskControl);
   const adjust = mask.adjust ?? {};
   const changed = !maskAdjustIsNeutral(adjust);
+  const fxChanged = maskHasFX(adjust);
+  // Collapse state is pure UI, not photo state, so it stays local — the
+  // BrushToolRow precedent. Opens on its own when the mask already carries an
+  // effect (a preset, a pasted look, the Background button).
+  const [fxExpanded, setFxExpanded] = useState(fxChanged);
+  // Also forced open while the keyboard walk is inside the group, so ↑/↓ can
+  // never park the focus ring on a slider hidden behind a collapsed header.
+  const fxOpen =
+    fxExpanded || (selected && activeMaskControl != null && MASK_FX_ORDER.includes(activeMaskControl));
   const patchAdjust = (key: MaskControlId, v: number): { adjust: MaskAdjust } => ({
     adjust: { ...adjust, [key]: v },
   });
+  // One slider, with the display convention taken from the spec's unit rather
+  // than from a chain of per-control special cases.
+  const maskSlider = (key: MaskControlId) => {
+    const spec = MASK_CONTROL_SPECS[key];
+    const raw = adjust[key] ?? 0;
+    const scale = spec.unit ? 1 : 100;
+    const display =
+      spec.unit === 'ev' ? `${raw >= 0 ? '+' : ''}${raw.toFixed(2)} EV`
+      : spec.unit === 'deg' ? `${Math.round(raw)}°`
+      : pct(raw);
+    const set = (v: number) => patchAdjust(key, v / scale);
+    return (
+      <EditSlider
+        key={key}
+        label={spec.label}
+        value={raw * scale}
+        display={display}
+        min={spec.min * scale}
+        max={spec.max * scale}
+        step={spec.step * scale}
+        neutral={0}
+        gradient={key === 'temp' ? TEMP_GRADIENT : key === 'tint' ? TINT_GRADIENT : undefined}
+        active={selected && activeMaskControl === key}
+        onFocusControl={() => esSetActiveMaskControl(index, key)}
+        onChange={(v) => esUpdateMask(client, index, set(v))}
+        onCommit={(v) => {
+          esUpdateMask(client, index, set(v));
+          esCommit(client);
+        }}
+        onClear={() => {
+          esUpdateMask(client, index, patchAdjust(key, 0));
+          esCommit(client);
+        }}
+      />
+    );
+  };
   return (
     <div className={cn('flex flex-col rounded-md border', selected ? 'border-primary/45' : 'border-border')}>
       {/* Hovering the row header shows this mask's red weight tint on the
@@ -1648,35 +1724,28 @@ function MaskRow({
           {mask.type === 'brush' && <BrushToolRow client={client} mask={mask} index={index} />}
           {mask.type === 'ai' && <AIShapeRows client={client} mask={mask} index={index} />}
           {mask.type === 'range' && <RangeShapeRows client={client} mask={mask} index={index} />}
-          {MASK_CONTROL_ORDER.map((key) => {
-            const spec = MASK_CONTROL_SPECS[key];
-            const raw = adjust[key] ?? 0;
-            const isEV = key === 'expEV';
-            return (
-              <EditSlider
-                key={key}
-                label={spec.label}
-                value={isEV ? raw : raw * 100}
-                display={isEV ? `${raw >= 0 ? '+' : ''}${raw.toFixed(2)} EV` : pct(raw)}
-                min={isEV ? spec.min : spec.min * 100}
-                max={isEV ? spec.max : spec.max * 100}
-                step={isEV ? spec.step : spec.step * 100}
-                neutral={0}
-                gradient={key === 'temp' ? TEMP_GRADIENT : key === 'tint' ? TINT_GRADIENT : undefined}
-                active={selected && activeMaskControl === key}
-                onFocusControl={() => esSetActiveMaskControl(index, key)}
-                onChange={(v) => esUpdateMask(client, index, patchAdjust(key, isEV ? v : v / 100))}
-                onCommit={(v) => {
-                  esUpdateMask(client, index, patchAdjust(key, isEV ? v : v / 100));
-                  esCommit(client);
-                }}
-                onClear={() => {
-                  esUpdateMask(client, index, patchAdjust(key, 0));
-                  esCommit(client);
-                }}
-              />
-            );
-          })}
+          {MASK_CONTROL_ORDER.map(maskSlider)}
+          {/* Effects: spatial, so they behave unlike everything above —
+              collapsed by default to keep the tone block readable. */}
+          <div className="mt-0.5 flex flex-col gap-[7px] border-t border-border/60 pt-1.5">
+            <button
+              type="button"
+              className="flex items-center gap-1.5 text-left text-[10px] font-semibold tracking-[.05em] text-faint uppercase hover:text-foreground"
+              aria-expanded={fxOpen}
+              data-testid="mask-fx-toggle"
+              onClick={() => setFxExpanded(!fxOpen)}
+            >
+              <ChevronRight className={cn('size-3 transition-transform', fxOpen && 'rotate-90')} />
+              Effects
+              {fxChanged && <span className="size-[5px] shrink-0 rounded-full bg-primary" title="Has effects" />}
+            </button>
+            {fxOpen &&
+              MASK_FX_ORDER.map((key) =>
+                // The direction only steers the two smears; the server zeroes
+                // it when neither is live, so hiding it matches what it does.
+                key === 'fxAngle' && !(adjust.motionBlur || adjust.streaks) ? null : maskSlider(key),
+              )}
+          </div>
         </div>
       )}
     </div>

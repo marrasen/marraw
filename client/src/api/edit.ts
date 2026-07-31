@@ -75,6 +75,12 @@ export interface MaskAdjust {
     temp?: number;
     tint?: number;
     saturation?: number;
+    blur?: number;
+    motionBlur?: number;
+    zoomBlur?: number;
+    streaks?: number;
+    mosaic?: number;
+    fxAngle?: number;
 }
 
 export interface Params {

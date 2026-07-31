@@ -179,6 +179,10 @@ func (g *guidedEval) weightRow(y int, wrow []uint16) (int, int) {
 	return x0, x1
 }
 
+// centroid delegates to the coverage plane the refinement wraps: the guided
+// filter snaps the mask's edge to the image's, which moves no meaningful mass.
+func (g *guidedEval) centroid() (float64, float64, bool) { return g.base.centroid() }
+
 // boxBlurF32 returns a box-averaged copy (edge-clamped running sums per
 // axis), the float sibling of boxBlurU8.
 func boxBlurF32(p []float32, w, h, radius int) []float32 {

@@ -33,7 +33,7 @@ import { nextSeq } from '@/lib/undoSeq';
 import {
   CONTROL_ORDER,
   CONTROL_SPECS,
-  MASK_CONTROL_ORDER,
+  MASK_ALL_CONTROLS,
   MASK_CONTROL_SPECS,
   MASK_TYPE_LABELS,
   NEUTRAL,
@@ -873,22 +873,37 @@ export function esMoveMaskActive(dir: 1 | -1) {
   const s = useEditSession.getState();
   const masks = s.draft?.masks;
   if (!masks || masks.length === 0) return;
-  const per = MASK_CONTROL_ORDER.length;
-  const total = masks.length * per;
+  // Built per mask rather than by modular arithmetic over a fixed stride,
+  // because the effect direction is only rendered when a smear is live — the
+  // walk must skip it, or ↑/↓ would park the focus ring on a control that
+  // isn't on screen.
+  const steps: { mask: number; control: MaskControlId }[] = [];
+  const edges: number[] = []; // index of each mask's first step
+  masks.forEach((m, mi) => {
+    edges.push(steps.length);
+    for (const control of MASK_ALL_CONTROLS) {
+      if (control === 'fxAngle' && !(m.adjust?.motionBlur || m.adjust?.streaks)) continue;
+      steps.push({ mask: mi, control });
+    }
+  });
+  if (steps.length === 0) return;
   let i: number;
   if (s.activeMask != null && s.activeMaskControl != null) {
-    i = s.activeMask * per + MASK_CONTROL_ORDER.indexOf(s.activeMaskControl);
+    i = steps.findIndex((st) => st.mask === s.activeMask && st.control === s.activeMaskControl);
+    if (i < 0) i = dir > 0 ? -1 : steps.length; // the focused control just went away
   } else if (s.activeMask != null) {
     // A selected mask without a focused slider: enter at its near edge.
-    i = s.activeMask * per + (dir > 0 ? -1 : per);
+    const first = edges[s.activeMask] ?? 0;
+    const last = (edges[s.activeMask + 1] ?? steps.length) - 1;
+    i = dir > 0 ? first - 1 : last + 1;
   } else {
-    i = dir > 0 ? -1 : total;
+    i = dir > 0 ? -1 : steps.length;
   }
   i += dir;
-  if (i < 0 || i >= total) return;
+  if (i < 0 || i >= steps.length) return;
   setState({
-    activeMask: Math.floor(i / per),
-    activeMaskControl: MASK_CONTROL_ORDER[i % per],
+    activeMask: steps[i].mask,
+    activeMaskControl: steps[i].control,
     maskPaint: false,
     keyAdjust: false,
   });

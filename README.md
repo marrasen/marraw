@@ -196,9 +196,12 @@ are the controls you chose to keep at hand.</sup>
   two-thumb near/far range) and Scene selections, with mask edges refined
   automatically at high zoom and a mask row's region tinted on hover. Each
   mask carries its own exposure, contrast, highlights/shadows, whites/blacks,
-  temperature, tint and saturation. Masks are anchored to image content, so
-  they survive recrops and re-straightens, and render identically in
-  previews, 1:1 tiles and exports.
+  temperature, tint and saturation, plus an **Effects** group: blur, motion
+  blur, zoom blur, anamorphic light streaks and mosaic. A **Background**
+  button is the one-click version — it detects the subject, inverts the mask
+  and defocuses everything else with light streaks. Masks are anchored to
+  image content, so they survive recrops and re-straightens, and render
+  identically in previews, 1:1 tiles and exports.
 - **Tone** — exposure (±5 EV), preserve highlights, brightness, gamma, shadow
   slope, contrast, whites, blacks, shadows, highlights.
 - **Curve** — a point **tone curve** on its own tab, with RGB / R / G / B

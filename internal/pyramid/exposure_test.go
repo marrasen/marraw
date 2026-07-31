@@ -41,7 +41,7 @@ func TestRenderPreviewExposureDelta(t *testing.T) {
 	// expDeltaEV 0 is a no-op: identical to leaving the fold out entirely.
 	noFold := flatGray(64, 48, 128)
 	ApplyLook(noFold, 0.72, e)
-	ApplyDetail(noFold, e)
+	ApplyDetail(noFold, e, nil)
 	if got := meanLuma(RenderPreview(src, 64, 0.72, e, 0, nil, nil, nil)); math.Abs(got-meanLuma(noFold)) > 0.5 {
 		t.Errorf("delta 0 render %.2f differs from unfolded %.2f", got, meanLuma(noFold))
 	}

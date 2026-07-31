@@ -24,14 +24,32 @@ import (
 // analytically for the parametric masks — no weight plane, so a full-res
 // export allocates nothing extra — and by sampling a fixed-resolution
 // coverage plane for brush masks.
-func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) {
+//
+// A mask may also carry spatial FX (defocus, mosaic, motion/zoom smears,
+// streaks). Those cannot ride the per-row weight seam — they gather
+// neighbouring pixels — so they run as a separate earlier pass per mask
+// (applyMaskFX) and the tone LUTs then act on the result: "blur the background
+// AND push it −1 EV" darkens exactly the pixels it blurred. A mask without FX
+// never enters that pass, so FX-free renders stay byte-identical.
+//
+// The returned plane is the detail suppression ApplyDetail must honour, or nil
+// when no mask defocused anything: clarity's large-radius unsharp mask would
+// otherwise re-amplify a deliberately blurred background into a bright rim
+// around the sharp subject.
+//
+// Two ordering notes. A range mask still selects against the pre-mask snapshot
+// below, so an earlier mask's blur cannot change WHICH pixels it picks, only
+// what its own FX then operate on. An AI mask's guided refinement does read
+// the live image, so an earlier heavy blur degrades a later AI mask's edge
+// snapping — rare enough in practice to document rather than work around.
+func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) []uint8 {
 	if !e.HasMasks() {
-		return
+		return nil
 	}
 	bnd := img.Bounds()
 	w, h := bnd.Dx(), bnd.Dy()
 	if w == 0 || h == 0 {
-		return
+		return nil
 	}
 	f := newMaskFrame(w, h, e)
 	// Range masks select by the developed pixel's own value. Masks apply in
@@ -49,6 +67,7 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) {
 		}
 	}
 	var wrow []uint16
+	var suppress []uint8
 	for mi := range e.Masks {
 		m := &e.Masks[mi]
 		if m.Disabled || m.Adjust.IsNeutral() {
@@ -63,6 +82,24 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) {
 		ev := newMaskEvaluator(m, f, ai, src)
 		if ev == nil {
 			continue
+		}
+		if m.Adjust.HasFX() {
+			if wp := applyMaskFX(img, ev, f, m); wp != nil {
+				if st := fxDetailSuppression(&m.Adjust); st > 0 {
+					if suppress == nil {
+						suppress = make([]uint8, w*h)
+					}
+					k := int32(math.Round(st * 255))
+					for i, v := range wp {
+						if s := uint8(int32(v) * k / 255); s > suppress[i] {
+							suppress[i] = s
+						}
+					}
+				}
+			}
+		}
+		if !m.Adjust.HasTone() {
+			continue // FX-only mask: the LUTs would be the identity
 		}
 		if wrow == nil {
 			wrow = make([]uint16, w)
@@ -99,6 +136,7 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) {
 			}
 		}
 	}
+	return suppress
 }
 
 // MaskWeightPlane rasterizes one mask's weight into an outW×outH byte plane
@@ -108,27 +146,54 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) {
 // render at outW×outH, needed only by range masks (which select on pixel
 // values); pass nil for the parametric/AI hover-tint callers.
 func MaskWeightPlane(outW, outH int, e *edit.Params, index int, ai AIMapSet, img *image.RGBA) []uint8 {
-	plane := make([]uint8, outW*outH)
 	if e == nil || index < 0 || index >= len(e.Masks) || outW <= 0 || outH <= 0 {
-		return plane
+		return make([]uint8, max(0, outW*outH))
 	}
 	f := newMaskFrame(outW, outH, e)
 	ev := newMaskEvaluator(&e.Masks[index], f, ai, img)
 	if ev == nil {
-		return plane
+		return make([]uint8, outW*outH)
 	}
-	wrow := make([]uint16, outW)
-	for y := 0; y < outH; y++ {
+	plane, _ := weightPlaneFrom(ev, outW, outH)
+	return plane
+}
+
+// weightPlaneFrom rasterizes an already-built evaluator into a w×h byte plane
+// (255 = full weight) and returns the bounding box of the non-zero weights.
+// The develop overlay's hover tint and the spatial-FX gather share this one
+// rasterizer, so the red tint a photographer hovers is provably the same
+// weight the blur gathers with.
+func weightPlaneFrom(ev maskEvaluator, w, h int) ([]uint8, image.Rectangle) {
+	plane := make([]uint8, w*h)
+	wrow := make([]uint16, w)
+	minX, minY, maxX, maxY := w, 0, -1, -1
+	for y := range h {
 		for i := range wrow {
 			wrow[i] = 0
 		}
 		x0, x1 := ev.weightRow(y, wrow)
-		row := plane[y*outW:]
-		for x := x0; x < x1 && x < outW; x++ {
+		row := plane[y*w : (y+1)*w]
+		for x := max(0, x0); x < x1 && x < w; x++ {
+			if wrow[x] == 0 {
+				continue
+			}
 			row[x] = uint8(min(255, int(wrow[x])*255/256))
+			if x < minX {
+				minX = x
+			}
+			if x > maxX {
+				maxX = x
+			}
+			if maxY < 0 {
+				minY = y
+			}
+			maxY = y
 		}
 	}
-	return plane
+	if maxX < 0 {
+		return plane, image.Rectangle{}
+	}
+	return plane, image.Rect(minX, minY, maxX+1, maxY+1)
 }
 
 // maskFrame maps output-buffer pixels back onto the oriented frame — the
@@ -741,6 +806,36 @@ func (ev *brushEval) weightRow(y int, w []uint16) (int, int) {
 		return 0, width
 	}
 	return x0, x1
+}
+
+// centroid returns the coverage plane's centre of mass in frame fractions,
+// satisfying fxCentroid. Deliberately read from the UN-inverted plane — see
+// maskFXCenter — and from a plane whose resolution is fixed in frame space, so
+// the answer is a pure function of the mask's params: identical at every render
+// size, on every tile, and under Invert.
+func (ev *brushEval) centroid() (float64, float64, bool) {
+	var sx, sy, sw float64
+	for y := range ev.ph {
+		row := ev.plane[y*ev.pw : (y+1)*ev.pw]
+		var rowW, rowX float64
+		for x, v := range row {
+			if v == 0 {
+				continue
+			}
+			rowW += float64(v)
+			rowX += float64(v) * (float64(x) + 0.5)
+		}
+		if rowW == 0 {
+			continue
+		}
+		sw += rowW
+		sx += rowX
+		sy += rowW * (float64(y) + 0.5)
+	}
+	if sw == 0 {
+		return 0, 0, false
+	}
+	return sx / sw / float64(ev.pw), sy / sw / float64(ev.ph), true
 }
 
 // samplePlane bilinearly reads the coverage plane; outside reads as zero.

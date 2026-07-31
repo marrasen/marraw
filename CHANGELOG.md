@@ -5,6 +5,14 @@ Only two constructs are parsed (client/src/lib/changelog.ts): `## X.Y.Z - YYYY-M
 version headers and `-` bullets; everything else is ignored. Newest release first.
 When cutting a release: bump the version in package.json and add a section here.
 
+## Unreleased
+
+- Masks: spatial effects on every mask type — **blur**, **motion blur** (with a direction), **zoom blur** that radiates from the mask's own centre, **light streaks** that draw long anamorphic strokes out of the highlights, and **mosaic**. They live in an Effects group under each mask's tone sliders, and unlike the tone controls they gather neighbouring pixels: the blur samples only *inside* the mask, so a masked-out subject never smears into the background around it, and everything is averaged in linear light so highlights stay bright instead of going grey
+- Masks: a **Background** button next to Subject — one click detects the subject, inverts the mask so it selects everything else, and defocuses it with light streaks. Tune it from there, or drop it into a preset and apply the whole look to a shoot
+- Previews of a mask effect are computed at a fixed working size, so what you see on the fit-to-screen preview is exactly what you get at 1:1 and in the export
+- Fixed: two renders of the same photo racing to write the same cache file could make one of them fail with "render failed"
+- This release re-renders every cached preview once (the pipeline changed), so the first browse after updating is slower than usual
+
 ## 0.8.0 - 2026-07-30
 
 - Lens corrections: marraw reads the camera and lens out of the RAW, matches a profile from a built-in database of ~1,500 calibrated lenses, and undoes what the lens did to the frame — barrel and pincushion distortion, lateral chromatic aberration, and corner vignetting. It runs automatically, before every other stage, so the frame you start editing is already the one your camera's own JPEG shows; each correction has its own amount in Develop → Detail → Lens correction (100 % is the profile's measurement), and the whole thing switches off in one click when a lens's own signature is the point. Photos you edited before this release re-render slightly straighter, with brighter corners — set Lens correction to Off to get the previous rendering back

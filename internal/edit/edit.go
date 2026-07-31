@@ -103,10 +103,46 @@ type MaskAdjust struct {
 	Temp           float64 `json:"temp,omitempty"`           // ±1, warm/cool
 	Tint           float64 `json:"tint,omitempty"`           // ±1, green/magenta
 	Saturation     float64 `json:"saturation,omitempty"`     // ±1
+	// Spatial FX. Unlike the tone fields above these are not point
+	// operations: they gather neighbouring pixels, so the render materializes
+	// this mask's weight plane and gathers through it (pyramid.applyMaskFX).
+	// All lengths are fractions of the oriented frame's LONG EDGE — the
+	// Stroke.Radius contract — so a 1024 draft, a 2048 settle, a 1:1 tile and
+	// an export agree. Appended after the tone fields on purpose: json.Marshal
+	// emits declaration order, so every pre-FX sidecar and edit hash stays
+	// byte-identical.
+	Blur       float64 `json:"blur,omitempty"`       // 0..1 defocus, radius to 6% of the long edge
+	MotionBlur float64 `json:"motionBlur,omitempty"` // 0..1 directional smear, to 15%
+	ZoomBlur   float64 `json:"zoomBlur,omitempty"`   // 0..1 radial smear about the mask's own centre
+	Streaks    float64 `json:"streaks,omitempty"`    // 0..1 anamorphic light streaks off the highlights
+	Mosaic     float64 `json:"mosaic,omitempty"`     // 0..1 pixelate, block to 8% of the long edge
+	// FXAngle is the smear direction for BOTH MotionBlur and Streaks, in
+	// degrees of the oriented frame (0 = horizontal, the anamorphic default).
+	// Mod 180 — a smear is symmetric under a half turn, the ellipse Angle
+	// precedent — and zeroed by Normalize when neither amount is set, so an
+	// inert angle can never make a mask non-neutral or fork its hash.
+	FXAngle float64 `json:"fxAngle,omitempty"` // 0..180
 }
 
 // IsNeutral reports whether the mask's adjustment changes nothing.
 func (a *MaskAdjust) IsNeutral() bool { return *a == MaskAdjust{} }
+
+// HasTone reports whether any of the point-operation fields is set — the gate
+// that decides whether the render builds this mask's tone LUTs at all, so an
+// FX-only mask skips a full-frame identity pass.
+func (a *MaskAdjust) HasTone() bool {
+	tone := *a
+	tone.Blur, tone.MotionBlur, tone.ZoomBlur = 0, 0, 0
+	tone.Streaks, tone.Mosaic, tone.FXAngle = 0, 0, 0
+	return tone != MaskAdjust{}
+}
+
+// HasFX reports whether the mask asks for a spatial effect — the gate that
+// decides whether ApplyMasks materializes a weight plane and an FX buffer for
+// it. FXAngle alone is not an effect (normalizeMasks zeroes it).
+func (a *MaskAdjust) HasFX() bool {
+	return a.Blur != 0 || a.MotionBlur != 0 || a.ZoomBlur != 0 || a.Streaks != 0 || a.Mosaic != 0
+}
 
 // Stroke is one brush stroke: a polyline of feathered circular stamps.
 // Coordinates are fractions of the oriented frame (like the crop rectangle);
@@ -774,6 +810,20 @@ func (e *Params) normalizeMasks() {
 		m.Adjust.Temp = clamp(m.Adjust.Temp, -1, 1)
 		m.Adjust.Tint = clamp(m.Adjust.Tint, -1, 1)
 		m.Adjust.Saturation = clamp(m.Adjust.Saturation, -1, 1)
+		m.Adjust.Blur = clamp(m.Adjust.Blur, 0, 1)
+		m.Adjust.MotionBlur = clamp(m.Adjust.MotionBlur, 0, 1)
+		m.Adjust.ZoomBlur = clamp(m.Adjust.ZoomBlur, 0, 1)
+		m.Adjust.Streaks = clamp(m.Adjust.Streaks, 0, 1)
+		m.Adjust.Mosaic = clamp(m.Adjust.Mosaic, 0, 1)
+		if m.Adjust.MotionBlur == 0 && m.Adjust.Streaks == 0 {
+			// Inert: nothing reads the angle, so equivalent states must hash
+			// identically (and a stray angle drag must not make a neutral mask
+			// look adjusted).
+			m.Adjust.FXAngle = 0
+		} else {
+			// A smear is symmetric under a half turn, like the ellipse Angle.
+			m.Adjust.FXAngle = quant4(math.Mod(math.Mod(m.Adjust.FXAngle, 180)+180, 180))
+		}
 		kept = append(kept, m)
 	}
 	if len(kept) == 0 {
