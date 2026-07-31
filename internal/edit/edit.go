@@ -115,7 +115,12 @@ type MaskAdjust struct {
 	MotionBlur float64 `json:"motionBlur,omitempty"` // 0..1 directional smear, to 15%
 	ZoomBlur   float64 `json:"zoomBlur,omitempty"`   // 0..1 radial smear about the mask's own centre
 	Streaks    float64 `json:"streaks,omitempty"`    // 0..1 anamorphic light streaks off the highlights
+	Glow       float64 `json:"glow,omitempty"`       // 0..1 isotropic bloom off the highlights
 	Mosaic     float64 `json:"mosaic,omitempty"`     // 0..1 pixelate, block to 8% of the long edge
+	// Prism splits red and blue radially about the mask's own centre — the
+	// lateral chromatic aberration of a cheap lens, as a creative dial.
+	// Signed: positive throws red outward, negative throws blue outward.
+	Prism float64 `json:"prism,omitempty"` // ±1
 	// FXAngle is the smear direction for BOTH MotionBlur and Streaks, in
 	// degrees of the oriented frame (0 = horizontal, the anamorphic default).
 	// Mod 180 — a smear is symmetric under a half turn, the ellipse Angle
@@ -133,7 +138,7 @@ func (a *MaskAdjust) IsNeutral() bool { return *a == MaskAdjust{} }
 func (a *MaskAdjust) HasTone() bool {
 	tone := *a
 	tone.Blur, tone.MotionBlur, tone.ZoomBlur = 0, 0, 0
-	tone.Streaks, tone.Mosaic, tone.FXAngle = 0, 0, 0
+	tone.Streaks, tone.Glow, tone.Mosaic, tone.Prism, tone.FXAngle = 0, 0, 0, 0, 0
 	return tone != MaskAdjust{}
 }
 
@@ -141,7 +146,8 @@ func (a *MaskAdjust) HasTone() bool {
 // decides whether ApplyMasks materializes a weight plane and an FX buffer for
 // it. FXAngle alone is not an effect (normalizeMasks zeroes it).
 func (a *MaskAdjust) HasFX() bool {
-	return a.Blur != 0 || a.MotionBlur != 0 || a.ZoomBlur != 0 || a.Streaks != 0 || a.Mosaic != 0
+	return a.Blur != 0 || a.MotionBlur != 0 || a.ZoomBlur != 0 ||
+		a.Streaks != 0 || a.Glow != 0 || a.Mosaic != 0 || a.Prism != 0
 }
 
 // Stroke is one brush stroke: a polyline of feathered circular stamps.
@@ -814,7 +820,9 @@ func (e *Params) normalizeMasks() {
 		m.Adjust.MotionBlur = clamp(m.Adjust.MotionBlur, 0, 1)
 		m.Adjust.ZoomBlur = clamp(m.Adjust.ZoomBlur, 0, 1)
 		m.Adjust.Streaks = clamp(m.Adjust.Streaks, 0, 1)
+		m.Adjust.Glow = clamp(m.Adjust.Glow, 0, 1)
 		m.Adjust.Mosaic = clamp(m.Adjust.Mosaic, 0, 1)
+		m.Adjust.Prism = clamp(m.Adjust.Prism, -1, 1)
 		if m.Adjust.MotionBlur == 0 && m.Adjust.Streaks == 0 {
 			// Inert: nothing reads the angle, so equivalent states must hash
 			// identically (and a stray angle drag must not make a neutral mask

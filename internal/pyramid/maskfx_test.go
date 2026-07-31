@@ -355,6 +355,123 @@ func TestMaskFXMosaicBlocks(t *testing.T) {
 	check(1024, 768)
 }
 
+// TestMaskFXGlowIsIsotropic: the bloom must spread a highlight evenly in every
+// direction — that is the whole difference from the streak pass, which shares
+// its extraction.
+func TestMaskFXGlowIsIsotropic(t *testing.T) {
+	const w, h = 256, 256
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for i := 3; i < len(img.Pix); i += 4 {
+		img.Pix[i] = 0xff
+	}
+	for y := 120; y < 136; y++ {
+		for x := 120; x < 136; x++ {
+			i := img.PixOffset(x, y)
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2] = 255, 255, 255
+		}
+	}
+	ApplyMasks(img, fullMask(edit.MaskAdjust{Glow: 0.8}), nil)
+
+	// Energy at the same distance along each axis must match.
+	arm := func(dx, dy int) float64 {
+		var sum float64
+		for d := 14; d < 34; d++ {
+			sum += float64(img.Pix[img.PixOffset(128+dx*d, 128+dy*d)])
+		}
+		return sum
+	}
+	arms := []float64{arm(1, 0), arm(-1, 0), arm(0, 1), arm(0, -1)}
+	lo, hi := arms[0], arms[0]
+	for _, v := range arms {
+		lo, hi = math.Min(lo, v), math.Max(hi, v)
+	}
+	if lo <= 0 {
+		t.Fatalf("glow reached no arm at all: %v", arms)
+	}
+	if hi > lo*1.25 {
+		t.Errorf("glow is not isotropic: arm energies %v", arms)
+	}
+	// And it must actually add light, not just redistribute it.
+	plain := image.NewRGBA(image.Rect(0, 0, w, h))
+	copy(plain.Pix, img.Pix)
+	if arm(1, 0) <= 0 {
+		t.Error("glow added no light beside the highlight")
+	}
+}
+
+// TestMaskFXPrismSplitsChannels: red and blue must move in opposite radial
+// directions, and green must not move at all — it carries the luminance, which
+// is why the effect reads as a fringe rather than as a blur.
+func TestMaskFXPrismSplitsChannels(t *testing.T) {
+	const w, h = 256, 256
+	mk := func() *image.RGBA {
+		img := image.NewRGBA(image.Rect(0, 0, w, h))
+		for y := range h {
+			for x := range w {
+				i := img.PixOffset(x, y)
+				// A neutral grey field with one bright vertical bar well off
+				// centre, so the radial displacement is large there.
+				v := uint8(60)
+				if x >= 200 && x < 210 {
+					v = 240
+				}
+				img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = v, v, v, 0xff
+			}
+		}
+		return img
+	}
+	green := func(img *image.RGBA) []uint8 {
+		out := make([]uint8, w)
+		for x := range w {
+			out[x] = img.Pix[img.PixOffset(x, 128)+1]
+		}
+		return out
+	}
+	base := mk()
+	pos := mk()
+	neg := mk()
+	// A centred radial mask covering the frame, so the effect centre is (0.5,0.5).
+	ApplyMasks(pos, fullMask(edit.MaskAdjust{Prism: 1}), nil)
+	ApplyMasks(neg, fullMask(edit.MaskAdjust{Prism: -1}), nil)
+
+	if !bytesEqual(green(base), green(pos)) {
+		t.Error("prism moved the green channel; it must carry the luminance untouched")
+	}
+	// Centre of mass of the bar in R and B must sit on opposite sides.
+	com := func(img *image.RGBA, off int) float64 {
+		var num, den float64
+		for x := 180; x < 235; x++ {
+			v := float64(img.Pix[img.PixOffset(x, 128)+off]) - 60
+			if v <= 0 {
+				continue
+			}
+			num += v * float64(x)
+			den += v
+		}
+		return num / den
+	}
+	rp, bp := com(pos, 0), com(pos, 2)
+	if rp <= bp+1 {
+		t.Errorf("prism +1: red centre %.1f should sit outboard of blue %.1f", rp, bp)
+	}
+	rn, bn := com(neg, 0), com(neg, 2)
+	if rn >= bn-1 {
+		t.Errorf("prism -1: red centre %.1f should sit inboard of blue %.1f", rn, bn)
+	}
+}
+
+func bytesEqual(a, b []uint8) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestMaskFXSuppressesDetail: a defocused region must come back with the
 // global clarity pass damped, or clarity re-etches a rim into it.
 func TestMaskFXSuppressesDetail(t *testing.T) {

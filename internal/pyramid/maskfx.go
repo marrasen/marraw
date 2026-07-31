@@ -74,6 +74,18 @@ const (
 	// flares are a bright source and a dim trail — but it means the trail
 	// needs a double-digit multiplier to read at all.
 	fxStreakGain = 10
+	// Glow: the bloom radius as a fraction of the (half-resolution) working
+	// buffer's long edge, and its gain. A box blur conserves energy, so the
+	// gain plays the same role as the streaks' — a highlight spread over a
+	// disc keeps only its area ratio.
+	fxGlowFrac = 0.06
+	fxGlowGain = 6
+	// Prism: the per-channel radial scale at ±1. Real lateral chromatic
+	// aberration is well under 0.1%; this is a creative dial, so 1% — a
+	// clearly coloured fringe at the frame edge, invisible at the centre —
+	// which keeps the whole slider usable instead of putting everything
+	// photographic in its bottom fifth.
+	fxPrismScale = 0.01
 
 	// Gather-side erosion. The AI matte is never pixel-perfect at hair edges,
 	// so the weight the gather SAMPLES with is pulled a pixel or so inside the
@@ -143,10 +155,11 @@ type fxSource struct {
 // weight plane it rasterized (nil when the mask covers nothing), which the
 // caller folds into the detail-suppression plane.
 //
-// Canonical intra-FX order: mosaic → blur → motion → zoom → streaks. Mosaic
-// runs first so a following blur softens the block edges; streaks run last and
-// additively, drawn from the already-defocused buffer, which is the anamorphic
-// ordering — defocus the background, then let its highlights streak.
+// Canonical intra-FX order: mosaic → blur → motion → zoom → prism → glow →
+// streaks. Mosaic runs first so a following blur softens the block edges; the
+// two light passes run last and additively, drawn from the already-defocused
+// and already-fringed buffer, which is the anamorphic ordering — defocus the
+// background, then let its highlights bloom and streak.
 func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) []uint8 {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -182,11 +195,24 @@ func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) [
 			fxLineSmear(s, dx, dy, l, taps, nil)
 		}
 	}
+	// The zoom smear and the prism split share a centre, so a photo dialled
+	// with both reads as one lens rather than two effects.
+	var cx, cy float64
+	if a.ZoomBlur > 0 || a.Prism != 0 {
+		cx, cy = fxCenterOutput(m, ev, f, ww, wh, w, h)
+	}
 	if a.ZoomBlur > 0 {
-		cx, cy := fxCenterOutput(m, ev, f, ww, wh, w, h)
 		fxZoomSmear(s, cx, cy, a.ZoomBlur*fxZoomSpread)
 	}
 	s.resolve()
+	// Prism before the light passes, so the bloom and streaks inherit its
+	// fringing — the order a real lens and a real emulsion sit in.
+	if a.Prism != 0 {
+		fxPrism(s, cx, cy, a.Prism)
+	}
+	if a.Glow > 0 {
+		fxGlow(s, a.Glow)
+	}
 	if a.Streaks > 0 {
 		if l := a.Streaks * fxStreakFrac * workLong; l >= 1 {
 			dx, dy := fxDirection(f, a.FXAngle)
@@ -609,8 +635,57 @@ func fxZoomSmear(s *fxSource, cx, cy, spread float64) {
 // streak is a glow, it carries no detail finer than its own width, and this
 // gather is otherwise the most expensive thing in the stage by a wide margin.
 func fxStreaks(s *fxSource, dx, dy, length, amount float64) {
+	hi, hw, hh := fxHighlights(s)
+
+	// Spread each highlight over at least the tap spacing before gathering.
+	// Without this a highlight narrower than the spacing lands as one blob
+	// per tap and the streak comes out DASHED — very visible, and the reason
+	// a bounded-tap gather is otherwise not enough for a long smear.
+	if r := int(math.Round(length / 2 / float64(fxStreakTaps-1) / 2)); r >= 1 {
+		for i := range hi {
+			hi[i] = boxBlurPlaneU16(hi[i], hw, hh, r, 2)
+		}
+	}
+
+	// An exponential falloff so the streak fades toward its ends instead of
+	// stopping dead.
+	const tau = 0.35
+	weights := make([]int32, fxStreakTaps)
+	for k := range fxStreakTaps {
+		t := math.Abs(float64(k)/float64(fxStreakTaps-1) - 0.5)
+		weights[k] = int32(math.Round(256 * math.Exp(-t/tau)))
+	}
+	hi = fxLineGather(hi, hw, hh, dx, dy, length/2, fxStreakTaps, weights)
+	fxAddLight(s, hi, hw, hh, amount*fxStreakGain)
+}
+
+// fxGlow is the isotropic sibling of fxStreaks: the same highlights, spread
+// evenly instead of along a direction, and added back the same way. It is what
+// a real defocus does that a box blur does not — highlights SWELL and bleed
+// into their surroundings rather than merely averaging with them — so it is
+// the cheap perceptual stand-in for disc bokeh.
+//
+// s must already be resolved.
+func fxGlow(s *fxSource, amount float64) {
+	hi, hw, hh := fxHighlights(s)
+	r := max(1, int(math.Round(amount*fxGlowFrac*float64(max(hw, hh)))))
+	for i := range hi {
+		hi[i] = boxBlurPlaneU16(hi[i], hw, hh, r, 3)
+	}
+	fxAddLight(s, hi, hw, hh, amount*fxGlowGain)
+}
+
+// fxHighlights extracts everything above the highlight knee, gated by the
+// mask's coverage (so a bright subject cannot throw light across a sky it is
+// not part of), at HALF the working resolution — a glow carries no detail
+// finer than its own width, and the spreading that follows is otherwise the
+// most expensive thing in the stage by a wide margin. Shared by the streak and
+// glow passes, which differ only in HOW they spread it.
+//
+// s must already be resolved: r/g/b are plain linear light, a is coverage.
+func fxHighlights(s *fxSource) (planes [][]uint16, hw, hh int) {
 	knee := int(fxLin[fxStreakKnee])
-	hw, hh := max(1, (s.w+1)/2), max(1, (s.h+1)/2)
+	hw, hh = max(1, (s.w+1)/2), max(1, (s.h+1)/2)
 	hi := [][]uint16{make([]uint16, hw*hh), make([]uint16, hw*hh), make([]uint16, hw*hh)}
 	fxBands(hh, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
@@ -636,28 +711,17 @@ func fxStreaks(s *fxSource, dx, dy, length, amount float64) {
 			}
 		}
 	})
+	return hi, hw, hh
+}
 
-	// Spread each highlight over at least the tap spacing before gathering.
-	// Without this a highlight narrower than the spacing lands as one blob
-	// per tap and the streak comes out DASHED — very visible, and the reason
-	// a bounded-tap gather is otherwise not enough for a long smear.
-	if r := int(math.Round(length / 2 / float64(fxStreakTaps-1) / 2)); r >= 1 {
-		for i := range hi {
-			hi[i] = boxBlurPlaneU16(hi[i], hw, hh, r, 2)
-		}
+// fxAddLight adds a half-resolution light plane triple back into the resolved
+// buffer, in linear light. Additive-in-linear is what makes both the streaks
+// and the glow read as light rather than as paint.
+func fxAddLight(s *fxSource, hi [][]uint16, hw, hh int, gain float64) {
+	gainQ := int(math.Round(gain * 256))
+	if gainQ <= 0 {
+		return
 	}
-
-	// An exponential falloff so the streak fades toward its ends instead of
-	// stopping dead.
-	const tau = 0.35
-	weights := make([]int32, fxStreakTaps)
-	for k := range fxStreakTaps {
-		t := math.Abs(float64(k)/float64(fxStreakTaps-1) - 0.5)
-		weights[k] = int32(math.Round(256 * math.Exp(-t/tau)))
-	}
-	hi = fxLineGather(hi, hw, hh, dx, dy, length/2, fxStreakTaps, weights)
-
-	gainQ := int(math.Round(amount * fxStreakGain * 256))
 	fxBands(s.h, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			for x := range s.w {
@@ -672,6 +736,57 @@ func fxStreaks(s *fxSource, dx, dy, length, amount float64) {
 			}
 		}
 	})
+}
+
+// fxPrism throws the red and blue channels apart radially about the effect
+// centre — lateral chromatic aberration, the signature of a cheap or vintage
+// lens, as a creative dial. The displacement grows with distance from the
+// centre (it is a per-channel SCALE, not a shift), which is what makes it read
+// as a lens property rather than as a misregistration.
+//
+// Sampling is nearest-neighbour on purpose: the displacement changes by a
+// fraction of a pixel between neighbours, so it acts as a local shift with no
+// stair-stepping, and green — which carries most of the luminance — is never
+// resampled at all.
+//
+// s must already be resolved.
+func fxPrism(s *fxSource, cx, cy, amount float64) {
+	w, h := s.w, s.h
+	k := amount * fxPrismScale
+	or := make([]uint16, w*h)
+	ob := make([]uint16, w*h)
+	fxBands(h, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			// This is a GATHER, so the signs are inverted against the effect:
+			// to throw red OUTWARD the red channel must sample INWARD.
+			fy := float64(y) - cy
+			ry := clampInt(int(math.Round(float64(y)-fy*k)), 0, h-1) * w
+			by := clampInt(int(math.Round(float64(y)+fy*k)), 0, h-1) * w
+			for x := range w {
+				j := y*w + x
+				if s.a[j] == 0 {
+					continue
+				}
+				fx := float64(x) - cx
+				jr := ry + clampInt(int(math.Round(float64(x)-fx*k)), 0, w-1)
+				jb := by + clampInt(int(math.Round(float64(x)+fx*k)), 0, w-1)
+				// Outside the mask there is no colour to borrow — keeping the
+				// pixel's own channel fringes toward neutral at the edge
+				// instead of pulling in black.
+				if s.a[jr] != 0 {
+					or[j] = s.r[jr]
+				} else {
+					or[j] = s.r[j]
+				}
+				if s.a[jb] != 0 {
+					ob[j] = s.b[jb]
+				} else {
+					ob[j] = s.b[j]
+				}
+			}
+		}
+	})
+	s.r, s.b = or, ob
 }
 
 // fxSampleHalf bilinearly reads a half-resolution plane triple at a

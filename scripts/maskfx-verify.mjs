@@ -140,10 +140,17 @@ for (const [name, adjust] of [
   ['zoom blur', { zoomBlur: 0.6 }],
   ['mosaic', { mosaic: 0.5 }],
   ['streaks', { streaks: 0.6 }],
+  ['glow', { glow: 0.7 }],
+  ['prism', { prism: 0.8 }],
 ]) {
   const r = await render({ masks: [{ ...radial, adjust }] });
   check(isJpeg(r.img) && !r.img.equals(base.img), `${name} changes the render`);
 }
+
+// Prism is signed — the two directions must not collapse to the same render.
+const prismPos = await render({ masks: [{ ...radial, adjust: { prism: 0.8 } }] });
+const prismNeg = await render({ masks: [{ ...radial, adjust: { prism: -0.8 } }] });
+check(!prismPos.img.equals(prismNeg.img), 'prism sign flips which channel goes outward');
 
 // --- 6. The headline path: an inverted AI subject mask, defocused with
 // streaks — the Background button's recipe. ---

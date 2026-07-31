@@ -79,7 +79,9 @@ export interface MaskAdjust {
     motionBlur?: number;
     zoomBlur?: number;
     streaks?: number;
+    glow?: number;
     mosaic?: number;
+    prism?: number;
     fxAngle?: number;
 }
 

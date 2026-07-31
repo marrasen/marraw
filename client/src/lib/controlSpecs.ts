@@ -301,8 +301,10 @@ export const MASK_CONTROL_ORDER: MaskControlId[] = [
 // Spatial effects, rendered as their own collapsible sub-block: these gather
 // neighbouring pixels rather than remapping each one, so they read as a
 // different kind of control and would drown the tone sliders in one flat list.
+// Grouped by what they do: the three defocus dials, then the two that add
+// light, then the two that give the region a character of its own.
 export const MASK_FX_ORDER: MaskControlId[] = [
-  'blur', 'motionBlur', 'zoomBlur', 'streaks', 'mosaic', 'fxAngle',
+  'blur', 'motionBlur', 'zoomBlur', 'glow', 'streaks', 'prism', 'mosaic', 'fxAngle',
 ];
 
 // Every mask slider in panel order — what the keyboard walk steps through.
@@ -323,7 +325,9 @@ export const MASK_CONTROL_SPECS: Record<MaskControlId, MaskControlSpec> = {
   blur: { label: 'Blur', ...fx01 },
   motionBlur: { label: 'Motion blur', ...fx01 },
   zoomBlur: { label: 'Zoom blur', ...fx01 },
+  glow: { label: 'Glow', ...fx01 },
   streaks: { label: 'Light streaks', ...fx01 },
+  prism: { label: 'Prism', ...pm1 },
   mosaic: { label: 'Mosaic', ...fx01 },
   fxAngle: { label: 'Direction', min: 0, max: 180, step: 1, bigStep: 15, unit: 'deg' },
 };
@@ -331,7 +335,7 @@ export const MASK_CONTROL_SPECS: Record<MaskControlId, MaskControlSpec> = {
 export const NEUTRAL_MASK_ADJUST: Required<MaskAdjust> = {
   expEV: 0, contrast: 0, toneHighlights: 0, toneShadows: 0,
   whites: 0, blacks: 0, temp: 0, tint: 0, saturation: 0,
-  blur: 0, motionBlur: 0, zoomBlur: 0, streaks: 0, mosaic: 0, fxAngle: 0,
+  blur: 0, motionBlur: 0, zoomBlur: 0, glow: 0, streaks: 0, prism: 0, mosaic: 0, fxAngle: 0,
 };
 
 // Must walk MASK_ALL_CONTROLS, not just the tone block: a blur-only mask is a
@@ -396,10 +400,15 @@ export function aiMask(kind: 'subject' | 'depth', mapVer: string): Mask {
 
 // backgroundMask is the one-click fake-bokeh recipe: the subject matte,
 // INVERTED so it selects everything the subject is not, pre-loaded with a
-// defocus and anamorphic streaks. Everything after is the photographer's to
-// tune — the same mask the Subject button makes, with the invert chip flipped.
+// defocus, a bloom and anamorphic streaks. The glow matters more than it
+// looks — a box blur averages highlights where a real lens makes them SWELL,
+// so without it the defocus reads as a filter rather than as depth.
+// Everything after is the photographer's to tune.
 export function backgroundMask(mapVer: string): Mask {
-  return { type: 'ai', aiKind: 'subject', mapVer, invert: true, adjust: { blur: 0.45, streaks: 0.35 } };
+  return {
+    type: 'ai', aiKind: 'subject', mapVer, invert: true,
+    adjust: { blur: 0.45, glow: 0.4, streaks: 0.35 },
+  };
 }
 
 export function aiClassMask(classId: number, mapVer: string): Mask {

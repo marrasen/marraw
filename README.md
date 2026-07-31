@@ -197,9 +197,10 @@ are the controls you chose to keep at hand.</sup>
   automatically at high zoom and a mask row's region tinted on hover. Each
   mask carries its own exposure, contrast, highlights/shadows, whites/blacks,
   temperature, tint and saturation, plus an **Effects** group: blur, motion
-  blur, zoom blur, anamorphic light streaks and mosaic. A **Background**
-  button is the one-click version — it detects the subject, inverts the mask
-  and defocuses everything else with light streaks. Masks are anchored to
+  blur, zoom blur, glow, anamorphic light streaks, prism (radial colour
+  fringing) and mosaic. A **Background** button is the one-click version — it
+  detects the subject, inverts the mask and defocuses everything else with a
+  bloom and light streaks. Masks are anchored to
   image content, so they survive recrops and re-straightens, and render
   identically in previews, 1:1 tiles and exports.
 - **Tone** — exposure (±5 EV), preserve highlights, brightness, gamma, shadow
