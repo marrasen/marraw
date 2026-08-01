@@ -1454,7 +1454,7 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
           size="sm"
           variant="outline"
           className="flex-1 basis-[30%]"
-          title="Mask everything except the subject and defocus it with light streaks (runs a local model)"
+          title="Mask everything except the subject and separate it with glow, light streaks and prism (runs a local model)"
           disabled={generating != null}
           onClick={() => addAI('subject', 'background')}
           data-testid="ai-mask-background"

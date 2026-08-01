@@ -165,10 +165,11 @@ jobs:
 # none of them publishes: each just uploads its packages as workflow artifacts.
 #
 # NOTE: macOS auto-update requires a Developer ID signature -- Squirrel.Mac
-# refuses to update an unsigned bundle. The unsigned .dmg installs (via
-# right-click Open / "Open Anyway" in System Settings), it just never
-# self-updates; the app hides the auto-update toggle on darwin. The Linux
-# AppImage self-updates normally.
+# refuses to update an unsigned bundle. The unsigned .dmg installs, but the
+# first launch is refused as "damaged" until the user clears the quarantine
+# bit (`xattr -dr com.apple.quarantine`); it then never self-updates, and the
+# app hides the auto-update toggle on darwin. The Linux AppImage self-updates
+# normally. See README Install for the user-facing wording.
 # ---------------------------------------------------------------------------
 
   linux:

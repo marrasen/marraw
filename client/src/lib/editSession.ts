@@ -1526,7 +1526,7 @@ function runPresetMasks(
   void esApplyPresetMasks(client, preset).then((r) => {
     if (r.status !== 'needs-download') return;
     if (opts?.onMasksNeedDownload) opts.onMasksNeedDownload(r.kind!);
-    else toast(`Look applied — AI masks skipped (the ${r.kind} model isn't downloaded yet)`);
+    else toast(`Preset applied — AI masks skipped (the ${r.kind} model isn't downloaded yet)`);
   });
 }
 

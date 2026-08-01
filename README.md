@@ -33,8 +33,18 @@ Grab your platform's package from the
 - **Linux** — `marraw-<version>-x86_64.AppImage` (auto-updating) or the
   `.deb` package.
 - **macOS** — `marraw-<version>-arm64.dmg` (Apple Silicon). Unsigned, so
-  first launch needs right-click → **Open** (or "Open Anyway" under
-  Privacy & Security on macOS 15+); auto-update is not available on macOS.
+  macOS refuses the first launch with *"marraw is damaged and can't be
+  opened"*. It isn't damaged — that is what Gatekeeper says about an
+  unsigned bundle it has quarantined. After dragging the app to
+  Applications, clear the quarantine flag in Terminal:
+
+  ```
+  xattr -dr com.apple.quarantine /Applications/marraw.app
+  ```
+
+  Then open it normally. Right-click → **Open** does *not* work for this
+  error, and neither does allowing "Anywhere" in Privacy & Security.
+  Auto-update is not available on macOS.
 
 On Windows and Linux (AppImage) the app updates itself: it checks GitHub on
 launch, downloads new versions in the background, and installs them when you
@@ -311,7 +321,8 @@ them is load-bearing for your work, marraw is not ready for you yet.
 **Platform & workflow**
 
 - ❌ **Not code-signed.** Expect a SmartScreen warning on first install
-  (Windows) or a right-click → Open dance on first launch (macOS).
+  (Windows), or a "damaged and can't be opened" refusal on macOS that needs
+  one `xattr` command to clear — see [Install](#install).
 - ❌ **No second-display window**, no tethered capture, no soft-proofing.
 - ❌ **No panorama stitch or HDR bracket merge.**
 

@@ -341,6 +341,38 @@ export function aiMaskRecipes(draft: Params): Mask[] | undefined {
   return recipes.length > 0 ? recipes : undefined;
 }
 
+// isMasksOnlyPreset reports whether a preset carries nothing but its smart-mask
+// recipes — the shape the presets UI saves when no look group is checked.
+// There is no flag for it on the wire: an empty `sections` list is omitempty on
+// the way out and reads back as the legacy "all sections", so the params encode
+// it instead — relative, sitting exactly on neutral, so applyUserPreset skips
+// every field and only the recipes land.
+export function isMasksOnlyPreset(preset: UserPreset): boolean {
+  if (preset.relative !== true) return false;
+  if ((preset.params.masks?.length ?? 0) === 0) return false;
+  return LOOK_KEYS.every((key) => isNeutralField(key, preset.params));
+}
+
+function isNeutralField(key: LookParamKey, p: Params): boolean {
+  if (key === 'hslHue' || key === 'hslSat' || key === 'hslLum') {
+    return p[key].every((v, i) => v === NEUTRAL[key][i]);
+  }
+  if (key === 'wbMul') return p.wbMul.every((v, i) => v === NEUTRAL.wbMul[i]);
+  if (CURVE_KEYS.includes(key as CurveKey)) return (p[key as CurveKey]?.length ?? 0) === 0;
+  const v = (p as unknown as Record<string, unknown>)[key];
+  // A field can spell "default" three ways once a preset has been through the
+  // server, so all three read as untouched:
+  //   • NEUTRAL's own value — a preset built client-side and not yet saved;
+  //   • the empty string — the server's spelling for the enums, which differs
+  //     from NEUTRAL's client-side display default (wbMode 'camera');
+  //   • absent — edit.Params tags the lens fields (and others) omitempty, so
+  //     they drop out of the JSON entirely at their zero value.
+  if (v === '' || v === undefined) return true;
+  // Sentinel-default fields store their neutral as 0, so the stored
+  // representations compare directly — no need to go through effective().
+  return v === (NEUTRAL as unknown as Record<string, unknown>)[key];
+}
+
 // stripToLook returns a copy of `draft` with geometry zeroed and local
 // adjustments removed — the shape a preset's params snapshot must have.
 export function stripToLook(draft: Params): Params {

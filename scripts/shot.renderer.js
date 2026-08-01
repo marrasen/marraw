@@ -885,6 +885,123 @@ if (shot === 'cull') {
     scrubbed,
     amountShown: !!es.getState().lastPresetApply,
   };
+} else if (shot === 'presetmasks') {
+  // A preset carrying ONLY smart masks: every look-group chip off, the Smart
+  // masks chip on. Saving used to be blocked outright (the section guard
+  // required at least one group), so this drives the real UI — chips, name
+  // field, Save button — and then checks the saved shape and what applying
+  // it does: the recipes must land and the look must not move a hair.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200); // initial preview settles
+  const setInput = (el, v) => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  const btn = (label) =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === label);
+  const chipOn = (b) => !!b && b.className.includes('bg-primary/15');
+  // Masks and presets persist to the fixture/settings — start clean so the
+  // surface is re-runnable.
+  mw.setUserPresets([]);
+  mw.esUpdate({ masks: [] });
+  mw.esCommit();
+  await sleep(300);
+  // A range mask is the cheapest smart mask: content-relative, so it travels
+  // as a recipe, but it needs no model on disk.
+  mw.esAddMask('range');
+  await sleep(300);
+  const mi = (es.getState().draft.masks?.length ?? 1) - 1;
+  mw.esUpdateMask(mi, { adjust: { expEV: 0.8 } });
+  mw.esCommit();
+  await sleep(400);
+  // A distinctly non-neutral look, so "the look didn't move" means something.
+  mw.esUpdate({ contrast: 0.42, vibrance: 0.31 });
+  mw.esCommit();
+  await sleep(400);
+
+  ui().setDevelopTab('presets');
+  await sleep(700);
+  const entryLabel = btn('Save preset') ? 'Save preset' : btn('Save current look') ? 'Save current look' : null;
+  btn(entryLabel)?.click();
+  await sleep(300);
+  // Smart masks default to ON now — probe before touching the chip.
+  const masksChip = () =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith('Smart masks'));
+  const masksDefaultOn = chipOn(masksChip());
+  const sectionsDefaultOn = ['Tone', 'Presence', 'White balance', 'Color', 'Effects', 'Detail'].every((g) =>
+    chipOn(btn(g)),
+  );
+  // Turn every look group off: masks are all that's left to carry.
+  for (const g of ['Tone', 'Presence', 'White balance', 'Color', 'Effects', 'Detail']) {
+    btn(g)?.click();
+    await sleep(60);
+  }
+  const sectionsAllOff = ['Tone', 'Presence', 'White balance', 'Color', 'Effects', 'Detail'].every(
+    (g) => !chipOn(btn(g)),
+  );
+  setInput(document.querySelector('input[aria-label="Preset name"]'), 'UITEST masks only');
+  await sleep(150);
+  const saveBtn = btn('Save');
+  const saveEnabled = !!saveBtn && !saveBtn.disabled;
+  saveBtn?.click();
+  let saved = null;
+  try {
+    saved = await until(() => ui().userPresets.find((p) => p.name === 'UITEST masks only'), 5000);
+  } catch {
+    saved = null;
+  }
+
+  // Apply it over a DIFFERENT, mask-free look and watch what moves.
+  let lookBefore = null;
+  let lookAfter = null;
+  let masksLanded = 0;
+  if (saved) {
+    mw.esUpdate({ masks: [], contrast: -0.2, vibrance: 0 });
+    mw.esCommit();
+    await sleep(500);
+    const d0 = es.getState().draft;
+    lookBefore = { contrast: d0.contrast, vibrance: d0.vibrance, expEV: d0.expEV, clarity: d0.clarity, saturation: d0.saturation };
+    mw.esApplyUserPreset(saved);
+    try {
+      await until(() => (es.getState().draft.masks?.length ?? 0) > 0, 15000);
+    } catch { /* probe reports 0 */ }
+    await sleep(600);
+    const d1 = es.getState().draft;
+    lookAfter = { contrast: d1.contrast, vibrance: d1.vibrance, expEV: d1.expEV, clarity: d1.clarity, saturation: d1.saturation };
+    masksLanded = d1.masks?.length ?? 0;
+  }
+  const near = (a, b) => a != null && b != null && Math.abs(a - b) < 0.002;
+  window.__presetMasksProbe = {
+    masksDefaultOn,
+    sectionsDefaultOn,
+    sectionsAllOff,
+    saveEnabled,
+    savedOK: !!saved,
+    // The stored shape: neutral look params marked relative, recipes aboard.
+    savedMaskCount: saved?.params.masks?.length ?? 0,
+    savedRelative: saved?.relative === true,
+    savedContrastNeutral: saved ? saved.params.contrast === 0 : null,
+    savedVibranceNeutral: saved ? saved.params.vibrance === 0 : null,
+    savedBaseExpEV: saved?.baseExpEV ?? null,
+    lookBefore,
+    lookAfter,
+    lookUnchanged:
+      !!lookBefore &&
+      !!lookAfter &&
+      Object.keys(lookBefore).every((k) => near(lookBefore[k], lookAfter[k])),
+    masksLanded,
+    badgeIsMasks: [...document.querySelectorAll('span')].some((s) => s.textContent.trim() === 'masks'),
+    // The store copy has been through the server, which re-marshals params:
+    // enums come back in the server's spelling ("" not 'camera') and the
+    // omitempty fields (lensMode &c.) drop out altogether. badgeIsMasks is the
+    // real assertion — it renders off that copy, so it only turns true if
+    // isMasksOnlyPreset survives the round-trip.
+    storeCopyRelative: ui().userPresets.find((p) => p.name === 'UITEST masks only')?.relative ?? null,
+    storeCopyMaskCount:
+      ui().userPresets.find((p) => p.name === 'UITEST masks only')?.params.masks?.length ?? null,
+  };
 } else if (shot === 'suggestions') {
   // The scene-aware suggestion gallery in the Presets tab: waits for the
   // candidate cards and their live thumbnails, probes hover (loupe override
@@ -1713,6 +1830,7 @@ const probe =
   window.__maskProbe ??
   window.__lensProbe ??
   window.__presetsProbe ??
+  window.__presetMasksProbe ??
   window.__suggestProbe ??
   window.__featuresProbe ??
   window.__cropProbe ??

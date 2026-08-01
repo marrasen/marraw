@@ -248,9 +248,13 @@ How the port is wired:
 
 Known caveats for user reports:
 
-- **macOS Gatekeeper** — the dmg is unsigned and unnotarized: first launch
-  needs right-click → Open, or on macOS 15+ System Settings → Privacy &
-  Security → **Open Anyway**. No auto-update (see above).
+- **macOS Gatekeeper** — the dmg is unsigned and unnotarized, so on Apple
+  Silicon the first launch fails with *"marraw is damaged and can't be
+  opened"*. Neither right-click → Open nor allowing "Anywhere" in Privacy &
+  Security clears it: that message is the quarantine bit plus a signature
+  Gatekeeper won't validate, not a policy verdict. The fix users need is
+  `xattr -dr com.apple.quarantine /Applications/marraw.app` (confirmed
+  working, 2026-08-01). No auto-update (see above).
 - **Linux trash without `gio`** — falls back to home-trash; deleting photos
   that live on a *different filesystem* than `$HOME` errors instead of
   trashing (deliberate: copying RAWs "to trash" would double disk usage).

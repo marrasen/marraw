@@ -50,7 +50,7 @@ export const FEATURES = {
   suggestions: {
     label: 'ML edit suggestions',
     description:
-      'Scene-aware suggested looks in the Presets panel, computed per photo by a local model.',
+      'Scene-aware edit suggestions in the Presets panel, computed per photo by a local model.',
     group: 'experimental',
     experimental: true,
     defaultOn: false,

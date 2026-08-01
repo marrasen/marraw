@@ -398,16 +398,16 @@ export function aiMask(kind: 'subject' | 'depth', mapVer: string): Mask {
   return { type: 'ai', aiKind: kind, mapVer, adjust: {} };
 }
 
-// backgroundMask is the one-click fake-bokeh recipe: the subject matte,
-// INVERTED so it selects everything the subject is not, pre-loaded with a
-// defocus, a bloom and anamorphic streaks. The glow matters more than it
-// looks — a box blur averages highlights where a real lens makes them SWELL,
-// so without it the defocus reads as a filter rather than as depth.
-// Everything after is the photographer's to tune.
+// backgroundMask is the one-click background-separation recipe: the subject
+// matte, INVERTED so it selects everything the subject is not, pre-loaded
+// with a light bloom, anamorphic streaks and a chromatic fringe. No blur —
+// a heavy default defocus smears the whole frame into mush and reads as a
+// filter; the glow/streaks/prism trio separates the background while it
+// still shows what is there. Everything after is the photographer's to tune.
 export function backgroundMask(mapVer: string): Mask {
   return {
     type: 'ai', aiKind: 'subject', mapVer, invert: true,
-    adjust: { blur: 0.45, glow: 0.4, streaks: 0.35 },
+    adjust: { glow: 0.1, streaks: 0.2, prism: 0.6, fxAngle: 25 },
   };
 }
 

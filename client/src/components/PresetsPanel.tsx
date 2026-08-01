@@ -43,6 +43,7 @@ import {
 import {
   adaptiveLookDiff,
   aiMaskRecipes,
+  isMasksOnlyPreset,
   PRESET_GROUPS,
   presetSections,
   stripToLook,
@@ -222,35 +223,58 @@ function UserPresetsSection({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState('');
   const [autoSecs, setAutoSecs] = useState<AutoSection[]>([]);
-  const [withMasks, setWithMasks] = useState(false);
+  // Smart masks ride along by default when the photo has any — a preset saved
+  // off a masked edit that silently dropped the masks was the common surprise.
+  const [withMasks, setWithMasks] = useState(true);
   // A preset whose AI-mask phase hit a missing model, waiting on download
   // consent; non-null renders the AIModelDialog.
   const [maskConsent, setMaskConsent] = useState<{ preset: UserPreset; pending: PendingAIDownload } | null>(null);
-  // Smart (content-relative) masks that travel in presets: AI masks and range
-  // (luma/colour) masks — mirrors aiMaskRecipes's filter.
-  const draftAIMaskCount = (draft?.masks ?? []).filter((m) => m.type === 'ai' || m.type === 'range').length;
+  // The smart (content-relative) masks that would actually travel in a preset
+  // — taken from aiMaskRecipes itself rather than re-deriving its filter, so
+  // the chip's count, the save-enable rule and the saved payload can't drift
+  // apart (a lone *disabled* smart mask makes no recipe, and so no preset).
+  const draftRecipes = draft ? aiMaskRecipes(draft) : undefined;
+  const draftAIMaskCount = draftRecipes?.length ?? 0;
+  // Saving needs something to carry: at least one look group, or the smart
+  // masks on their own.
+  const canSave = sections.length > 0 || (withMasks && draftAIMaskCount > 0);
   const importInput = useRef<HTMLInputElement>(null);
   const thumbs = useUserPresetThumbs(client, photo, presets);
 
   const save = async () => {
     const trimmed = name.trim();
-    if (!draft || !trimmed || sections.length === 0) return;
-    // Adaptive auto sections only make sense for look groups the preset
-    // carries (their names coincide with the group ids by design).
-    const autos = autoSecs.filter((a) => sections.includes(a));
+    if (!draft || !trimmed) return;
     // Painted masks and retouch spots are local geometry tied to one
     // photo's content, not a look; geometry stays with the photo too. AI
     // masks travel as recipes when chosen — applying re-runs detection.
-    let params: Params = {
-      ...stripToLook(draft),
-      masks: withMasks ? aiMaskRecipes(draft) : undefined,
-    };
-    let rel = relative;
+    const recipes = withMasks ? draftRecipes : undefined;
+    // No look groups checked is legal as long as the masks carry the preset:
+    // "re-run these smart masks here" is a preset in its own right.
+    const masksOnly = sections.length === 0;
+    if (masksOnly && !recipes) return;
+    // Adaptive auto sections only make sense for look groups the preset
+    // carries (their names coincide with the group ids by design).
+    const autos = autoSecs.filter((a) => sections.includes(a));
+    // A masks-only preset must land as a no-op on the look, and the stored
+    // shape has to encode that on its own: an empty `sections` list can't
+    // survive the round-trip (omitempty on the wire, and both this client and
+    // presetLookSections in Go read an empty list as "all sections" — the
+    // legacy shape). So it stores NEUTRAL params marked relative instead:
+    // every field's delta from neutral is zero, so applyUserPreset skips all
+    // of them (expEV included — presetExpEV's creative offset is 0 with
+    // baseExpEV unset) and only the mask recipes land.
+    let params: Params = masksOnly
+      ? { ...NEUTRAL, masks: recipes }
+      : { ...stripToLook(draft), masks: recipes };
+    let rel = relative || masksOnly;
     // The source photo's calibrated exposure baseline: apply re-anchors
     // the look's creative exposure to the target photo's baseline, so a
     // preset saved on a +1.3 EV-compensated shot doesn't drag that
     // compensation onto differently calibrated photos.
-    let baseEV = photo?.baseExpEV || undefined;
+    // A masks-only preset carries no exposure to re-anchor, and a stored
+    // baseline would turn its neutral expEV into a creative offset of
+    // −baseExpEV — a real exposure change on apply.
+    let baseEV = masksOnly ? undefined : photo?.baseExpEV || undefined;
     if (autos.length > 0 && photo) {
       // Adaptive save: the preset stores the CREATIVE DIFFERENCE between
       // this look and the photo's own auto — applying re-runs the auto on
@@ -262,7 +286,7 @@ function UserPresetsSection({
         toast.error(`Auto adjust failed: ${(err as Error).message}`);
         return;
       }
-      params = { ...adaptiveLookDiff(draft, auto), masks: withMasks ? aiMaskRecipes(draft) : undefined };
+      params = { ...adaptiveLookDiff(draft, auto), masks: recipes };
       rel = true;
       // Exposure rides the per-photo auto result; no baseline to anchor.
       baseEV = undefined;
@@ -272,8 +296,10 @@ function UserPresetsSection({
       name: trimmed,
       params,
       // All sections checked stores as "all" (empty) — the legacy shape,
-      // and new sections added by future builds stay included.
-      sections: sections.length === PRESET_GROUPS.length ? undefined : sections,
+      // and new sections added by future builds stay included. A masks-only
+      // preset stores "all" too; its neutral relative params make that a
+      // no-op (see above) and it keeps the stored shape uniform.
+      sections: masksOnly || sections.length === PRESET_GROUPS.length ? undefined : sections,
       relative: rel || undefined,
       baseExpEV: baseEV,
       autoSections: autos.length > 0 ? autos : undefined,
@@ -306,25 +332,34 @@ function UserPresetsSection({
   // preset's identity and semantics (id → the Ctrl+Shift+n slot and any
   // default-preset reference stay valid; sections/relative unchanged). A
   // preset that carries AI-mask recipes refreshes them from the draft's AI
-  // masks; one without stays mask-free.
+  // masks; one without stays mask-free. A masks-only preset stays masks-only
+  // — re-snapshotting the whole look into it would silently turn it into a
+  // different kind of preset — so it needs a draft with smart masks.
   const overwrite = (p: UserPreset) => {
     if (!draft) return;
+    const masksOnly = isMasksOnlyPreset(p);
+    if (masksOnly && !draftRecipes) {
+      toast.error(`“${p.name}” carries only smart masks — this photo has none to save`);
+      return;
+    }
     updateUserPresets(
       client,
       presets.map((x) =>
         x.id === p.id
           ? {
               ...x,
-              params: {
-                ...stripToLook(draft),
-                masks: (x.params.masks?.length ?? 0) > 0 ? aiMaskRecipes(draft) : undefined,
-              },
-              baseExpEV: photo?.baseExpEV || undefined,
+              params: masksOnly
+                ? { ...NEUTRAL, masks: draftRecipes }
+                : {
+                    ...stripToLook(draft),
+                    masks: (x.params.masks?.length ?? 0) > 0 ? draftRecipes : undefined,
+                  },
+              baseExpEV: masksOnly ? undefined : photo?.baseExpEV || undefined,
             }
           : x,
       ),
     );
-    toast.success(`“${p.name}” overwritten with the current look`);
+    toast.success(`“${p.name}” overwritten with the current edit`);
   };
 
   const exportAll = () => {
@@ -432,23 +467,7 @@ function UserPresetsSection({
                 ) : (
                   <span className="flex items-baseline gap-1.5 truncate px-2 py-1.5">
                     <span className="truncate text-[12px] group-hover:text-foreground">{p.name}</span>
-                    {((p.sections?.length ?? 0) > 0 || p.relative || (p.autoSections?.length ?? 0) > 0) && (
-                      <span
-                        className="shrink-0 text-[9px] tracking-[.05em] text-muted-foreground uppercase"
-                        title={`${
-                          (p.autoSections?.length ?? 0) > 0
-                            ? 'Adaptive preset (re-runs auto per photo)'
-                            : p.relative
-                              ? 'Relative preset (stacks on existing edits)'
-                              : 'Partial preset'
-                        }: ${presetSections(p)
-                          .map((id) => PRESET_GROUPS.find((g) => g.id === id)?.label ?? id)
-                          .join(', ')}`}
-                      >
-                        {(p.autoSections?.length ?? 0) > 0 ? 'auto ' : p.relative ? '± ' : ''}
-                        {(p.sections?.length ?? 0) > 0 ? `${presetSections(p).length}/${PRESET_GROUPS.length}` : ''}
-                      </span>
-                    )}
+                    <PresetBadge preset={p} />
                   </span>
                 )}
               </button>
@@ -468,7 +487,7 @@ function UserPresetsSection({
                 />
                 <CardAction
                   icon={<RefreshCw className="size-3" />}
-                  label={`Overwrite ${p.name} with the current look`}
+                  label={`Overwrite ${p.name} with the current edit`}
                   disabled={!draft}
                   onClick={() => overwrite(p)}
                 />
@@ -499,7 +518,12 @@ function UserPresetsSection({
               }}
               aria-label="Preset name"
             />
-            <Button size="sm" onClick={() => void save()} disabled={!name.trim() || sections.length === 0}>
+            <Button
+              size="sm"
+              onClick={() => void save()}
+              disabled={!name.trim() || !canSave}
+              title={canSave ? undefined : 'Pick at least one section — or include the smart masks on their own'}
+            >
               Save
             </Button>
           </div>
@@ -517,7 +541,7 @@ function UserPresetsSection({
               title={
                 autoSecs.length > 0
                   ? 'Adaptive presets are always relative — the diff lands on each photo’s own auto'
-                  : 'Relative: apply the look as offsets on top of a photo’s existing edits instead of replacing them'
+                  : 'Relative: apply the preset as offsets on top of a photo’s existing edits instead of replacing them'
               }
             >
               ± Relative
@@ -552,7 +576,7 @@ function UserPresetsSection({
           <div className="flex flex-wrap items-center gap-1">
             <span
               className="text-[10px] tracking-[.05em] text-muted-foreground uppercase"
-              title="Adaptive: the preset re-runs these autos on each photo and applies your look as the difference from this photo's auto"
+              title="Adaptive: the preset re-runs these autos on each photo and applies your edit as the difference from this photo's auto"
             >
               Adapts
             </span>
@@ -582,7 +606,7 @@ function UserPresetsSection({
                       ? `Include the ${a.id} section to adapt it`
                       : on
                         ? `Don't re-run ${a.label.toLowerCase()} per photo`
-                        : `Re-run ${a.label.toLowerCase()} on each photo and layer this look's difference on top`
+                        : `Re-run ${a.label.toLowerCase()} on each photo and layer this preset's difference on top`
                   }
                 >
                   {a.label}
@@ -612,7 +636,7 @@ function UserPresetsSection({
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" className="w-fit" disabled={!draft} onClick={() => setNaming(true)}>
             <Plus data-icon="inline-start" />
-            Save current look
+            Save preset
           </Button>
           <span className="flex-1" />
           <Button
@@ -660,6 +684,45 @@ function UserPresetsSection({
         }}
       />
     </Section>
+  );
+}
+
+// PresetBadge is the small qualifier on a card's name — what makes this
+// preset something other than a plain absolute snapshot of every section.
+// Nothing to say (a full absolute preset) renders nothing.
+function PresetBadge({ preset }: { preset: UserPreset }) {
+  // Checked first: a masks-only preset is stored as relative-on-neutral over
+  // "all sections", so the generic branches below would describe it as a
+  // relative preset carrying all six — true of the bytes, wrong about intent.
+  if (isMasksOnlyPreset(preset)) {
+    return (
+      <span
+        className="shrink-0 text-[9px] tracking-[.05em] text-muted-foreground uppercase"
+        title={`Smart masks only (${preset.params.masks!.length}) — re-runs them here and leaves the look alone`}
+      >
+        masks
+      </span>
+    );
+  }
+  const partial = (preset.sections?.length ?? 0) > 0;
+  const adaptive = (preset.autoSections?.length ?? 0) > 0;
+  if (!partial && !preset.relative && !adaptive) return null;
+  return (
+    <span
+      className="shrink-0 text-[9px] tracking-[.05em] text-muted-foreground uppercase"
+      title={`${
+        adaptive
+          ? 'Adaptive preset (re-runs auto per photo)'
+          : preset.relative
+            ? 'Relative preset (stacks on existing edits)'
+            : 'Partial preset'
+      }: ${presetSections(preset)
+        .map((id) => PRESET_GROUPS.find((g) => g.id === id)?.label ?? id)
+        .join(', ')}`}
+    >
+      {adaptive ? 'auto ' : preset.relative ? '± ' : ''}
+      {partial ? `${presetSections(preset).length}/${PRESET_GROUPS.length}` : ''}
+    </span>
   );
 }
 

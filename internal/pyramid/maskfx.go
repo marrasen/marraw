@@ -33,7 +33,12 @@ import (
 //     that reads as light. Streaks are nearly invisible without this.
 //   - It runs at a FIXED working resolution (fxPlaneLongEdge), so the 2048
 //     settle, the 1:1 tile and the export produce identical effects and the
-//     memory cost is constant regardless of the photo's megapixels.
+//     memory cost is constant regardless of the photo's megapixels. What comes
+//     back out of that buffer therefore carries no detail finer than 1024 px,
+//     which is only acceptable when the effect destroyed that detail anyway —
+//     so the passes that don't (glow, streaks, prism) composite as a
+//     DIFFERENCE against the full-resolution pixel rather than replacing it.
+//     See fxComposite.
 const (
 	// fxPlaneLongEdge caps the resolution the spatial effects are computed at.
 	// A defocused region carries no detail finer than its own blur radius, so
@@ -180,12 +185,19 @@ func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) [
 	a := &m.Adjust
 	s := newFXSource(img, plane, ww, wh)
 
+	// Whether a pass actually threw the region's detail away. Tracked around
+	// the passes rather than read off the amounts, so a dial too low to round
+	// up to a single pixel of reach counts as what it is — nothing ran — and
+	// costs the render no sharpness. It picks the composite mode below.
+	destroyed := false
 	if a.Mosaic > 0 {
 		fxMosaic(s, a.Mosaic*fxMosaicFrac)
+		destroyed = true
 	}
 	if a.Blur > 0 {
 		if r := int(math.Round(a.Blur * fxBlurFrac * workLong)); r >= 1 {
 			fxBlur(s, r)
+			destroyed = true
 		}
 	}
 	if a.MotionBlur > 0 {
@@ -193,6 +205,7 @@ func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) [
 			dx, dy := fxDirection(f, a.FXAngle)
 			taps := min(fxMotionTaps, max(3, int(math.Round(l/1.5))))
 			fxLineSmear(s, dx, dy, l, taps, nil)
+			destroyed = true
 		}
 	}
 	// The zoom smear and the prism split share a centre, so a photo dialled
@@ -203,8 +216,17 @@ func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) [
 	}
 	if a.ZoomBlur > 0 {
 		fxZoomSmear(s, cx, cy, a.ZoomBlur*fxZoomSpread)
+		destroyed = true
 	}
 	s.resolve()
+	// Record what the remaining passes change, rather than what they leave
+	// behind. Worth its allocation only when nothing has destroyed the detail
+	// the render still holds AND the working buffer is smaller than the
+	// render — otherwise the plain replace below is both right and cheaper.
+	var delta *fxDelta
+	if !destroyed && (ww != w || wh != h) {
+		delta = newFXDelta(s)
+	}
 	// Prism before the light passes, so the bloom and streaks inherit its
 	// fringing — the order a real lens and a real emulsion sit in.
 	if a.Prism != 0 {
@@ -219,8 +241,76 @@ func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) [
 			fxStreaks(s, dx, dy, l, a.Streaks)
 		}
 	}
-	fxComposite(img, plane, s)
+	delta.complete(s)
+	fxComposite(img, plane, s, delta)
 	return plane
+}
+
+// fxDelta is what the detail-preserving passes (prism, glow, streaks) ADD, in
+// linear light at the working resolution — the low-frequency part of the
+// result, which is the only part that survives the upsample back to the
+// render's own resolution intact. See fxComposite for why that matters.
+//
+// It is seeded with the NEGATED pre-pass buffer and finished by adding the
+// post-pass one, so the snapshot and the difference share one allocation. A
+// nil *fxDelta is the "not worth recording" state and takes both methods.
+type fxDelta struct {
+	w, h    int
+	r, g, b []int32
+}
+
+func newFXDelta(s *fxSource) *fxDelta {
+	return &fxDelta{w: s.w, h: s.h, r: fxNegate(s.r), g: fxNegate(s.g), b: fxNegate(s.b)}
+}
+
+func fxNegate(p []uint16) []int32 {
+	out := make([]int32, len(p))
+	for i, v := range p {
+		out[i] = -int32(v)
+	}
+	return out
+}
+
+func (d *fxDelta) complete(s *fxSource) {
+	if d == nil {
+		return
+	}
+	fxBands(d.h, func(y0, y1 int) {
+		for j := y0 * d.w; j < y1*d.w; j++ {
+			d.r[j] += int32(s.r[j])
+			d.g[j] += int32(s.g[j])
+			d.b[j] += int32(s.b[j])
+		}
+	})
+}
+
+// sample bilinearly reads the three planes, clamping at the edges — sample's
+// signed sibling, and the only thing fxComposite needs in delta mode (where a
+// pixel the working buffer never covered has a zero delta, so the coverage
+// test the replace path makes is already implied).
+func (d *fxDelta) sample(x, y float64) (r, g, b int32) {
+	x0f, y0f := math.Floor(x), math.Floor(y)
+	fx, fy := x-x0f, y-y0f
+	x0 := clampInt(int(x0f), 0, d.w-1)
+	y0 := clampInt(int(y0f), 0, d.h-1)
+	x1 := clampInt(x0+1, 0, d.w-1)
+	y1 := clampInt(y0+1, 0, d.h-1)
+	var ar, ag, ab float64
+	for _, t := range [4]struct {
+		x, y int
+		w    float64
+	}{
+		{x0, y0, (1 - fx) * (1 - fy)},
+		{x1, y0, fx * (1 - fy)},
+		{x0, y1, (1 - fx) * fy},
+		{x1, y1, fx * fy},
+	} {
+		j := t.y*d.w + t.x
+		ar += float64(d.r[j]) * t.w
+		ag += float64(d.g[j]) * t.w
+		ab += float64(d.b[j]) * t.w
+	}
+	return int32(math.Round(ar)), int32(math.Round(ag)), int32(math.Round(ab))
 }
 
 // fxDetailSuppression is how strongly this mask's FX destroyed detail that the
@@ -822,7 +912,21 @@ func fxSampleHalf(p [][]uint16, hw, hh, x, y int) (int, int, int) {
 // composite in ApplyMasks. Pixels the working buffer never covered — a mask so
 // thin it vanished in the downscale — are left alone rather than blended
 // toward black.
-func fxComposite(img *image.RGBA, plane []uint8, s *fxSource) {
+//
+// delta, when non-nil, switches the blend from REPLACE to ADD-THE-DIFFERENCE:
+// the pixel keeps its own full-resolution value and only picks up the light
+// the recorded passes added. That distinction is the difference between a
+// sharp 1:1 tile and a soft one. Replacing is right for an effect that
+// destroyed the region's detail (a defocus, a mosaic, a smear) — the working
+// buffer then holds everything there is to know. It is WRONG for the passes
+// that only add light or split colour: the background under a bloom is still
+// as sharp as the decode, so replacing it with an upsample of a 1024 plane
+// throws away every pixel of detail the render just paid a full RAW decode
+// for, and the region reads as blocky at 1:1 (and never sharpens, however
+// long you wait — the tiles ARE the sharpest thing there is). The difference
+// carries only the low-frequency light those passes contribute, which is
+// exactly the part that survives the upsample intact.
+func fxComposite(img *image.RGBA, plane []uint8, s *fxSource, delta *fxDelta) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	exact := s.w == w && s.h == h
@@ -839,25 +943,40 @@ func fxComposite(img *image.RGBA, plane []uint8, s *fxSource) {
 				if pw == 0 {
 					continue
 				}
-				var lr, lg, lb, la int
-				if exact {
-					j := y*w + x
-					lr, lg, lb, la = int(s.r[j]), int(s.g[j]), int(s.b[j]), int(s.a[j])
+				fx := (float64(x)+0.5)*sx - 0.5
+				i0 := x * 4
+				var lr, lg, lb int
+				if delta != nil {
+					dr, dg, db := delta.sample(fx, fy)
+					if dr == 0 && dg == 0 && db == 0 {
+						continue
+					}
+					// The delta cancels the mask normalization and the erosion
+					// bias its two ends share, so what lands on the render's own
+					// pixel is the added light alone — no step at the silhouette.
+					lr = clampInt(int(fxLin[row[i0]])+int(dr), 0, 65535)
+					lg = clampInt(int(fxLin[row[i0+1]])+int(dg), 0, 65535)
+					lb = clampInt(int(fxLin[row[i0+2]])+int(db), 0, 65535)
 				} else {
-					lr, lg, lb, la = s.sample((float64(x)+0.5)*sx-0.5, fy)
-				}
-				if la == 0 {
-					continue
+					var la int
+					if exact {
+						j := y*w + x
+						lr, lg, lb, la = int(s.r[j]), int(s.g[j]), int(s.b[j]), int(s.a[j])
+					} else {
+						lr, lg, lb, la = s.sample(fx, fy)
+					}
+					if la == 0 {
+						continue
+					}
 				}
 				wq := int32(covToWeight[pw])
-				i := x * 4
-				r0, g0, b0 := int32(row[i]), int32(row[i+1]), int32(row[i+2])
+				r0, g0, b0 := int32(row[i0]), int32(row[i0+1]), int32(row[i0+2])
 				r := int32(fxEnc[lr])
 				gg := int32(fxEnc[lg])
 				bl := int32(fxEnc[lb])
-				row[i] = clamp8(r0 + (r-r0)*wq>>8)
-				row[i+1] = clamp8(g0 + (gg-g0)*wq>>8)
-				row[i+2] = clamp8(b0 + (bl-b0)*wq>>8)
+				row[i0] = clamp8(r0 + (r-r0)*wq>>8)
+				row[i0+1] = clamp8(g0 + (gg-g0)*wq>>8)
+				row[i0+2] = clamp8(b0 + (bl-b0)*wq>>8)
 			}
 		}
 	})

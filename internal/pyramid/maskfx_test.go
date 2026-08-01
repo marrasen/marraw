@@ -495,6 +495,114 @@ func TestMaskFXSuppressesDetail(t *testing.T) {
 	}
 }
 
+// TestMaskFXKeepsDetailUnderLight is the 1:1 contract. The gathers run at
+// fxPlaneLongEdge whatever the render's size, so anything composited back OUT
+// of that buffer is capped at 1024 px of detail. That is free for an effect
+// that destroyed the detail anyway — but glow, streaks and prism do not: the
+// background under a bloom is as sharp as the decode. Before the delta
+// composite these threw every pixel of it away, which is what made a
+// full-resolution tile look blocky and, to the eye, look like the 1:1 render
+// never arrived.
+func TestMaskFXKeepsDetailUnderLight(t *testing.T) {
+	// Well past fxPlaneLongEdge, so the working buffer is a real downscale.
+	const w, h = 3072, 2304
+	base := localVariation(ditherImage(w, h))
+
+	for _, tc := range []struct {
+		name string
+		a    edit.MaskAdjust
+		keep float64 // fraction of the 1 px detail that must survive
+	}{
+		{"streaks", edit.MaskAdjust{Streaks: 0.2}, 0.9},
+		{"glow", edit.MaskAdjust{Glow: 0.1}, 0.9},
+		{"prism", edit.MaskAdjust{Prism: 0.6}, 0.9},
+		{"the Background recipe", edit.MaskAdjust{Glow: 0.1, Streaks: 0.2, Prism: 0.6, FXAngle: 25}, 0.9},
+		// The other half of the contract: a defocus still has to defocus.
+		{"blur", edit.MaskAdjust{Blur: 0.45}, 0},
+	} {
+		img := ditherImage(w, h)
+		ApplyMasks(img, fullMask(tc.a), nil)
+		got := localVariation(img) / base
+		if tc.keep == 0 {
+			if got > 0.2 {
+				t.Errorf("%s: kept %.0f%% of the detail, want it gone", tc.name, 100*got)
+			}
+			continue
+		}
+		if got < tc.keep {
+			t.Errorf("%s: kept %.0f%% of the detail at %dx%d, want ≥ %.0f%%",
+				tc.name, 100*got, w, h, 100*tc.keep)
+		}
+	}
+}
+
+// ditherImage carries its detail at ONE pixel — a frequency the 1024 working
+// buffer cannot represent at all, so measuring it answers "did the render's own
+// pixels come through?" and nothing else. A bright disc gives the light passes
+// something above the highlight knee to work with; the mid-level dither leaves
+// headroom so the added light does not clip the alternation away and read as
+// lost detail.
+func ditherImage(w, h int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	cx, cy := float64(w)*0.3, float64(h)*0.4
+	rad := float64(min(w, h)) * 0.08
+	for y := range h {
+		for x := range w {
+			i := img.PixOffset(x, y)
+			v := 90
+			if (x+y)%2 == 0 {
+				v = 130
+			}
+			if math.Hypot(float64(x)-cx, float64(y)-cy) <= rad {
+				v = 250
+			}
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = uint8(v), uint8(v), uint8(v), 0xff
+		}
+	}
+	return img
+}
+
+// TestMaskFXLightStillLands guards the other side of the delta composite: it
+// must change what the low-frequency passes changed, only more sharply. A
+// bloom that preserved the detail by doing nothing at all would pass the test
+// above.
+func TestMaskFXLightStillLands(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		a    edit.MaskAdjust
+	}{
+		{"glow", edit.MaskAdjust{Glow: 0.6}},
+		{"streaks", edit.MaskAdjust{Streaks: 0.6}},
+	} {
+		// 2048: past fxPlaneLongEdge (delta composite) and 1024: at it (the
+		// working buffer IS the render, so the replace path runs). The same
+		// effect must read at both, or the settle changes the look.
+		for _, size := range []int{1024, 2048} {
+			img := fxImage(size, size*3/4)
+			before := meanLevel(img)
+			ApplyMasks(img, fullMask(tc.a), nil)
+			after := meanLevel(img)
+			if after-before < 1 {
+				t.Errorf("%s at %d px: mean level %.2f -> %.2f, the light never landed",
+					tc.name, size, before, after)
+			}
+		}
+	}
+}
+
+func meanLevel(img *image.RGBA) float64 {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	var sum float64
+	for y := range h {
+		row := img.Pix[y*img.Stride : y*img.Stride+w*4]
+		for x := range w {
+			sum += float64(row[x*4]) + float64(row[x*4+1]) + float64(row[x*4+2])
+		}
+	}
+	return sum / float64(3*w*h)
+}
+
 // TestFXEncodingRoundTrip: fxEnc must invert fxLin exactly, so a region the FX
 // leaves alone survives the linearize/re-encode trip byte-identical.
 func TestFXEncodingRoundTrip(t *testing.T) {

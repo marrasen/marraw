@@ -37,6 +37,7 @@ import {
 import { CONTROL_SPECS, type ControlId } from '@/lib/controlSpecs';
 import type { AutoSection } from '@/lib/editSession';
 import { FEATURES, FEATURE_GROUPS, FEATURE_IDS, resolveFeature } from '@/lib/features';
+import { isMasksOnlyPreset } from '@/lib/presetSections';
 import {
   updateAutoPresets,
   updateBurstGapSeconds,
@@ -638,8 +639,12 @@ function DefaultPresetsSection() {
   const userPresets = useUIStore((s) => s.userPresets);
   const cameras = useListCameras();
   // Seeding runs presetLook server-side, which can't resolve per-photo
-  // autos — offer only non-adaptive presets.
-  const seedable = userPresets.filter((p) => (p.autoSections?.length ?? 0) === 0);
+  // autos — offer only non-adaptive presets. Masks-only presets are out for
+  // the same reason: seeding lands the look, and their look is deliberately
+  // nothing, so they'd sit in the list doing nothing on import.
+  const seedable = userPresets.filter(
+    (p) => (p.autoSections?.length ?? 0) === 0 && !isMasksOnlyPreset(p),
+  );
   // Cameras with a stale mapping (folder removed from the catalog) still
   // show, so the entry can be seen and cleared.
   const cameraKeys = new Set((cameras.data ?? []).map((c) => c.key));
