@@ -277,6 +277,9 @@ interface UIState {
   clipboard: Params | null;
   exportOpen: boolean;
   settingsOpen: boolean;
+  // Which pane the Settings dialog shows. Lives here, not in the dialog, so a
+  // deep link (rail → "Manage connections…") can open straight onto one.
+  settingsSection: string;
   // The watermark editor dialog. Per-window, not persisted.
   watermarkEditorOpen: boolean;
 
@@ -318,7 +321,9 @@ interface UIState {
   setBurstMembers: (members: Map<number, number[]>) => void;
   setClipboard: (p: Params | null) => void;
   setExportOpen: (open: boolean) => void;
-  setSettingsOpen: (open: boolean) => void;
+  /** Opens/closes Settings; a section deep-links, otherwise the last pane stays. */
+  setSettingsOpen: (open: boolean, section?: string) => void;
+  setSettingsSection: (section: string) => void;
   setWatermarkEditorOpen: (open: boolean) => void;
   toggleSoftOnly: () => void;
   toggleCollapseBursts: () => void;
@@ -392,6 +397,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   clipboard: null,
   exportOpen: false,
   settingsOpen: false,
+  settingsSection: 'General',
   watermarkEditorOpen: false,
   cellSize: 220,
   loupeZoom: 'fit',
@@ -553,7 +559,9 @@ export const useUIStore = create<UIState>((set, get) => ({
   setBurstMembers: (members) => set({ burstMembers: members }),
   setClipboard: (p) => set({ clipboard: p }),
   setExportOpen: (open) => set({ exportOpen: open }),
-  setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setSettingsOpen: (open, section) =>
+    set(section ? { settingsOpen: open, settingsSection: section } : { settingsOpen: open }),
+  setSettingsSection: (section) => set({ settingsSection: section }),
   setWatermarkEditorOpen: (open) => set({ watermarkEditorOpen: open }),
   toggleSoftOnly: () => set((s) => ({ softOnly: !s.softOnly })),
   toggleCollapseBursts: () => set((s) => ({ collapseBursts: !s.collapseBursts })),

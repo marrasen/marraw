@@ -14,7 +14,14 @@ import {
   type RemoteAccessInfo,
 } from '@/api/system';
 import { backend, canUseHostFs } from '@/lib/backend';
-import type { RemoteAccessPrefs } from '@/lib/electron';
+import type { RemoteAccessPrefs, RemoteConnection, RemoteProbe } from '@/lib/electron';
+import {
+  deleteRemote,
+  openRemoteWindow,
+  remoteStatusText,
+  saveRemote,
+  useRemotes,
+} from '@/stores/remoteStore';
 import { DirPickerDialog } from '@/components/DirPickerDialog';
 import { useApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -83,13 +90,22 @@ type Section = (typeof SECTIONS)[number];
 export function SettingsDialog() {
   const open = useUIStore((s) => s.settingsOpen);
   const setOpen = useUIStore((s) => s.setSettingsOpen);
-  const [section, setSection] = useState<Section>('General');
-  // Remote access is configured on the machine that HOSTS the library, via
-  // the shell's prefs — hide it in remote windows and plain browser tabs.
-  const showRemote = !backend.isRemote && !!window.marraw?.getRemoteAccess;
+  // The Remote pane covers both halves of remote work — the connections this
+  // machine can open, and hosting this library to others — so it shows
+  // wherever the shell bridges exist, including a remote window (whose shell
+  // is still this machine's). What's hidden there is the hosting half.
+  const showRemote = !!window.marraw?.getRemoteAccess;
   const sections = SECTIONS.filter((s) => s !== 'Remote' || showRemote);
+  // The visible pane lives in the store so anything can deep-link to one
+  // (the rail's "Manage connections…"); a stale name falls back to General.
+  const setSection = useUIStore((s) => s.setSettingsSection);
+  const stored = useUIStore((s) => s.settingsSection);
+  const section = (sections as readonly string[]).includes(stored)
+    ? (stored as Section)
+    : 'General';
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => setOpen(v)}>
       <DialogContent
         showCloseButton={false}
         className="flex h-[480px] w-[760px] max-w-none flex-col gap-0 overflow-hidden rounded-[14px] border-glass-border p-0 sm:max-w-none"
@@ -1053,11 +1069,204 @@ function ModelsSection() {
   );
 }
 
-// RemoteSection: host this library to other machines (e.g. a laptop over a
+// RemoteSection: the two halves of remote work. "Connections" is the list of
+// other machines' libraries this machine can open — shell prefs, so it works
+// in a remote window too. "Host this library" is the other direction, and
+// only makes sense for the daemon on THIS machine.
+function RemoteSection() {
+  return (
+    <div className="flex flex-col gap-6">
+      <ConnectionsSection />
+      {!backend.isRemote && <HostSection />}
+    </div>
+  );
+}
+
+/**
+ * Saved connections to libraries on other machines. Adding one needs its host
+ * and the pairing token from that machine's Settings → Remote; the token is
+ * verified against the live daemon on save.
+ */
+function ConnectionsSection() {
+  const { conns, probes } = useRemotes();
+  const [editing, setEditing] = useState<Partial<RemoteConnection> | null>(null);
+
+  return (
+    <div className="flex flex-col">
+      <div className="mb-1.5 text-[10px] tracking-[.06em] text-muted-foreground uppercase">
+        Connections
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {conns.length === 0 && !editing && (
+          <div className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+            No connections yet. Add the machine that hosts the library — it shows its pairing token
+            under Settings → Remote.
+          </div>
+        )}
+        {conns.map((c) => (
+          <div
+            key={c.id}
+            className="flex items-center gap-3 rounded-lg border bg-secondary px-3 py-2 dark:bg-white/5"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-medium">{c.name}</div>
+              <div className="truncate font-mono text-[10.5px] text-faint">{c.host}</div>
+            </div>
+            <RemoteStatus probe={probes[c.id]} />
+            <Button variant="outline" size="sm" onClick={() => openRemoteWindow(c.id)}>
+              Open
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setEditing(c)}>
+              Edit
+            </Button>
+          </div>
+        ))}
+      </div>
+      {editing ? (
+        <ConnectionEditor
+          conn={editing}
+          onClose={() => setEditing(null)}
+        />
+      ) : (
+        <div className="mt-2.5">
+          <Button variant="outline" size="sm" onClick={() => setEditing({})}>
+            Add connection…
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Live reachability of one saved connection, as of the last 30s poll. */
+function RemoteStatus({ probe }: { probe: RemoteProbe | undefined }) {
+  const label = remoteStatusText(probe);
+  return (
+    <span
+      className={cn(
+        'shrink-0 font-mono text-[10.5px]',
+        !probe ? 'text-faint' : probe.ok ? 'text-emerald-500' : 'text-destructive',
+      )}
+      title={probe && !probe.ok ? probe.error : undefined}
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Add/edit one connection. The token is tested before saving: a wrong token
+ * would only bounce at connect time, but an asleep host is not an error —
+ * that saves with a warning, since it will answer later.
+ */
+function ConnectionEditor({
+  conn,
+  onClose,
+}: {
+  conn: Partial<RemoteConnection>;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(conn.name ?? '');
+  const [host, setHost] = useState(conn.host ?? '');
+  const [token, setToken] = useState(conn.token ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async () => {
+    if (!host.trim()) {
+      setError('Host is required.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    const probe = await window.marraw?.testRemote?.(host.trim(), token.trim());
+    if (probe && !probe.ok && probe.error === 'invalid token') {
+      setBusy(false);
+      setError('The daemon answered, but rejected this token.');
+      return;
+    }
+    await saveRemote({ id: conn.id, name: name.trim(), host: host.trim(), token: token.trim() });
+    setBusy(false);
+    if (probe && !probe.ok) toast.warning(`Saved — ${host.trim()} is not answering (${probe.error})`);
+    else toast.success(`Saved ${name.trim() || host.trim()}`);
+    onClose();
+  };
+
+  const remove = async () => {
+    if (conn.id) await deleteRemote(conn.id);
+    onClose();
+  };
+
+  return (
+    <div className="mt-2.5 flex flex-col gap-2 rounded-lg border border-primary/50 bg-primary/5 p-3">
+      <ConnectionField label="Name" value={name} onChange={setName} placeholder="Home desktop" />
+      <ConnectionField
+        label="Host (name or IP, optionally :port)"
+        value={host}
+        onChange={setHost}
+        placeholder="100.64.0.12 or desktop:8482"
+        mono
+      />
+      <ConnectionField
+        label="Pairing token (Settings → Remote on that machine)"
+        value={token}
+        onChange={setToken}
+        placeholder="32-character token"
+        mono
+      />
+      {error && <div className="text-[11px] text-destructive">{error}</div>}
+      <div className="mt-0.5 flex items-center gap-1.5">
+        <Button size="sm" disabled={busy} onClick={() => void submit()}>
+          {busy ? 'Checking…' : 'Save'}
+        </Button>
+        <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
+          Cancel
+        </Button>
+        <span className="flex-1" />
+        {conn.id && (
+          <Button variant="destructive" size="sm" disabled={busy} onClick={() => void remove()}>
+            Remove
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConnectionField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  mono,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  mono?: boolean;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <input
+        className={cn(
+          'h-8 rounded-lg border border-input bg-secondary px-2.5 text-xs outline-none focus:border-ring dark:bg-white/5',
+          mono && 'font-mono',
+        )}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </label>
+  );
+}
+
+// HostSection: host this library to other machines (e.g. a laptop over a
 // Tailscale network). The listen/port toggle is a shell preference applied at
 // daemon spawn — hence the relaunch dance — while the pairing token lives in
 // the daemon and swaps live.
-function RemoteSection() {
+function HostSection() {
   const client = useApiClient();
   const [prefs, setPrefs] = useState<RemoteAccessPrefs | null>(null);
   const [info, setInfo] = useState<RemoteAccessInfo | null>(null);
@@ -1102,6 +1311,9 @@ function RemoteSection() {
 
   return (
     <div className="flex flex-col">
+      <div className="mb-1.5 text-[10px] tracking-[.06em] text-muted-foreground uppercase">
+        Host this library
+      </div>
       <SettingRow
         title="Allow remote connections"
         description="Let marraw on another machine (e.g. your laptop over Tailscale) open this library. The daemon listens on all interfaces on the port below — only clients with the pairing token get in."
@@ -1146,8 +1358,8 @@ function RemoteSection() {
         description={
           <div className="flex flex-col gap-1">
             <span>
-              Enter this on the connecting machine (its connect screen asks for it). Regenerating
-              locks out every saved connection until they update the token.
+              Enter this on the connecting machine, under Settings → Remote → Add connection.
+              Regenerating locks out every saved connection until they update the token.
             </span>
             <span className="font-mono text-[11.5px] text-foreground select-text">
               {info ? info.pairingToken : '…'}
@@ -1187,15 +1399,6 @@ function RemoteSection() {
               </Button>
             )}
           </div>
-        }
-      />
-      <SettingRow
-        title="Connect to another library"
-        description="Open the connect screen to browse a marraw library hosted on another machine."
-        control={
-          <Button variant="outline" size="sm" onClick={() => window.marraw?.openConnectWindow?.()}>
-            Connect…
-          </Button>
         }
       />
     </div>

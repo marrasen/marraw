@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { canUseHostFs } from '@/lib/backend';
+import { backend, canUseHostFs } from '@/lib/backend';
 import {
   AppWindow,
   ArrowDown,
@@ -14,12 +14,14 @@ import {
   FolderTree,
   Info,
   Maximize2,
+  Monitor,
   Pencil,
   Play,
   PlugZap,
   Plus,
   RefreshCw,
   Search,
+  Server,
   Settings,
   Trash2,
 } from 'lucide-react';
@@ -76,7 +78,15 @@ import {
   updateShootGroup,
   updateShootSort,
 } from '@/lib/uiSettings';
+import {
+  deleteRemote,
+  openLocalWindow,
+  openRemoteWindow,
+  remoteStatusText,
+  useRemotes,
+} from '@/stores/remoteStore';
 import { useUIStore, type ShootGroup, type ShootSort } from '@/stores/uiStore';
+import type { RemoteConnection, RemoteProbe } from '@/lib/electron';
 
 // Display aliases are a pure display preference, persisted server-side
 // (uiSettings.groupAliases), keyed by the lowercased settings key.
@@ -220,6 +230,7 @@ export function LibraryRail() {
           Add folder
         </button>
       </div>
+      <RemotesSection />
       <button
         className="flex items-center gap-2 border-t px-3 py-2.5 text-xs text-muted-foreground hover:text-foreground"
         onClick={() => setSettingsOpen(true)}
@@ -228,6 +239,159 @@ export function LibraryRail() {
         Settings
       </button>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- remotes
+
+// The rail's collapse state is keyed by lowercased folder path; no path can
+// collide with this.
+const REMOTES_KEY = '@remotes';
+
+/**
+ * Libraries on other machines. Opening one is always a NEW window: a library
+ * is a whole backend — its own folders, cache, models, export targets and
+ * paths — so two of them never share a window.
+ *
+ * The list belongs to the Electron shell (this machine's), not the daemon,
+ * which is why it also shows in a remote window: from there it is the way
+ * back home, and the way sideways to a third machine. A remote host's own
+ * connections are invisible here, and there is no hop through it — every
+ * window connects direct.
+ */
+function RemotesSection() {
+  const client = useApiClient();
+  const { conns, probes } = useRemotes();
+  const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
+  const open = useUIStore((s) => s.railGroups[REMOTES_KEY] !== false);
+
+  if (!conns.length) return null;
+
+  // Which saved connection this window is already looking at, if any.
+  const currentHost = backend.isRemote ? backend.http.replace(/^https?:\/\//, '') : '';
+
+  return (
+    <div className="flex flex-col border-t pt-2.5" data-testid="rail-remotes">
+      <div className="flex items-center justify-between px-[18px] pb-1.5">
+        <button
+          className="flex items-center gap-1.5 text-[10px] tracking-[.07em] text-faint uppercase hover:text-muted-foreground"
+          onClick={() => updateRailGroupOpen(client, REMOTES_KEY, !open)}
+        >
+          <span className={cn('text-[8px] transition-transform', open && 'rotate-90')}>▶</span>
+          Other computers
+        </button>
+        <button
+          className="flex size-5 items-center justify-center rounded text-faint hover:bg-accent hover:text-foreground"
+          title="Manage connections"
+          aria-label="Manage connections"
+          onClick={() => setSettingsOpen(true, 'Remote')}
+        >
+          <Settings className="size-3" strokeWidth={1.5} />
+        </button>
+      </div>
+      {open && (
+        <div className="flex max-h-[28vh] flex-col gap-px overflow-y-auto px-2 pb-1.5">
+          {/* Only shown from a remote window — from the local one you are here. */}
+          {backend.isRemote && (
+            <button
+              className="flex h-[30px] shrink-0 items-center gap-[7px] rounded-[7px] px-2 hover:bg-accent"
+              onClick={openLocalWindow}
+              title="Open this machine's library in a new window"
+              data-testid="rail-remote-local"
+            >
+              <Monitor className="size-3 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+              <span className="flex-1 truncate text-left">This computer</span>
+            </button>
+          )}
+          {conns.map((c) => (
+            <RemoteRow
+              key={c.id}
+              conn={c}
+              probe={probes[c.id]}
+              current={c.host.toLowerCase() === currentHost.toLowerCase()}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One saved connection, with its last probed status. */
+function RemoteRow({
+  conn,
+  probe,
+  current,
+}: {
+  conn: RemoteConnection;
+  probe: RemoteProbe | undefined;
+  /** This window is already connected to it — clicking would open a duplicate. */
+  current: boolean;
+}) {
+  const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
+  const status = remoteStatusText(probe);
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger
+        className={cn(
+          'flex h-[34px] shrink-0 items-center gap-[7px] rounded-[7px] px-2',
+          current ? 'bg-sidebar-accent' : 'cursor-pointer hover:bg-accent',
+        )}
+        onClick={() => !current && openRemoteWindow(conn.id)}
+        title={`${conn.host} — ${status}`}
+        data-testid="rail-remote"
+        data-name={conn.name}
+        data-online={probe?.ok ? '1' : '0'}
+      >
+        <span
+          className={cn(
+            'size-1.5 shrink-0 rounded-full',
+            !probe ? 'bg-muted-foreground/40' : probe.ok ? 'bg-emerald-500' : 'bg-destructive/70',
+          )}
+        />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className={cn('truncate', current && 'font-semibold text-foreground')}>
+            {conn.name}
+          </span>
+          <span className="truncate font-mono text-[9.5px] text-faint">
+            {current ? 'connected · this window' : status}
+          </span>
+        </span>
+        <Server className="size-3 shrink-0 text-muted-foreground" strokeWidth={1.5} />
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <div className="flex flex-col gap-px px-2.5 pt-1.5 pb-2">
+          <span className="truncate font-semibold text-foreground">{conn.name}</span>
+          <span className="truncate font-mono text-[10px] text-faint">
+            {conn.host} · {status}
+          </span>
+        </div>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={current} onClick={() => openRemoteWindow(conn.id)}>
+          <AppWindow /> <span className="flex-1 text-foreground">Open in new window</span>
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => setSettingsOpen(true, 'Remote')}>
+          <Pencil /> <span className="flex-1">Edit connection…</span>
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(conn.host);
+            toast.success('Host copied');
+          }}
+        >
+          <Copy /> <span className="flex-1">Copy host</span>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="destructive" onClick={() => void deleteRemote(conn.id)}>
+          <Trash2 />
+          <div className="flex flex-col gap-px">
+            <span>Remove connection</span>
+            <span className="text-[11px] text-faint">Nothing on that machine changes</span>
+          </div>
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

@@ -246,8 +246,9 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
-	// The connect screen's reachability probe: proves both the host and the
-	// token in one authenticated round trip. /healthz stays open on purpose.
+	// The shell's reachability probe for a saved connection: proves both the
+	// host and the token in one authenticated round trip. /healthz stays open
+	// on purpose.
 	mux.HandleFunc("GET /authz", func(w http.ResponseWriter, r *http.Request) {
 		if tokenValid != nil && !tokenValid(r.URL.Query().Get("t")) && !tokenValid(r.Header.Get("X-Marraw-Token")) {
 			http.Error(w, "forbidden", http.StatusForbidden)
@@ -333,7 +334,7 @@ func isLoopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// buildVersion is what GET /authz reports so the connect screen can show
+// buildVersion is what GET /authz reports so a connecting client can show
 // which version it reached. Release builds carry the module version via
 // -buildvcs/embedded build info; a source build reports "dev".
 func buildVersion() string {

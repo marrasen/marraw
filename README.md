@@ -156,11 +156,12 @@ you the moment the connection drops. Turn it on in **Settings → Remote**;
 `--dev` builds refuse to bind past loopback, and access is gated on the token,
 not on who can reach the port.
 
-![Settings dialog open on the Remote tab: an Allow remote connections toggle switched on, a Port field reading 8482, a pairing token with Copy and Regenerate buttons, and a Connect to another library row](screenshots/marraw_remote.jpg)
+![Settings dialog open on the Remote tab: an Allow remote connections toggle switched on, a Port field reading 8482, a pairing token with Copy and Regenerate buttons, and the saved connections list](screenshots/marraw_remote.jpg)
 
 <sup>Settings → Remote on the machine that holds the photos. Flip the toggle,
-hand the pairing token to your laptop, and its connect screen opens the library
-over the network — no files copied.</sup>
+hand the pairing token to your laptop, and it appears under **Other computers**
+in the laptop's library rail — one click opens it over the network, no files
+copied.</sup>
 
 ---
 

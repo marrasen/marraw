@@ -22,9 +22,18 @@ contextBridge.exposeInMainWorld('marraw', {
   // version; see main.cjs betaChannelEnabled.
   getBetaChannel: () => ipcRenderer.invoke('marraw:get-beta-channel'),
   setBetaChannel: (on) => ipcRenderer.invoke('marraw:set-beta-channel', on),
-  // Remote connections: Settings surfaces the shell's remote-access prefs
-  // (spawn flags, so a change needs relaunch) and the connect screen.
-  openConnectWindow: () => ipcRenderer.send('marraw:open-connect'),
+  // Saved connections to other machines' libraries. They live in the shell's
+  // prefs, not the daemon's settings, so they are the same list in every
+  // window — including a remote one, whose shell is still this machine's.
+  listRemotes: () => ipcRenderer.invoke('marraw:remotes-list'),
+  saveRemote: (conn) => ipcRenderer.invoke('marraw:remotes-save', conn),
+  deleteRemote: (id) => ipcRenderer.invoke('marraw:remotes-delete', id),
+  // Reachability + token check, run in the main process (no CORS in play).
+  testRemote: (host, token) => ipcRenderer.invoke('marraw:remote-test', host, token),
+  openRemote: (id) => ipcRenderer.invoke('marraw:open-remote', id),
+  openLocal: () => ipcRenderer.invoke('marraw:open-local'),
+  // Hosting this library to other machines: shell prefs (spawn flags, so a
+  // change needs a relaunch).
   getRemoteAccess: () => ipcRenderer.invoke('marraw:get-remote-access'),
   setRemoteAccess: (patch) => ipcRenderer.invoke('marraw:set-remote-access', patch),
   relaunch: () => ipcRenderer.invoke('marraw:relaunch'),

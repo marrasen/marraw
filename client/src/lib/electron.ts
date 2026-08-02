@@ -10,6 +10,19 @@ export interface RemoteAccessPrefs {
   restartRequired: boolean;
 }
 
+// A saved connection to another machine's library, stored in the shell's
+// prefs (not the daemon's settings) so the list is the same in every window.
+export interface RemoteConnection {
+  id: string;
+  name: string;
+  /** Always host:port — the shell normalizes a bare host to the default port. */
+  host: string;
+  token: string;
+}
+
+/** One reachability probe of a remote daemon (GET /authz from the shell). */
+export type RemoteProbe = { ok: true; version: string } | { ok: false; error: string };
+
 declare global {
   interface Window {
     marraw?: {
@@ -29,7 +42,12 @@ declare global {
       getBetaChannel?: () => Promise<boolean>;
       setBetaChannel?: (on: boolean) => Promise<boolean>;
       // Remote connections — absent on builds predating them; feature-check.
-      openConnectWindow?: () => void;
+      listRemotes?: () => Promise<RemoteConnection[]>;
+      saveRemote?: (conn: Partial<RemoteConnection>) => Promise<RemoteConnection[]>;
+      deleteRemote?: (id: string) => Promise<RemoteConnection[]>;
+      testRemote?: (host: string, token: string) => Promise<RemoteProbe>;
+      openRemote?: (id: string) => Promise<boolean>;
+      openLocal?: () => Promise<boolean>;
       getRemoteAccess?: () => Promise<RemoteAccessPrefs>;
       setRemoteAccess?: (patch: Partial<RemoteAccessPrefs>) => Promise<RemoteAccessPrefs>;
       relaunch?: () => Promise<void>;

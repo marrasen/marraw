@@ -475,7 +475,9 @@ ipcMain.handle('marraw:remote-test', async (_ev, host, token) => {
     if (!body || body.app !== 'marraw') return { ok: false, error: 'not a marraw daemon' };
     return { ok: true, version: body.version ?? '' };
   } catch (err) {
-    return { ok: false, error: err?.name === 'TimeoutError' ? 'unreachable (timed out)' : String(err?.message ?? err) };
+    // fetch's own wording ("fetch failed") says nothing to a photographer.
+    // The two cases that matter are "not answering" and "answering slowly".
+    return { ok: false, error: err?.name === 'TimeoutError' ? 'no answer (timed out)' : 'unreachable' };
   }
 });
 ipcMain.handle('marraw:get-remote-access', () => ({
@@ -506,59 +508,19 @@ ipcMain.handle('marraw:relaunch', () => {
   app.relaunch();
   app.quit();
 });
-const launchMode = () => (readPrefs().launchMode === 'picker' ? 'picker' : 'local');
-ipcMain.handle('marraw:get-launch-mode', () => launchMode());
-ipcMain.handle('marraw:set-launch-mode', (_ev, mode) => {
-  const prefs = readPrefs();
-  prefs.launchMode = mode === 'picker' ? 'picker' : 'local';
-  writePrefs(prefs);
-  return prefs.launchMode;
-});
-ipcMain.on('marraw:open-connect', () => openConnectWindow());
+// Opening a library always means a NEW window, never a swap: the caller's
+// window stays up while the daemon spawns. (It also has to — closing the last
+// window fires window-all-closed, which quits the app.)
 ipcMain.handle('marraw:open-remote', (_ev, id) => {
   const conn = remotesList().find((c) => c && c.id === id);
   if (!conn) return false;
   void createWindow({ remote: { name: conn.name, host: conn.host, token: conn.token } });
-  if (connectWin && !connectWin.isDestroyed()) connectWin.close();
   return true;
 });
 ipcMain.handle('marraw:open-local', () => {
   void createWindow({});
-  if (connectWin && !connectWin.isDestroyed()) connectWin.close();
   return true;
 });
-
-// The connect screen: a small pre-launch picker that must work before any
-// daemon exists, so it is a plain static page, not the React client.
-let connectWin = null;
-function openConnectWindow() {
-  if (connectWin && !connectWin.isDestroyed()) {
-    connectWin.focus();
-    return;
-  }
-  connectWin = new BrowserWindow({
-    width: 480,
-    height: 620,
-    resizable: false,
-    frame: false,
-    backgroundColor: '#0c0d0f',
-    icon: WINDOW_ICON,
-    show: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'connectPreload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  connectWin.setMenuBarVisibility(false);
-  connectWin.once('ready-to-show', () => connectWin.show());
-  connectWin.on('closed', () => {
-    connectWin = null;
-  });
-  connectWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  void connectWin.loadFile(path.join(__dirname, 'connect.html'));
-}
 
 // Single instance: a second launch hands its MARRAW_OPEN_FOLDER over via
 // additionalData (the first instance can't see the second's env) and exits;
@@ -578,12 +540,7 @@ if (!gotLock) {
     void createWindow({ openFolder: folder });
   });
   app.whenReady().then(() => {
-    // Harness runs always need the real app window, whatever the pref says.
-    if (launchMode() === 'picker' && !UITEST) {
-      openConnectWindow();
-    } else {
-      void createWindow({ initial: true });
-    }
+    void createWindow({ initial: true });
     initAutoUpdater();
   });
 }
