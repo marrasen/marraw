@@ -12,7 +12,7 @@
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const BIN = join(process.cwd(), 'build', process.platform === 'win32' ? 'marrawd.exe' : 'marrawd');
@@ -24,6 +24,10 @@ if (!existsSync(BIN)) {
 const PORT = 8489;
 const LAUNCH_TOKEN = 'launch-token-for-the-pairing-probe';
 
+// The daemon logs mDNS registration to stderr; some assertions read it.
+let logTail = [];
+const daemonLog = () => logTail.join('');
+
 const results = {};
 const check = (name, ok, detail = '') => {
   results[name] = ok;
@@ -33,11 +37,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Starts marrawd on `listen:port` against a throwaway data dir. */
 async function startDaemon(listen, port, dataDir) {
+  logTail = [];
   const child = spawn(BIN, ['--port', String(port), '--listen', listen, '--data-dir', dataDir], {
     env: { ...process.env, MARRAW_TOKEN: LAUNCH_TOKEN },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  child.stderr.on('data', (d) => process.env.VERBOSE && console.error(`[marrawd] ${d}`));
+  child.stderr.on('data', (d) => {
+    logTail.push(String(d));
+    if (process.env.VERBOSE) console.error(`[marrawd] ${d}`);
+  });
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('daemon not ready in 15s')), 15_000);
     child.stdout.on('data', (d) => {
@@ -122,8 +130,57 @@ try {
   // ---- discovery ----
   const hello = await get('/hello').then((r) => r.json());
   check('hello identifies the daemon', hello.app === 'marraw' && !!hello.name, `name=${hello.name}`);
+  // mDNS lives in the daemon now, so it is the daemon that must announce.
+  check(
+    'the daemon announces itself on the local network',
+    /mdns: announcing/.test(daemonLog()),
+    (daemonLog().match(/mdns: [^\n]*/) ?? ['no mdns line'])[0],
+  );
   check('hello reports pairing open', hello.pairing === true);
   check('authz still needs a token', (await get('/authz')).status === 403);
+
+  // ---- discovery runs on the daemon ----
+  {
+    const scanClient = await connect(LAUNCH_TOKEN);
+    const t0 = Date.now();
+    const found = await scanClient.call('System.ScanForHosts', [[]]);
+    const took = Date.now() - t0;
+    check('scan returns a list', Array.isArray(found), `${found.length} found in ${took}ms`);
+    // This daemon announces itself, so without the self-filter a scan would
+    // always turn up the machine running it. Any OTHER marraw on the network
+    // is a legitimate result — this box may well have real peers.
+    const selfHosts = new Set([
+      '127.0.0.1',
+      'localhost',
+      hostname(),
+      `${hostname()}.local`,
+    ]);
+    const offeredSelf = found.filter(
+      (h) => selfHosts.has(h.host.replace(/:\d+$/, '')) || h.host.endsWith(`:${PORT}`),
+    );
+    check(
+      'scan does not offer this machine to itself',
+      offeredSelf.length === 0,
+      JSON.stringify(offeredSelf.map((h) => h.host)),
+    );
+    check(
+      'every result is a real marraw daemon',
+      found.every((h) => h.name && h.host && (h.source === 'mdns' || h.source === 'tailscale')),
+      found.map((h) => `${h.name}@${h.host}/${h.source}`).join(' '),
+    );
+    // Excluding a host must drop it, which is how already-saved connections
+    // stay out of the list.
+    if (found.length > 0) {
+      const excluded = await scanClient.call('System.ScanForHosts', [[found[0].host]]);
+      check(
+        'exclude drops a host from the scan',
+        !excluded.some((h) => h.host === found[0].host),
+        `excluded ${found[0].host}`,
+      );
+    }
+    check('scan finishes inside the browse window', took < 12_000, `${took}ms`);
+    scanClient.ws.close();
+  }
 
   // ---- a browser must not be able to drive pairing ----
   const formPost = await post('/pair/request', { name: 'X' }, { 'Content-Type': 'text/plain' });

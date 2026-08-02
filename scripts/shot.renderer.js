@@ -815,6 +815,22 @@ if (shot === 'cull') {
   // the shell filters out its own addresses.
   ui().setSettingsOpen(true, 'Remote');
   await sleep(600);
+  if (shot === 'remote') {
+    // The host half sits below the fold; scroll to it so the shot shows the
+    // reachability rows, and report what they say.
+    const pane = [...document.querySelectorAll('[role="dialog"] *')].find(
+      (e) => e.scrollHeight > e.clientHeight + 40 && e.clientHeight > 200,
+    );
+    if (pane) pane.scrollTop = pane.scrollHeight;
+    await sleep(1200);
+    const text = document.querySelector('[role="dialog"]')?.textContent ?? '';
+    window.__remoteProbe = {
+      showsAddresses: text.includes('Reachable at'),
+      addressLine: (text.match(/Reachable at.*?((?:\d{1,3}\.){3}\d{1,3}:\d+)/s) ?? [])[1] ?? '',
+      warnsWhenInvisible: text.includes('Not visible to searches'),
+      showsDeviceName: text.includes("This computer's name"),
+    };
+  }
   if (shot === 'pairing-selfpair') {
     // The whole add-a-connection flow against our OWN daemon, driven through
     // the real UI: scan (stubbed to point at loopback via MARRAW_UITEST_HOSTS)
@@ -1958,6 +1974,7 @@ const probe =
   window.__neardupProbe ??
   window.__modelsProbe ??
   window.__pairingProbe ??
+  window.__remoteProbe ??
   window.__updatesProbe ??
   window.__maskProbe ??
   window.__lensProbe ??

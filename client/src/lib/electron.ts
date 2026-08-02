@@ -23,21 +23,6 @@ export interface RemoteConnection {
 /** One reachability probe of a remote daemon (GET /authz from the shell). */
 export type RemoteProbe = { ok: true; version: string } | { ok: false; error: string };
 
-/**
- * A machine found by a scan, confirmed by its unauthenticated GET /hello.
- * `source` says how we found it, which is worth showing: "Local network" and
- * "Tailscale" mean different things to someone deciding whether it's theirs.
- */
-export interface DiscoveredHost {
-  /** Always host:port. */
-  host: string;
-  name: string;
-  version: string;
-  /** false when that machine has turned off accepting new connections. */
-  pairing: boolean;
-  source: 'mdns' | 'tailscale';
-}
-
 /** The host is now showing `code`, and is waiting for someone to approve. */
 export type PairRequestResult =
   | { ok: true; requestId: string; code: string; hostName: string }
@@ -106,8 +91,8 @@ declare global {
       testRemote?: (host: string, token: string) => Promise<RemoteProbe>;
       openRemote?: (id: string) => Promise<boolean>;
       openLocal?: () => Promise<boolean>;
-      // Discovery + pairing — absent on builds predating them; feature-check.
-      scanRemotes?: () => Promise<DiscoveredHost[]>;
+      // Pairing — absent on builds predating it; feature-check. Finding
+      // machines is System.ScanForHosts on the daemon, not a bridge call.
       pairRemote?: (host: string) => Promise<PairRequestResult>;
       waitRemotePairing?: (host: string, requestId: string) => Promise<PairWaitResult>;
       cancelRemotePairing?: (host: string, requestId: string) => Promise<boolean>;

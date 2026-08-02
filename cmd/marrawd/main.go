@@ -26,6 +26,7 @@ import (
 
 	"github.com/marrasen/marraw/internal/api"
 	"github.com/marrasen/marraw/internal/decode"
+	"github.com/marrasen/marraw/internal/discovery"
 	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/imghttp"
 	"github.com/marrasen/marraw/internal/infer"
@@ -163,9 +164,16 @@ func main() {
 	if !loopbackOnly && !*dev {
 		broker = &pairing.Broker{}
 	}
+	// mDNS lives here rather than in the Electron shell so that only ONE
+	// program ever opens a listening socket — on Windows every program that
+	// does gets its own firewall prompt, and a declined second prompt left
+	// the machine reachable by address but invisible to a local scan.
+	advertiser := &discovery.Advertiser{}
+	defer advertiser.Stop()
 
 	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir, WatermarkDir: watermarkDir,
-		Infer: infer.NewManager(filepath.Join(*dataDir, "models")), IOGate: ioGate, Tokens: tokens, Pairing: broker, LoopbackOnly: loopbackOnly}
+		Infer: infer.NewManager(filepath.Join(*dataDir, "models")), IOGate: ioGate, Tokens: tokens, Pairing: broker,
+		Advertiser: advertiser, LoopbackOnly: loopbackOnly}
 	registry, library, _, _ := api.NewRegistry(deps)
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any
@@ -304,6 +312,9 @@ func main() {
 			log.Fatalf("serve: %v", err)
 		}
 	}()
+
+	// Announce on the local network, now that the real port is known.
+	deps.StartAdvertising(context.Background())
 
 	// The handshake line the Electron main process waits for.
 	fmt.Printf("MARRAW_READY port=%d\n", actualPort)

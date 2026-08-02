@@ -2,10 +2,17 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"sync"
 
 	"github.com/marrasen/aprot"
+
+	"github.com/marrasen/marraw/internal/discovery"
 )
 
 // System exposes app-level maintenance: preview-cache inspection, clearing,
@@ -91,6 +98,15 @@ type RemoteAccessInfo struct {
 	// can shut the door once their machines are paired without giving up
 	// remote access itself.
 	PairingOpen bool `json:"pairingOpen"`
+	// Addresses are the "host:port" addresses another machine can use to
+	// reach this one. Shown so nobody has to go hunting for their own IP.
+	Addresses []string `json:"addresses"`
+	// Advertising reports whether this machine is announcing itself on the
+	// local network, and AdvertiseError says why not. A blocked multicast
+	// socket is the one failure a user cannot otherwise see: the daemon looks
+	// perfectly healthy while being invisible to a scan.
+	Advertising    bool   `json:"advertising"`
+	AdvertiseError string `json:"advertiseError"`
 }
 
 const remoteAccessKey = "remoteAccess"
@@ -104,6 +120,14 @@ func (s *System) remoteAccessInfo(ctx context.Context) *RemoteAccessInfo {
 	}
 	if s.deps.Tokens != nil {
 		info.PairingToken = s.deps.Tokens.Pairing()
+	}
+	if !s.deps.LoopbackOnly {
+		if _, portStr, err := net.SplitHostPort(s.deps.ListenAddr); err == nil {
+			if port, err := strconv.Atoi(portStr); err == nil {
+				info.Addresses = discovery.ReachableAddresses(port)
+			}
+		}
+		info.Advertising, info.AdvertiseError = s.deps.Advertiser.Status()
 	}
 	return info
 }
@@ -125,6 +149,9 @@ func (s *System) SetDeviceName(ctx context.Context, name string) (*RemoteAccessI
 	if err := s.deps.DB.SetSetting(ctx, DeviceNameKey, name); err != nil {
 		return nil, err
 	}
+	// Re-announce under the new name, so other machines see the rename now
+	// rather than after a relaunch.
+	s.deps.StartAdvertising(ctx)
 	aprot.TriggerRefresh(ctx, remoteAccessKey)
 	return s.remoteAccessInfo(ctx), nil
 }
@@ -141,6 +168,89 @@ func (s *System) SetPairingOpen(ctx context.Context, open bool) (*RemoteAccessIn
 	}
 	aprot.TriggerRefresh(ctx, remoteAccessKey)
 	return s.remoteAccessInfo(ctx), nil
+}
+
+// DiscoveredHost is one marraw machine a scan turned up. Source says how it
+// was found — "Local network" and "Tailscale" mean different things to
+// someone deciding whether a machine is theirs.
+type DiscoveredHost struct {
+	Host    string `json:"host"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	// Pairing is false when that machine has stopped accepting new
+	// connections, so the UI can say so instead of offering a dead button.
+	Pairing bool `json:"pairing"`
+	Source  string `json:"source"` // "mdns" | "tailscale"
+}
+
+// ScanForHosts looks for other marraw machines: mDNS on the local network,
+// Tailscale peers across a tailnet. Both run concurrently, and every
+// candidate is confirmed with GET /hello — which is also what supplies the
+// name, so a Tailscale-found machine shows something recognisable rather than
+// a bare 100.x address.
+//
+// exclude carries the connections the caller has already saved; a scan should
+// surface machines the user has not set up yet, not repeat the ones they have.
+// This machine's own addresses are always excluded.
+func (s *System) ScanForHosts(ctx context.Context, exclude []string) ([]DiscoveredHost, error) {
+	if raw := os.Getenv(discovery.UITestHostsEnv); raw != "" {
+		// Harness stand-in: a scan on one machine can only ever find nothing,
+		// since this computer filters itself out.
+		var seeded []DiscoveredHost
+		if err := json.Unmarshal([]byte(raw), &seeded); err == nil {
+			return seeded, nil
+		}
+	}
+
+	var (
+		mdnsHosts []string
+		tsHosts   []string
+		wg        sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() { defer wg.Done(); mdnsHosts = discovery.Browse(ctx) }()
+	go func() { defer wg.Done(); tsHosts = discovery.TailscalePeers(ctx) }()
+	wg.Wait()
+
+	self := discovery.LocalAddresses()
+	skip := make(map[string]bool, len(exclude))
+	for _, e := range exclude {
+		skip[discovery.Normalize(e)] = true
+	}
+
+	// mDNS wins the label when a machine turns up both ways: "Local network"
+	// is the more useful thing to tell someone standing next to it.
+	source := map[string]string{}
+	var candidates []string
+	for _, group := range []struct {
+		hosts []string
+		label string
+	}{{mdnsHosts, "mdns"}, {tsHosts, "tailscale"}} {
+		for _, h := range group.hosts {
+			if skip[h] || self[discovery.HostOnly(h)] {
+				continue
+			}
+			if _, seen := source[h]; seen {
+				continue
+			}
+			source[h] = group.label
+			candidates = append(candidates, h)
+		}
+	}
+
+	found := discovery.ProbeAll(ctx, candidates)
+	out := make([]DiscoveredHost, 0, len(found))
+	for addr, hello := range found {
+		out = append(out, DiscoveredHost{
+			Host:    addr,
+			Name:    hello.Name,
+			Version: hello.Version,
+			Pairing: hello.Pairing,
+			Source:  source[addr],
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 // PairingRequest is one machine waiting to be let in. Code is shown on both

@@ -16,6 +16,14 @@ export interface CacheInfo {
     capBytes: number;
 }
 
+export interface DiscoveredHost {
+    host: string;
+    name: string;
+    version: string;
+    pairing: boolean;
+    source: string;
+}
+
 export interface ModelFile {
     fileName: string;
     name?: string;
@@ -43,6 +51,9 @@ export interface RemoteAccessInfo {
     loopbackOnly: boolean;
     deviceName: string;
     pairingOpen: boolean;
+    addresses: string[];
+    advertising: boolean;
+    advertiseError: string;
 }
 
 export interface RemoteDeviceInfo {
@@ -181,6 +192,19 @@ revokeRemoteDevice.method = 'System.RevokeRemoteDevice' as const;
 
 export function subscribeRevokeRemoteDevice(client: ApiClient, id: string, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('System.RevokeRemoteDevice', [id], callback, onError, options);
+}
+
+
+export function scanForHosts(client: ApiClient, exclude: string[], options?: RequestOptions): Promise<DiscoveredHost[]> {
+    return client.request<DiscoveredHost[]>('System.ScanForHosts', [exclude], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+scanForHosts.method = 'System.ScanForHosts' as const;
+
+export function subscribeScanForHosts(client: ApiClient, exclude: string[], callback: (data: DiscoveredHost[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<DiscoveredHost[]>('System.ScanForHosts', [exclude], callback, onError, options);
 }
 
 
@@ -378,6 +402,21 @@ export function useRevokeRemoteDevice(id: string, options?: UseQueryOptions<void
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [id], _subscribe: { method: 'System.RevokeRemoteDevice', params: [id] } });
+}
+
+/**
+ * Subscribes to `System.ScanForHosts` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useScanForHosts(exclude: string[], options?: UseQueryOptions<DiscoveredHost[]>): UseQueryResult<DiscoveredHost[]> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, exclude: string[]) => scanForHosts(client, exclude, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [exclude], _subscribe: { method: 'System.ScanForHosts', params: [exclude] } });
 }
 
 /**

@@ -4,7 +4,9 @@ package api
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/marrasen/aprot/tasks"
 
 	"github.com/marrasen/marraw/internal/decode"
+	"github.com/marrasen/marraw/internal/discovery"
 	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/infer"
@@ -59,6 +62,9 @@ type Deps struct {
 	// machine to approve them. Nil on a loopback-only daemon — nothing can
 	// reach it to ask.
 	Pairing *pairing.Broker
+	// Advertiser announces this daemon on the local network while remote
+	// access is on. Nil is valid (loopback-only: nothing to announce).
+	Advertiser *discovery.Advertiser
 	// ListenAddr is the address the daemon actually bound (set by main before
 	// serving); LoopbackOnly reports whether it is unreachable from other
 	// machines. Surfaced to the Settings UI via System.GetRemoteAccess.
@@ -173,6 +179,24 @@ func (d *Deps) DisconnectDevice(id string) {
 	if s != nil {
 		s.DisconnectUser(ConnDevicePrefix + id)
 	}
+}
+
+// StartAdvertising announces this daemon on the local network under its
+// current name. A no-op on a loopback-only daemon: announcing a machine
+// nobody can reach would just offer connections that cannot be made.
+func (d *Deps) StartAdvertising(ctx context.Context) {
+	if d.Advertiser == nil || d.LoopbackOnly {
+		return
+	}
+	_, portStr, err := net.SplitHostPort(d.ListenAddr)
+	if err != nil {
+		return
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return
+	}
+	d.Advertiser.Start(d.DeviceName(ctx), port)
 }
 
 // NotifyPairingChanged refreshes the pending-request subscription, which is

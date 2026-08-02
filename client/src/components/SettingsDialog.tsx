@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Download, RefreshCw, RotateCw, X } from 'lucide-react';
 import { useGetAppSettings, setSidecarWrites, useListCameras } from '@/api/library';
@@ -12,17 +12,13 @@ import {
   useGetRemoteAccess,
   useListRemoteDevices,
   regeneratePairingToken,
+  type DiscoveredHost,
   revokeRemoteDevice,
   setDeviceName,
   setPairingOpen,
 } from '@/api/system';
 import { backend, canUseHostFs } from '@/lib/backend';
-import type {
-  DiscoveredHost,
-  RemoteAccessPrefs,
-  RemoteConnection,
-  RemoteProbe,
-} from '@/lib/electron';
+import type { RemoteAccessPrefs, RemoteConnection, RemoteProbe } from '@/lib/electron';
 import {
   cancelPairing,
   deleteRemote,
@@ -1201,6 +1197,10 @@ function ConnectionsSection() {
   // the middle of. The panel guards against that itself, but handing it a
   // changing callback would still be a trap for the next caller.
   const closeAdding = useCallback(() => setAdding(false), []);
+  // Joined into one string so the scan effect keys off the CONTENT of the
+  // list, not the array identity a poll hands back every 30 seconds.
+  const savedKey = conns.map((c) => c.host).join(',');
+  const savedHosts = useMemo(() => (savedKey ? savedKey.split(',') : []), [savedKey]);
 
   return (
     <div className="flex flex-col">
@@ -1236,7 +1236,7 @@ function ConnectionsSection() {
       {editing ? (
         <ConnectionEditor conn={editing} onClose={() => setEditing(null)} />
       ) : adding ? (
-        <AddConnectionPanel onClose={closeAdding} />
+        <AddConnectionPanel onClose={closeAdding} exclude={savedHosts} />
       ) : (
         <div className="mt-2.5">
           <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
@@ -1255,7 +1255,15 @@ function ConnectionsSection() {
  * already told us what they want, and making them press a second button to
  * begin looking is pure ceremony.
  */
-function AddConnectionPanel({ onClose }: { onClose: () => void }) {
+function AddConnectionPanel({
+  onClose,
+  exclude,
+}: {
+  onClose: () => void;
+  /** Hosts already saved — stable identity, it feeds the scan effect. */
+  exclude: string[];
+}) {
+  const client = useApiClient();
   const [hosts, setHosts] = useState<DiscoveredHost[] | null>(null);
   // The scan starts on mount, so "scanning" is the state this opens in rather
   // than something an effect flips on afterwards. A shell too old to scan goes
@@ -1264,15 +1272,18 @@ function AddConnectionPanel({ onClose }: { onClose: () => void }) {
   const [manual, setManual] = useState(() => !discoverySupported());
   const [pairing, setPairing] = useState<{ host: string; name: string } | null>(null);
 
-  const runScan = useCallback((alive: () => boolean) => {
-    return scanRemotes()
-      .catch(() => [] as DiscoveredHost[])
-      .then((found) => {
-        if (!alive()) return;
-        setHosts(found);
-        setScanning(false);
-      });
-  }, []);
+  const runScan = useCallback(
+    (alive: () => boolean) => {
+      return scanRemotes(client, exclude)
+        .catch(() => [] as DiscoveredHost[])
+        .then((found) => {
+          if (!alive()) return;
+          setHosts(found);
+          setScanning(false);
+        });
+    },
+    [client, exclude],
+  );
 
   useEffect(() => {
     if (!discoverySupported()) return;
@@ -1745,6 +1756,46 @@ function HostSection() {
             <Button variant="outline" size="sm" onClick={() => void window.marraw?.relaunch?.()}>
               Restart now
             </Button>
+          }
+        />
+      )}
+      {prefs?.enabled && !prefs.restartRequired && (
+        <SettingRow
+          title="Reachable at"
+          description={
+            <div className="flex flex-col gap-1">
+              <span>
+                Other computers can use any of these. Enter one under Add connection → Enter details
+                manually if the search does not find this computer.
+              </span>
+              <span className="font-mono text-[11.5px] text-foreground select-text">
+                {info?.addresses?.length ? info.addresses.join('  ·  ') : 'no network addresses'}
+              </span>
+            </div>
+          }
+        />
+      )}
+      {/* The one failure a user cannot otherwise see: the daemon is healthy
+          and the toggle says yes, but nothing announces it, so a scan on the
+          next desk finds nothing. On Windows this is a declined firewall
+          prompt, which is why the wording points there. */}
+      {prefs?.enabled && !prefs.restartRequired && info && !info.advertising && (
+        <SettingRow
+          title={<span className="text-accent-text">Not visible to searches</span>}
+          description={
+            <div className="flex flex-col gap-1">
+              <span>
+                This computer is running, but it is not announcing itself on the local network, so
+                other computers will not find it by name. They can still connect using an address
+                above. On Windows this usually means a firewall prompt was declined — allow marraw
+                through Windows Defender Firewall, then restart it.
+              </span>
+              {info.advertiseError && (
+                <span className="font-mono text-[10.5px] text-faint select-text">
+                  {info.advertiseError}
+                </span>
+              )}
+            </div>
           }
         />
       )}

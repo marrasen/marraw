@@ -1,7 +1,9 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
+import type { ApiClient } from '@/api/client';
+import { scanForHosts, type DiscoveredHost } from '@/api/system';
+import { backend } from '@/lib/backend';
 import type {
-  DiscoveredHost,
   PairRequestResult,
   PairWaitResult,
   RemoteConnection,
@@ -72,16 +74,28 @@ export async function deleteRemote(id: string): Promise<void> {
   useRemoteStore.setState({ conns: list, loaded: true });
 }
 
-/** Discovery needs a newer shell than the saved-connections list did. */
-export const discoverySupported = (): boolean => !!window.marraw?.scanRemotes;
+/**
+ * Scanning runs on the daemon this window is connected to, which in a remote
+ * window is someone else's machine — it would search THEIR network, not the
+ * one the user is sitting on. Saved connections belong to this computer, so
+ * that answer would be useless; remote windows get manual entry instead.
+ */
+export const discoverySupported = (): boolean => remotesSupported() && !backend.isRemote;
 
 /**
  * Looks for other marraw machines: mDNS on the local network, Tailscale peers
  * across a tailnet. Takes a couple of seconds — the mDNS browse has to wait
  * out its answer window — so callers should show that it is working.
+ *
+ * `exclude` is the already-saved connections: a scan should surface machines
+ * the user has not set up yet, not repeat the ones they have. The daemon
+ * filters out this computer's own addresses on top of that.
  */
-export async function scanRemotes(): Promise<DiscoveredHost[]> {
-  return (await window.marraw?.scanRemotes?.()) ?? [];
+export async function scanRemotes(
+  client: ApiClient,
+  exclude: string[],
+): Promise<DiscoveredHost[]> {
+  return scanForHosts(client, exclude);
 }
 
 /**
