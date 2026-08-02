@@ -79,27 +79,216 @@ func (s *System) ClearCache(ctx context.Context) (*CacheInfo, error) {
 }
 
 // RemoteAccessInfo describes how this daemon can be reached from another
-// machine: the pairing token remote clients authenticate with and what the
-// daemon is actually listening on.
+// machine: the pairing token remote clients authenticate with, the name it
+// answers discovery with, and what the daemon is actually listening on.
 type RemoteAccessInfo struct {
 	PairingToken string `json:"pairingToken"`
 	ListenAddr   string `json:"listenAddr"`
 	LoopbackOnly bool   `json:"loopbackOnly"`
+	// DeviceName is what other machines see when they find this one.
+	DeviceName string `json:"deviceName"`
+	// PairingOpen reports whether new pairing requests are accepted. The user
+	// can shut the door once their machines are paired without giving up
+	// remote access itself.
+	PairingOpen bool `json:"pairingOpen"`
 }
 
-func (s *System) remoteAccessInfo() *RemoteAccessInfo {
-	info := &RemoteAccessInfo{ListenAddr: s.deps.ListenAddr, LoopbackOnly: s.deps.LoopbackOnly}
+const remoteAccessKey = "remoteAccess"
+
+func (s *System) remoteAccessInfo(ctx context.Context) *RemoteAccessInfo {
+	info := &RemoteAccessInfo{
+		ListenAddr:   s.deps.ListenAddr,
+		LoopbackOnly: s.deps.LoopbackOnly,
+		DeviceName:   s.deps.DeviceName(ctx),
+		PairingOpen:  s.deps.PairingOpen(ctx),
+	}
 	if s.deps.Tokens != nil {
 		info.PairingToken = s.deps.Tokens.Pairing()
 	}
 	return info
 }
 
-// GetRemoteAccess returns the pairing token and listen address for the
-// Settings dialog's Remote section.
+// GetRemoteAccess returns the pairing token, device name and listen address
+// for the Settings dialog's Remote section. Subscription query: renaming the
+// machine or toggling pairing pushes an update.
 func (s *System) GetRemoteAccess(ctx context.Context) (*RemoteAccessInfo, error) {
-	return s.remoteAccessInfo(), nil
+	aprot.RegisterRefreshTrigger(ctx, remoteAccessKey)
+	return s.remoteAccessInfo(ctx), nil
 }
+
+// SetDeviceName renames this machine as other machines see it — in their scan
+// results and in the approval dialog. An empty name restores the hostname.
+func (s *System) SetDeviceName(ctx context.Context, name string) (*RemoteAccessInfo, error) {
+	if len([]rune(name)) > 64 {
+		return nil, aprot.ErrInvalidParams("name must be 64 characters or fewer")
+	}
+	if err := s.deps.DB.SetSetting(ctx, DeviceNameKey, name); err != nil {
+		return nil, err
+	}
+	aprot.TriggerRefresh(ctx, remoteAccessKey)
+	return s.remoteAccessInfo(ctx), nil
+}
+
+// SetPairingOpen turns new pairing requests on or off. Already-approved
+// devices keep working either way — this only closes the door to new ones.
+func (s *System) SetPairingOpen(ctx context.Context, open bool) (*RemoteAccessInfo, error) {
+	v := "true"
+	if !open {
+		v = "false"
+	}
+	if err := s.deps.DB.SetSetting(ctx, PairingOpenKey, v); err != nil {
+		return nil, err
+	}
+	aprot.TriggerRefresh(ctx, remoteAccessKey)
+	return s.remoteAccessInfo(ctx), nil
+}
+
+// PairingRequest is one machine waiting to be let in. Code is shown on both
+// machines so the person approving can tell one request from another; it is
+// not a secret and not a password.
+type PairingRequest struct {
+	ID        string `json:"id"`
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	Platform  string `json:"platform"`
+	Addr      string `json:"addr"`
+	ExpiresAt int64  `json:"expiresAt"`
+}
+
+const pairingKey = "pairing"
+
+// ListPairingRequests returns the connection requests waiting for approval.
+// Subscription query: a new request, an approval, a denial, or a timeout all
+// push an update, which is what opens and closes the dialog.
+//
+// It answers only windows on this machine. A remote client — including one
+// holding a valid device token — always sees an empty list, so nobody can
+// approve their own way in from the machine asking to be let in.
+func (s *System) ListPairingRequests(ctx context.Context) ([]PairingRequest, error) {
+	aprot.RegisterRefreshTrigger(ctx, pairingKey)
+	out := []PairingRequest{}
+	if s.deps.Pairing == nil || !s.deps.ConnIsLocal(ctx) {
+		return out, nil
+	}
+	for _, r := range s.deps.Pairing.Pending() {
+		out = append(out, PairingRequest{
+			ID:        r.ID,
+			Code:      r.Code,
+			Name:      r.Name,
+			Platform:  r.Platform,
+			Addr:      r.Addr,
+			ExpiresAt: r.ExpiresAt.UnixMilli(),
+		})
+	}
+	return out, nil
+}
+
+// ResolvePairing approves or denies a waiting request. Approving mints a
+// token belonging to that machine alone, so it can later be revoked on its
+// own. Local windows only, for the same reason ListPairingRequests is.
+func (s *System) ResolvePairing(ctx context.Context, id string, approve bool) error {
+	if s.deps.Pairing == nil {
+		return aprot.ErrInvalidParams("pairing is not enabled on this daemon")
+	}
+	if !s.deps.ConnIsLocal(ctx) {
+		return aprot.ErrAuthFailed("only a window on this machine can approve a connection")
+	}
+	defer aprot.TriggerRefresh(ctx, pairingKey)
+
+	if !approve {
+		if err := s.deps.Pairing.Resolve(id, false, ""); err != nil {
+			return aprot.ErrInvalidParams(err.Error())
+		}
+		return nil
+	}
+
+	req, ok := s.deps.Pairing.Find(id)
+	if !ok {
+		return aprot.ErrInvalidParams("that request is no longer waiting")
+	}
+	device, err := NewDevice(req.Name, req.Addr)
+	if err != nil {
+		return err
+	}
+
+	// Persist before handing the token out: a device that authenticates but
+	// vanishes on restart would be worse than a failed approval. If the
+	// request expired out from under us, put the list back.
+	prev := s.deps.Tokens.Devices()
+	next := append(prev, device)
+	if err := SaveDevices(ctx, s.deps.DB, next); err != nil {
+		return err
+	}
+	s.deps.Tokens.SetDevices(next)
+	if err := s.deps.Pairing.Resolve(id, true, device.Token); err != nil {
+		s.deps.Tokens.SetDevices(prev)
+		_ = SaveDevices(ctx, s.deps.DB, prev)
+		return aprot.ErrInvalidParams(err.Error())
+	}
+	return nil
+}
+
+// RemoteDeviceInfo is one approved machine, as shown in Settings. It
+// deliberately carries no token: the credential exists only in the daemon and
+// on the machine it was minted for.
+type RemoteDeviceInfo struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Addr     string `json:"addr"`
+	AddedAt  int64  `json:"addedAt"`
+	LastSeen int64  `json:"lastSeen"`
+}
+
+const devicesKey = "remoteDevices"
+
+// ListRemoteDevices returns the machines approved to connect to this one.
+// Subscription query: approving or revoking pushes an update.
+func (s *System) ListRemoteDevices(ctx context.Context) ([]RemoteDeviceInfo, error) {
+	aprot.RegisterRefreshTrigger(ctx, devicesKey)
+	out := []RemoteDeviceInfo{}
+	if s.deps.Tokens == nil {
+		return out, nil
+	}
+	for _, d := range s.deps.Tokens.Devices() {
+		out = append(out, RemoteDeviceInfo{
+			ID: d.ID, Name: d.Name, Addr: d.Addr, AddedAt: d.AddedAt, LastSeen: d.LastSeen,
+		})
+	}
+	return out, nil
+}
+
+// RevokeRemoteDevice withdraws one machine's access and drops its live
+// connection, so a laptop that has been lost or lent out stops working now
+// rather than at its next reconnect. Other devices are untouched.
+func (s *System) RevokeRemoteDevice(ctx context.Context, id string) error {
+	if s.deps.Tokens == nil {
+		return aprot.ErrInvalidParams("no devices on this daemon")
+	}
+	if !s.deps.ConnIsLocal(ctx) {
+		return aprot.ErrAuthFailed("only a window on this machine can revoke a device")
+	}
+	devices := s.deps.Tokens.Devices()
+	next := make([]Device, 0, len(devices))
+	found := false
+	for _, d := range devices {
+		if d.ID == id {
+			found = true
+			continue
+		}
+		next = append(next, d)
+	}
+	if !found {
+		return aprot.ErrInvalidParams("unknown device")
+	}
+	if err := SaveDevices(ctx, s.deps.DB, next); err != nil {
+		return err
+	}
+	s.deps.Tokens.SetDevices(next)
+	s.deps.DisconnectDevice(id)
+	aprot.TriggerRefresh(ctx, devicesKey)
+	return nil
+}
+
 
 // RegeneratePairingToken replaces the pairing token, invalidating the old one
 // for new connections. Clients already connected stay until they disconnect.
@@ -114,7 +303,8 @@ func (s *System) RegeneratePairingToken(ctx context.Context) (*RemoteAccessInfo,
 	if s.deps.Tokens != nil {
 		s.deps.Tokens.SetPairing(tok)
 	}
-	return s.remoteAccessInfo(), nil
+	aprot.TriggerRefresh(ctx, remoteAccessKey)
+	return s.remoteAccessInfo(ctx), nil
 }
 
 // SetCacheDir relocates the preview cache. An empty path restores the default

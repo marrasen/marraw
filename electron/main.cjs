@@ -7,8 +7,10 @@ const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, nativeImage } = r
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
+const remote = require('./remote.cjs');
 
 // Taskbar/window icon. Only needed for the dev/unpackaged run — the packaged
 // exe carries its own icon (electron-builder win.icon), and build/ isn't
@@ -348,6 +350,11 @@ async function startDaemon() {
     });
     child.on('error', reject);
   });
+  // Announce ourselves only when we are actually reachable: advertising a
+  // loopback-only daemon would offer connections nobody can make. The mDNS
+  // name is a hint for the browse — GET /hello is what the other machine
+  // actually displays, so the two never need to agree.
+  if (ra.enabled) remote.startAdvertising({ port: Number(port), name: os.hostname() });
   return { port, token };
 }
 
@@ -562,12 +569,8 @@ const remotesList = () => {
   return Array.isArray(list) ? list : [];
 };
 // "host" or "host:port" → "host:port" (the daemon's remote default port).
-const normalizeHost = (host) => {
-  const h = String(host).trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
-  // A lone hostname/IPv4 gets the default port; IPv6 literals and host:port
-  // pass through.
-  return /^[^:]+$/.test(h) ? `${h}:8482` : h;
-};
+// Shared with the discovery/pairing code, which has to agree on it exactly.
+const { normalizeHost } = remote;
 
 ipcMain.handle('marraw:remotes-list', () => remotesList());
 ipcMain.handle('marraw:remotes-save', (_ev, conn) => {
@@ -612,6 +615,35 @@ ipcMain.handle('marraw:remote-test', async (_ev, host, token) => {
     return { ok: false, error: err?.name === 'TimeoutError' ? 'no answer (timed out)' : 'unreachable' };
   }
 });
+// Scan the network for other marraw machines. Excludes anything already
+// saved — the point is to surface what the user hasn't set up yet.
+ipcMain.handle('marraw:remote-scan', async () => {
+  // A harness run can never discover anything real: a scan filters out this
+  // machine's own addresses and there is no second machine to find. This
+  // stands in a fixed result so the found-rows UI can be exercised.
+  if (UITEST && process.env.MARRAW_UITEST_HOSTS) {
+    return JSON.parse(process.env.MARRAW_UITEST_HOSTS);
+  }
+  try {
+    return await remote.scanForHosts({ exclude: remotesList().map((c) => c.host) });
+  } catch (err) {
+    console.error(`[scan] failed: ${err.message}`);
+    return [];
+  }
+});
+// Ask a discovered host to let us in. Nothing is saved until the person at
+// that machine approves — this only puts a dialog on their screen.
+ipcMain.handle('marraw:remote-pair', async (_ev, host) => {
+  try {
+    return await remote.requestPairing(host, os.hostname());
+  } catch (err) {
+    return { ok: false, error: `Could not reach ${normalizeHost(host)}.` };
+  }
+});
+ipcMain.handle('marraw:remote-pair-wait', (_ev, host, requestId) =>
+  remote.waitForPairing(host, requestId),
+);
+ipcMain.handle('marraw:remote-pair-cancel', (_ev, requestId) => remote.cancelPairing(requestId));
 ipcMain.handle('marraw:get-remote-access', () => ({
   ...remoteAccessPrefs(),
   // The daemon binds at spawn: prefs changed after that need a relaunch.
@@ -680,6 +712,7 @@ app.on('before-quit', () => {
   quitting = true;
 });
 app.on('will-quit', () => {
+  remote.closeDiscovery();
   child?.kill();
 });
 app.on('window-all-closed', () => app.quit());

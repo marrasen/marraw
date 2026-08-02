@@ -799,6 +799,45 @@ if (shot === 'cull') {
   ui().setSettingsOpen(true);
   await sleep(300);
   [...document.querySelectorAll('button')].find((b) => b.textContent === 'Cache')?.click();
+} else if (
+  shot === 'remote' ||
+  shot === 'remote-add' ||
+  shot === 'remote-add-found' ||
+  shot === 'pairing-approve'
+) {
+  // Remote pairing. These need a daemon that is actually REACHABLE — the
+  // shared `marrawd --dev` on 8483 is loopback-only, so it serves none of the
+  // pairing routes. Run them with MARRAW_SHOT_OWN_DAEMON=1 (see shot.mjs),
+  // which spawns a real daemon bound per the run's prefs.
+  // The `remote-add-found` variant needs MARRAW_UITEST_HOSTS in the shot env
+  // (see main.cjs): a scan on one machine can only ever find nothing, since
+  // the shell filters out its own addresses.
+  ui().setSettingsOpen(true, 'Remote');
+  await sleep(600);
+  if (shot === 'remote-add' || shot === 'remote-add-found') {
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent.startsWith('Add connection'))
+      ?.click();
+    // The scan runs mDNS for 2.5s and probes for up to 1.5s more.
+    await sleep(4500);
+  } else if (shot === 'pairing-approve') {
+    // A real request against our own daemon, driven through the production
+    // path: window.marraw.pairRemote runs in the main process. A fetch from
+    // here CANNOT work — the daemon sends no CORS headers on /pair/*, which
+    // is exactly what stops a web page driving this flow — so going through
+    // the bridge is not a workaround, it is the only door there is.
+    const port = new URLSearchParams(location.search).get('apiPort');
+    const req = await window.marraw.pairRemote(`127.0.0.1:${port}`);
+    // The dialog opens off the ListPairingRequests subscription push.
+    await sleep(1500);
+    window.__pairingProbe = {
+      requested: req.ok === true,
+      requestError: req.error ?? '',
+      dialogOpen: !!document.querySelector('[data-testid="pairing-approval"]'),
+      shownName: document.querySelector('[data-testid="pairing-name"]')?.textContent ?? '',
+      codesMatch: req.code === document.querySelector('[data-testid="pairing-code"]')?.textContent,
+    };
+  }
 } else if (shot === 'models') {
   // Downloaded-models inventory: seed the models dir first (models-verify.mjs
   // leaves three specs + one orphan behind), open Settings → Models, probe
@@ -1869,6 +1908,7 @@ const probe =
   window.__wmProbe ??
   window.__neardupProbe ??
   window.__modelsProbe ??
+  window.__pairingProbe ??
   window.__updatesProbe ??
   window.__maskProbe ??
   window.__lensProbe ??

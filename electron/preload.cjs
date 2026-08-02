@@ -44,6 +44,14 @@ contextBridge.exposeInMainWorld('marraw', {
   testRemote: (host, token) => ipcRenderer.invoke('marraw:remote-test', host, token),
   openRemote: (id) => ipcRenderer.invoke('marraw:open-remote', id),
   openLocal: () => ipcRenderer.invoke('marraw:open-local'),
+  // Finding machines (mDNS + Tailscale) and asking one to let us in. All of
+  // it runs in the main process: no CORS, and the daemon's pairing endpoints
+  // send no CORS headers precisely so only a native client can drive them.
+  scanRemotes: () => ipcRenderer.invoke('marraw:remote-scan'),
+  pairRemote: (host) => ipcRenderer.invoke('marraw:remote-pair', host),
+  waitRemotePairing: (host, requestId) =>
+    ipcRenderer.invoke('marraw:remote-pair-wait', host, requestId),
+  cancelRemotePairing: (requestId) => ipcRenderer.invoke('marraw:remote-pair-cancel', requestId),
   // Hosting this library to other machines: shell prefs (spawn flags, so a
   // change needs a relaunch).
   getRemoteAccess: () => ipcRenderer.invoke('marraw:get-remote-access'),

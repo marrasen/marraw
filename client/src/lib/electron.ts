@@ -24,6 +24,34 @@ export interface RemoteConnection {
 export type RemoteProbe = { ok: true; version: string } | { ok: false; error: string };
 
 /**
+ * A machine found by a scan, confirmed by its unauthenticated GET /hello.
+ * `source` says how we found it, which is worth showing: "Local network" and
+ * "Tailscale" mean different things to someone deciding whether it's theirs.
+ */
+export interface DiscoveredHost {
+  /** Always host:port. */
+  host: string;
+  name: string;
+  version: string;
+  /** false when that machine has turned off accepting new connections. */
+  pairing: boolean;
+  source: 'mdns' | 'tailscale';
+}
+
+/** The host is now showing `code`, and is waiting for someone to approve. */
+export type PairRequestResult =
+  | { ok: true; requestId: string; code: string; hostName: string }
+  | { ok: false; error: string };
+
+/** How a pairing attempt ended. `token` is present only when approved. */
+export interface PairWaitResult {
+  status: 'approved' | 'denied' | 'expired' | 'canceled' | 'pending' | 'error';
+  token?: string;
+  hostName?: string;
+  error?: string;
+}
+
+/**
  * Where the updater stands right now, pushed from the shell on every change.
  * `available`/`downloading`/`downloaded` all carry the offered `version`;
  * `idle` with a non-zero `checkedAt` means "checked, nothing newer".
@@ -78,6 +106,11 @@ declare global {
       testRemote?: (host: string, token: string) => Promise<RemoteProbe>;
       openRemote?: (id: string) => Promise<boolean>;
       openLocal?: () => Promise<boolean>;
+      // Discovery + pairing — absent on builds predating them; feature-check.
+      scanRemotes?: () => Promise<DiscoveredHost[]>;
+      pairRemote?: (host: string) => Promise<PairRequestResult>;
+      waitRemotePairing?: (host: string, requestId: string) => Promise<PairWaitResult>;
+      cancelRemotePairing?: (requestId: string) => Promise<boolean>;
       getRemoteAccess?: () => Promise<RemoteAccessPrefs>;
       setRemoteAccess?: (patch: Partial<RemoteAccessPrefs>) => Promise<RemoteAccessPrefs>;
       relaunch?: () => Promise<void>;

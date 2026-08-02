@@ -14,6 +14,7 @@ import { ExportDialog } from '@/components/ExportDialog';
 import { SubjectScanDialog } from '@/components/SubjectScanDialog';
 import { EyeScanDialog } from '@/components/EyeScanDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
+import { PairingApprovalDialog } from '@/components/PairingApprovalDialog';
 import { WatermarkDialog } from '@/components/WatermarkDialog';
 import { StatusBar } from '@/components/StatusBar';
 import { ConnectionBanner } from '@/components/ConnectionBanner';
@@ -163,6 +164,7 @@ export default function App() {
       </div>
       <AddFolderDialog />
       <SettingsDialog />
+      <PairingApprovalDialog />
       <WatermarkDialog />
       <CommandPalette />
       <ShortcutsOverlay />

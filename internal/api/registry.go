@@ -4,8 +4,10 @@ package api
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/marrasen/aprot"
 	"github.com/marrasen/aprot/tasks"
@@ -14,6 +16,7 @@ import (
 	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/infer"
+	"github.com/marrasen/marraw/internal/pairing"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
@@ -52,6 +55,10 @@ type Deps struct {
 	// Tokens validates WS auth frames and image-URL tokens. Nil is valid (dev
 	// mode: no auth anywhere).
 	Tokens *AuthTokens
+	// Pairing holds remote-connection requests waiting for someone at this
+	// machine to approve them. Nil on a loopback-only daemon — nothing can
+	// reach it to ask.
+	Pairing *pairing.Broker
 	// ListenAddr is the address the daemon actually bound (set by main before
 	// serving); LoopbackOnly reports whether it is unreachable from other
 	// machines. Surfaced to the Settings UI via System.GetRemoteAccess.
@@ -123,6 +130,107 @@ func (d *Deps) BroadcastAIMapsGenerated(photoID int64) {
 	d.mu.RUnlock()
 	if s != nil {
 		s.Broadcast(AIMapsGeneratedEvent{PhotoID: photoID})
+	}
+}
+
+// Connection identities, set by the auth hook in cmd/marrawd. They are what
+// lets a handler tell a window on this machine from a client somewhere else —
+// the whole approve-a-remote-connection flow rests on the distinction.
+const (
+	// ConnLocal authenticated with the per-launch token, which only the
+	// Electron shell that spawned this daemon knows.
+	ConnLocal = "local"
+	// ConnPairing authenticated with the shared pairing token: a remote
+	// client that was set up by copying the token by hand.
+	ConnPairing = "pairing"
+	// ConnDevicePrefix + device ID identifies a remote client holding a token
+	// minted for it by the approval flow.
+	ConnDevicePrefix = "device:"
+)
+
+// ConnIsLocal reports whether the calling connection is a window on this
+// machine. A loopback-only daemon is unreachable from anywhere else, so every
+// connection to it qualifies — which is also what keeps dev mode (no auth
+// hook, so no identity) working.
+//
+// The default is deny: a call with no connection in context on a daemon that
+// *is* reachable does not get local rights.
+func (d *Deps) ConnIsLocal(ctx context.Context) bool {
+	if d.LoopbackOnly {
+		return true
+	}
+	c := aprot.Connection(ctx)
+	return c != nil && c.UserID() == ConnLocal
+}
+
+// DisconnectDevice drops every live connection belonging to one approved
+// device, so revoking access takes effect immediately rather than at the
+// client's next reconnect.
+func (d *Deps) DisconnectDevice(id string) {
+	d.mu.RLock()
+	s := d.server
+	d.mu.RUnlock()
+	if s != nil {
+		s.DisconnectUser(ConnDevicePrefix + id)
+	}
+}
+
+// NotifyPairingChanged refreshes the pending-request subscription, which is
+// what opens, closes and clears the approval dialog. Wired to the broker's
+// OnChange in cmd/marrawd.
+func (d *Deps) NotifyPairingChanged() { d.TriggerRefresh(pairingKey) }
+
+// DeviceNameKey holds the name this machine answers discovery with; empty
+// means "use the hostname".
+const DeviceNameKey = "deviceName"
+
+// PairingOpenKey holds whether new pairing requests are accepted. Absent means
+// yes — a daemon that has never been configured still pairs.
+const PairingOpenKey = "pairingOpen"
+
+// DeviceName is what other machines see when they find this one: the user's
+// chosen name, or the hostname.
+func (d *Deps) DeviceName(ctx context.Context) string {
+	if d.DB != nil {
+		if name, err := d.DB.GetSetting(ctx, DeviceNameKey); err == nil && name != "" {
+			return name
+		}
+	}
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
+	return "marraw"
+}
+
+// PairingOpen reports whether this daemon still accepts new pairing requests.
+func (d *Deps) PairingOpen(ctx context.Context) bool {
+	if d.DB == nil {
+		return true
+	}
+	v, err := d.DB.GetSetting(ctx, PairingOpenKey)
+	return err != nil || v != "false"
+}
+
+// TouchDevice records that an approved device just connected. Best-effort:
+// the timestamp is only there to help the user recognise an entry in the
+// devices list, so a failed write is not worth failing a connection over.
+func (d *Deps) TouchDevice(ctx context.Context, id, addr string) {
+	if d.Tokens == nil || d.DB == nil {
+		return
+	}
+	devices := d.Tokens.Devices()
+	for i := range devices {
+		if devices[i].ID != id {
+			continue
+		}
+		devices[i].LastSeen = time.Now().UnixMilli()
+		if addr != "" {
+			devices[i].Addr = addr
+		}
+		d.Tokens.SetDevices(devices)
+		_ = SaveDevices(ctx, d.DB, devices)
+		d.TriggerRefresh(devicesKey)
+		return
 	}
 }
 

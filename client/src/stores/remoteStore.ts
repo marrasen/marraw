@@ -1,6 +1,12 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
-import type { RemoteConnection, RemoteProbe } from '@/lib/electron';
+import type {
+  DiscoveredHost,
+  PairRequestResult,
+  PairWaitResult,
+  RemoteConnection,
+  RemoteProbe,
+} from '@/lib/electron';
 
 // Saved connections to other machines' libraries. They live in the Electron
 // shell's preferences.json, reached over IPC — the daemon knows nothing about
@@ -64,6 +70,47 @@ export async function saveRemote(conn: Partial<RemoteConnection>): Promise<Remot
 export async function deleteRemote(id: string): Promise<void> {
   const list = (await window.marraw?.deleteRemote?.(id)) ?? [];
   useRemoteStore.setState({ conns: list, loaded: true });
+}
+
+/** Discovery needs a newer shell than the saved-connections list did. */
+export const discoverySupported = (): boolean => !!window.marraw?.scanRemotes;
+
+/**
+ * Looks for other marraw machines: mDNS on the local network, Tailscale peers
+ * across a tailnet. Takes a couple of seconds — the mDNS browse has to wait
+ * out its answer window — so callers should show that it is working.
+ */
+export async function scanRemotes(): Promise<DiscoveredHost[]> {
+  return (await window.marraw?.scanRemotes?.()) ?? [];
+}
+
+/**
+ * Asks a host to let this machine in, putting an approval dialog on its
+ * screen. Nothing is saved here: the token only exists once someone over
+ * there says yes.
+ */
+export async function pairWithHost(host: string): Promise<PairRequestResult> {
+  return (
+    (await window.marraw?.pairRemote?.(host)) ?? {
+      ok: false,
+      error: 'This build cannot pair automatically.',
+    }
+  );
+}
+
+/** Waits for the decision at the other end. Resolves once, when it settles. */
+export async function waitForPairing(host: string, requestId: string): Promise<PairWaitResult> {
+  return (
+    (await window.marraw?.waitRemotePairing?.(host, requestId)) ?? {
+      status: 'error',
+      error: 'This build cannot pair automatically.',
+    }
+  );
+}
+
+/** Abandons a wait when the user backs out of the dialog. */
+export function cancelPairing(requestId: string): void {
+  void window.marraw?.cancelRemotePairing?.(requestId);
 }
 
 /** One line of status for a connection — the same wording everywhere. */

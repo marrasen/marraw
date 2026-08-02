@@ -30,6 +30,7 @@ import (
 	"github.com/marrasen/marraw/internal/imghttp"
 	"github.com/marrasen/marraw/internal/infer"
 	"github.com/marrasen/marraw/internal/inpaint"
+	"github.com/marrasen/marraw/internal/pairing"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
@@ -93,19 +94,22 @@ func main() {
 	// The persistent pairing token remote clients authenticate with. Created
 	// once and kept in the DB so a saved laptop connection survives restarts;
 	// Settings can regenerate it (System.RegeneratePairingToken).
-	pairing, err := db.GetSetting(context.Background(), api.PairingTokenKey)
+	pairingToken, err := db.GetSetting(context.Background(), api.PairingTokenKey)
 	if err != nil {
 		log.Fatalf("read pairing token: %v", err)
 	}
-	if pairing == "" {
-		if pairing, err = api.GeneratePairingToken(); err != nil {
+	if pairingToken == "" {
+		if pairingToken, err = api.GeneratePairingToken(); err != nil {
 			log.Fatalf("generate pairing token: %v", err)
 		}
-		if err := db.SetSetting(context.Background(), api.PairingTokenKey, pairing); err != nil {
+		if err := db.SetSetting(context.Background(), api.PairingTokenKey, pairingToken); err != nil {
 			log.Fatalf("store pairing token: %v", err)
 		}
 	}
-	tokens := api.NewAuthTokens(token, pairing)
+	tokens := api.NewAuthTokens(token, pairingToken)
+	// Devices approved through the pairing dialog. Each carries its own token
+	// so one can be revoked without disturbing the others.
+	tokens.SetDevices(api.LoadDevices(context.Background(), db))
 
 	pool := decode.NewPool(runtime.NumCPU())
 	defer pool.Close()
@@ -153,8 +157,15 @@ func main() {
 		log.Fatalf("create watermark dir: %v", err)
 	}
 
+	// Pairing only exists where it can be used: a loopback-only daemon is
+	// unreachable from another machine, so nothing can ask to be let in.
+	var broker *pairing.Broker
+	if !loopbackOnly && !*dev {
+		broker = &pairing.Broker{}
+	}
+
 	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir, WatermarkDir: watermarkDir,
-		Infer: infer.NewManager(filepath.Join(*dataDir, "models")), IOGate: ioGate, Tokens: tokens, LoopbackOnly: loopbackOnly}
+		Infer: infer.NewManager(filepath.Join(*dataDir, "models")), IOGate: ioGate, Tokens: tokens, Pairing: broker, LoopbackOnly: loopbackOnly}
 	registry, library, _, _ := api.NewRegistry(deps)
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any
@@ -198,15 +209,32 @@ func main() {
 	// checks prove nothing. Trust lives in the first-message auth frame: the
 	// per-launch launch token (local windows) or the persistent pairing token
 	// (remote connections). Dev registers no hook — connections are open.
+	//
+	// The hook also records WHICH credential matched, as the connection's user
+	// ID. That is what lets handlers tell a window on this machine from a
+	// client elsewhere — the approval RPCs answer local windows only, so that
+	// a machine asking to be let in cannot approve itself — and it gives
+	// revocation a handle to disconnect by.
 	isDev := *dev
 	server.SetCheckOrigin(func(r *http.Request) bool { return true })
 	if !isDev {
 		server.OnAuth(func(ctx context.Context, conn *aprot.Conn, tok string) error {
-			if tokens.Valid(tok) {
-				return nil
+			switch m := tokens.Match(tok); {
+			case m.Launch:
+				conn.SetUserID(api.ConnLocal)
+			case m.DeviceID != "":
+				conn.SetUserID(api.ConnDevicePrefix + m.DeviceID)
+				go deps.TouchDevice(context.Background(), m.DeviceID, conn.RemoteAddr())
+			case m.Pairing:
+				conn.SetUserID(api.ConnPairing)
+			default:
+				return aprot.ErrAuthFailed("invalid token")
 			}
-			return aprot.ErrAuthFailed("invalid token")
+			return nil
 		})
+	}
+	if broker != nil {
+		broker.OnChange = deps.NotifyPairingChanged
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -246,6 +274,10 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
+	// Discovery and pairing, on a reachable daemon only (see remote.go).
+	if broker != nil {
+		registerRemoteRoutes(mux, deps, broker)
+	}
 	// The shell's reachability probe for a saved connection: proves both the
 	// host and the token in one authenticated round trip. /healthz stays open
 	// on purpose.

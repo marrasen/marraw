@@ -28,10 +28,29 @@ export interface ModelsInfo {
     models: ModelFile[];
 }
 
+export interface PairingRequest {
+    id: string;
+    code: string;
+    name: string;
+    platform: string;
+    addr: string;
+    expiresAt: number;
+}
+
 export interface RemoteAccessInfo {
     pairingToken: string;
     listenAddr: string;
     loopbackOnly: boolean;
+    deviceName: string;
+    pairingOpen: boolean;
+}
+
+export interface RemoteDeviceInfo {
+    id: string;
+    name: string;
+    addr: string;
+    addedAt: number;
+    lastSeen: number;
 }
 
 
@@ -100,6 +119,32 @@ export function subscribeGetRemoteAccess(client: ApiClient, callback: (data: Rem
 }
 
 
+export function listPairingRequests(client: ApiClient, options?: RequestOptions): Promise<PairingRequest[]> {
+    return client.request<PairingRequest[]>('System.ListPairingRequests', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+listPairingRequests.method = 'System.ListPairingRequests' as const;
+
+export function subscribeListPairingRequests(client: ApiClient, callback: (data: PairingRequest[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<PairingRequest[]>('System.ListPairingRequests', [], callback, onError, options);
+}
+
+
+export function listRemoteDevices(client: ApiClient, options?: RequestOptions): Promise<RemoteDeviceInfo[]> {
+    return client.request<RemoteDeviceInfo[]>('System.ListRemoteDevices', [], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+listRemoteDevices.method = 'System.ListRemoteDevices' as const;
+
+export function subscribeListRemoteDevices(client: ApiClient, callback: (data: RemoteDeviceInfo[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<RemoteDeviceInfo[]>('System.ListRemoteDevices', [], callback, onError, options);
+}
+
+
 export function regeneratePairingToken(client: ApiClient, options?: RequestOptions): Promise<RemoteAccessInfo> {
     return client.request<RemoteAccessInfo>('System.RegeneratePairingToken', [], options);
 }
@@ -110,6 +155,32 @@ regeneratePairingToken.method = 'System.RegeneratePairingToken' as const;
 
 export function subscribeRegeneratePairingToken(client: ApiClient, callback: (data: RemoteAccessInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<RemoteAccessInfo>('System.RegeneratePairingToken', [], callback, onError, options);
+}
+
+
+export function resolvePairing(client: ApiClient, id: string, approve: boolean, options?: RequestOptions): Promise<void> {
+    return client.request<void>('System.ResolvePairing', [id, approve], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+resolvePairing.method = 'System.ResolvePairing' as const;
+
+export function subscribeResolvePairing(client: ApiClient, id: string, approve: boolean, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('System.ResolvePairing', [id, approve], callback, onError, options);
+}
+
+
+export function revokeRemoteDevice(client: ApiClient, id: string, options?: RequestOptions): Promise<void> {
+    return client.request<void>('System.RevokeRemoteDevice', [id], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+revokeRemoteDevice.method = 'System.RevokeRemoteDevice' as const;
+
+export function subscribeRevokeRemoteDevice(client: ApiClient, id: string, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('System.RevokeRemoteDevice', [id], callback, onError, options);
 }
 
 
@@ -136,6 +207,32 @@ setCacheDir.method = 'System.SetCacheDir' as const;
 
 export function subscribeSetCacheDir(client: ApiClient, path: string, callback: (data: CacheInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<CacheInfo>('System.SetCacheDir', [path], callback, onError, options);
+}
+
+
+export function setDeviceName(client: ApiClient, name: string, options?: RequestOptions): Promise<RemoteAccessInfo> {
+    return client.request<RemoteAccessInfo>('System.SetDeviceName', [name], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setDeviceName.method = 'System.SetDeviceName' as const;
+
+export function subscribeSetDeviceName(client: ApiClient, name: string, callback: (data: RemoteAccessInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<RemoteAccessInfo>('System.SetDeviceName', [name], callback, onError, options);
+}
+
+
+export function setPairingOpen(client: ApiClient, open: boolean, options?: RequestOptions): Promise<RemoteAccessInfo> {
+    return client.request<RemoteAccessInfo>('System.SetPairingOpen', [open], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setPairingOpen.method = 'System.SetPairingOpen' as const;
+
+export function subscribeSetPairingOpen(client: ApiClient, open: boolean, callback: (data: RemoteAccessInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<RemoteAccessInfo>('System.SetPairingOpen', [open], callback, onError, options);
 }
 
 // React Hooks for System
@@ -212,6 +309,34 @@ export function useGetRemoteAccess(options?: UseQueryOptions<RemoteAccessInfo>):
 }
 
 /**
+ * Subscribes to `System.ListPairingRequests` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useListPairingRequests(options?: UseQueryOptions<PairingRequest[]>): UseQueryResult<PairingRequest[]> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => listPairingRequests(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'System.ListPairingRequests', params: [] } });
+}
+
+/**
+ * Subscribes to `System.ListRemoteDevices` and re-renders automatically when the
+ * server triggers a refresh. The subscription is cleaned up on unmount.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useListRemoteDevices(options?: UseQueryOptions<RemoteDeviceInfo[]>): UseQueryResult<RemoteDeviceInfo[]> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal) => listRemoteDevices(client, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, _subscribe: { method: 'System.ListRemoteDevices', params: [] } });
+}
+
+/**
  * Subscribes to `System.RegeneratePairingToken` and re-renders automatically when the
  * server triggers a refresh. The subscription is cleaned up on unmount.
  * See {@link UseQueryResult} for return value details — including the
@@ -223,6 +348,36 @@ export function useRegeneratePairingToken(options?: UseQueryOptions<RemoteAccess
         [],
     );
     return useQuery(wrappedFn, { ...options, _subscribe: { method: 'System.RegeneratePairingToken', params: [] } });
+}
+
+/**
+ * Subscribes to `System.ResolvePairing` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useResolvePairing(id: string, approve: boolean, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, id: string, approve: boolean) => resolvePairing(client, id, approve, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [id, approve], _subscribe: { method: 'System.ResolvePairing', params: [id, approve] } });
+}
+
+/**
+ * Subscribes to `System.RevokeRemoteDevice` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useRevokeRemoteDevice(id: string, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, id: string) => revokeRemoteDevice(client, id, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [id], _subscribe: { method: 'System.RevokeRemoteDevice', params: [id] } });
 }
 
 /**
@@ -253,4 +408,34 @@ export function useSetCacheDir(path: string, options?: UseQueryOptions<CacheInfo
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'System.SetCacheDir', params: [path] } });
+}
+
+/**
+ * Subscribes to `System.SetDeviceName` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetDeviceName(name: string, options?: UseQueryOptions<RemoteAccessInfo>): UseQueryResult<RemoteAccessInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, name: string) => setDeviceName(client, name, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [name], _subscribe: { method: 'System.SetDeviceName', params: [name] } });
+}
+
+/**
+ * Subscribes to `System.SetPairingOpen` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetPairingOpen(open: boolean, options?: UseQueryOptions<RemoteAccessInfo>): UseQueryResult<RemoteAccessInfo> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, open: boolean) => setPairingOpen(client, open, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [open], _subscribe: { method: 'System.SetPairingOpen', params: [open] } });
 }

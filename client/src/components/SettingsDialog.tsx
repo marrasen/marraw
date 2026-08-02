@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Download, RefreshCw, RotateCw, X } from 'lucide-react';
 import { useGetAppSettings, setSidecarWrites, useListCameras } from '@/api/library';
@@ -9,18 +9,31 @@ import {
   setCacheDir,
   useGetModelsInfo,
   deleteModel,
-  getRemoteAccess,
+  useGetRemoteAccess,
+  useListRemoteDevices,
   regeneratePairingToken,
-  type RemoteAccessInfo,
+  revokeRemoteDevice,
+  setDeviceName,
+  setPairingOpen,
 } from '@/api/system';
 import { backend, canUseHostFs } from '@/lib/backend';
-import type { RemoteAccessPrefs, RemoteConnection, RemoteProbe } from '@/lib/electron';
+import type {
+  DiscoveredHost,
+  RemoteAccessPrefs,
+  RemoteConnection,
+  RemoteProbe,
+} from '@/lib/electron';
 import {
+  cancelPairing,
   deleteRemote,
+  discoverySupported,
   openRemoteWindow,
+  pairWithHost,
   remoteStatusText,
   saveRemote,
+  scanRemotes,
   useRemotes,
+  waitForPairing,
 } from '@/stores/remoteStore';
 import {
   checkForUpdates,
@@ -1173,13 +1186,16 @@ function RemoteSection() {
 }
 
 /**
- * Saved connections to libraries on other machines. Adding one needs its host
- * and the pairing token from that machine's Settings → Remote; the token is
- * verified against the live daemon on save.
+ * Saved connections to libraries on other machines. Adding one normally means
+ * picking this machine off a scan and having someone approve it over there —
+ * no address to find, no token to copy. Manual entry stays for the cases a
+ * scan cannot reach: blocked multicast, a non-default port, or a host set up
+ * with the shared pairing token.
  */
 function ConnectionsSection() {
   const { conns, probes } = useRemotes();
-  const [editing, setEditing] = useState<Partial<RemoteConnection> | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<RemoteConnection | null>(null);
 
   return (
     <div className="flex flex-col">
@@ -1187,10 +1203,10 @@ function ConnectionsSection() {
         Connections
       </div>
       <div className="flex flex-col gap-1.5">
-        {conns.length === 0 && !editing && (
+        {conns.length === 0 && !adding && !editing && (
           <div className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
-            No connections yet. Add the machine that hosts the library — it shows its pairing token
-            under Settings → Remote.
+            No connections yet. Turn on “Allow remote connections” on the computer that holds the
+            library, then add it here — it will ask you to approve this computer.
           </div>
         )}
         {conns.map((c) => (
@@ -1213,17 +1229,222 @@ function ConnectionsSection() {
         ))}
       </div>
       {editing ? (
-        <ConnectionEditor
-          conn={editing}
-          onClose={() => setEditing(null)}
-        />
+        <ConnectionEditor conn={editing} onClose={() => setEditing(null)} />
+      ) : adding ? (
+        <AddConnectionPanel onClose={() => setAdding(false)} />
       ) : (
         <div className="mt-2.5">
-          <Button variant="outline" size="sm" onClick={() => setEditing({})}>
+          <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
             Add connection…
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Add a connection: scan first, type only if you have to.
+ *
+ * The scan starts the moment this opens — someone who clicked "Add" has
+ * already told us what they want, and making them press a second button to
+ * begin looking is pure ceremony.
+ */
+function AddConnectionPanel({ onClose }: { onClose: () => void }) {
+  const [hosts, setHosts] = useState<DiscoveredHost[] | null>(null);
+  // The scan starts on mount, so "scanning" is the state this opens in rather
+  // than something an effect flips on afterwards. A shell too old to scan goes
+  // straight to the manual form.
+  const [scanning, setScanning] = useState(discoverySupported);
+  const [manual, setManual] = useState(() => !discoverySupported());
+  const [pairing, setPairing] = useState<{ host: string; name: string } | null>(null);
+
+  const runScan = useCallback((alive: () => boolean) => {
+    return scanRemotes()
+      .catch(() => [] as DiscoveredHost[])
+      .then((found) => {
+        if (!alive()) return;
+        setHosts(found);
+        setScanning(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!discoverySupported()) return;
+    let live = true;
+    void runScan(() => live);
+    return () => {
+      live = false;
+    };
+  }, [runScan]);
+
+  const rescan = () => {
+    setScanning(true);
+    void runScan(() => true);
+  };
+
+  if (pairing) {
+    return (
+      <PairingWaitPanel
+        host={pairing.host}
+        hostName={pairing.name}
+        onDone={onClose}
+        onCancel={() => setPairing(null)}
+      />
+    );
+  }
+
+  if (manual) {
+    return (
+      <ConnectionEditor
+        conn={{}}
+        onClose={onClose}
+        onBack={discoverySupported() ? () => setManual(false) : undefined}
+      />
+    );
+  }
+
+  return (
+    <div className="mt-2.5 flex flex-col gap-2 rounded-lg border border-primary/50 bg-primary/5 p-3">
+      <div className="flex items-center gap-2">
+        <span className="flex-1 text-[11px] text-muted-foreground">
+          {scanning
+            ? 'Looking for computers…'
+            : hosts && hosts.length > 0
+              ? 'Computers found on your network'
+              : 'No other computers found'}
+        </span>
+        <Button variant="ghost" size="sm" disabled={scanning} onClick={rescan}>
+          {scanning ? 'Scanning…' : 'Scan again'}
+        </Button>
+      </div>
+
+      <div className="flex flex-col gap-1.5" data-testid="remote-scan-results">
+        {(hosts ?? []).map((h) => (
+          <div
+            key={h.host}
+            className="flex items-center gap-3 rounded-lg border bg-secondary px-3 py-2 dark:bg-white/5"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] font-medium">{h.name}</div>
+              <div className="truncate font-mono text-[10.5px] text-faint">
+                {h.host} · {h.source === 'tailscale' ? 'Tailscale' : 'Local network'}
+              </div>
+            </div>
+            <Button
+              size="sm"
+              disabled={!h.pairing}
+              title={h.pairing ? undefined : 'That computer is not accepting new connections'}
+              onClick={() => setPairing({ host: h.host, name: h.name })}
+            >
+              Connect
+            </Button>
+          </div>
+        ))}
+        {!scanning && hosts?.length === 0 && (
+          <div className="rounded-lg border border-dashed px-3 py-3 text-center text-[11px] text-muted-foreground">
+            Check that the other computer is awake and has “Allow remote connections” turned on. On
+            some networks the search is blocked — you can still add it by address.
+          </div>
+        )}
+      </div>
+
+      <div className="mt-0.5 flex items-center gap-1.5">
+        <Button variant="outline" size="sm" onClick={() => setManual(true)}>
+          Enter details manually
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The waiting half of pairing: this machine has asked, and someone at the
+ * other end has to say yes. The code shown here is the same one on their
+ * screen — it is what makes "Allow" a decision rather than a reflex.
+ */
+function PairingWaitPanel({
+  host,
+  hostName,
+  onDone,
+  onCancel,
+}: {
+  host: string;
+  hostName: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    let requestId = '';
+    void (async () => {
+      const req = await pairWithHost(host);
+      if (!live) return;
+      if (!req.ok) {
+        setError(req.error);
+        return;
+      }
+      requestId = req.requestId;
+      setCode(req.code);
+
+      const res = await waitForPairing(host, requestId);
+      if (!live) return;
+      if (res.status === 'approved' && res.token) {
+        await saveRemote({ name: res.hostName || hostName, host, token: res.token });
+        toast.success(`Connected to ${res.hostName || hostName}`);
+        onDone();
+        return;
+      }
+      setError(
+        res.status === 'denied'
+          ? 'That computer declined the connection.'
+          : res.status === 'expired'
+            ? 'Nobody approved it in time. Try again when someone is at that computer.'
+            : res.status === 'canceled'
+              ? ''
+              : (res.error ?? 'The connection could not be set up.'),
+      );
+    })();
+    return () => {
+      live = false;
+      if (requestId) cancelPairing(requestId);
+    };
+  }, [host, hostName, onDone]);
+
+  return (
+    <div className="mt-2.5 flex flex-col gap-2 rounded-lg border border-primary/50 bg-primary/5 p-3">
+      {error ? (
+        <div className="text-[11px] text-destructive">{error}</div>
+      ) : (
+        <>
+          <div className="text-[11px] text-muted-foreground">
+            Waiting for someone to approve this computer on{' '}
+            <span className="text-foreground">{hostName}</span>.
+          </div>
+          <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed py-3">
+            <span className="text-[10px] tracking-[.06em] text-muted-foreground uppercase">
+              Check this code matches
+            </span>
+            <span
+              className="font-mono text-2xl tracking-[.3em] tabular-nums select-text"
+              data-testid="pairing-wait-code"
+            >
+              {code || '····'}
+            </span>
+          </div>
+        </>
+      )}
+      <div className="mt-0.5 flex items-center gap-1.5">
+        <Button variant="ghost" size="sm" onClick={onCancel}>
+          {error ? 'Back' : 'Cancel'}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -1245,16 +1466,23 @@ function RemoteStatus({ probe }: { probe: RemoteProbe | undefined }) {
 }
 
 /**
- * Add/edit one connection. The token is tested before saving: a wrong token
- * would only bounce at connect time, but an asleep host is not an error —
- * that saves with a warning, since it will answer later.
+ * Add/edit one connection by hand. This is the fallback path — a scan and an
+ * approval is the normal way in — so it keeps the pairing-token field: a host
+ * behind blocked multicast, on a non-default port, or set up before pairing
+ * existed is still reachable this way.
+ *
+ * The token is tested before saving: a wrong token would only bounce at
+ * connect time, but an asleep host is not an error — that saves with a
+ * warning, since it will answer later.
  */
 function ConnectionEditor({
   conn,
   onClose,
+  onBack,
 }: {
   conn: Partial<RemoteConnection>;
   onClose: () => void;
+  onBack?: () => void;
 }) {
   const [name, setName] = useState(conn.name ?? '');
   const [host, setHost] = useState(conn.host ?? '');
@@ -1309,8 +1537,8 @@ function ConnectionEditor({
         <Button size="sm" disabled={busy} onClick={() => void submit()}>
           {busy ? 'Checking…' : 'Save'}
         </Button>
-        <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
-          Cancel
+        <Button variant="ghost" size="sm" disabled={busy} onClick={onBack ?? onClose}>
+          {onBack ? 'Back' : 'Cancel'}
         </Button>
         <span className="flex-1" />
         {conn.id && (
@@ -1359,17 +1587,36 @@ function ConnectionField({
 function HostSection() {
   const client = useApiClient();
   const [prefs, setPrefs] = useState<RemoteAccessPrefs | null>(null);
-  const [info, setInfo] = useState<RemoteAccessInfo | null>(null);
+  // Subscribed, not fetched once: renaming this machine or approving a device
+  // pushes a fresh snapshot, so two open windows never disagree.
+  const { data: info } = useGetRemoteAccess();
   const [port, setPort] = useState('');
   const [confirmRegen, setConfirmRegen] = useState(false);
+  const [name, setName] = useState<string | null>(null);
 
   useEffect(() => {
     void window.marraw?.getRemoteAccess?.().then((p) => {
       setPrefs(p);
       setPort(String(p.port));
     });
-    getRemoteAccess(client).then(setInfo).catch(() => {});
-  }, [client]);
+  }, []);
+
+  // The name field tracks the server until the user starts typing; `name`
+  // being null means "not edited", which is what keeps a push from yanking
+  // characters out from under them mid-edit.
+  const nameValue = name ?? info?.deviceName ?? '';
+  const applyName = () => {
+    if (name === null || name === info?.deviceName) {
+      setName(null);
+      return;
+    }
+    setDeviceName(client, name.trim())
+      .then(() => setName(null))
+      .catch((err) => {
+        setName(null);
+        toast.error((err as Error).message);
+      });
+  };
 
   const update = (patch: Partial<RemoteAccessPrefs>) =>
     window.marraw
@@ -1392,10 +1639,7 @@ function HostSection() {
   const regen = () => {
     setConfirmRegen(false);
     regeneratePairingToken(client)
-      .then((i) => {
-        setInfo(i);
-        toast.success('Pairing token regenerated — saved connections need the new token');
-      })
+      .then(() => toast.success('Pairing token regenerated — saved connections need the new token'))
       .catch((err) => toast.error((err as Error).message));
   };
 
@@ -1406,7 +1650,7 @@ function HostSection() {
       </div>
       <SettingRow
         title="Allow remote connections"
-        description="Let marraw on another machine (e.g. your laptop over Tailscale) open this library. The daemon listens on all interfaces on the port below — only clients with the pairing token get in."
+        description="Let marraw on another machine (e.g. your laptop over Tailscale) open this library. The daemon listens on all interfaces on the port below, and other computers can find it by name — but nothing gets in until you approve it here."
         control={
           <Switch
             checked={prefs?.enabled ?? false}
@@ -1416,6 +1660,39 @@ function HostSection() {
           />
         }
       />
+      {prefs?.enabled && (
+        <SettingRow
+          title="This computer's name"
+          description="What other computers see when they find this one."
+          control={
+            <input
+              className="h-8 w-44 rounded-lg border border-input bg-secondary px-2.5 text-xs outline-none focus:border-ring dark:bg-white/5"
+              value={nameValue}
+              placeholder="…"
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && applyName()}
+              onBlur={applyName}
+              aria-label="This computer's name"
+            />
+          }
+        />
+      )}
+      {prefs?.enabled && (
+        <SettingRow
+          title="Accept new connection requests"
+          description="When off, computers you have already approved keep working, but nobody new can ask. Turn it off once your machines are set up."
+          control={
+            <Switch
+              checked={info?.pairingOpen ?? true}
+              disabled={!info}
+              onCheckedChange={(v) =>
+                setPairingOpen(client, v).catch((err) => toast.error((err as Error).message))
+              }
+              aria-label="Accept new connection requests"
+            />
+          }
+        />
+      )}
       {prefs?.enabled && (
         <SettingRow
           title="Port"
@@ -1443,13 +1720,15 @@ function HostSection() {
           }
         />
       )}
+      {prefs?.enabled && <ApprovedDevices />}
       <SettingRow
         title="Pairing token"
         description={
           <div className="flex flex-col gap-1">
             <span>
-              Enter this on the connecting machine, under Settings → Remote → Add connection.
-              Regenerating locks out every saved connection until they update the token.
+              The manual way in, for a computer the search cannot reach. Enter it there under
+              Settings → Remote → Add connection → Enter details manually. Regenerating locks out
+              every connection set up this way; approved computers above are unaffected.
             </span>
             <span className="font-mono text-[11.5px] text-foreground select-text">
               {info ? info.pairingToken : '…'}
@@ -1493,4 +1772,75 @@ function HostSection() {
       />
     </div>
   );
+}
+
+/**
+ * The computers approved through the pairing dialog. Each holds a token of
+ * its own, so revoking one here is exactly that — the others keep working,
+ * unlike regenerating the shared pairing token.
+ */
+function ApprovedDevices() {
+  const client = useApiClient();
+  const { data } = useListRemoteDevices();
+  const devices = data ?? [];
+  const [confirmID, setConfirmID] = useState('');
+
+  if (devices.length === 0) return null;
+
+  const revoke = (id: string, name: string) => {
+    setConfirmID('');
+    revokeRemoteDevice(client, id)
+      .then(() => toast.success(`${name} can no longer connect`))
+      .catch((err) => toast.error((err as Error).message));
+  };
+
+  return (
+    <SettingRow
+      title="Approved computers"
+      description="Computers you let in. Revoking one disconnects it now and leaves the others alone."
+      control={
+        <div className="flex w-64 flex-col gap-1.5" data-testid="approved-devices">
+          {devices.map((d) => (
+            <div
+              key={d.id}
+              className="flex items-center gap-2 rounded-lg border bg-secondary px-2.5 py-1.5 dark:bg-white/5"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12px] font-medium">{d.name}</div>
+                <div className="truncate font-mono text-[10px] text-faint">
+                  last seen {relativeTime(d.lastSeen)}
+                </div>
+              </div>
+              {confirmID === d.id ? (
+                <>
+                  <Button variant="ghost" size="sm" onClick={() => setConfirmID('')}>
+                    Cancel
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => revoke(d.id, d.name)}>
+                    Revoke
+                  </Button>
+                </>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => setConfirmID(d.id)}>
+                  Revoke
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      }
+    />
+  );
+}
+
+/** "3 minutes ago" for the devices list — coarse on purpose. */
+function relativeTime(ms: number): string {
+  if (!ms) return 'never';
+  const secs = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (secs < 90) return 'just now';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} days ago`;
 }
