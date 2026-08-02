@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Download, RefreshCw, RotateCw, X } from 'lucide-react';
 import { useGetAppSettings, setSidecarWrites, useListCameras } from '@/api/library';
@@ -1196,6 +1196,11 @@ function ConnectionsSection() {
   const { conns, probes } = useRemotes();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<RemoteConnection | null>(null);
+  // Stable identity: this reaches the pairing panel's effect, and a fresh
+  // closure on every render of this list would restart the pairing it is in
+  // the middle of. The panel guards against that itself, but handing it a
+  // changing callback would still be a trap for the next caller.
+  const closeAdding = useCallback(() => setAdding(false), []);
 
   return (
     <div className="flex flex-col">
@@ -1231,7 +1236,7 @@ function ConnectionsSection() {
       {editing ? (
         <ConnectionEditor conn={editing} onClose={() => setEditing(null)} />
       ) : adding ? (
-        <AddConnectionPanel onClose={() => setAdding(false)} />
+        <AddConnectionPanel onClose={closeAdding} />
       ) : (
         <div className="mt-2.5">
           <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
@@ -1380,17 +1385,38 @@ function PairingWaitPanel({
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
 
+  // Asking to be let in puts a dialog on someone else's screen, so a re-run of
+  // this effect is not free the way a re-fetch would be. Two guards:
+  //
+  // `onDone` is held in a ref rather than being a dependency — it arrives as a
+  // fresh closure whenever the connections list re-renders, which saving the
+  // connection itself causes at the exact moment of approval. Depending on it
+  // restarted the pairing and popped a second request on the host.
+  //
+  // Cleanup then withdraws whatever this run created, including when it is
+  // torn down before the request even comes back (StrictMode's double-invoke
+  // in development does exactly that). Between them, at most one request is
+  // ever live, and none is left behind to expire on the host's screen.
+  const onDoneRef = useRef(onDone);
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  });
+
   useEffect(() => {
     let live = true;
     let requestId = '';
     void (async () => {
       const req = await pairWithHost(host);
-      if (!live) return;
       if (!req.ok) {
-        setError(req.error);
+        if (live) setError(req.error);
         return;
       }
       requestId = req.requestId;
+      if (!live) {
+        // Torn down while we were asking: take it back off their screen.
+        cancelPairing(host, requestId);
+        return;
+      }
       setCode(req.code);
 
       const res = await waitForPairing(host, requestId);
@@ -1398,7 +1424,7 @@ function PairingWaitPanel({
       if (res.status === 'approved' && res.token) {
         await saveRemote({ name: res.hostName || hostName, host, token: res.token });
         toast.success(`Connected to ${res.hostName || hostName}`);
-        onDone();
+        onDoneRef.current();
         return;
       }
       setError(
@@ -1413,9 +1439,11 @@ function PairingWaitPanel({
     })();
     return () => {
       live = false;
-      if (requestId) cancelPairing(requestId);
+      // Withdraws the request too, so backing out here clears the dialog on
+      // the other machine instead of leaving it up until it expires.
+      if (requestId) cancelPairing(host, requestId);
     };
-  }, [host, hostName, onDone]);
+  }, [host, hostName]);
 
   return (
     <div className="mt-2.5 flex flex-col gap-2 rounded-lg border border-primary/50 bg-primary/5 p-3">

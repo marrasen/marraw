@@ -82,6 +82,28 @@ func registerRemoteRoutes(mux *http.ServeMux, deps *api.Deps, broker *pairing.Br
 		})
 	})
 
+	// Backing out on the connecting machine should take the dialog off the
+	// host's screen, not leave someone staring at a request nobody is waiting
+	// on any more. Knowing the (unguessable, 128-bit) request id is the
+	// authorization here, exactly as it is for /pair/wait.
+	mux.HandleFunc("POST /pair/withdraw", func(w http.ResponseWriter, r *http.Request) {
+		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+			http.Error(w, "expected application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+		var body struct {
+			RequestID string `json:"requestId"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPairBody)).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		// An unknown or already-answered id is not an error worth reporting:
+		// the caller's goal (nobody is waiting on this) already holds.
+		_ = broker.Resolve(body.RequestID, false, "")
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+
 	mux.HandleFunc("GET /pair/wait", func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
 		if id == "" {

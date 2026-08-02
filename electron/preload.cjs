@@ -51,7 +51,8 @@ contextBridge.exposeInMainWorld('marraw', {
   pairRemote: (host) => ipcRenderer.invoke('marraw:remote-pair', host),
   waitRemotePairing: (host, requestId) =>
     ipcRenderer.invoke('marraw:remote-pair-wait', host, requestId),
-  cancelRemotePairing: (requestId) => ipcRenderer.invoke('marraw:remote-pair-cancel', requestId),
+  cancelRemotePairing: (host, requestId) =>
+    ipcRenderer.invoke('marraw:remote-pair-cancel', host, requestId),
   // Hosting this library to other machines: shell prefs (spawn flags, so a
   // change needs a relaunch).
   getRemoteAccess: () => ipcRenderer.invoke('marraw:get-remote-access'),

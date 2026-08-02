@@ -643,7 +643,9 @@ ipcMain.handle('marraw:remote-pair', async (_ev, host) => {
 ipcMain.handle('marraw:remote-pair-wait', (_ev, host, requestId) =>
   remote.waitForPairing(host, requestId),
 );
-ipcMain.handle('marraw:remote-pair-cancel', (_ev, requestId) => remote.cancelPairing(requestId));
+ipcMain.handle('marraw:remote-pair-cancel', (_ev, host, requestId) =>
+  remote.cancelPairing(host, requestId),
+);
 ipcMain.handle('marraw:get-remote-access', () => ({
   ...remoteAccessPrefs(),
   // The daemon binds at spawn: prefs changed after that need a relaunch.

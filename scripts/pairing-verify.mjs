@@ -224,6 +224,34 @@ try {
     (await get('/pair/wait?id=deadbeef').then((r) => r.json())).status === 'expired',
   );
 
+  // Backing out on the connecting side must clear the host's dialog, not
+  // leave it up until the request expires two minutes later.
+  const abandoned = await post('/pair/request', { name: 'Changed my mind' }).then((r) => r.json());
+  await sleep(300);
+  check(
+    'an abandoned request is pending before withdrawal',
+    (await local.call('System.ListPairingRequests')).length === 1,
+  );
+  const withdrawn = await post('/pair/withdraw', { requestId: abandoned.requestId });
+  check('withdraw is accepted', withdrawn.status === 200, `${withdrawn.status}`);
+  await sleep(300);
+  check(
+    'withdrawing clears the host dialog',
+    (await local.call('System.ListPairingRequests')).length === 0,
+  );
+  check(
+    'a withdrawn request cannot then be approved',
+    await local
+      .call('System.ResolvePairing', [abandoned.requestId, true])
+      .then(() => false)
+      .catch(() => true),
+  );
+  check(
+    'withdraw rejects non-JSON content types',
+    (await post('/pair/withdraw', { requestId: 'x' }, { 'Content-Type': 'text/plain' })).status ===
+      415,
+  );
+
   // ---- closing the door ----
   await local.call('System.SetPairingOpen', [false]);
   const shut = await post('/pair/request', { name: 'Too late' });

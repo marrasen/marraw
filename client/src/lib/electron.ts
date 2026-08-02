@@ -110,7 +110,7 @@ declare global {
       scanRemotes?: () => Promise<DiscoveredHost[]>;
       pairRemote?: (host: string) => Promise<PairRequestResult>;
       waitRemotePairing?: (host: string, requestId: string) => Promise<PairWaitResult>;
-      cancelRemotePairing?: (requestId: string) => Promise<boolean>;
+      cancelRemotePairing?: (host: string, requestId: string) => Promise<boolean>;
       getRemoteAccess?: () => Promise<RemoteAccessPrefs>;
       setRemoteAccess?: (patch: Partial<RemoteAccessPrefs>) => Promise<RemoteAccessPrefs>;
       relaunch?: () => Promise<void>;

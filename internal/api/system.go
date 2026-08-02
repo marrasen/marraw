@@ -225,6 +225,9 @@ func (s *System) ResolvePairing(ctx context.Context, id string, approve bool) er
 		_ = SaveDevices(ctx, s.deps.DB, prev)
 		return aprot.ErrInvalidParams(err.Error())
 	}
+	// The machine just approved has to show up in "Approved computers" now,
+	// not whenever that list next happens to be re-read.
+	aprot.TriggerRefresh(ctx, devicesKey)
 	return nil
 }
 

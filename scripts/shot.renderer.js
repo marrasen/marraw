@@ -803,6 +803,7 @@ if (shot === 'cull') {
   shot === 'remote' ||
   shot === 'remote-add' ||
   shot === 'remote-add-found' ||
+  shot === 'pairing-selfpair' ||
   shot === 'pairing-approve'
 ) {
   // Remote pairing. These need a daemon that is actually REACHABLE — the
@@ -814,6 +815,54 @@ if (shot === 'cull') {
   // the shell filters out its own addresses.
   ui().setSettingsOpen(true, 'Remote');
   await sleep(600);
+  if (shot === 'pairing-selfpair') {
+    // The whole add-a-connection flow against our OWN daemon, driven through
+    // the real UI: scan (stubbed to point at loopback via MARRAW_UITEST_HOSTS)
+    // → Connect → the approval dialog opens in this same window → Allow.
+    //
+    // The regression this exists for: approving saves the connection, which
+    // re-renders the list, which used to hand the waiting panel a fresh
+    // callback and restart the pairing — popping a SECOND request on the host
+    // moments after the first was approved.
+    const trail = [];
+    const snap = (label) =>
+      trail.push(
+        `${label}: wait=${document.querySelector('[data-testid="pairing-wait-code"]')?.textContent ?? '-'} ` +
+          `host=${document.querySelector('[data-testid="pairing-code"]')?.textContent ?? '-'} ` +
+          `allow=${[...document.querySelectorAll('button')].some((b) => b.textContent === 'Allow')}`,
+      );
+
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent.startsWith('Add connection'))
+      ?.click();
+    await sleep(2000);
+    const connect = [...document.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Connect',
+    );
+    connect?.click();
+    for (let i = 0; i < 6; i++) {
+      await sleep(1000);
+      snap(`t+${i + 1}s`);
+    }
+    const waitCode = document.querySelector('[data-testid="pairing-wait-code"]')?.textContent ?? '';
+    const hostCode = document.querySelector('[data-testid="pairing-code"]')?.textContent ?? '';
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent === 'Allow')
+      ?.click();
+    // Long enough that a restarted pairing would have asked again by now.
+    await sleep(4000);
+    snap('after-allow');
+    window.__pairingProbe = {
+      apiPort: new URLSearchParams(location.search).get('apiPort'),
+      connectClicked: !!connect,
+      codesMatched: !!waitCode && waitCode === hostCode,
+      // The point of the test: nothing may be waiting for approval afterwards.
+      dialogAfterApprove: !!document.querySelector('[data-testid="pairing-approval"]'),
+      savedConnections: (await window.marraw.listRemotes()).length,
+      approvedDevices: document.querySelectorAll('[data-testid="approved-devices"] > div').length,
+      trail,
+    };
+  }
   if (shot === 'remote-add' || shot === 'remote-add-found') {
     [...document.querySelectorAll('button')]
       .find((b) => b.textContent.startsWith('Add connection'))

@@ -108,9 +108,12 @@ export async function waitForPairing(host: string, requestId: string): Promise<P
   );
 }
 
-/** Abandons a wait when the user backs out of the dialog. */
-export function cancelPairing(requestId: string): void {
-  void window.marraw?.cancelRemotePairing?.(requestId);
+/**
+ * Abandons a request when the user backs out, and withdraws it on the host so
+ * its dialog closes instead of waiting out the expiry.
+ */
+export function cancelPairing(host: string, requestId: string): void {
+  void window.marraw?.cancelRemotePairing?.(host, requestId);
 }
 
 /** One line of status for a connection — the same wording everywhere. */

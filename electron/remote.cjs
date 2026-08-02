@@ -289,7 +289,7 @@ const waits = new Map();
  */
 async function waitForPairing(host, requestId) {
   const controller = new AbortController();
-  waits.set(requestId, controller);
+  waits.set(requestId, { controller, host });
   // Slightly past the daemon's 2-minute request TTL: if we are still asking
   // by then, the answer is "nobody came".
   const deadline = Date.now() + 150_000;
@@ -318,8 +318,24 @@ async function waitForPairing(host, requestId) {
   }
 }
 
-function cancelPairing(requestId) {
-  waits.get(requestId)?.abort();
+/**
+ * Gives up on a request and tells the host to drop it, so the dialog over
+ * there disappears instead of waiting out its two-minute expiry. Best-effort:
+ * if the host cannot be reached the request simply expires as before.
+ */
+function cancelPairing(host, requestId) {
+  const wait = waits.get(requestId);
+  wait?.controller.abort();
+  const target = host ?? wait?.host;
+  if (!target) return false;
+  void fetch(`http://${normalizeHost(target)}/pair/withdraw`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId }),
+    signal: AbortSignal.timeout(3000),
+  }).catch(() => {
+    /* the host will expire it on its own */
+  });
   return true;
 }
 
