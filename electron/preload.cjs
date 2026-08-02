@@ -18,6 +18,18 @@ contextBridge.exposeInMainWorld('marraw', {
     (process.platform === 'linux' && !!process.env.APPIMAGE),
   getAutoUpdate: () => ipcRenderer.invoke('marraw:get-auto-update'),
   setAutoUpdate: (on) => ipcRenderer.invoke('marraw:set-auto-update', on),
+  // Update check/download/install, driven from Settings → Updates. The state
+  // object covers every phase; onUpdateState pushes each change and returns
+  // its own unsubscribe.
+  getUpdateState: () => ipcRenderer.invoke('marraw:get-update-state'),
+  checkForUpdates: () => ipcRenderer.invoke('marraw:check-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('marraw:download-update'),
+  installUpdate: () => ipcRenderer.invoke('marraw:install-update'),
+  onUpdateState: (cb) => {
+    const handler = (_e, state) => cb(state);
+    ipcRenderer.on('marraw:update-state', handler);
+    return () => ipcRenderer.off('marraw:update-state', handler);
+  },
   // Beta-channel opt-in (GitHub pre-releases). Unset follows the running
   // version; see main.cjs betaChannelEnabled.
   getBetaChannel: () => ipcRenderer.invoke('marraw:get-beta-channel'),

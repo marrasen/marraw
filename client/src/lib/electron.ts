@@ -23,6 +23,29 @@ export interface RemoteConnection {
 /** One reachability probe of a remote daemon (GET /authz from the shell). */
 export type RemoteProbe = { ok: true; version: string } | { ok: false; error: string };
 
+/**
+ * Where the updater stands right now, pushed from the shell on every change.
+ * `available`/`downloading`/`downloaded` all carry the offered `version`;
+ * `idle` with a non-zero `checkedAt` means "checked, nothing newer".
+ */
+export interface UpdateState {
+  status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error';
+  version: string;
+  releaseNotes: string;
+  releaseDate: string;
+  /** 0–100 while downloading. */
+  percent: number;
+  transferred: number;
+  total: number;
+  bytesPerSecond: number;
+  error: string;
+  /** epoch ms of the last completed check; 0 = not checked this session. */
+  checkedAt: number;
+  /** Only present on the reply to getUpdateState, not on pushed updates. */
+  supported?: boolean;
+  currentVersion?: string;
+}
+
 declare global {
   interface Window {
     marraw?: {
@@ -41,6 +64,13 @@ declare global {
       // Absent on builds predating the beta-channel setting — feature-check.
       getBetaChannel?: () => Promise<boolean>;
       setBetaChannel?: (on: boolean) => Promise<boolean>;
+      // In-app update flow — absent on builds predating it; feature-check.
+      getUpdateState?: () => Promise<UpdateState>;
+      checkForUpdates?: () => Promise<boolean>;
+      downloadUpdate?: () => Promise<boolean>;
+      installUpdate?: () => Promise<boolean>;
+      /** Subscribes to state pushes; returns its own unsubscribe. */
+      onUpdateState?: (cb: (state: UpdateState) => void) => () => void;
       // Remote connections — absent on builds predating them; feature-check.
       listRemotes?: () => Promise<RemoteConnection[]>;
       saveRemote?: (conn: Partial<RemoteConnection>) => Promise<RemoteConnection[]>;

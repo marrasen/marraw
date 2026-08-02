@@ -812,6 +812,48 @@ if (shot === 'cull') {
     .map((e) => e.textContent)
     .filter((t) => t !== 'Downloaded models');
   window.__modelsProbe = { rows, text: dlg.textContent.includes('Not used by this version') };
+} else if (shot === 'updates' || shot === 'updates-downloading' || shot === 'updates-rail') {
+  // Settings → Updates and the rail's pending-update row. Only a packaged
+  // build can ever see a real update (the shell's updater is inert under
+  // UITEST), so the phase is seeded straight into the store — after the
+  // store's own initial read has landed, or it would overwrite the seed.
+  // Needs APPIMAGE=1 in the shot env: that's what makes the shell report a
+  // self-updating packaging on Linux, hence the pane and the rail row.
+  await sleep(400);
+  const seed = {
+    'updates': { status: 'downloaded', version: '0.9.0', percent: 100 },
+    'updates-downloading': {
+      status: 'downloading',
+      version: '0.9.0',
+      percent: 43.2,
+      transferred: 41_500_000,
+      total: 96_000_000,
+      bytesPerSecond: 5_400_000,
+    },
+    'updates-rail': { status: 'available', version: '0.9.0' },
+  }[shot];
+  mw.useUpdateStore.setState((s) => ({
+    state: { ...s.state, ...seed, error: '', checkedAt: Date.now() },
+    currentVersion: '0.9.0-beta.4',
+    loaded: true,
+  }));
+  if (shot !== 'updates-rail') {
+    ui().setSettingsOpen(true, 'Updates');
+    await sleep(400);
+    const dlg = document.querySelector('[role="dialog"]');
+    window.__updatesProbe = {
+      tab: !!dlg && [...dlg.querySelectorAll('button')].some((b) => b.textContent === 'Updates'),
+      version: !!dlg && dlg.textContent.includes('0.9.0-beta.4'),
+      check: !!dlg && dlg.textContent.includes('Check for updates'),
+      action:
+        !!dlg &&
+        dlg.textContent.includes(shot === 'updates' ? 'Restart & install' : 'Downloading 0.9.0'),
+    };
+  } else {
+    await sleep(300);
+    const row = document.querySelector('[data-testid="rail-update"]');
+    window.__updatesProbe = { railText: row?.textContent ?? null };
+  }
 } else if (shot === 'remote') {
   // Settings → Remote: persist enabled first so the section mounts with the
   // Port row and pairing token shown (the dev-attach daemon leaves
@@ -1827,6 +1869,7 @@ const probe =
   window.__wmProbe ??
   window.__neardupProbe ??
   window.__modelsProbe ??
+  window.__updatesProbe ??
   window.__maskProbe ??
   window.__lensProbe ??
   window.__presetsProbe ??

@@ -82,44 +82,179 @@ function applyUpdateChannel() {
   if (beta != null) autoUpdater.allowPrerelease = !!beta;
 }
 
-// Check GitHub Releases on launch, download a newer version in the background,
-// swap it in on quit. Draft releases are invisible here, so an unpublished
-// draft never reaches anyone. Never fatal: an unreachable update server must
-// not stop the app from starting.
+// Only Windows (NSIS) and the Linux AppImage can replace themselves. A .deb
+// install is owned by the package manager, and Squirrel.Mac refuses to update
+// a bundle without a valid signature — nothing to start until marraw has an
+// Apple Developer ID. Mirrored in preload.cjs, which hides the UI.
+const UPDATES_SUPPORTED =
+  process.platform === 'win32' || (process.platform === 'linux' && !!process.env.APPIMAGE);
+
+// Check GitHub Releases, download a newer version, swap it in on relaunch.
+// Draft releases are invisible here, so an unpublished draft never reaches
+// anyone. Never fatal: an unreachable update server must not stop the app
+// from starting.
+//
+// Every phase is pushed to the renderers as one state object instead of a
+// transient OS notification: the whole point is that the user can find out
+// where an update stands whenever they look, not only in the seconds after
+// it lands. See client/src/stores/updateStore.ts.
 let autoUpdater = null;
-function initAutoUpdater() {
-  // Dev/preview run from the repo with no update metadata; UITEST owns its
-  // process and must not race a background download.
-  if (!app.isPackaged || UITEST) return;
-  // Squirrel.Mac refuses to update a bundle without a valid signature, so
-  // there is nothing to start until marraw has an Apple Developer ID.
-  if (process.platform === 'darwin') return;
-  if (!autoUpdateEnabled()) {
-    console.log('[updater] disabled in settings');
-    return;
+let updateState = {
+  /** idle | checking | available | downloading | downloaded | error */
+  status: 'idle',
+  /** The version on offer (available/downloading/downloaded), else ''. */
+  version: '',
+  releaseNotes: '',
+  releaseDate: '',
+  percent: 0,
+  transferred: 0,
+  total: 0,
+  bytesPerSecond: 0,
+  error: '',
+  /** epoch ms of the last completed check; 0 = never checked this session. */
+  checkedAt: 0,
+};
+
+function pushUpdateState(patch) {
+  updateState = { ...updateState, ...patch };
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('marraw:update-state', updateState);
   }
-  if (autoUpdater) {
-    // Re-enabled mid-session: the listeners are already attached, just look.
-    autoUpdater.autoInstallOnAppQuit = true;
-    applyUpdateChannel();
-    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-    return;
-  }
+}
+
+/**
+ * Loads electron-updater on first use and wires its events to updateState.
+ * Returns null where updating can't work (dev run, unsupported packaging,
+ * UITEST — which owns its process and must not race a download).
+ */
+function updater() {
+  if (autoUpdater) return autoUpdater;
+  if (!app.isPackaged || UITEST || !UPDATES_SUPPORTED) return null;
   try {
     ({ autoUpdater } = require('electron-updater'));
   } catch (err) {
     console.error(`[updater] unavailable: ${err.message}`);
+    return null;
+  }
+  // The UI decides when to fetch; a background download is started explicitly
+  // below when automatic updates are on.
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = autoUpdateEnabled();
+  applyUpdateChannel();
+  autoUpdater.on('error', (err) => {
+    const msg = String(err?.message ?? err);
+    console.error(`[updater] ${msg}`);
+    pushUpdateState({ status: 'error', error: msg, percent: 0 });
+  });
+  autoUpdater.on('checking-for-update', () => pushUpdateState({ status: 'checking', error: '' }));
+  autoUpdater.on('update-available', (i) => {
+    console.log(`[updater] ${i.version} available`);
+    pushUpdateState({
+      status: 'available',
+      version: i.version ?? '',
+      releaseNotes: typeof i.releaseNotes === 'string' ? i.releaseNotes : '',
+      releaseDate: i.releaseDate ?? '',
+      error: '',
+      percent: 0,
+      checkedAt: Date.now(),
+    });
+    // "Automatic updates" means the bytes arrive without being asked for; the
+    // install still waits for the user (or for quit).
+    if (autoUpdateEnabled()) startDownload();
+  });
+  autoUpdater.on('update-not-available', () => {
+    console.log('[updater] up to date');
+    pushUpdateState({ status: 'idle', version: '', error: '', checkedAt: Date.now() });
+  });
+  autoUpdater.on('download-progress', (p) => {
+    pushUpdateState({
+      status: 'downloading',
+      percent: p?.percent ?? 0,
+      transferred: p?.transferred ?? 0,
+      total: p?.total ?? 0,
+      bytesPerSecond: p?.bytesPerSecond ?? 0,
+    });
+  });
+  autoUpdater.on('update-downloaded', (i) => {
+    console.log(`[updater] ${i.version} ready to install`);
+    pushUpdateState({ status: 'downloaded', version: i.version ?? '', percent: 100, error: '' });
+  });
+  return autoUpdater;
+}
+
+function startCheck() {
+  const up = updater();
+  if (!up) {
+    pushUpdateState({
+      status: 'error',
+      error: app.isPackaged
+        ? 'This installation cannot update itself.'
+        : 'Updates only run in an installed build.',
+      checkedAt: Date.now(),
+    });
     return;
   }
-  applyUpdateChannel();
-  autoUpdater.on('error', (err) => console.error(`[updater] ${err?.message ?? err}`));
-  autoUpdater.on('update-available', (i) => console.log(`[updater] ${i.version} available`));
-  autoUpdater.on('update-not-available', () => console.log('[updater] up to date'));
-  autoUpdater.on('update-downloaded', (i) => console.log(`[updater] ${i.version} installs on quit`));
-  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-    console.error(`[updater] check failed: ${err?.message ?? err}`);
+  pushUpdateState({ status: 'checking', error: '' });
+  up.checkForUpdates().catch((err) => {
+    // The error event covers most failures, but a rejection here (no network,
+    // bad metadata) can arrive without one.
+    const msg = String(err?.message ?? err);
+    console.error(`[updater] check failed: ${msg}`);
+    pushUpdateState({ status: 'error', error: msg, checkedAt: Date.now() });
   });
 }
+
+function startDownload() {
+  const up = updater();
+  if (!up) return;
+  // A download the user asked for should still land if they quit mid-wait,
+  // even with the background updater switched off.
+  up.autoInstallOnAppQuit = true;
+  pushUpdateState({ status: 'downloading', percent: 0, error: '' });
+  up.downloadUpdate().catch((err) => {
+    const msg = String(err?.message ?? err);
+    console.error(`[updater] download failed: ${msg}`);
+    pushUpdateState({ status: 'error', error: msg, percent: 0 });
+  });
+}
+
+function initAutoUpdater() {
+  if (!autoUpdateEnabled()) {
+    console.log('[updater] automatic check disabled in settings');
+    return;
+  }
+  const up = updater();
+  if (!up) return;
+  // Also the re-enabled-mid-session path: a staged update that set-auto-update
+  // parked must start installing on quit again.
+  up.autoInstallOnAppQuit = true;
+  applyUpdateChannel();
+  startCheck();
+}
+
+ipcMain.handle('marraw:get-update-state', () => ({
+  ...updateState,
+  supported: UPDATES_SUPPORTED,
+  currentVersion: app.getVersion(),
+}));
+ipcMain.handle('marraw:check-updates', () => {
+  startCheck();
+  return true;
+});
+ipcMain.handle('marraw:download-update', () => {
+  startDownload();
+  return true;
+});
+ipcMain.handle('marraw:install-update', () => {
+  if (updateState.status !== 'downloaded' || !autoUpdater) return false;
+  // The daemon's exit must read as expected, not as a crash (see child.on
+  // 'exit'); before-quit would set this anyway, but quitAndInstall tears the
+  // process down on its own schedule.
+  quitting = true;
+  child?.kill();
+  autoUpdater.quitAndInstall();
+  return true;
+});
 
 ipcMain.handle('marraw:get-auto-update', () => autoUpdateEnabled());
 ipcMain.handle('marraw:set-auto-update', (_ev, on) => {
@@ -130,7 +265,7 @@ ipcMain.handle('marraw:set-auto-update', (_ev, on) => {
     initAutoUpdater();
   } else if (autoUpdater) {
     // Stop a staged update from being applied on quit. A download already in
-    // flight finishes; it just never gets installed.
+    // flight finishes; it just never gets installed until asked for.
     autoUpdater.autoInstallOnAppQuit = false;
   }
   return prefs.autoUpdate;
@@ -141,15 +276,12 @@ ipcMain.handle('marraw:set-beta-channel', (_ev, on) => {
   const prefs = readPrefs();
   prefs.betaChannel = !!on;
   writePrefs(prefs);
-  if (autoUpdater) {
-    autoUpdater.allowPrerelease = prefs.betaChannel;
-    // Joining the channel should surface a pending beta now, not next launch.
-    // Leaving it only affects future checks: a beta already downloaded still
-    // installs on quit (there is no API to discard a staged update).
-    if (prefs.betaChannel && autoUpdateEnabled()) {
-      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-    }
-  }
+  if (autoUpdater) autoUpdater.allowPrerelease = prefs.betaChannel;
+  // Joining the channel should surface a pending beta now, not next launch —
+  // including on a first check, where updater() reads the pref we just wrote.
+  // Leaving it only affects future checks: a beta already downloaded still
+  // installs on quit (there is no API to discard a staged update).
+  if (prefs.betaChannel) startCheck();
   return prefs.betaChannel;
 });
 

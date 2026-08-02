@@ -3,6 +3,7 @@ import { backend, canUseHostFs } from '@/lib/backend';
 import {
   AppWindow,
   ArrowDown,
+  ArrowDownToLine,
   ArrowUp,
   ArrowUpDown,
   Check,
@@ -20,6 +21,7 @@ import {
   PlugZap,
   Plus,
   RefreshCw,
+  RotateCw,
   Search,
   Server,
   Settings,
@@ -86,6 +88,7 @@ import {
   useRemotes,
 } from '@/stores/remoteStore';
 import { useUIStore, type ShootGroup, type ShootSort } from '@/stores/uiStore';
+import { useUpdates } from '@/stores/updateStore';
 import type { RemoteConnection, RemoteProbe } from '@/lib/electron';
 
 // Display aliases are a pure display preference, persisted server-side
@@ -231,6 +234,7 @@ export function LibraryRail() {
         </button>
       </div>
       <RemotesSection />
+      <UpdateRow />
       <button
         className="flex items-center gap-2 border-t px-3 py-2.5 text-xs text-muted-foreground hover:text-foreground"
         onClick={() => setSettingsOpen(true)}
@@ -239,6 +243,43 @@ export function LibraryRail() {
         Settings
       </button>
     </div>
+  );
+}
+
+/**
+ * A pending update, parked at the foot of the rail until it is dealt with.
+ * It replaces the OS notification the old flow relied on: nothing here times
+ * out, so an update found mid-shoot is still findable an hour later. Clicking
+ * opens Settings → Updates rather than acting — restarting the app is not
+ * something a stray click in the rail should do.
+ */
+function UpdateRow() {
+  const { state } = useUpdates();
+  const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
+  if (state.status !== 'available' && state.status !== 'downloading' && state.status !== 'downloaded')
+    return null;
+
+  const ready = state.status === 'downloaded';
+  return (
+    <button
+      className="flex items-center gap-2 border-t px-3 py-2.5 text-left text-xs text-accent-text hover:bg-accent"
+      onClick={() => setSettingsOpen(true, 'Updates')}
+      title={`marraw ${state.version} — open Settings → Updates`}
+      data-testid="rail-update"
+    >
+      {ready ? (
+        <RotateCw className="size-3.5 shrink-0" />
+      ) : (
+        <ArrowDownToLine className="size-3.5 shrink-0" />
+      )}
+      <span className="truncate">
+        {ready
+          ? `Restart to update to ${state.version}`
+          : state.status === 'downloading'
+            ? `Downloading ${state.version}… ${Math.round(state.percent)}%`
+            : `Version ${state.version} available`}
+      </span>
+    </button>
   );
 }
 

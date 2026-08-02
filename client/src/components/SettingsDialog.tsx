@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { X } from 'lucide-react';
+import { Download, RefreshCw, RotateCw, X } from 'lucide-react';
 import { useGetAppSettings, setSidecarWrites, useListCameras } from '@/api/library';
 import {
   useGetCacheInfo,
@@ -22,6 +22,14 @@ import {
   saveRemote,
   useRemotes,
 } from '@/stores/remoteStore';
+import {
+  checkForUpdates,
+  downloadUpdate,
+  installUpdate,
+  updateStatusText,
+  updatesSupported,
+  useUpdates,
+} from '@/stores/updateStore';
 import { DirPickerDialog } from '@/components/DirPickerDialog';
 import { useApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -80,7 +88,7 @@ function formatBytes(n: number): string {
   return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
 }
 
-const SECTIONS = ['General', 'Features', 'Toolbars', 'Auto presets', 'Default presets', 'Cache', 'Models', 'Sidecars', 'Remote'] as const;
+const SECTIONS = ['General', 'Features', 'Toolbars', 'Auto presets', 'Default presets', 'Cache', 'Models', 'Sidecars', 'Remote', 'Updates'] as const;
 type Section = (typeof SECTIONS)[number];
 
 /**
@@ -95,7 +103,12 @@ export function SettingsDialog() {
   // wherever the shell bridges exist, including a remote window (whose shell
   // is still this machine's). What's hidden there is the hosting half.
   const showRemote = !!window.marraw?.getRemoteAccess;
-  const sections = SECTIONS.filter((s) => s !== 'Remote' || showRemote);
+  // Hidden where nothing can be updated (a browser tab, a .deb, macOS) rather
+  // than shown as a pane whose every button fails — see updatesSupported.
+  const showUpdates = updatesSupported();
+  const sections = SECTIONS.filter(
+    (s) => (s !== 'Remote' || showRemote) && (s !== 'Updates' || showUpdates),
+  );
   // The visible pane lives in the store so anything can deep-link to one
   // (the rail's "Manage connections…"); a stale name falls back to General.
   const setSection = useUIStore((s) => s.setSettingsSection);
@@ -147,6 +160,7 @@ export function SettingsDialog() {
             {open && section === 'Models' && <ModelsSection />}
             {open && section === 'Sidecars' && <SidecarSection />}
             {open && section === 'Remote' && showRemote && <RemoteSection />}
+            {open && section === 'Updates' && showUpdates && <UpdatesSection />}
           </div>
         </div>
       </DialogContent>
@@ -214,8 +228,6 @@ function GeneralSection() {
           />
         }
       />
-      <AutoUpdateRow />
-      <BetaChannelRow />
     </div>
   );
 }
@@ -341,6 +353,84 @@ function BurstTuningRows() {
 }
 
 /**
+ * Updates: where the current version stands, an explicit check, and the
+ * download/install steps with their progress. The whole flow is visible on
+ * demand here — an update that arrives while you're working leaves a badge in
+ * the rail, so there is nothing to catch in the moment.
+ */
+function UpdatesSection() {
+  const { state, currentVersion, loaded } = useUpdates();
+  const busy = state.status === 'checking' || state.status === 'downloading';
+
+  return (
+    <div className="flex flex-col">
+      <div className="mb-4 rounded-[10px] border p-4">
+        <div className="flex items-start gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium">
+              marraw {currentVersion || '…'}
+              {state.status === 'available' || state.status === 'downloading' ? (
+                <span className="ml-2 rounded-[4px] bg-primary/15 px-1.5 py-px text-[9px] font-semibold tracking-[.05em] text-accent-text uppercase">
+                  Update available
+                </span>
+              ) : null}
+            </div>
+            <div
+              className={cn(
+                'mt-0.5 text-xs leading-normal',
+                state.status === 'error' ? 'text-destructive' : 'text-muted-foreground',
+              )}
+            >
+              {updateStatusText(state)}
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-1.5">
+            {state.status === 'available' && (
+              <Button size="sm" onClick={downloadUpdate}>
+                <Download className="size-3.5" />
+                Download
+              </Button>
+            )}
+            {state.status === 'downloaded' && (
+              <Button size="sm" onClick={installUpdate}>
+                <RotateCw className="size-3.5" />
+                Restart &amp; install
+              </Button>
+            )}
+            <Button variant="outline" size="sm" disabled={busy || !loaded} onClick={checkForUpdates}>
+              <RefreshCw className={cn('size-3.5', state.status === 'checking' && 'animate-spin')} />
+              Check for updates
+            </Button>
+          </div>
+        </div>
+        {state.status === 'downloading' && (
+          <div className="mt-3 flex flex-col gap-1.5">
+            <div className="h-1 w-full overflow-hidden rounded-sm bg-black/10 dark:bg-white/12">
+              <div
+                className="h-full rounded-sm bg-primary transition-[width]"
+                style={{ width: `${Math.min(100, Math.max(0, state.percent))}%` }}
+              />
+            </div>
+            <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+              {formatBytes(state.transferred)} / {formatBytes(state.total)}
+              {state.bytesPerSecond > 0 && <> · {formatBytes(state.bytesPerSecond)}/s</>}
+            </span>
+          </div>
+        )}
+        {state.status === 'downloaded' && (
+          <div className="mt-3 text-xs text-muted-foreground">
+            marraw will close and reopen on the new version. It also installs by itself the next
+            time you quit, so you can keep working and restart whenever it suits you.
+          </div>
+        )}
+      </div>
+      <AutoUpdateRow />
+      <BetaChannelRow />
+    </div>
+  );
+}
+
+/**
  * Auto-update lives in the Electron shell rather than the daemon's settings:
  * the check runs at launch, before marrawd is up. Hidden in a browser tab and
  * on macOS, where an unsigned bundle can never update itself.
@@ -373,7 +463,7 @@ function AutoUpdateRow() {
   return (
     <SettingRow
       title="Automatic updates"
-      description="Check for a new version on launch, download it in the background, and install it when marraw quits. Turn this off to update by hand from the releases page."
+      description="Check on launch and download a new version in the background, so it is ready to install the moment you want it. Turn this off to decide every step yourself — the button above still checks and downloads on demand."
       control={
         <Switch checked={enabled} onCheckedChange={toggle} aria-label="Automatic updates" />
       }

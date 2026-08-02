@@ -47,12 +47,16 @@ if (import.meta.env.DEV) {
     import('@/lib/changelog'),
     import('@/lib/library'),
     import('@/lib/cullHistory'),
-  ]).then(([ui, es, us, ex, cl, lib, ch]) => {
+    import('@/stores/updateStore'),
+  ]).then(([ui, es, us, ex, cl, lib, ch, upd]) => {
     (window as unknown as Record<string, unknown>).__marraw = {
       useUIStore: ui.useUIStore,
       useEditSession: es.useEditSession,
       // Flag/rating undo history (the `cullundo` shot surface probes it).
       useCullHistory: ch.useCullHistory,
+      // Updater state (the `updates*` shot surfaces): a real update can only
+      // come from a packaged build, so the phases are seeded here instead.
+      useUpdateStore: upd.useUpdateStore,
       // Action fns the scripted UI test drives directly (client-bound calls
       // like a crop drag are awkward to synthesize as raw pointer events).
       esUpdate: (patch: unknown) => es.esUpdate(client, patch as never),
