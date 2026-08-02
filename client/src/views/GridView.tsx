@@ -176,6 +176,18 @@ export function GridView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusId]);
 
+  // Returning from cull/develop remounts the grid at scrollTop 0, and the
+  // effect above can't help: on the first commit the scroll element hasn't been
+  // measured yet (the callback ref sets state), and focusId never changes, so
+  // it never fires again. Re-anchor once, on the first render that has a width.
+  const restored = useRef(false);
+  useLayoutEffect(() => {
+    if (restored.current || width === 0) return;
+    restored.current = true;
+    if (focusRow != null) virtualizer.scrollToIndex(focusRow, { align: 'center' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [width, focusRow]);
+
   // A row-model change (a background metadata snapshot reflowing the natural
   // layout, a rating patch, a resize) re-anchors on the focus only when it was
   // on-screen before the reflow — never yanking back a view the user has
