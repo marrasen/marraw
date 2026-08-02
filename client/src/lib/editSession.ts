@@ -217,6 +217,11 @@ interface EditSessionState {
   // The region currently hovered (loupe pointer or a panel chip); the
   // AIPickOverlay renders its tint.
   aiHover: { kind: AIPickKind; id: number } | null;
+  // An AI kind the focused photo's masks reference but whose model isn't
+  // downloaded (esEnsureAIMaps hit the consent sentinel). The Local panel
+  // turns it into the download dialog; cleared when consumed or on a photo
+  // switch, so a mask that can't render never nags more than once.
+  aiMapRestore: AIKindType | null;
   // Brush tool settings shared between the Masks panel and the paint overlay.
   // Radius is a fraction of the frame long edge (the server's stroke model).
   brushRadius: number;
@@ -266,6 +271,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   aiDetect: { person: null, class: null },
   aiPickArmed: null,
   aiHover: null,
+  aiMapRestore: null,
   brushRadius: 0.05,
   brushFeather: 0.5,
   brushFlow: 1,
@@ -316,6 +322,11 @@ let applyGen = 0;
 let hoverTimer = 0;
 let hoverGen = 0;
 let amountTimer = 0;
+// Idle delay before a freshly opened photo's missing AI maps are generated
+// (esLoad → esEnsureAIMaps): flicking through a folder must not fire an
+// inference — and the RAW decode behind it — for every frame it passes.
+let ensureTimer = 0;
+const ENSURE_AI_IDLE_MS = 400;
 
 // In crop mode the loupe draws the rectangle and applies the straighten angle
 // as a CSS rotation, both client-side — so the backend renders the flat full
@@ -477,6 +488,7 @@ function labelForDiff(prev: Params, next: Params): string {
 export async function esLoad(client: ApiClient, photoId: number, applyIds: number[], baseExpEV = 0) {
   window.clearTimeout(commitTimer);
   window.clearTimeout(hoverTimer);
+  window.clearTimeout(ensureTimer);
   applyGen++; // supersede any autoAdjust still in flight for the old photo
   hoverGen++;
   pending = null; // BEFORE the abort: its finally must not refire for the old photo
@@ -507,6 +519,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     aiDetect: { person: null, class: null },
     aiPickArmed: null,
     aiHover: null,
+    aiMapRestore: null,
     keyAdjust: false,
   }));
   const params = await getEditParams(client, photoId).catch(() => null);
@@ -518,6 +531,14 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
       : { ...s.history, [photoId]: { stack: [{ params: draft, label: 'Original', seq: 0 }], index: 0 } };
     return { draft, loading: false, history };
   });
+  // The edit may carry AI masks whose maps this machine never generated — a
+  // sidecar from another computer, a cleared data dir, or a paste that landed
+  // on the whole selection. Without the map they render as nothing. Only for a
+  // photo the user actually stops on (see ensureTimer): browsing past one must
+  // not queue an inference behind the frame the loupe is waiting for.
+  ensureTimer = window.setTimeout(() => {
+    if (useEditSession.getState().photoId === photoId) esEnsureAIMaps(client, photoId, draft);
+  }, ENSURE_AI_IDLE_MS);
 }
 
 // esSetApplyIds updates commit targets when the selection changes without
@@ -1113,12 +1134,17 @@ function pushHistory(photoId: number, params: Params, label: string) {
   });
 }
 
-function persist(client: ApiClient, params: Params, ids: number[]) {
+// persist saves the params to every target. The returned promise settles when
+// the save is done (or has failed and been reported) — never rejects — so
+// callers can sequence work that must not race the write.
+function persist(client: ApiClient, params: Params, ids: number[]): Promise<void> {
   const p =
     ids.length > 1
       ? pasteEditParams(client, ids, params)
       : setEditParams(client, ids[0], params);
-  p.catch((err) => toast.error(`Save failed: ${(err as Error).message}`));
+  return p.catch((err) => {
+    toast.error(`Save failed: ${(err as Error).message}`);
+  });
 }
 
 // esCommit persists the draft (merged with an optional final patch) to every
@@ -1133,7 +1159,7 @@ export function esCommit(client: ApiClient, patch?: Partial<Params>) {
   const prev = h ? h.stack[h.index].params : { ...NEUTRAL };
   pushHistory(s.photoId, params, labelForDiff(prev, params));
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
-  persist(client, params, ids);
+  void persist(client, params, ids);
   // Settle render: drag frames were low-res, so bring the loupe back to the
   // full 2048 (which the server also writes to the pyramid cache).
   schedulePreview(client, 'settle');
@@ -1202,6 +1228,80 @@ export function esDeclineFillDownload(client: ApiClient) {
   void esFinishSpot(client, index);
 }
 
+// An AI mask is a RECIPE, not pixels: it names a model map by (aiKind,
+// mapVer), and that map is a per-photo file the params do NOT carry. A photo
+// without it on disk renders the mask as exactly nothing (pyramid.newAIEval
+// returns no evaluator — a silent no-op by design). So every path that lands
+// AI masks on a photo that never ran the model has to kick the inference off
+// itself: pasting settings, applying a preset, opening a photo whose sidecar
+// came from another machine.
+//
+// This used to live in the Local panel's mask section, which meant the maps
+// only ever ran while that tab was mounted — a pasted background blur stayed
+// invisible until the user happened to open Local.
+//
+// Remembered per (photo, kind) for the session: GenerateAIMap is idempotent
+// and cheap when the map is on disk, but there's no reason to re-ask on every
+// paste or history step.
+const aiMapsFired = new Set<string>();
+
+// esEnsureAIMaps materializes the maps `params`' AI masks reference on the
+// focused photo, then repaints — a map is a render input OUTSIDE the edit
+// hash, so nothing else invalidates the frames already on screen. `rest` (the
+// other photos of a multi-photo apply) get theirs from one shared background
+// task, each landing map cache-busting its own thumb via AIMapsGeneratedEvent.
+//
+// Never downloads a model: a missing one surfaces as aiMapRestore for the
+// consent dialog, exactly once per session per kind.
+export function esEnsureAIMaps(client: ApiClient, photoId: number, params: Params, rest: number[] = []) {
+  const kinds = [
+    ...new Set((params.masks ?? []).filter((m) => m.type === 'ai' && m.aiKind).map((m) => m.aiKind!)),
+  ];
+  if (kinds.length === 0) return;
+  void (async () => {
+    const ran: AIKindType[] = [];
+    for (const kind of kinds) {
+      const key = `${photoId}|${kind}`;
+      if (aiMapsFired.has(key)) {
+        ran.push(kind);
+        continue;
+      }
+      aiMapsFired.add(key);
+      try {
+        const res = await generateAIMap(client, photoId, kind, false);
+        ran.push(kind);
+        // Repaint ONLY when a map actually regenerated: an unconditional
+        // nudge forces a transient (non-abortable) decode on every first
+        // visit to a masked photo — those piled up into browse stalls.
+        if (!res.generated) continue;
+        bumpImgBust(photoId); // the grid thumb is immutably cached — refetch it
+        // The loupe's sharp frame was rendered without the map and is deduped
+        // by lastShown; the low-res frame clears that, so the settle behind it
+        // really re-renders.
+        if (useEditSession.getState().photoId === photoId) previewThenSettle(client);
+      } catch (err) {
+        if (isModelNotDownloaded(err)) {
+          // Stays in aiMapsFired: ask once, not on every paste or re-render.
+          setState((st) => (st.aiMapRestore == null ? { aiMapRestore: kind } : {}));
+          continue;
+        }
+        aiMapsFired.delete(key); // transient failure: allow a retry
+      }
+    }
+    // Consent already settled by the focused photo's runs above, so the batch
+    // needs no allowDownload of its own.
+    if (rest.length === 0 || ran.length === 0) return;
+    void generateAIMaps(client, rest, ran, false).catch((err) => {
+      toast.error(`AI masks failed for the selection: ${(err as Error).message}`);
+    });
+  })();
+}
+
+// esClearAIMapRestore drops the pending consent ask once a dialog owns it.
+export function esClearAIMapRestore() {
+  setState({ aiMapRestore: null });
+}
+
 // esApplyParams replaces the whole draft (paste, picker result, undo) with
 // immediate preview + persist.
 export function esApplyParams(
@@ -1211,13 +1311,21 @@ export function esApplyParams(
 ) {
   const s = useEditSession.getState();
   if (s.photoId == null) return;
+  const photoId = s.photoId;
   // hoverParams cleared: a replaced draft must not stay hidden behind a
   // stale hover overlay (the pointer may still be parked on a card).
   setState({ draft: params, lastPresetApply: null, hoverParams: null });
-  if (!opts?.skipHistory) pushHistory(s.photoId, params, opts?.label ?? 'Edit');
+  if (!opts?.skipHistory) pushHistory(photoId, params, opts?.label ?? 'Edit');
   schedulePreview(client, 'settle');
-  const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
-  persist(client, params, ids);
+  const ids = s.applyIds.length > 1 ? s.applyIds : [photoId];
+  // Pasted AI masks need their maps generated here — AFTER the save lands:
+  // GenerateAIMap drops the photo's cached renditions for the edit hash it
+  // reads from the DB, so a map materialized before the paste is stored would
+  // invalidate the OLD hash and leave the just-rendered maskless frame cached
+  // under the new one.
+  void persist(client, params, ids).then(() =>
+    esEnsureAIMaps(client, photoId, params, ids.filter((id) => id !== photoId)),
+  );
 }
 
 // esApplyParamsPreview is esApplyParams for one-shot auto/preset applies: it
@@ -1232,7 +1340,7 @@ function esApplyParamsPreview(client: ApiClient, params: Params, label: string) 
   setState({ draft: params, lastPresetApply: null, hoverParams: null });
   pushHistory(s.photoId, params, label);
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
-  persist(client, params, ids);
+  void persist(client, params, ids);
   previewThenSettle(client);
 }
 
@@ -1302,16 +1410,17 @@ export function esJumpTo(client: ApiClient, index: number) {
   const h = s.history[s.photoId];
   if (!h) return;
   if (index < 0 || index >= h.stack.length || index === h.index) return;
+  const photoId = s.photoId;
   const params = h.stack[index].params;
   setState({
     draft: params,
     lastPresetApply: null,
-    history: { ...s.history, [s.photoId]: { ...h, index } },
+    history: { ...s.history, [photoId]: { ...h, index } },
   });
   schedulePreview(client, 'settle');
-  setEditParams(client, s.photoId, params).catch((err) =>
-    toast.error(`Save failed: ${(err as Error).message}`),
-  );
+  // Redoing back to a state whose masks were pasted in — same save-then-
+  // generate ordering as esApplyParams.
+  void persist(client, params, [photoId]).then(() => esEnsureAIMaps(client, photoId, params));
 }
 
 // esHistory reads the focused photo's timeline for the Presets history list:
@@ -1564,6 +1673,7 @@ export async function esApplyPresetMasks(
     try {
       const res = await generateAIMap(client, pid, kind, opts?.allowDownload ?? false);
       vers[kind] = res.mapVer;
+      aiMapsFired.add(`${pid}|${kind}`); // this map is settled — the commit below need not re-ask
     } catch (err) {
       if (isModelNotDownloaded(err)) return { status: 'needs-download', kind };
       toast.error(`AI masks failed: ${(err as Error).message}`);
@@ -1584,17 +1694,12 @@ export async function esApplyPresetMasks(
   // does); the look phase's record stays valid — scrubs preserve the
   // draft's masks — so restore it across the mask commit.
   const keep = cur.lastPresetApply;
+  // The focused photo's maps just ran above; the rest of the selection gets the
+  // same recipes persisted but no inference — esApplyParams' esEnsureAIMaps
+  // pass kicks that off once the save has landed (consent is already settled
+  // here, so it needs no allowDownload of its own).
   esApplyParams(client, { ...cur.draft, masks }, { label: `${preset.name} · masks` });
   if (keep && keep.photoId === pid) setState({ lastPresetApply: keep });
-  // The focused photo's maps just ran above; the rest of the selection got the
-  // same recipes persisted but no inference — kick it off now. Consent was
-  // already settled by the focused run, so allowDownload carries over.
-  const rest = cur.applyIds.length > 1 ? cur.applyIds.filter((id) => id !== pid) : [];
-  if (rest.length > 0) {
-    void generateAIMaps(client, rest, kinds, opts?.allowDownload ?? false).catch((err) => {
-      toast.error(`AI masks failed for the selection: ${(err as Error).message}`);
-    });
-  }
   return { status: 'done' };
 }
 
@@ -1714,7 +1819,7 @@ export function esCommitPresetAmount(client: ApiClient) {
     return { history: { ...st.history, [a.photoId]: { ...h, stack } } };
   });
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
-  persist(client, params, ids);
+  void persist(client, params, ids);
   schedulePreview(client, 'settle');
 }
 

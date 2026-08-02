@@ -12,7 +12,6 @@ import { applyRating, applyFlag } from '@/lib/actions';
 // (aprot's camelCasing lowercases exactly one leading character: aIModelStatus.)
 import { aIModelStatus as aiModelStatus, applyBatchEdit, fillModelStatus, generateAIMap, lensProfile, type Delta, type LensProfileInfo } from '@/api/edits';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
-import { isModelNotDownloaded } from '@/lib/aiConsent';
 import type { AIKindType, CurvePoint, Mask, MaskAdjust, Params, Spot } from '@/api/edit';
 import {
   CURVE_CHANNELS,
@@ -57,6 +56,7 @@ import {
   esAuto,
   esCanRedo,
   esCanUndo,
+  esClearAIMapRestore,
   esCommit,
   esLoad,
   esRedo,
@@ -1275,13 +1275,6 @@ function LocalPanel({ client, targetCount }: { client: ApiClient; targetCount: n
   );
 }
 
-// aiRestoreFired remembers which (photo, kind) map restores this session has
-// already requested — GenerateAIMap is idempotent and cheap when the map is
-// on disk, but there's no reason to re-fire it on every render (or for
-// StrictMode's double effect). A consent-declined kind stays in the set so
-// the dialog doesn't nag on every re-render; it re-asks next session.
-const aiRestoreFired = new Set<string>();
-
 function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   const activeMask = useEditSession((s) => s.activeMask);
   // Both AI region-mask detections live in the session, shared with the
@@ -1289,6 +1282,7 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   // them on a photo switch, so the panel keeps no per-photo copy.
   const aiDetect = useEditSession((s) => s.aiDetect);
   const aiPickArmed = useEditSession((s) => s.aiPickArmed);
+  const aiMapRestore = useEditSession((s) => s.aiMapRestore);
   const personDetect = aiDetect.person;
   const sceneDetect = aiDetect.class;
   const photoId = useEditSession((s) => s.photoId);
@@ -1379,34 +1373,20 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
     void runAI(kind, false, 'add', variant);
   };
 
-  // Restore maps for AI masks that arrived without local map files (sidecar
-  // from another machine, cleared data dir): idempotent per photo+kind, and
-  // never a silent download — a missing model opens the consent dialog.
+  // Generating the maps an AI mask references is the edit session's job (it
+  // has to happen wherever the masks land — a paste from another photo, a
+  // preset, a sidecar from another machine — not just while this tab is
+  // mounted). All that's left here is the consent dialog it can't show
+  // itself: esEnsureAIMaps parks the kind whose model is missing, and this
+  // turns it into the download ask, once.
   useEffect(() => {
-    if (photoId == null) return;
-    for (const m of masks) {
-      if (m.type !== 'ai' || !m.aiKind) continue;
-      const kind = m.aiKind;
-      const key = `${photoId}|${kind}`;
-      if (aiRestoreFired.has(key)) continue;
-      aiRestoreFired.add(key);
-      generateAIMap(client, photoId, kind, false)
-        .then((res) => {
-          if (res.generated) {
-            esUpdate(client, {});
-            bumpImgBust(photoId);
-          }
-        })
-        .catch(async (err) => {
-          if (isModelNotDownloaded(err)) {
-            const status = await aiModelStatus(client, kind).catch(() => null);
-            if (status) setPendingAI({ kind, bytes: status.bytes, mode: 'restore' });
-            return; // stays in aiRestoreFired: don't re-nag this session
-          }
-          aiRestoreFired.delete(key); // transient failure: allow a retry
-        });
-    }
-  }, [client, photoId, masks]);
+    if (aiMapRestore == null) return;
+    esClearAIMapRestore(); // consumed — the dialog owns the ask from here
+    const kind = aiMapRestore;
+    aiModelStatus(client, kind)
+      .then((status) => setPendingAI({ kind, bytes: status.bytes, mode: 'restore' }))
+      .catch(() => {}); // no status, no dialog — the mask just stays inactive
+  }, [client, aiMapRestore]);
 
   return (
     <div className="flex flex-col gap-1.5">
