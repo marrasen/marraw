@@ -37,7 +37,7 @@ func (e *Edits) SuggestEdits(ctx context.Context, photoID int64, params edit.Par
 	if err != nil {
 		return nil, err
 	}
-	rgba, err := e.previewDecode(ctx, photoID, photo, &params)
+	rgba, err := e.statsDecode(ctx, photoID, photo, &params)
 	if err != nil {
 		return nil, err
 	}

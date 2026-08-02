@@ -64,13 +64,19 @@ for (const p of picks) {
   const auto = await call('Edits.AutoAdjust', [p.id, base, ['all']]);
   const ms = Date.now() - t;
   console.log(`photo ${p.id} (${p.fileName}) [${ms}ms]\n    base ev=${(base.expEV ?? 0).toFixed(2)}\n    auto ${fmt(auto)}`);
+  // ±5 EV is the validator's exposure range (edit.MinExpEV/MaxExpEV); auto
+  // may legitimately return past LibRaw's ±3 exp_shift range, since the
+  // residual is folded into the metered frame (api.Edits.statsDecode).
   const inRange =
-    auto.expEV >= -2 && auto.expEV <= 3 &&
+    auto.expEV >= -5 && auto.expEV <= 5 &&
     [auto.contrast, auto.whites, auto.blacks, auto.toneShadows, auto.toneHighlights, auto.vibrance, auto.saturation]
       .every((v) => v >= -1 && v <= 1);
   check(inRange, 'all values within validator ranges');
   check(auto.wbMode === 'auto', 'wb section set wbMode auto');
-  check(Math.abs(auto.expEV - (base.expEV ?? 0)) <= 1.5, 'exposure move bounded to ±1.5 EV');
+  // autoEVLimit caps one pass at exactly 1.5 EV, so compare with an epsilon:
+  // a bare `<= 1.5` fails on float noise (2.78 - 1.28 === 1.5000000000000002).
+  const move = Math.abs(auto.expEV - (base.expEV ?? 0));
+  check(move <= 1.5 + 1e-9, `exposure move bounded to ±1.5 EV (${move.toFixed(2)})`);
 
   // Section isolation: tone-only must not touch WB or color.
   const toneOnly = await call('Edits.AutoAdjust', [p.id, base, ['tone']]);
@@ -79,11 +85,21 @@ for (const p of picks) {
     'tone-only leaves wb/color untouched',
   );
 
-  // Idempotence: re-running on the auto result must not drift much — the
-  // exposure has landed, so the second pass reads a corrected histogram.
-  const again = await call('Edits.AutoAdjust', [p.id, auto, ['all']]);
-  const drift = Math.abs(again.expEV - auto.expEV);
-  check(drift <= 0.35, `second pass exposure drift ${drift.toFixed(2)} EV small`);
+  // Convergence, not idempotence: one pass moves at most ±1.5 EV, so a very
+  // dark or very bright scene legitimately needs several to reach the target
+  // (these hangar interiors want >3 EV). Re-run until the move dies out and
+  // assert it settles quickly — a pass that hit the clamp has NOT landed yet,
+  // so asserting no drift after a single pass is wrong.
+  let cur = auto;
+  let passes = 0;
+  let drift = 0;
+  do {
+    const next = await call('Edits.AutoAdjust', [p.id, cur, ['all']]);
+    drift = Math.abs(next.expEV - cur.expEV);
+    cur = next;
+    passes++;
+  } while (drift > 0.35 && passes < 4);
+  check(drift <= 0.35, `exposure converged in ${passes} extra pass(es), final drift ${drift.toFixed(2)} EV`);
 }
 
 // Validation: unknown sections must be rejected.

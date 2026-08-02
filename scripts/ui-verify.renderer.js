@@ -219,8 +219,13 @@ try {
       bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y, pointerId: 7, isPrimary: true,
     }));
     await sleep(200);
-    // -2..3 range: 75% ≈ +1.75
-    R.sliderClickJumps = es().draft.expEV > 1.4 && es().draft.expEV < 2.1 ? true : `expEV=${es().draft.expEV}`;
+    // Exposure spans -5..+5 (controlSpecs), and the track is inset by the
+    // thumb radius, so a click at 75% of the element lands a bit under the
+    // nominal +2.5. Assert the jump is a large positive move rather than a
+    // step, not an exact value — the tolerance below was calibrated for the
+    // old -2..3 range and only kept passing by luck.
+    const clickEV = es().draft.expEV;
+    R.sliderClickJumps = clickEV > 1.4 && clickEV <= 5 ? true : `expEV=${clickEV}`;
   } else {
     R.sliderClickJumps = 'exposure slider not found';
   }
@@ -298,16 +303,22 @@ try {
   ui().setDevelopTab('develop');
   await until(() => sliderRowByLabel('Exposure'), 5000, 'develop tab restored');
   R.autoButtons = autoDevelop && autoPresets ? true : `develop=${autoDevelop} presets=${autoPresets}`;
-  // Ctrl+U auto dynamics: the draft carries ~+1.75 EV from the slider click
-  // above, so auto tone must land a different (pulled-back) state.
+  // Ctrl+U auto dynamics: the draft carries a manual exposure from the slider
+  // click above, so auto tone must land somewhere else — but NOT necessarily
+  // lower. Which way it goes is the fixture's business (a dark interior is
+  // legitimately lifted), so assert only what auto tone actually promises:
+  // the exposure moved, by at most autoEVLimit (1.5 EV) in one pass, and the
+  // dynamics section left WB and saturation alone.
   const preAutoEV = es().draft.expEV;
   const preAutoJSON = JSON.stringify(es().draft);
   key('u', { ctrlKey: true });
   await until(() => JSON.stringify(es().draft) !== preAutoJSON, 20000, 'auto tone landed');
+  const autoMove = es().draft.expEV - preAutoEV;
   R.autoTone =
-    es().draft.expEV < preAutoEV && es().draft.wbMode !== 'auto' && es().draft.saturation === 0
+    autoMove !== 0 && Math.abs(autoMove) <= 1.5 + 1e-9 &&
+    es().draft.wbMode !== 'auto' && es().draft.saturation === 0
       ? true
-      : `expEV ${preAutoEV} -> ${es().draft.expEV}, wb=${es().draft.wbMode}, sat=${es().draft.saturation}`;
+      : `expEV ${preAutoEV} -> ${es().draft.expEV} (move ${autoMove.toFixed(2)}), wb=${es().draft.wbMode}, sat=${es().draft.saturation}`;
   await sleep(400);
   // Ctrl+Shift+U auto colours: switches WB to auto and computes vibrance.
   key('u', { ctrlKey: true, shiftKey: true });

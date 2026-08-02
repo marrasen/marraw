@@ -243,6 +243,31 @@ func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Ph
 	return e.decodePreview(ctx, photoID, photo, ep, true)
 }
 
+// statsDecode is previewDecode for the metering paths (auto adjustments,
+// suggestions): the frame comes back carrying the edit's FULL exposure, with
+// edit.Params.ResidualExpEV — the stops beyond LibRaw's exp_shift range —
+// folded in the way every accurate render folds it. Metering the raw decode
+// instead measured a darker frame than the one on screen and made auto tone
+// drop the residual on the floor (a +4.28 EV photo came back +2.65).
+//
+// The fold is destructive and previewDecode hands back the shared cache
+// entry, so a non-zero residual meters a copy; the common case (|ExpEV| ≤ 3)
+// costs nothing.
+func (e *Edits) statsDecode(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params) (*image.RGBA, error) {
+	rgba, err := e.previewDecode(ctx, photoID, photo, ep)
+	if err != nil {
+		return nil, err
+	}
+	residual := ep.ResidualExpEV()
+	if residual == 0 {
+		return rgba, nil
+	}
+	dup := image.NewRGBA(rgba.Rect)
+	copy(dup.Pix, rgba.Pix)
+	pyramid.ApplyExposureEV(dup, residual, ep)
+	return dup, nil
+}
+
 // decodePreview is previewDecode with the single-entry cache store optional:
 // batch passes (the folder-wide subject scan) read the cache but never write
 // it, so a background scan can't evict the interactive editor's warm decode —
@@ -854,7 +879,7 @@ func (e *Edits) AutoAdjust(ctx context.Context, photoID int64, params edit.Param
 	// this returns the cached decode from the last preview; when it was, the
 	// one half-size demosaic here also pre-warms the cache for the preview
 	// the client requests right after.
-	rgba, err := e.previewDecode(ctx, photoID, photo, &out)
+	rgba, err := e.statsDecode(ctx, photoID, photo, &out)
 	if err != nil {
 		return nil, err
 	}

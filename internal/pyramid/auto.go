@@ -81,7 +81,8 @@ type SceneStats struct {
 }
 
 // GatherSceneStats measures img through the baseline look (see AutoAdjust for
-// the display-space rationale) in one strided pass.
+// the display-space rationale) in one strided pass. img must carry the edit's
+// FULL exposure, residual included — see autoTone.
 func GatherSceneStats(img *image.RGBA, lookGamma float64, subject *AIMap) *SceneStats {
 	lut := buildLookLUT(lookGamma, nil)
 	stats := &SceneStats{}
@@ -153,10 +154,13 @@ func autoTone(hist *[256]int, n int, subjHist *[256]int, subjTotal int, p *edit.
 	// so a display-domain ratio maps to EV via the 2.222 power.
 	dEV := 2.222 * math.Log2(autoMedianTarget/med)
 	dEV = math.Round(clampF(dEV, -autoEVLimit, autoEVLimit)/0.05) * 0.05
-	// The histogram was measured on the decode, which carries BakedExpEV (the
-	// residual beyond LibRaw's exp_shift range folds in at render time), so
-	// the move lands relative to that — not to the nominal dial value.
-	p.ExpEV = clampF(p.BakedExpEV()+dEV, edit.MinExpEV, edit.MaxExpEV)
+	// The move lands relative to the exposure the histogram was measured at,
+	// which callers must make the FULL ExpEV: a decode carries only
+	// BakedExpEV, so the caller folds edit.Params.ResidualExpEV in before
+	// metering (see api.Edits.statsDecode). Measuring the baked value and
+	// adding to it silently discarded any exposure past LibRaw's ±3 EV
+	// exp_shift range — auto tone yanked a +4.28 EV photo back to +2.65.
+	p.ExpEV = clampF(p.ExpEV+dEV, edit.MinExpEV, edit.MaxExpEV)
 
 	// Rescale the percentiles by the exposure move so the remaining sliders
 	// judge the histogram as it will look after the EV lands.

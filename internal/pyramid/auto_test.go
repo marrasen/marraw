@@ -138,6 +138,22 @@ func TestAutoToneWellExposedIsNoOp(t *testing.T) {
 	}
 }
 
+// Exposure past LibRaw's ±3 EV exp_shift range lives in ResidualExpEV, which
+// the caller folds into the frame before metering (api.Edits.statsDecode).
+// autoTone must therefore move from the FULL dial value: basing it on
+// BakedExpEV instead silently discarded the residual, pulling a well-exposed
+// +4.5 EV photo back to +3.
+func TestAutoToneKeepsExposureBeyondLibrawRange(t *testing.T) {
+	img := wellExposed(t) // already on target: the move should be ~0
+	for _, ev := range []float64{4.5, -4.5} {
+		p := edit.Params{ExpEV: ev}
+		AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone}, nil)
+		if math.Abs(p.ExpEV-ev) > 0.05 {
+			t.Errorf("ExpEV %v: auto tone returned %v, want it held (residual dropped?)", ev, p.ExpEV)
+		}
+	}
+}
+
 func TestAutoToneDegenerateScenes(t *testing.T) {
 	for _, tc := range []struct {
 		name string
