@@ -271,16 +271,16 @@ export function subscribePickRangeColor(client: ApiClient, photoID: number, para
 }
 
 
-export function pickWhiteBalance(client: ApiClient, photoID: number, params: Params, x: number, y: number, options?: RequestOptions): Promise<Params> {
-    return client.request<Params>('Edits.PickWhiteBalance', [photoID, params, x, y], options);
+export function pickWhiteBalance(client: ApiClient, photoID: number, params: Params, base: Params, x: number, y: number, options?: RequestOptions): Promise<Params> {
+    return client.request<Params>('Edits.PickWhiteBalance', [photoID, params, base, x, y], options);
 }
 // Wire-method tag consumed by useQuerySuspense to key the promise cache and
 // open the matching server subscription. Stable identifier across builds
 // (unaffected by minification, unlike Function.name).
 pickWhiteBalance.method = 'Edits.PickWhiteBalance' as const;
 
-export function subscribePickWhiteBalance(client: ApiClient, photoID: number, params: Params, x: number, y: number, callback: (data: Params) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
-    return client.subscribe<Params>('Edits.PickWhiteBalance', [photoID, params, x, y], callback, onError, options);
+export function subscribePickWhiteBalance(client: ApiClient, photoID: number, params: Params, base: Params, x: number, y: number, callback: (data: Params) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Params>('Edits.PickWhiteBalance', [photoID, params, base, x, y], callback, onError, options);
 }
 
 
@@ -359,6 +359,19 @@ suggestHealSource.method = 'Edits.SuggestHealSource' as const;
 
 export function subscribeSuggestHealSource(client: ApiClient, photoID: number, params: Params, spot: Spot, callback: (data: Spot) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<Spot>('Edits.SuggestHealSource', [photoID, params, spot], callback, onError, options);
+}
+
+
+export function wBPickFrame(client: ApiClient, photoID: number, base: Params, options?: RequestOptions): Promise<Blob> {
+    return client.request<Blob>('Edits.WBPickFrame', [photoID, base], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+wBPickFrame.method = 'Edits.WBPickFrame' as const;
+
+export function subscribeWBPickFrame(client: ApiClient, photoID: number, base: Params, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Blob>('Edits.WBPickFrame', [photoID, base], callback, onError, options);
 }
 
 export function onAIMapsGeneratedEvent(client: ApiClient, handler: PushHandler<AIMapsGeneratedEvent>): () => void {
@@ -583,12 +596,12 @@ export function usePickRangeColor(photoID: number, params: Params, x: number, y:
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function usePickWhiteBalance(photoID: number, params: Params, x: number, y: number, options?: UseQueryOptions<Params>): UseQueryResult<Params> {
+export function usePickWhiteBalance(photoID: number, params: Params, base: Params, x: number, y: number, options?: UseQueryOptions<Params>): UseQueryResult<Params> {
     const wrappedFn = useCallback(
-        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, x: number, y: number) => pickWhiteBalance(client, photoID, params, x, y, { signal }),
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, base: Params, x: number, y: number) => pickWhiteBalance(client, photoID, params, base, x, y, { signal }),
         [],
     );
-    return useQuery(wrappedFn, { ...options, params: [photoID, params, x, y], _subscribe: { method: 'Edits.PickWhiteBalance', params: [photoID, params, x, y] } });
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, base, x, y], _subscribe: { method: 'Edits.PickWhiteBalance', params: [photoID, params, base, x, y] } });
 }
 
 /**
@@ -679,6 +692,21 @@ export function useSuggestHealSource(photoID: number, params: Params, spot: Spot
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, params, spot], _subscribe: { method: 'Edits.SuggestHealSource', params: [photoID, params, spot] } });
+}
+
+/**
+ * Subscribes to `Edits.WBPickFrame` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useWBPickFrame(photoID: number, base: Params, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, base: Params) => wBPickFrame(client, photoID, base, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, base], _subscribe: { method: 'Edits.WBPickFrame', params: [photoID, base] } });
 }
 
 export function useAIMapsGeneratedEvent(options?: { maxEvents?: number }): UsePushResult<AIMapsGeneratedEvent> {

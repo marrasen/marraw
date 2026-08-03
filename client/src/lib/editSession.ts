@@ -21,6 +21,7 @@ import {
   resetEdits,
   setEditParams,
   suggestHealSource,
+  wBPickFrame,
 } from '@/api/edits';
 import { bumpImgBust } from '@/lib/imgCacheBust';
 import type { AICategory, AIInstance, Suggestion } from '@/api/edits';
@@ -147,8 +148,13 @@ interface EditSessionState {
   preview: Preview | null;
   wbPicking: boolean;
   // Draft snapshot from when the WB eyedropper opened: the revert target for
-  // Reset/Cancel. Null when the picker is closed.
+  // Reset/Cancel, and the state the server samples every pick against. Null
+  // when the picker is closed.
   wbPickBase: Params | null;
+  // Object URL of the frame the server samples for wbPickBase — the pipette's
+  // magnifier shows THIS rather than the live preview, so the RGB readout is
+  // the pixels the next pick is actually computed from. Null until it loads.
+  wbPickFrameUrl: string | null;
   // Colour eyedropper for a range mask: while on, loupe clicks sample the
   // developed colour and seed the active range mask's hue window (each pick is
   // one committed history entry; the picker stays open for repeated sampling).
@@ -249,6 +255,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   preview: null,
   wbPicking: false,
   wbPickBase: null,
+  wbPickFrameUrl: null,
   rangePicking: false,
   hoverParams: null,
   lastPresetApply: null,
@@ -495,6 +502,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
   inFlight?.abort.abort();
   lastShown = null;
   esClearPreview();
+  revokePickFrame();
   setState((s) => ({
     photoId,
     applyIds,
@@ -506,6 +514,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     loading: true,
     wbPicking: false,
     wbPickBase: null,
+    wbPickFrameUrl: null,
     rangePicking: false,
     cropping: false,
     healing: false,
@@ -607,16 +616,43 @@ useUIStore.subscribe((s, prev) => {
 // draft as the revert target (wbPickBase) for Reset/Cancel; closing here is a
 // plain dismiss — use esWBPickDone / esWBPickCancel to keep or discard the
 // previewed value.
-export function esSetWBPicking(on: boolean) {
+//
+// The snapshot is also what every pick in this session is sampled against, so
+// it is fetched once here as an image: picks stay comparable with each other,
+// and the magnifier can show the very pixels being sampled.
+export function esSetWBPicking(client: ApiClient, on: boolean) {
   const s = useEditSession.getState();
   if (on && !s.draft) return;
+  revokePickFrame();
   // Opening slides the develop drawer away — drop any keyboard-focused
   // control so +/- can't keep adjusting an invisible slider.
   setState(
     on
-      ? { wbPicking: true, wbPickBase: s.draft, rangePicking: false, activeControl: null, keyAdjust: false, aiPickArmed: null, aiHover: null }
-      : { wbPicking: false, wbPickBase: null },
+      ? { wbPicking: true, wbPickBase: s.draft, wbPickFrameUrl: null, rangePicking: false, activeControl: null, keyAdjust: false, aiPickArmed: null, aiHover: null }
+      : { wbPicking: false, wbPickBase: null, wbPickFrameUrl: null },
   );
+  if (on && s.photoId != null && s.draft) void loadWBPickFrame(client, s.photoId, s.draft);
+}
+
+// loadWBPickFrame fetches the pinned frame the server samples and hands it to
+// the magnifier. A failure is silent: the readout falls back to the live
+// preview, and picking itself doesn't depend on this.
+async function loadWBPickFrame(client: ApiClient, photoId: number, base: Params) {
+  try {
+    const blob = await wBPickFrame(client, photoId, base);
+    const cur = useEditSession.getState();
+    if (cur.photoId !== photoId || !cur.wbPicking || cur.wbPickBase !== base) return;
+    revokePickFrame();
+    setState({ wbPickFrameUrl: URL.createObjectURL(blob) });
+  } catch {
+    // superseded or unavailable — the magnifier keeps the live frame
+  }
+}
+
+// revokePickFrame releases the pinned frame's object URL, if one is held.
+function revokePickFrame() {
+  const url = useEditSession.getState().wbPickFrameUrl;
+  if (url) URL.revokeObjectURL(url);
 }
 
 // esSetRangePicking opens/closes the range mask's colour eyedropper. It only
@@ -1854,16 +1890,17 @@ export async function computePresetParams(
 }
 
 // esPickWB samples the clicked spot and PREVIEWS the resulting custom WB — the
-// draft updates but nothing is committed until Done. The backend reads the
-// camera's scene-linear colour, so the same pixel always yields the same
-// balance; the preview folds off the cached decode (no re-demosaic). The
-// eyedropper stays open for repeated sampling; Done keeps the value, Reset /
-// Cancel restore the pre-picker draft.
+// draft updates but nothing is committed until Done. Every pick in a session
+// is sampled against wbPickBase, the draft as it was when the picker opened,
+// so two spots can be compared by clicking one then the other — sampling the
+// live frame would fold each pick into the basis of the next and force a
+// pick/undo/pick dance. The eyedropper stays open for repeated sampling; Done
+// keeps the value, Reset / Cancel restore the pre-picker draft.
 export async function esPickWB(client: ApiClient, x: number, y: number) {
   const s = useEditSession.getState();
   if (s.photoId == null || !s.draft) return;
   try {
-    const params = await pickWhiteBalance(client, s.photoId, s.draft, x, y);
+    const params = await pickWhiteBalance(client, s.photoId, s.draft, s.wbPickBase ?? s.draft, x, y);
     const cur = useEditSession.getState();
     if (cur.photoId !== s.photoId || !cur.wbPicking) return; // superseded / closed
     setState({ draft: params });
@@ -1883,7 +1920,8 @@ export async function esPickWB(client: ApiClient, x: number, y: number) {
 export function esWBPickDone(client: ApiClient) {
   const s = useEditSession.getState();
   const base = s.wbPickBase;
-  setState({ wbPicking: false, wbPickBase: null });
+  revokePickFrame();
+  setState({ wbPicking: false, wbPickBase: null, wbPickFrameUrl: null });
   if (s.photoId == null || !s.draft) return;
   if (base && sameParams(base, s.draft)) {
     schedulePreview(client, 'settle'); // land a sharp frame, no history churn
@@ -1896,7 +1934,8 @@ export function esWBPickDone(client: ApiClient) {
 export function esWBPickCancel(client: ApiClient) {
   const s = useEditSession.getState();
   const base = s.wbPickBase;
-  setState({ wbPicking: false, wbPickBase: null });
+  revokePickFrame();
+  setState({ wbPicking: false, wbPickBase: null, wbPickFrameUrl: null });
   if (base && s.draft && !sameParams(base, s.draft)) {
     setState({ draft: base });
     schedulePreview(client, 'settle');

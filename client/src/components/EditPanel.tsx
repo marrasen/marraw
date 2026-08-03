@@ -601,7 +601,7 @@ function DevelopPanel({
                 ? 'Keep white balance (Enter)'
                 : 'Pick white balance (W): click a neutral gray in the image'
             }
-            onClick={() => (wbPicking ? esWBPickDone(client) : esSetWBPicking(true))}
+            onClick={() => (wbPicking ? esWBPickDone(client) : esSetWBPicking(client, true))}
           >
             <Pipette />
           </Button>

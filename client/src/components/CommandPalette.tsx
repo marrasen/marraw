@@ -83,9 +83,9 @@ function buildCommands(
           goDevelop();
           esSetCropping(client, true);
         } },
-      { id: 'wb-pick', label: 'White balance eyedropper', group: 'Develop', run: () => {
+      { id: 'wb-pick', label: 'White balance eyedropper', group: 'Develop', run: (client) => {
           goDevelop();
-          esSetWBPicking(true);
+          esSetWBPicking(client, true);
         } },
       { id: 'mask-linear', label: 'Add linear gradient mask', group: 'Develop', run: (client) => {
           goDevelop('masks');

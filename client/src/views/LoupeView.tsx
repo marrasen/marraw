@@ -453,6 +453,7 @@ export function CinemaImage({
   const setZoom = useUIStore((s) => s.setLoupeZoom);
   const preview = useEditSession((s) => s.preview);
   const wbPicking = useEditSession((s) => s.wbPicking);
+  const wbPickFrameUrl = useEditSession((s) => s.wbPickFrameUrl);
   const rangePicking = useEditSession((s) => s.rangePicking);
   const cropping = useEditSession((s) => s.cropping);
   const healing = useEditSession((s) => s.healing);
@@ -1111,8 +1112,14 @@ export function CinemaImage({
     setCursor([(e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height]);
   };
 
-  // Live RGB readout under the pipette.
-  const sample = usePixelSampler(shownSrc, wbPicking);
+  // RGB readout under the pipette, off the PINNED frame the server samples —
+  // not the live preview. Every pick in a session is measured against the
+  // draft as it was when the picker opened, so once the first pick lands the
+  // live frame carries a correction the next pick won't be computed from;
+  // reading the pinned frame keeps the number under the pipette the number
+  // the pick actually uses. Falls back to the live frame until it loads.
+  const pickSrc = wbPickFrameUrl ?? shownSrc;
+  const sample = usePixelSampler(pickSrc, wbPicking);
   const sampledRGB = (() => {
     if (!wbPicking || !cursor || !sample) return null;
     const x = Math.min(sample.width - 1, Math.max(0, Math.round(cursor[0] * sample.width)));
@@ -1268,7 +1275,7 @@ export function CinemaImage({
               />
             )}
             {wbPicking && cursor && (
-              <Magnifier src={shownSrc} boxW={boxW} boxH={boxH} cursor={cursor} rgb={sampledRGB} />
+              <Magnifier src={pickSrc} boxW={boxW} boxH={boxH} cursor={cursor} rgb={sampledRGB} />
             )}
           </div>
           </div>

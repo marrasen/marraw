@@ -245,6 +245,23 @@ func (p *Processor) CamMul() [4]float64 {
 	return camMulOf(p.h)
 }
 
+// EffectiveMul returns the white-balance multipliers the most recent Process
+// actually applied, normalized the way LibRaw normalized them. Valid only
+// after Process — scale_colors resolves the chosen WB mode into pre_mul in
+// place, so this is the only way to learn what auto WB decided (dcraw derives
+// it from the pixels; no caller can predict it). Before a Process it reads the
+// file's daylight multipliers.
+func (p *Processor) EffectiveMul() [4]float64 {
+	var out [4]float64
+	for i := range out {
+		out[i] = float64(p.h.color.pre_mul[i])
+	}
+	if out[1] <= 0 {
+		return [4]float64{1, 1, 1, 1}
+	}
+	return out
+}
+
 // EmbeddedThumb extracts the largest embedded preview as raw JPEG bytes
 // without decoding any RAW data.
 func (p *Processor) EmbeddedThumb() ([]byte, error) {

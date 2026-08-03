@@ -42,6 +42,16 @@ type Edits struct {
 	// replaced when the photo or a pre-demosaic control changes.
 	linMu    sync.Mutex
 	linEntry *linCache
+
+	// pickEntry holds the frame the WB picker samples, pinned to the draft as
+	// it was when the picker opened. Every click during one picking session
+	// reads this same frame, so two nearby picks are comparable and re-picking
+	// a spot is idempotent — sampling the LIVE preview instead would fold each
+	// pick into the basis of the next, and the only way to compare two spots
+	// would be pick, undo, pick. Replaced when the photo or the pinned base
+	// changes; one entry, like the decode and linear caches.
+	pickMu    sync.Mutex
+	pickEntry *pickCache
 }
 
 type decodeCache struct {
@@ -58,6 +68,15 @@ type linCache struct {
 	refMul  [4]float64    // as-shot WB the reference was decoded at
 	camXYZ  [4][3]float64 // camera matrix, for resolving Kelvin WB in Go
 	lin     *image.RGBA64 // scene-linear reference; never mutated once cached
+	clipped bool          // a channel is floored where the frame is lit — see refClipped
+}
+
+type pickCache struct {
+	photoID  int64
+	key      string // Hash of the pinned base (masks stripped)
+	longEdge int
+	mul      [4]float64  // the multipliers the decode actually applied
+	rgba     *image.RGBA // developed, display-oriented; never mutated once cached
 }
 
 // GetEditParams returns the stored edit state. An untouched photo returns
@@ -383,6 +402,9 @@ func (e *Edits) previewLinear(ctx context.Context, photoID int64, photo store.Ph
 	if err != nil {
 		return nil, false, err
 	}
+	if entry.clipped {
+		return nil, false, nil // reference can't carry a WB change; decode exactly
+	}
 	fp := foldParamsFor(ep, entry.refMul, entry.camXYZ)
 	ai := e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep)
 	fills := e.deps.Cache.Fills.SetFor(photo.CacheKey, ep)
@@ -427,9 +449,49 @@ func (e *Edits) linearMaster(ctx context.Context, photoID int64, photo store.Pho
 	if err != nil {
 		return nil, err
 	}
-	c := &linCache{photoID: photoID, key: key, refMul: refMul, camXYZ: camXYZ, lin: lin}
+	c := &linCache{photoID: photoID, key: key, refMul: refMul, camXYZ: camXYZ, lin: lin, clipped: refClipped(lin)}
 	e.storeLinear(c)
 	return c, nil
+}
+
+// refClipped reports whether the scene-linear reference has a channel sitting
+// on the 16-bit floor in places the frame is plainly lit — the state in which
+// it can no longer carry a white-balance change, because the fold only scales
+// what is there and no gain brings a zeroed channel back.
+//
+// LibRaw applies the as-shot multipliers before the colour matrix, and under a
+// narrow-band source (blue stage light, say) that combination can drive a
+// channel negative and clip it. A blue-lit ILCE-7RM2 frame came back with
+// green at 0 across 92% of the reference: the fold rendered it magenta while
+// the exact decode of the same edit was correct. Photos like that give up the
+// fold path and re-decode per frame — slower to drag, but right.
+func refClipped(lin *image.RGBA64) bool {
+	b := lin.Bounds()
+	const (
+		lit   = 1024 // clearly not a shadow
+		floor = 8
+	)
+	var litN, badN int
+	for y := b.Min.Y; y < b.Max.Y; y += 8 {
+		for x := b.Min.X; x < b.Max.X; x += 8 {
+			o := lin.PixOffset(x, y)
+			var v [3]uint32
+			for c := range 3 {
+				v[c] = uint32(lin.Pix[o+2*c])<<8 | uint32(lin.Pix[o+2*c+1])
+			}
+			hi := max(v[0], v[1], v[2])
+			if hi < lit {
+				continue // shadow: a floored channel there means nothing
+			}
+			litN++
+			if min(v[0], v[1], v[2]) < floor {
+				badN++
+			}
+		}
+	}
+	// A handful of saturated specular pixels is normal; a fifth of the lit
+	// frame missing a channel is not.
+	return litN > 0 && badN*5 > litN
 }
 
 // cachedLinear returns the cached linear reference for (photoID, key), or nil.
@@ -518,14 +580,24 @@ func targetWBMul(ep *edit.Params, refMul [4]float64, camXYZ [4][3]float64) [4]fl
 	return refMul
 }
 
+// wbPickLongEdge is the size of the pinned frame the WB picker samples. It
+// matches the full-quality preview: a 7×7 patch then covers a small surface
+// rather than half a shirt, and the client shows this same frame under the
+// magnifier, where a smaller render would read visibly soft.
+const wbPickLongEdge = previewLongEdge
+
 // PickWhiteBalance returns the edit state that neutralizes the surface at the
-// given relative coordinates (0..1 in the displayed, orientation-corrected
-// image): wbMode=custom with multipliers computed from the scene-linear camera
-// values. Because it reads the demosaiced sensor colour (not the developed
-// preview) the result depends only on the pixel — one click lands the neutral
-// instead of needing to converge over several, and clicking the same spot
-// always yields the same balance regardless of the current draft's WB.
-func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params edit.Params, x, y float64) (*edit.Params, error) {
+// given relative coordinates (0..1 in the displayed, cropped frame — the space
+// the pinned frame is rendered in, so no remapping is needed): wbMode=custom
+// with multipliers that make the picked surface come out grey.
+//
+// base is the draft as it was when the picker opened, and it — not the live
+// draft — is what gets sampled, for the whole picking session. Sampling the
+// live frame would mean each pick lands on a frame already carrying the last
+// one, so two nearby spots could only be compared by picking, undoing and
+// picking again; against a pinned frame every click means the same thing and
+// re-picking a spot is idempotent.
+func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params, base edit.Params, x, y float64) (*edit.Params, error) {
 	if x < 0 || x > 1 || y < 0 || y > 1 {
 		return nil, aprot.ErrInvalidParams("pick coordinates must be within 0..1")
 	}
@@ -533,62 +605,39 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params edit
 	if err != nil {
 		return nil, err
 	}
-	var ep *edit.Params
-	if !params.IsNeutral() {
-		ep = &params
-	}
-	// Sample the scene-linear reference (demosaiced, at the camera's as-shot
-	// WB, no gamma/look) — the same buffer the fold preview uses — so no
-	// display-curve inversion is needed and the sampled colour is the camera's.
-	entry, err := e.linearMaster(ctx, photoID, photo, ep)
+	frame, err := e.wbPickFrame(ctx, photoID, photo, base)
 	if err != nil {
 		return nil, err
 	}
-	// The click is relative to the displayed (rotated, mirrored, possibly
-	// cropped) frame while the reference is the full oriented frame, so map
-	// through the crop rectangle (fractions of the displayed frame), then
-	// undo the mirror, then the quarter turns — the display transform is
-	// flip∘rotate, so its inverse runs in that order. A straighten angle is
-	// ignored — a WB patch spans enough pixels that a few degrees don't move
-	// the sampled colour.
-	fx, fy := x, y
-	if params.HasCrop() {
-		fx = params.CropX + x*params.CropW
-		fy = params.CropY + y*params.CropH
+	// Back out the look to approximately linear light: the sample is a
+	// developed pixel, so the display curve and the look's saturation boost
+	// have to come off before the channels are a ratio of scene light.
+	lookGamma := photo.LookGamma
+	if lookGamma == 0 {
+		lookGamma = pyramid.FallbackLookGamma
 	}
-	if params.FlipH {
-		fx = 1 - fx
-	}
-	switch params.RotateTurns() {
-	case 1: // displayed = oriented turned 90° CW: (x,y) → (1-y, x)
-		fx, fy = fy, 1-fx
-	case 2:
-		fx, fy = 1-fx, 1-fy
-	case 3:
-		fx, fy = 1-fy, fx
-	}
-	rl, gl, bl := samplePatchLinearRef(entry.lin, fx, fy)
-	if rl < 8 || gl < 8 || bl < 8 { // 16-bit linear; a neutral gray is thousands
-		log.Printf("wb pick: too-dark patch at (%.3f,%.3f)->(%.3f,%.3f) linear rl=%.4g gl=%.4g bl=%.4g on %dx%d reference",
-			x, y, fx, fy, rl, gl, bl, entry.lin.Bounds().Dx(), entry.lin.Bounds().Dy())
+	satFactor := math.Max(0.2, 1.15*(1+base.Saturation))
+	rl, gl, bl := samplePatchLinear(frame.rgba, x, y, lookGamma, satFactor)
+	if rl < 1e-4 || gl < 1e-4 || bl < 1e-4 {
+		log.Printf("wb pick: no-signal patch at (%.3f,%.3f) linear rl=%.4g gl=%.4g bl=%.4g on %dx%d pinned frame",
+			x, y, rl, gl, bl, frame.rgba.Bounds().Dx(), frame.rgba.Bounds().Dy())
 		return nil, aprot.ErrInvalidParams("picked area is too dark — pick a brighter neutral area")
 	}
 
-	// Neutralizing custom multipliers, normalized to green. The reference
-	// already carries the as-shot WB (cam), so to make the picked surface
-	// neutral each channel is scaled by the as-shot ratio times 1/its-value:
-	// m[c] = (cam[c]/cam[G]) · (lin[G]/lin[c]).
-	cam := entry.refMul
-	cg := cam[1]
-	if cg <= 0 {
-		cg = 1
+	// The pinned frame was developed at frame.mul, so neutralizing the patch
+	// means scaling those by the patch's own imbalance: m[c] = mul[c]·(g/c).
+	// Normalized to green, then held inside what the Kelvin dial can express.
+	eff := frame.mul
+	eg := eff[1]
+	if eg <= 0 {
+		eg = 1
 	}
-	mul := [4]float64{
-		cam[0] / cg * (gl / rl),
+	mul := clampPickedWB([4]float64{
+		eff[0] / eg * (gl / rl),
 		1,
-		cam[2] / cg * (gl / bl),
+		eff[2] / eg * (gl / bl),
 		1,
-	}
+	}, eff)
 
 	out := params
 	out.WBMode = edit.WBCustom
@@ -597,14 +646,120 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params edit
 	return &out, nil
 }
 
-// samplePatchLinearRef averages a small patch of the scene-linear reference
-// around the given relative coordinates. Samples are 16-bit linear (0..65535);
-// only their per-channel ratios matter to white balance.
-func samplePatchLinearRef(img *image.RGBA64, x, y float64) (r, g, b float64) {
+// WBPickFrame returns the frame PickWhiteBalance samples for this base, as a
+// JPEG — the client shows it under the pipette so the magnifier's readout is
+// literally the pixels the pick is computed from. Rendering it here (rather
+// than letting the client reuse its live preview) also warms the pin, so the
+// first click is as fast as the rest.
+func (e *Edits) WBPickFrame(ctx context.Context, photoID int64, base edit.Params) (*aprot.Blob, error) {
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	frame, err := e.wbPickFrame(ctx, photoID, photo, base)
+	if err != nil {
+		return nil, err
+	}
+	return jpegBlob(frame.rgba)
+}
+
+// wbPickFrame renders (or returns the pinned) frame the WB picker samples: the
+// base developed exactly as the loupe develops it, minus the masks.
+//
+// Masks are stripped for the same reason PickRangeColor strips them — a local
+// adjustment's own temp/tint (or an FX mask's glow and prism) would otherwise
+// feed straight into the global white balance. It decodes rather than reusing
+// the shared preview caches because the multipliers LibRaw actually applied
+// have to be read back off the handle: in auto WB mode dcraw derives them from
+// the pixels, and without them there is nothing to express the pick relative
+// to. That decode is paid once per picking session.
+func (e *Edits) wbPickFrame(ctx context.Context, photoID int64, photo store.Photo, base edit.Params) (*pickCache, error) {
+	base.Masks = nil
+	base.Normalize()
+	key := base.Hash()
+	if c := e.cachedPick(photoID, key); c != nil {
+		return c, nil
+	}
+	var ep *edit.Params
+	if !base.IsNeutral() {
+		ep = &base
+	}
+	proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
+	if err != nil {
+		return nil, err
+	}
+	if ctx.Err() != nil {
+		release()
+		return nil, ctx.Err() // superseded while waiting for the handle
+	}
+	img, err := proc.Process(ctx, ep.LibrawParams(true))
+	if err != nil {
+		healthy := true
+		if ctx.Err() != nil {
+			healthy = proc.Open(photo.Path()) == nil
+			err = ctx.Err()
+		}
+		release()
+		if !healthy {
+			e.deps.Handles.Invalidate(photoID)
+		}
+		return nil, err
+	}
+	mul := proc.EffectiveMul() // resolved WB, auto included — valid until the next Process
+	release()
+	rgba, err := pyramid.FromLibraw(img)
+	if err != nil {
+		return nil, err
+	}
+	gamma := photo.LookGamma
+	if gamma == 0 {
+		gamma = pyramid.FallbackLookGamma
+	}
+	c := &pickCache{
+		photoID:  photoID,
+		key:      key,
+		longEdge: wbPickLongEdge,
+		mul:      mul,
+		rgba: pyramid.RenderPreview(rgba, wbPickLongEdge, gamma, ep, ep.ResidualExpEV(),
+			e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep),
+			e.deps.Cache.Fills.SetFor(photo.CacheKey, ep),
+			e.deps.Cache.Lenses.For(photo)),
+	}
+	e.storePick(c)
+	return c, nil
+}
+
+// cachedPick returns the pinned pick frame for (photoID, key), or nil.
+func (e *Edits) cachedPick(photoID int64, key string) *pickCache {
+	e.pickMu.Lock()
+	defer e.pickMu.Unlock()
+	if e.pickEntry != nil && e.pickEntry.photoID == photoID && e.pickEntry.key == key &&
+		e.pickEntry.longEdge == wbPickLongEdge {
+		return e.pickEntry
+	}
+	return nil
+}
+
+// storePick replaces the single-entry pinned-frame cache.
+func (e *Edits) storePick(c *pickCache) {
+	e.pickMu.Lock()
+	defer e.pickMu.Unlock()
+	e.pickEntry = c
+}
+
+// samplePatchLinear averages a small patch of a developed frame around (x,y)
+// in approximately linear light: the display look (BT.709 gamma × calibrated
+// lift) is inverted with a single combined power, and the look's saturation
+// boost (satFactor) is undone around luma. The edit's tone-curve adjustments
+// are not inverted — they are monotonic per channel and a WB pick reads the
+// ratio between channels, which they barely move.
+func samplePatchLinear(img *image.RGBA, x, y, lookGamma, satFactor float64) (r, g, b float64) {
 	bnd := img.Bounds()
 	cx := bnd.Min.X + int(x*float64(bnd.Dx()-1))
 	cy := bnd.Min.Y + int(y*float64(bnd.Dy()-1))
 	const rad = 3
+	decodePow := 2.222 / lookGamma
+
 	var n float64
 	for py := cy - rad; py <= cy+rad; py++ {
 		for px := cx - rad; px <= cx+rad; px++ {
@@ -612,9 +767,15 @@ func samplePatchLinearRef(img *image.RGBA64, x, y float64) (r, g, b float64) {
 				continue
 			}
 			o := img.PixOffset(px, py)
-			r += float64(uint32(img.Pix[o])<<8 | uint32(img.Pix[o+1]))
-			g += float64(uint32(img.Pix[o+2])<<8 | uint32(img.Pix[o+3]))
-			b += float64(uint32(img.Pix[o+4])<<8 | uint32(img.Pix[o+5]))
+			fr, fg, fb := float64(img.Pix[o])/255, float64(img.Pix[o+1])/255, float64(img.Pix[o+2])/255
+			// Undo the look's saturation boost around Rec.601 luma.
+			luma := 0.299*fr + 0.587*fg + 0.114*fb
+			fr = luma + (fr-luma)/satFactor
+			fg = luma + (fg-luma)/satFactor
+			fb = luma + (fb-luma)/satFactor
+			r += math.Pow(math.Max(0, fr), decodePow)
+			g += math.Pow(math.Max(0, fg), decodePow)
+			b += math.Pow(math.Max(0, fb), decodePow)
 			n++
 		}
 	}
@@ -622,6 +783,40 @@ func samplePatchLinearRef(img *image.RGBA64, x, y float64) (r, g, b float64) {
 		return 0, 0, 0
 	}
 	return r / n, g / n, b / n
+}
+
+// pickWBStops is how far a single pick may move a channel from the white
+// balance the sampled frame was developed at, in stops. A pick corrects a
+// cast; it does not invent channel gain. Loose on purpose — real picks move
+// well under a stop, and the case this exists for moves ten.
+const pickWBStops = 3
+
+// clampPickedWB holds a picked white balance within pickWBStops of eff, the
+// multipliers the sampled frame was developed at. Both green-normalized.
+//
+// A spot lit by one narrow-band source can carry almost no signal in a channel
+// — on a blue-lit stage shot a patch sampled 350× more green than red — and
+// neutralizing that literally asks for a multiplier in the hundreds, which
+// crushes the channels actually carrying the light and drops the frame to
+// near-black. Bounding against the frame's own white balance rather than an
+// absolute range keeps the bound meaningful whatever the light: LibRaw's auto
+// WB for that same shot is [1.865, 1, 0.372], nowhere near the blackbody
+// locus, and an absolute envelope built from the Kelvin dial would clamp a
+// perfectly good pick.
+func clampPickedWB(mul, eff [4]float64) [4]float64 {
+	const span = 1 << pickWBStops
+	eg := eff[1]
+	if eg <= 0 {
+		eg = 1
+	}
+	for _, c := range [2]int{0, 2} {
+		base := eff[c] / eg
+		if base <= 0 {
+			continue
+		}
+		mul[c] = min(max(mul[c], base/span), base*span)
+	}
+	return mul
 }
 
 // developedBaseForMask renders the developed (post-Look) image with masks

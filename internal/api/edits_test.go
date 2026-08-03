@@ -8,42 +8,42 @@ import (
 	"github.com/marrasen/marraw/internal/edit"
 )
 
-func TestRangeColorWindow(t *testing.T) {
-	// A saturated green pick centres a wrap-free hue window on ~1/3 and sets a
-	// floor below its saturation.
-	lo, hi, sat, err := rangeColorWindow(0, 200, 0)
-	if err != nil {
-		t.Fatalf("green pick: %v", err)
+// TestClampPickedWB pins the guard that keeps a pick on a narrow-band-lit spot
+// — where a channel carries almost no signal — from asking for a multiplier in
+// the hundreds and dropping the frame to near-black. The bound is relative to
+// the white balance the sampled frame was developed at, because a real white
+// balance need not sit anywhere near the blackbody locus: LibRaw's auto WB for
+// the blue-lit shot this came from is [1.865, 1, 0.372].
+func TestClampPickedWB(t *testing.T) {
+	auto := [4]float64{5.011, 2.687, 1, 2.687} // as EffectiveMul reports it
+	green := [3]float64{auto[0] / auto[1], 1, auto[2] / auto[1]}
+
+	// The pick that photo actually produces — a small correction — must pass
+	// through untouched. An absolute Kelvin-derived envelope clamped this.
+	ordinary := [4]float64{1.982, 1, 0.389, 1}
+	if got := clampPickedWB(ordinary, auto); got != ordinary {
+		t.Errorf("ordinary pick was clamped: %v -> %v (frame WB %v)", ordinary, got, green)
 	}
-	if math.Abs(lo-(1.0/3-0.045)) > 1e-9 || math.Abs(hi-(1.0/3+0.045)) > 1e-9 {
-		t.Errorf("green window = [%v,%v], want ~[%v,%v]", lo, hi, 1.0/3-0.045, 1.0/3+0.045)
+
+	// A pick off a spot with no red: ×350 red, and blue crushed.
+	got := clampPickedWB([4]float64{349.5, 1, 0.02, 1}, auto)
+	if got[1] != 1 {
+		t.Errorf("green must stay 1, got %v", got[1])
 	}
-	if sat <= 0 || sat >= 1 {
-		t.Errorf("green satMin = %v, want a floor in (0,1)", sat)
+	const span = 1 << pickWBStops
+	for _, c := range [2]int{0, 2} {
+		lo, hi := green[c]/span, green[c]*span
+		if got[c] < lo-1e-9 || got[c] > hi+1e-9 {
+			t.Errorf("channel %d = %.4g, outside %d stops of the frame's WB [%.4g, %.4g]",
+				c, got[c], pickWBStops, lo, hi)
+		}
 	}
-	// A red pick (hue 0) wraps: lo near 1, hi near 0 (hi < lo), which Normalize
-	// keeps as a circular window.
-	lo, hi, _, err = rangeColorWindow(220, 0, 0)
-	if err != nil {
-		t.Fatalf("red pick: %v", err)
-	}
-	if lo <= hi {
-		t.Errorf("red window should wrap (lo > hi), got [%v,%v]", lo, hi)
-	}
-	// Grey and near-black picks have no hue and must be refused.
-	if _, _, _, err := rangeColorWindow(128, 128, 128); err == nil {
-		t.Error("grey pick must be refused")
-	}
-	if _, _, _, err := rangeColorWindow(3, 5, 2); err == nil {
-		t.Error("too-dark pick must be refused")
+	// Clamped to the bound, not to something arbitrary in the middle.
+	if got[0] != green[0]*span {
+		t.Errorf("red should sit on the bound %.4g, got %.4g", green[0]*span, got[0])
 	}
 }
 
-// TestFoldParamsForUnitScales guards the fold's WB ratio against a
-// normalization-unit mismatch: a picked custom WBMul is normalized to green=1,
-// while the reference cam_mul is in raw units (green ~1024 on many cameras).
-// Without normalizing both to green the ratio collapses to ~1/1000 and the
-// preview goes black — the regression this test pins down.
 func TestFoldParamsForUnitScales(t *testing.T) {
 	// Raw-units as-shot WB, green ~1024 (typical Sony cam_mul).
 	refMul := [4]float64{2400, 1024, 1500, 1024}

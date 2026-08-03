@@ -375,7 +375,7 @@ export function useKeyboard() {
       if (key === 'w' && es.draft && s.mode !== 'cull') {
         e.preventDefault();
         if (es.wbPicking) esWBPickDone(client);
-        else esSetWBPicking(true);
+        else esSetWBPicking(client, true);
         return;
       }
 
