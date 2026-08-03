@@ -163,7 +163,7 @@ and a banner tells you the moment the connection drops. Turn on hosting in
 **Settings → Remote**; `--dev` builds refuse to bind past loopback, and access
 is gated on the credential, not on who can reach the port.
 
-![Settings dialog open on the Remote tab: an Allow remote connections toggle switched on, a Port field reading 8482, a pairing token with Copy and Regenerate buttons, and the saved connections list](screenshots/marraw_remote.jpg)
+![Settings dialog open on the Remote tab: a Connections section with an Add connection button, and a Host this library section with an Allow remote connections toggle switched on, a name field for what other computers see, and an Accept new connection requests toggle](screenshots/marraw_remote.jpg)
 
 <sup>Settings → Remote on the machine that holds the photos. Flip the toggle,
 approve the laptop when it asks, and this library appears under **Other

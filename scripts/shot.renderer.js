@@ -803,6 +803,7 @@ if (shot === 'cull') {
   [...document.querySelectorAll('button')].find((b) => b.textContent === 'Cache')?.click();
 } else if (
   shot === 'remote' ||
+  shot === 'remote-top' ||
   shot === 'remote-add' ||
   shot === 'remote-add-found' ||
   shot === 'pairing-selfpair' ||
@@ -817,6 +818,25 @@ if (shot === 'cull') {
   // the shell filters out its own addresses.
   ui().setSettingsOpen(true, 'Remote');
   await sleep(600);
+  if (shot === 'remote-top') {
+    // The README shot. Deliberately NOT scrolled: the rows below the fold are
+    // this machine's reachable addresses and its pairing token, neither of
+    // which belongs in a published screenshot — `leaksToken` guards that.
+    // "Approved computers" does not render while the list is empty, so it is
+    // absent here; seeding a real entry would need `pairing-selfpair`, which
+    // currently finds nothing (its scan moved into the daemon and the machine
+    // self-excludes, so the MARRAW_UITEST_HOSTS stub it documents is gone).
+    await sleep(900);
+    const text = document.querySelector('[role="dialog"]')?.textContent ?? '';
+    window.__remoteProbe = {
+      showsToggle: text.includes('Allow remote connections'),
+      showsDeviceName: text.includes("This computer's name"),
+      showsApproved: text.includes('Approved computers'),
+      approvedRows: document.querySelectorAll('[data-testid="approved-devices"] > div').length,
+      // Must stay false, or the shot leaks a credential.
+      leaksToken: /\b[0-9a-f]{32}\b/.test(text),
+    };
+  }
   if (shot === 'remote') {
     // The host half sits below the fold; scroll to it so the shot shows the
     // reachability rows, and report what they say.
