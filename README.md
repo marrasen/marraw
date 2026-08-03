@@ -48,7 +48,9 @@ Grab your platform's package from the
 
 On Windows and Linux (AppImage) the app updates itself: it checks GitHub on
 launch, downloads new versions in the background, and installs them when you
-quit.
+quit. **Settings → Updates** drives the same thing by hand — check, download
+with progress, and restart to install — and a waiting update parks a row at the
+foot of the library rail until you deal with it.
 
 **Requirements:** Windows 10/11 64-bit, a recent x86-64 Linux distro, or an
 Apple Silicon Mac. No LibRaw DLLs, no runtime, no Python. One installer.
@@ -147,21 +149,26 @@ control, any preset.
 
 **Your photos can stay on the machine that holds them.**
 The daemon that does the pixel work can listen on the network, so the laptop on
-the couch can open a library that lives on the desktop in the other room — same
-Tailscale network, one pairing token, no copying a hundred gigabytes of RAW
-around. A remote window routes *everything* through the host: the directory
-picker, the preview cache, exports and watermark images all read and write on
-the machine with the photos, not the one you are sitting at, and a banner tells
-you the moment the connection drops. Turn it on in **Settings → Remote**;
-`--dev` builds refuse to bind past loopback, and access is gated on the token,
-not on who can reach the port.
+the couch can open a library that lives on the desktop in the other room —
+without copying a hundred gigabytes of RAW around. Setting it up is a scan and
+a click: the laptop finds machines on the local network and across a Tailscale
+network, asks to connect, and someone at the desktop approves in a dialog. Each
+approved machine gets a credential of its own, so a laptop can be revoked
+without locking out everyone. Saved connections then live under **Other
+computers** at the foot of the library rail, and clicking one opens that
+library in its own window. A remote window routes *everything* through the
+host: the directory picker, the preview cache, exports and watermark images all
+read and write on the machine with the photos, not the one you are sitting at,
+and a banner tells you the moment the connection drops. Turn on hosting in
+**Settings → Remote**; `--dev` builds refuse to bind past loopback, and access
+is gated on the credential, not on who can reach the port.
 
 ![Settings dialog open on the Remote tab: an Allow remote connections toggle switched on, a Port field reading 8482, a pairing token with Copy and Regenerate buttons, and the saved connections list](screenshots/marraw_remote.jpg)
 
 <sup>Settings → Remote on the machine that holds the photos. Flip the toggle,
-hand the pairing token to your laptop, and it appears under **Other computers**
-in the laptop's library rail — one click opens it over the network, no files
-copied.</sup>
+approve the laptop when it asks, and this library appears under **Other
+computers** in the laptop's library rail — one click opens it over the network,
+no files copied.</sup>
 
 ---
 
