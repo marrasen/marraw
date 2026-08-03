@@ -590,6 +590,38 @@ func TestMaskFXLightStillLands(t *testing.T) {
 	}
 }
 
+// TestMaskToneAppliesBeforeFX pins the pass order: a mask's tone/colour LUTs run
+// BEFORE its spatial FX, so one mask carrying both must equal a tone-only mask
+// followed by an FX-only mask. The bug this guards: streak light added to the
+// undimmed highlight and only then pushed through the exposure LUT rendered
+// grey, where the global pipeline (exposure first, light added on top) keeps it
+// white. Half a stop, not two: past roughly a stop the darkened highlight no
+// longer clears fxStreakKnee and the streak correctly disappears altogether —
+// which is what the global path does at that exposure too, but it would make
+// the "light landed" check below vacuous.
+func TestMaskToneAppliesBeforeFX(t *testing.T) {
+	const size = 1024
+	combined := fxImage(size, size*3/4)
+	ApplyMasks(combined, fullMask(edit.MaskAdjust{ExpEV: -0.5, Streaks: 0.6}), nil)
+
+	sequential := fxImage(size, size*3/4)
+	ApplyMasks(sequential, fullMask(edit.MaskAdjust{ExpEV: -0.5}), nil)
+	ApplyMasks(sequential, fullMask(edit.MaskAdjust{Streaks: 0.6}), nil)
+
+	for i := range combined.Pix {
+		if d := int(combined.Pix[i]) - int(sequential.Pix[i]); d > 1 || d < -1 {
+			t.Fatalf("pixel %d: combined %d, tone-then-FX %d — FX ran before the tone LUTs",
+				i, combined.Pix[i], sequential.Pix[i])
+		}
+	}
+	// Not vacuous: at this exposure the streak light does still land.
+	dark := fxImage(size, size*3/4)
+	ApplyMasks(dark, fullMask(edit.MaskAdjust{ExpEV: -0.5}), nil)
+	if lit, plain := meanLevel(combined), meanLevel(dark); lit-plain < 1 {
+		t.Errorf("mean level %.2f with streaks vs %.2f without: the light never landed", lit, plain)
+	}
+}
+
 func meanLevel(img *image.RGBA) float64 {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()

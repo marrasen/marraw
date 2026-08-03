@@ -86,9 +86,29 @@ const (
 	// AIPerson is the person instance map (pixel = instance ID, 0 =
 	// background, 1..N ordered left-to-right by centroid).
 	AIPerson AIKind = "person"
+	// AIBackground is everything the subject matte is NOT. It stores no map of
+	// its own — it samples the subject matte (see MapKind) and inverts at
+	// evaluation time — so the panel can say "Background" outright instead of
+	// showing a Subject mask with the Invert pill lit. Note that a build
+	// predating this kind drops such a mask in Normalize (unknown kind), so a
+	// sidecar written here loses its background masks on an older build.
+	AIBackground AIKind = "background"
 )
 
-func AIKindValues() []AIKind { return []AIKind{AISubject, AIClass, AIDepth, AIPerson} }
+func AIKindValues() []AIKind {
+	return []AIKind{AISubject, AIClass, AIDepth, AIPerson, AIBackground}
+}
+
+// MapKind is the kind whose stored map this kind samples: background shares the
+// subject matte, every other kind owns its map. Generation, the model lookup,
+// the map file name and the render's set key all key on this, so a background
+// mask never triggers a second inference pass or a duplicate map file.
+func (k AIKind) MapKind() AIKind {
+	if k == AIBackground {
+		return AISubject
+	}
+	return k
+}
 
 // MaskAdjust is the adjustment a mask applies inside its weighted region:
 // the tone and color basics, all with zero neutral. Kept slice-free so the
@@ -784,7 +804,9 @@ func (e *Params) normalizeMasks() {
 			m.clearRange()
 			m.Feather = quant4(clamp(m.Feather, 0, 1))
 			switch m.AIKind {
-			case AISubject:
+			case AISubject, AIBackground:
+				// Background thresholds the same matte — the slider moves the
+				// subject/background boundary either way.
 				m.ClassID, m.DepthLo, m.DepthHi = 0, 0, 0
 				m.Threshold = quant4(clamp(m.Threshold, 0, 1))
 			case AIClass:

@@ -505,10 +505,13 @@ export function CinemaImage({
   const spotVisualize = useEditSession((s) => s.spotVisualize);
   const visualizeUI = healUI && spotVisualize;
   // The hover tint needs no selected mask — hovering any Masks-panel row
-  // shows that mask's weight over the ordinary Develop view. Suppressed while
-  // AI picking: the pick overlay owns the tint then (chip + loupe hover).
+  // shows that mask's weight over the ordinary Develop view. It stays mounted
+  // while the AI pick tool is armed (adding a mask from a chip leaves it
+  // armed, and the new row must still tint on hover): panel-row hover and the
+  // pick overlay's own chip/loupe hover are mutually exclusive pointer
+  // positions, and that overlay sits above this one anyway.
   const tintUI =
-    uiMode === 'develop' && !cropping && !wbPicking && !healing && !aiPicking && esPhotoId === photo.id;
+    uiMode === 'develop' && !cropping && !wbPicking && !healing && esPhotoId === photo.id;
   // Spot rows live in the Retouch section whether or not the heal tool is on,
   // so their hover tint must show in ordinary Develop too — like the mask tint
   // above but WITHOUT the !healing gate (it also rides on top while healing,

@@ -202,10 +202,10 @@ if (shot === 'cull') {
     escCleared: es.getState().activeMask == null && es.getState().activeMaskControl == null,
   };
 } else if (shot === 'maskfx') {
-  // Mask FX: the one-click Background button — an inverted subject matte
-  // pre-loaded with a defocus and light streaks. The probe is the visual
-  // proof of the whole feature: the corner (background) must change and the
-  // centre (subject) must not.
+  // Mask FX: the one-click Background button — a background-kind AI mask
+  // pre-loaded with glow, light streaks and a prism fringe. The probe is the
+  // visual proof of the whole feature: the corner (background) must change and
+  // the centre (subject) must not.
   ui().setMode('develop');
   const es = mw.useEditSession;
   await until(() => es.getState().draft != null);
@@ -256,7 +256,9 @@ if (shot === 'cull') {
   document.querySelector('[data-testid="ai-mask-background"]')?.click();
   // Generation runs a local model (seconds warm) and adds the mask on success.
   await until(
-    () => (es.getState().draft?.masks ?? []).some((m) => m.type === 'ai' && m.invert && m.adjust?.blur),
+    () => (es.getState().draft?.masks ?? []).some(
+      (m) => m.type === 'ai' && m.aiKind === 'background' && m.adjust?.streaks,
+    ),
     120000,
   );
   await until(() => mw.esPreviewSettled(), 60000);
@@ -273,8 +275,8 @@ if (shot === 'cull') {
   const mask = es.getState().draft.masks.at(-1);
   window.__maskProbe = {
     fx: true,
-    invert: !!mask.invert,
-    blur: mask.adjust?.blur ?? 0,
+    aiKind: mask.aiKind,
+    glow: mask.adjust?.glow ?? 0,
     streaks: mask.adjust?.streaks ?? 0,
     cornerDetailBefore: Math.round(before.cornerDetail * 10) / 10,
     cornerDetailAfter: Math.round(after.cornerDetail * 10) / 10,

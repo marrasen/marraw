@@ -492,6 +492,36 @@ func TestRangeMaskNormalize(t *testing.T) {
 	}
 }
 
+// TestBackgroundMaskNormalize: the background kind survives Normalize (an
+// unknown kind is dropped) and keeps its Threshold, which moves the same
+// subject/background boundary the subject kind thresholds.
+func TestBackgroundMaskNormalize(t *testing.T) {
+	e := &Params{Masks: []Mask{
+		{Type: MaskAI, AIKind: AIBackground, MapVer: "isnet-1", Threshold: 0.61234,
+			ClassID: 7, DepthLo: 0.2, Adjust: MaskAdjust{ExpEV: -1}},
+	}}
+	e.Normalize()
+	if len(e.Masks) != 1 {
+		t.Fatalf("background mask must survive Normalize, got %d masks", len(e.Masks))
+	}
+	m := e.Masks[0]
+	if m.AIKind != AIBackground {
+		t.Errorf("kind changed to %q", m.AIKind)
+	}
+	if m.Threshold != 0.6123 {
+		t.Errorf("threshold must be kept and quantized, got %v", m.Threshold)
+	}
+	if m.ClassID != 0 || m.DepthLo != 0 {
+		t.Errorf("other kinds' fields must be zeroed: %+v", m)
+	}
+	if got := AIBackground.MapKind(); got != AISubject {
+		t.Errorf("background must sample the subject map, got %q", got)
+	}
+	if got := AISubject.MapKind(); got != AISubject {
+		t.Errorf("MapKind must be identity for subject, got %q", got)
+	}
+}
+
 func TestRangeMaskFieldsOmittedFromNonRangeJSON(t *testing.T) {
 	// omitempty on the range fields is load-bearing: a non-range mask must
 	// marshal byte-identical to older builds so existing edit hashes stay stable.

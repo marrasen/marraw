@@ -6,6 +6,7 @@ export const AIKind = {
     Class: "class",
     Depth: "depth",
     Person: "person",
+    Background: "background",
 } as const;
 export type AIKindType = typeof AIKind[keyof typeof AIKind];
 

@@ -80,7 +80,9 @@ var (
 // the kind has no available model (semantic class maps, pending a
 // license-clean host).
 func SpecFor(kind edit.AIKind) (infer.ModelSpec, bool) {
-	switch kind {
+	// Background rides the subject model and its MapVer — canonicalize here so
+	// every caller (generation, MapVerFor, model status) agrees.
+	switch kind.MapKind() {
 	case edit.AISubject:
 		return subjectModel, true
 	case edit.AIDepth:

@@ -174,6 +174,52 @@ func TestAISubjectThresholdAndInvert(t *testing.T) {
 	}
 }
 
+// TestAIBackgroundIsInvertedSubject: the background kind stores no map of its
+// own — it reads the SUBJECT matte and inverts it, so it must render exactly
+// like the subject mask with Invert set, and its own Invert pill must compose
+// back to a plain subject mask.
+func TestAIBackgroundIsInvertedSubject(t *testing.T) {
+	// Left half strong subject (220), right half background (30).
+	g := image.NewGray(image.Rect(0, 0, 64, 48))
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 64; x++ {
+			v := uint8(30)
+			if x < 32 {
+				v = 220
+			}
+			g.Pix[y*g.Stride+x] = v
+		}
+	}
+	// Only a subject map exists on disk: a background mask must find it.
+	s, key := testStoreWithMap(t, edit.AISubject, "m1", g)
+
+	run := func(kind edit.AIKind, invert bool) *image.RGBA {
+		e := &edit.Params{Masks: []edit.Mask{{
+			Type: edit.MaskAI, AIKind: kind, MapVer: "m1", Invert: invert,
+			Adjust: edit.MaskAdjust{ExpEV: 1.5},
+		}}}
+		img := smoothImage(128, 96)
+		ApplyMasks(img, e, s.SetFor(key, e))
+		return img
+	}
+	same := func(t *testing.T, a, b *image.RGBA, what string) {
+		t.Helper()
+		for i := range a.Pix {
+			if a.Pix[i] != b.Pix[i] {
+				t.Fatalf("%s: pixel %d differs (%d vs %d)", what, i, a.Pix[i], b.Pix[i])
+			}
+		}
+	}
+	same(t, run(edit.AIBackground, false), run(edit.AISubject, true), "background vs inverted subject")
+	same(t, run(edit.AIBackground, true), run(edit.AISubject, false), "inverted background vs subject")
+
+	// Not vacuous: the two sides must actually differ from each other.
+	bg, subj := run(edit.AIBackground, false), run(edit.AISubject, false)
+	if bg.Pix[40*bg.Stride+30*4] == subj.Pix[40*subj.Stride+30*4] {
+		t.Error("background and subject masks changed the subject side alike")
+	}
+}
+
 // TestAIDepthWindow: only pixels whose depth falls inside [lo,hi] change.
 func TestAIDepthWindow(t *testing.T) {
 	// Depth ramp left (far, 0) → right (near, 255).

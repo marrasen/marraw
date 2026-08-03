@@ -25,6 +25,7 @@ import {
   esSetActiveSpot,
   esSetCropping,
   esSetHealing,
+  esSetKeyAdjust,
   esArmAIPick,
   esSetSpotVisualize,
   esSetWBPicking,
@@ -353,10 +354,17 @@ export function useKeyboard() {
       if (e.key === 'Tab') {
         if (s.settingsOpen || s.addFolderOpen || s.shortcutsOpen) return;
         e.preventDefault();
-        if (s.mode === 'develop') {
+        // Crop and WB pick slide the drawer off-screen, so cycling its tabs
+        // there would change state nobody can see — the ↑/↓ precedent. The AI
+        // pick tool leaves the drawer up, so Tab keeps working through it.
+        if (s.mode === 'develop' && !es.cropping && !es.wbPicking) {
           const order: DevelopTab[] = ['develop', 'curve', 'masks', 'presets', 'info'];
           const i = order.indexOf(s.developTab);
           s.setDevelopTab(order[(i + (e.shiftKey ? order.length - 1 : 1)) % order.length]);
+          // A +/- heads-up adjust has the drawer faded out. Switching tabs is
+          // pointless if the result stays invisible, so end that mode — the
+          // same reveal the letter hotkeys do through esSetActive.
+          esSetKeyAdjust(false);
         }
         return;
       }

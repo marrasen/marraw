@@ -61,8 +61,11 @@ type AIInstance struct {
 // in display space (the same OutputDims math as the render), so the develop
 // overlay can stretch it 1:1 over the displayed image — the hover tint for
 // AI masks, whose weights the client cannot compute itself. Sized to
-// longEdge (default 1024). A missing AI map yields a fully transparent
-// image, never an error.
+// longEdge (default 1024). An AI mask whose map isn't generated yet is an
+// ERROR, not a blank tint: the client caches tints by (photo, mask, geometry),
+// so a transparent PNG would outlive the map's arrival a moment later and the
+// row would never tint again. A failed fetch is never cached, so the next
+// hover retries.
 func (e *Edits) MaskTintPreview(ctx context.Context, photoID int64, params edit.Params, maskIndex int, longEdge int) (*aprot.Blob, error) {
 	if maskIndex < 0 || maskIndex >= len(params.Masks) {
 		return nil, aprot.ErrInvalidParams("maskIndex out of range")
@@ -85,6 +88,13 @@ func (e *Edits) MaskTintPreview(ctx context.Context, photoID int64, params edit.
 		ow, oh = ow*longEdge/long, oh*longEdge/long
 	}
 	ow, oh = max(1, ow), max(1, oh)
+
+	if m := &params.Masks[maskIndex]; m.Type == edit.MaskAI {
+		if e.deps.Cache.AIMaps == nil ||
+			!e.deps.Cache.AIMaps.Has(photo.CacheKey, m.AIKind.MapKind(), m.MapVer) {
+			return nil, fmt.Errorf("ai masks: no %s map for this photo yet", m.AIKind)
+		}
+	}
 
 	ai := e.deps.Cache.AIMaps.SetFor(photo.CacheKey, &params)
 	// A range mask selects on the developed pixels themselves, so its tint
@@ -301,6 +311,8 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 	if err != nil {
 		return nil, err
 	}
+	// A background mask stores no map of its own — it reads the subject matte.
+	kind = kind.MapKind()
 	// Fast path: an already-present map returns without opening a task, so the
 	// cheap sidecar-restore calls don't each spawn a task and a "done" toast.
 	if ver, ok := aimask.MapVerFor(kind); ok && e.deps.Cache.AIMaps != nil &&
@@ -333,6 +345,7 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 // edit that photo next), while the folder-wide scan must not — each scanned
 // frame would evict the interactive editor's warm decode (see decodePreview).
 func (e *Edits) generateAIMap(ctx context.Context, photo store.Photo, kind edit.AIKind, allowDownload, cacheDecode bool, onProgress func(done, total int64)) (*AIMapResult, bool, error) {
+	kind = kind.MapKind() // background reads the subject matte; never its own map
 	ver, ok := aimask.MapVerFor(kind)
 	if !ok {
 		return nil, false, fmt.Errorf("ai masks: %q has no model available yet", kind)
@@ -412,14 +425,23 @@ func (e *Edits) GenerateAIMaps(ctx context.Context, photoIDs []int64, kinds []ed
 	if e.deps.Cache.AIMaps == nil || e.deps.Infer == nil {
 		return nil, aprot.ErrInvalidParams("ai masks: inference is not configured")
 	}
+	// Canonicalize first: background and subject share one matte, so asking for
+	// both must not run inference twice.
+	canon := make([]edit.AIKind, 0, len(kinds))
 	vers := make(map[edit.AIKind]string, len(kinds))
 	for _, k := range kinds {
+		k = k.MapKind()
+		if _, done := vers[k]; done {
+			continue
+		}
 		ver, ok := aimask.MapVerFor(k)
 		if !ok {
 			return nil, aprot.ErrInvalidParams(fmt.Sprintf("ai masks: %q has no model available yet", k))
 		}
 		vers[k] = ver
+		canon = append(canon, k)
 	}
+	kinds = canon
 	photos, err := e.deps.DB.GetPhotos(ctx, photoIDs)
 	if err != nil {
 		return nil, err

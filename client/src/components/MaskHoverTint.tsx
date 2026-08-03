@@ -42,7 +42,13 @@ export function MaskHoverTint({
   const [prevTint, setPrevTint] = useState(tintMask);
   if (tintMask !== prevTint) {
     setPrevTint(tintMask);
-    if (tintMask != null) setShown(tintMask);
+    if (tintMask != null) {
+      // Moving to a DIFFERENT mask drops the old PNG: it covers another
+      // region entirely, and showing it until the new fetch resolves reads as
+      // the wrong mask lighting up. (A cache hit repaints immediately.)
+      if (tintMask !== shown) setAiUrl(null);
+      setShown(tintMask);
+    }
   }
 
   // AI and range masks have no client-side weight function (range coverage

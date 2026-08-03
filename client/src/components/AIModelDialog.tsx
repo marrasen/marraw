@@ -16,6 +16,12 @@ const AI_KIND_INFO: Record<string, { title: string; feature: string }> = {
     title: 'Subject detection',
     feature: 'Finds the main subject of a photo so you can mask it with one click and adjust it independently of the background.',
   },
+  // Background masks ride the subject model, so restoring one asks for the
+  // same download — described from the background's side.
+  background: {
+    title: 'Subject detection',
+    feature: 'Finds the main subject of a photo so you can mask everything around it with one click and adjust the background independently.',
+  },
   depth: {
     title: 'Depth estimation',
     feature: 'Estimates how far every part of the scene is from the camera, so you can mask by distance — for example lift the foreground or fade the background.',

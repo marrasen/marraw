@@ -105,8 +105,8 @@ const (
 
 // fxLin linearizes a display-encoded level for the gather. The exponent is
 // previewExposureGamma — the decode's own display encoding, the same one
-// buildMaskLUTs undoes for exposure and the white balance gains — so blurring
-// a region and then pushing it half a stop compose correctly.
+// buildMaskLUTs undoes for exposure and the white balance gains — so pushing a
+// region half a stop and then blurring it compose correctly.
 // Forced strictly increasing: the curve is so flat at the bottom that levels
 // 0..2 would otherwise all land on linear 0, and a non-injective forward table
 // has no exact inverse — an FX-free region would come back a level off.

@@ -33,10 +33,12 @@ import {
   aiMask,
   aiPersonMask,
   backgroundMask,
+  isMaskShapeControl,
   maskAdjustIsNeutral,
   maskHasFX,
   maskLabel,
   type MaskControlId,
+  type MaskShapeControlId,
 } from '@/lib/controlSpecs';
 import { useApiClient, type ApiClient } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -1602,7 +1604,11 @@ function MaskRow({
   // Also forced open while the keyboard walk is inside the group, so ↑/↓ can
   // never park the focus ring on a slider hidden behind a collapsed header.
   const fxOpen =
-    fxExpanded || (selected && activeMaskControl != null && MASK_FX_ORDER.includes(activeMaskControl));
+    fxExpanded ||
+    (selected &&
+      activeMaskControl != null &&
+      !isMaskShapeControl(activeMaskControl) &&
+      MASK_FX_ORDER.includes(activeMaskControl));
   const patchAdjust = (key: MaskControlId, v: number): { adjust: MaskAdjust } => ({
     adjust: { ...adjust, [key]: v },
   });
@@ -1736,12 +1742,16 @@ function MaskRow({
 // row this IS photo state (threshold/feather/depth window live in the mask
 // params and change pixels), so every move flows through esUpdateMask.
 function AIShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; index: number }) {
+  // These sliders join the ↑/↓ walk (they render above the adjust block), so
+  // they carry the same focus ring and focus handoff as maskSlider.
+  const focused = useEditSession((s) => (s.activeMask === index ? s.activeMaskControl : null));
   const patch = (p: Partial<Mask>) => esUpdateMask(client, index, p);
   const commit = (p: Partial<Mask>) => {
     esUpdateMask(client, index, p);
     esCommit(client);
   };
   const shapeSlider = (
+    id: MaskShapeControlId,
     label: string,
     raw: number,
     displayDefault: number, // shown when raw is 0 (server default)
@@ -1751,7 +1761,7 @@ function AIShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; i
     const shown = raw === 0 ? displayDefault : raw;
     return (
       <EditSlider
-        key={label}
+        key={id}
         label={label}
         value={shown * 100}
         display={pct(shown)}
@@ -1759,6 +1769,8 @@ function AIShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; i
         max={100}
         step={1}
         neutral={displayDefault * 100}
+        active={focused === id}
+        onFocusControl={() => esSetActiveMaskControl(index, id)}
         onChange={(v) => patch(onValue(v / 100))}
         onCommit={(v) => commit(onValue(v / 100))}
         onClear={() => commit(onValue(0))}
@@ -1768,8 +1780,10 @@ function AIShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; i
   return (
     <>
       {/* Threshold's floor is 2%: a raw 0 means "server default (50%)", so the
-          slider must never land exactly on 0. */}
-      {mask.aiKind === 'subject' && shapeSlider('Threshold', mask.threshold ?? 0, 0.5, (v) => ({ threshold: v }), 0.02)}
+          slider must never land exactly on 0. Background thresholds the same
+          subject matte — the slider moves the boundary either way. */}
+      {(mask.aiKind === 'subject' || mask.aiKind === 'background') &&
+        shapeSlider('threshold', 'Threshold', mask.threshold ?? 0, 0.5, (v) => ({ threshold: v }), 0.02)}
       {mask.aiKind === 'depth' && (
         <EditRangeSlider
           label="Depth range"
@@ -1784,7 +1798,7 @@ function AIShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; i
           onClear={() => commit({ ...DEPTH_WINDOW_DEFAULT })}
         />
       )}
-      {shapeSlider('Edge feather', mask.feather ?? 0, 0, (v) => ({ feather: v }))}
+      {shapeSlider('feather', 'Edge feather', mask.feather ?? 0, 0, (v) => ({ feather: v }))}
     </>
   );
 }
@@ -1797,6 +1811,7 @@ function AIShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; i
 // red. The eyedropper seeds the hue window from a pixel on the photo.
 function RangeShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; index: number }) {
   const picking = useEditSession((s) => s.rangePicking && s.activeMask === index);
+  const focused = useEditSession((s) => (s.activeMask === index ? s.activeMaskControl : null));
   const patch = (p: Partial<Mask>) => esUpdateMask(client, index, p);
   const commit = (p: Partial<Mask>) => {
     esUpdateMask(client, index, p);
@@ -1877,6 +1892,8 @@ function RangeShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask
         onCommit={(v) => setHue(center * 360, v, true)}
         onClear={() => commit({ ...RANGE_HUE_DEFAULT })}
       />
+      {/* These two are scalar, so they join the ↑/↓ walk like the AI shape
+          rows. The windows above cannot: two thumbs, and hue is circular. */}
       <EditSlider
         label="Min saturation"
         value={satMin * 100}
@@ -1885,6 +1902,8 @@ function RangeShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask
         max={100}
         step={1}
         neutral={0}
+        active={focused === 'rangeSatMin'}
+        onFocusControl={() => esSetActiveMaskControl(index, 'rangeSatMin')}
         onChange={(v) => patch({ rangeSatMin: v / 100 })}
         onCommit={(v) => commit({ rangeSatMin: v / 100 })}
         onClear={() => commit({ rangeSatMin: 0 })}
@@ -1897,6 +1916,8 @@ function RangeShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask
         max={100}
         step={1}
         neutral={0}
+        active={focused === 'feather'}
+        onFocusControl={() => esSetActiveMaskControl(index, 'feather')}
         onChange={(v) => patch({ feather: v / 100 })}
         onCommit={(v) => commit({ feather: v / 100 })}
         onClear={() => commit({ feather: 0 })}

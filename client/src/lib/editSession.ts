@@ -36,12 +36,15 @@ import {
   CONTROL_SPECS,
   MASK_ALL_CONTROLS,
   MASK_CONTROL_SPECS,
+  MASK_SHAPE_SPECS,
   MASK_TYPE_LABELS,
   NEUTRAL,
   defaultMask,
+  isMaskShapeControl,
+  maskShapeOrder,
   paramLabel,
   type ControlId,
-  type MaskControlId,
+  type MaskPanelControlId,
 } from '@/lib/controlSpecs';
 import { updateEditGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
@@ -199,7 +202,9 @@ interface EditSessionState {
   activeMask: number | null;
   // The keyboard-focused slider of the active mask (Masks-tab counterpart of
   // activeControl): ↑/↓ walk it across every mask's sliders, +/- adjusts.
-  activeMaskControl: MaskControlId | null;
+  // Covers the shape sliders (threshold, feather, …) as well as the adjust
+  // ones — they render above the adjust block, so the walk must reach them.
+  activeMaskControl: MaskPanelControlId | null;
   // Brush paint mode: pointer strokes on the loupe paint into the active
   // (brush) mask instead of panning.
   maskPaint: boolean;
@@ -916,7 +921,7 @@ export function esSetActiveMask(index: number | null) {
 
 // esSetActiveMaskControl focuses one slider of one mask (pointer-down on the
 // row, mirroring esSetActive for the develop controls).
-export function esSetActiveMaskControl(index: number, control: MaskControlId | null) {
+export function esSetActiveMaskControl(index: number, control: MaskPanelControlId | null) {
   setState({ activeMask: index, activeMaskControl: control, keyAdjust: false });
 }
 
@@ -934,10 +939,13 @@ export function esMoveMaskActive(dir: 1 | -1) {
   // because the effect direction is only rendered when a smear is live — the
   // walk must skip it, or ↑/↓ would park the focus ring on a control that
   // isn't on screen.
-  const steps: { mask: number; control: MaskControlId }[] = [];
+  const steps: { mask: number; control: MaskPanelControlId }[] = [];
   const edges: number[] = []; // index of each mask's first step
   masks.forEach((m, mi) => {
     edges.push(steps.length);
+    // Shape sliders first: they render above the adjust block, so entering a
+    // mask from above must land on Threshold, not Exposure.
+    for (const control of maskShapeOrder(m)) steps.push({ mask: mi, control });
     for (const control of MASK_ALL_CONTROLS) {
       if (control === 'fxAngle' && !(m.adjust?.motionBlur || m.adjust?.streaks)) continue;
       steps.push({ mask: mi, control });
@@ -977,11 +985,20 @@ export function esStepMask(client: ApiClient, dir: 1 | -1, big = false) {
   if (!masks || s.activeMask == null || s.activeMaskControl == null) return;
   const m = masks[s.activeMask];
   if (!m) return;
-  const spec = MASK_CONTROL_SPECS[s.activeMaskControl];
-  const step = big ? spec.bigStep : spec.step;
-  const raw = (m.adjust?.[s.activeMaskControl] ?? 0) + dir * step;
-  const v = Math.min(spec.max, Math.max(spec.min, Math.round(raw * 1000) / 1000));
-  esUpdateMask(client, s.activeMask, { adjust: { ...m.adjust, [s.activeMaskControl]: v } });
+  // Shape sliders live on the mask itself, adjust sliders in mask.adjust — the
+  // step/clamp/commit tail is the same either way.
+  if (isMaskShapeControl(s.activeMaskControl)) {
+    const spec = MASK_SHAPE_SPECS[s.activeMaskControl];
+    const raw = spec.get(m) + dir * (big ? spec.bigStep : spec.step);
+    const v = Math.min(spec.max, Math.max(spec.min, Math.round(raw * 1000) / 1000));
+    esUpdateMask(client, s.activeMask, spec.set(v));
+  } else {
+    const spec = MASK_CONTROL_SPECS[s.activeMaskControl];
+    const step = big ? spec.bigStep : spec.step;
+    const raw = (m.adjust?.[s.activeMaskControl] ?? 0) + dir * step;
+    const v = Math.min(spec.max, Math.max(spec.min, Math.round(raw * 1000) / 1000));
+    esUpdateMask(client, s.activeMask, { adjust: { ...m.adjust, [s.activeMaskControl]: v } });
+  }
   esFlushDraft(); // a discrete key step should land in the draft immediately
   schedulePreview(client, 'settle'); // sharp frame right behind the instant one
   window.clearTimeout(commitTimer);

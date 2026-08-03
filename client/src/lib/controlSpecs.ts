@@ -332,6 +332,63 @@ export const MASK_CONTROL_SPECS: Record<MaskControlId, MaskControlSpec> = {
   fxAngle: { label: 'Direction', min: 0, max: 180, step: 1, bigStep: 15, unit: 'deg' },
 };
 
+// Shape controls are the sliders that live on the MASK itself rather than in
+// mask.adjust — they change which pixels the mask selects, not what happens to
+// them. They render ABOVE the adjust sliders (AIShapeRows/RangeShapeRows), so
+// the keyboard walk must enter them first or ↓ appears to skip the top of the
+// panel. Accessors, because the value's home and its "unset" spelling differ
+// per control. Two-thumb windows (depth, luminance) and the circular hue pair
+// stay out: the scalar step model cannot express them.
+export type MaskShapeControlId = 'threshold' | 'rangeSatMin' | 'feather';
+
+export interface MaskShapeSpec {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  bigStep: number;
+  get(m: Mask): number;
+  set(v: number): Partial<Mask>;
+}
+
+export const MASK_SHAPE_SPECS: Record<MaskShapeControlId, MaskShapeSpec> = {
+  // Raw 0 means "the server's 0.5 default", so stepping starts from what the
+  // slider shows; the floor keeps it off the 0 that would mean default again.
+  threshold: {
+    label: 'Threshold', min: 0.02, max: 1, step: 0.01, bigStep: 0.05,
+    get: (m) => m.threshold || 0.5, set: (v) => ({ threshold: v }),
+  },
+  rangeSatMin: {
+    label: 'Min saturation', min: 0, max: 1, step: 0.01, bigStep: 0.05,
+    get: (m) => m.rangeSatMin ?? 0, set: (v) => ({ rangeSatMin: v }),
+  },
+  feather: {
+    label: 'Edge feather', min: 0, max: 1, step: 0.01, bigStep: 0.05,
+    get: (m) => m.feather ?? 0, set: (v) => ({ feather: v }),
+  },
+};
+
+// The shape sliders one mask actually shows, in panel order — mirrors what
+// AIShapeRows/RangeShapeRows render, so the focus ring never lands on a row
+// that isn't there.
+export function maskShapeOrder(m: Mask): MaskShapeControlId[] {
+  if (m.type === 'ai') {
+    return m.aiKind === 'subject' || m.aiKind === 'background'
+      ? ['threshold', 'feather']
+      : ['feather'];
+  }
+  if (m.type === 'range') return ['rangeSatMin', 'feather'];
+  return [];
+}
+
+// What the mask panel's keyboard focus can sit on: an adjust slider or a shape
+// slider.
+export type MaskPanelControlId = MaskControlId | MaskShapeControlId;
+
+export function isMaskShapeControl(c: MaskPanelControlId): c is MaskShapeControlId {
+  return c in MASK_SHAPE_SPECS;
+}
+
 export const NEUTRAL_MASK_ADJUST: Required<MaskAdjust> = {
   expEV: 0, contrast: 0, toneHighlights: 0, toneShadows: 0,
   whites: 0, blacks: 0, temp: 0, tint: 0, saturation: 0,
@@ -368,6 +425,7 @@ export function maskLabel(m: Mask, index: number): string {
     if (m.aiKind === 'person') return `Person ${m.classId ?? 0}`;
     const kind =
       m.aiKind === 'subject' ? 'Subject'
+      : m.aiKind === 'background' ? 'Background'
       : m.aiKind === 'depth' ? 'Depth'
       : m.aiKind === 'class' ? (AI_CATEGORY_NAMES[m.classId ?? 0] ?? 'Class')
       : 'AI';
@@ -398,15 +456,17 @@ export function aiMask(kind: 'subject' | 'depth', mapVer: string): Mask {
   return { type: 'ai', aiKind: kind, mapVer, adjust: {} };
 }
 
-// backgroundMask is the one-click background-separation recipe: the subject
-// matte, INVERTED so it selects everything the subject is not, pre-loaded
-// with a light bloom, anamorphic streaks and a chromatic fringe. No blur —
+// backgroundMask is the one-click background-separation recipe: the background
+// kind (the subject matte, inverted by the server — see edit.AIBackground), so
+// the row reads "Background" with the Invert pill free for the photographer to
+// flip back to the subject. Pre-loaded with a light bloom, anamorphic streaks
+// and a chromatic fringe. No blur —
 // a heavy default defocus smears the whole frame into mush and reads as a
 // filter; the glow/streaks/prism trio separates the background while it
 // still shows what is there. Everything after is the photographer's to tune.
 export function backgroundMask(mapVer: string): Mask {
   return {
-    type: 'ai', aiKind: 'subject', mapVer, invert: true,
+    type: 'ai', aiKind: 'background', mapVer,
     adjust: { glow: 0.1, streaks: 0.2, prism: 0.6, fxAngle: 25 },
   };
 }

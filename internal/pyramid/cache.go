@@ -180,7 +180,7 @@ func nested(a, b string) bool {
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r10"
+const renderVersion = "r11"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {

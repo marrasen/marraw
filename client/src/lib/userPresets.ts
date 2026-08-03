@@ -74,7 +74,7 @@ function sanitizeParams(raw: Record<string, unknown>): Params {
   return out;
 }
 
-const AI_KINDS = new Set(['subject', 'class', 'depth']);
+const AI_KINDS = new Set(['subject', 'background', 'class', 'depth']);
 const ADJUST_KEYS = [
   'expEV', 'contrast', 'toneHighlights', 'toneShadows', 'whites', 'blacks',
   'temp', 'tint', 'saturation',

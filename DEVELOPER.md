@@ -68,7 +68,9 @@ Local adjustment masks run between the look and the detail stage
 (`internal/pyramid/mask.go`). Their tone/colour sliders are point operations
 served by a per-row weight seam, but the **spatial effects** — blur, motion and
 zoom smears, glow, light streaks, prism, mosaic — gather neighbouring pixels, so they run as
-a separate earlier pass per mask (`internal/pyramid/maskfx.go`) that
+a separate later pass per mask (`internal/pyramid/maskfx.go`), after that mask's
+own tone/colour sliders, so light added by glow or streaks is never re-darkened
+by the mask's exposure. That pass
 materializes the mask's weight plane and gathers *through* it: weight-normalized
 (`Σw·c / Σw`, so a masked-out subject cannot bleed into the blurred surround)
 and in linear light. That pass runs at a fixed `fxPlaneLongEdge` working

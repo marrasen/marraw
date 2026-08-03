@@ -180,11 +180,13 @@ func (s *AIMapStore) SetFor(photoKey string, e *edit.Params) AIMapSet {
 		if m.Type != edit.MaskAI || m.AIKind == "" {
 			continue
 		}
-		k := aiSetKey(m.AIKind, m.MapVer)
+		// Background samples the subject matte, so both kinds share one entry.
+		kind := m.AIKind.MapKind()
+		k := aiSetKey(kind, m.MapVer)
 		if _, done := set[k]; done {
 			continue
 		}
-		if am := s.loadOriented(photoKey, m.AIKind, m.MapVer, rot, flip); am != nil {
+		if am := s.loadOriented(photoKey, kind, m.MapVer, rot, flip); am != nil {
 			if set == nil {
 				set = AIMapSet{}
 			}
@@ -316,10 +318,11 @@ const aiPlaneCacheCap = 8
 func deriveCoverage(am *AIMap, m *edit.Mask) []uint8 {
 	out := make([]uint8, len(am.Pix))
 	switch m.AIKind {
-	case edit.AISubject:
+	case edit.AISubject, edit.AIBackground:
 		// Continuous matte: remap around the threshold with a feather-wide
 		// smoothstep. Threshold 0 means the 0.5 default; feather 0 keeps the
 		// model's own soft edges (identity above/below the cutoff band).
+		// Background derives the same coverage — newAIEval inverts it.
 		t := m.Threshold
 		if t == 0 {
 			t = 0.5
