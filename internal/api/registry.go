@@ -23,6 +23,7 @@ import (
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
+	"github.com/marrasen/marraw/internal/tsfunnel"
 	"github.com/marrasen/marraw/internal/watch"
 )
 
@@ -65,6 +66,10 @@ type Deps struct {
 	// Advertiser announces this daemon on the local network while remote
 	// access is on. Nil is valid (loopback-only: nothing to announce).
 	Advertiser *discovery.Advertiser
+	// Funnel publishes this daemon on the public internet so a share link can
+	// be opened by someone with no Tailscale of their own. Nil is valid: the
+	// share UI then reports sharing as unavailable rather than failing.
+	Funnel *tsfunnel.Manager
 	// ListenAddr is the address the daemon actually bound (set by main before
 	// serving); LoopbackOnly reports whether it is unreachable from other
 	// machines. Surfaced to the Settings UI via System.GetRemoteAccess.
@@ -152,21 +157,31 @@ const (
 	// ConnDevicePrefix + device ID identifies a remote client holding a token
 	// minted for it by the approval flow.
 	ConnDevicePrefix = "device:"
+	// ConnGuestPrefix + link ID identifies someone holding a share link. Not
+	// the user: see guest.go.
+	ConnGuestPrefix = "guest:"
 )
 
 // ConnIsLocal reports whether the calling connection is a window on this
-// machine. A loopback-only daemon is unreachable from anywhere else, so every
-// connection to it qualifies — which is also what keeps dev mode (no auth
-// hook, so no identity) working.
+// machine.
+//
+// An authenticated connection is judged on its identity alone. The bind
+// address used to stand in for that — a loopback daemon being unreachable from
+// anywhere else — but a share link is served through a tunnel that arrives on
+// loopback like any local window, so binding proves nothing once guests exist.
+//
+// The LoopbackOnly fallback survives for the case it was really covering: dev
+// mode registers no auth hook, so connections carry no identity at all, and
+// there a loopback daemon is still the whole of the trust boundary.
 //
 // The default is deny: a call with no connection in context on a daemon that
 // *is* reachable does not get local rights.
 func (d *Deps) ConnIsLocal(ctx context.Context) bool {
-	if d.LoopbackOnly {
-		return true
-	}
 	c := aprot.Connection(ctx)
-	return c != nil && c.UserID() == ConnLocal
+	if c == nil || c.UserID() == "" {
+		return d.LoopbackOnly
+	}
+	return c.UserID() == ConnLocal
 }
 
 // DisconnectDevice drops every live connection belonging to one approved
@@ -178,6 +193,17 @@ func (d *Deps) DisconnectDevice(id string) {
 	d.mu.RUnlock()
 	if s != nil {
 		s.DisconnectUser(ConnDevicePrefix + id)
+	}
+}
+
+// DisconnectGuest drops every live connection holding one share link, so
+// revoking a share takes effect while the guest is still looking at it.
+func (d *Deps) DisconnectGuest(id string) {
+	d.mu.RLock()
+	s := d.server
+	d.mu.RUnlock()
+	if s != nil {
+		s.DisconnectUser(ConnGuestPrefix + id)
 	}
 }
 
@@ -320,6 +346,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.Register(export)
 	registry.Register(&System{deps: deps})
 	registry.Register(settings)
+	registry.Register(&Share{deps: deps, lib: library})
 
 	registry.RegisterEnumFor(library, FlagValues())
 	registry.RegisterEnumFor(settings, ThemeValues())

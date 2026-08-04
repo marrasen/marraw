@@ -17,13 +17,15 @@ var assetName = regexp.MustCompile(`^[0-9a-f]{16}\.(png|jpg)$`)
 // GET /wm/{name}?t=token.
 type Assets struct {
 	Dir string
-	// TokenValid validates the ?t=/X-Marraw-Token credential; nil disables
-	// the check (dev mode).
-	TokenValid func(string) bool
+	// Authorize checks the ?t=/X-Marraw-Token credential; nil disables the
+	// check (dev mode). Watermark assets belong to the library rather than to
+	// any one folder, so a confined credential (a share link) is refused
+	// outright — the shared page has no editor to preview them in.
+	Authorize Authorizer
 }
 
 func (h *Assets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !authorized(h.TokenValid, r) {
+	if !authorized(h.Authorize, r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}

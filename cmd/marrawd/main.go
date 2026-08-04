@@ -28,6 +28,8 @@ import (
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/discovery"
 	"github.com/marrasen/marraw/internal/diskio"
+	"github.com/marrasen/marraw/internal/export"
+	"github.com/marrasen/marraw/internal/guestui"
 	"github.com/marrasen/marraw/internal/imghttp"
 	"github.com/marrasen/marraw/internal/infer"
 	"github.com/marrasen/marraw/internal/inpaint"
@@ -36,6 +38,7 @@ import (
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
 	"github.com/marrasen/marraw/internal/sysmem"
+	"github.com/marrasen/marraw/internal/tsfunnel"
 	"github.com/marrasen/marraw/internal/watermark"
 )
 
@@ -111,6 +114,9 @@ func main() {
 	// Devices approved through the pairing dialog. Each carries its own token
 	// so one can be revoked without disturbing the others.
 	tokens.SetDevices(api.LoadDevices(context.Background(), db))
+	// Share links: one folder each, for someone culling in a browser. Confined
+	// to the culling RPCs by api.GuestGate below.
+	tokens.SetGuests(api.LoadGuestLinks(context.Background(), db))
 
 	pool := decode.NewPool(runtime.NumCPU())
 	defer pool.Close()
@@ -171,9 +177,13 @@ func main() {
 	advertiser := &discovery.Advertiser{}
 	defer advertiser.Stop()
 
+	// The funnel publishes this daemon on the public internet for share links.
+	// Its port is filled in once the listener is bound, below.
+	funnel := tsfunnel.New(0)
+
 	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir, WatermarkDir: watermarkDir,
 		Infer: infer.NewManager(filepath.Join(*dataDir, "models")), IOGate: ioGate, Tokens: tokens, Pairing: broker,
-		Advertiser: advertiser, LoopbackOnly: loopbackOnly}
+		Advertiser: advertiser, Funnel: funnel, LoopbackOnly: loopbackOnly}
 	registry, library, _, _ := api.NewRegistry(deps)
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any
@@ -197,6 +207,11 @@ func main() {
 			return res, err
 		}
 	})
+	// Share links reach the same registry as the owner, so the confinement has
+	// to sit in front of it: everything outside the culling allowlist is
+	// refused here, before the handler runs. Inside the logging middleware, so
+	// a refusal is recorded.
+	server.Use(api.GuestGate(tokens))
 	scanner.OnPhotosChanged = func(folderID int64) {
 		server.TriggerRefresh(fmt.Sprintf("photos:%d", folderID))
 	}
@@ -235,6 +250,8 @@ func main() {
 				go deps.TouchDevice(context.Background(), m.DeviceID, conn.RemoteAddr())
 			case m.Pairing:
 				conn.SetUserID(api.ConnPairing)
+			case m.Guest != nil:
+				conn.SetUserID(api.ConnGuestPrefix + m.Guest.ID)
 			default:
 				return aprot.ErrAuthFailed("invalid token")
 			}
@@ -250,16 +267,66 @@ func main() {
 
 	go janitor.Run(ctx)
 
+	// Two credential checks for the HTTP endpoints, because a share link is a
+	// valid credential that may see almost nothing. imgAuth resolves what a
+	// credential is allowed to see (one folder, base renditions only) for the
+	// photo endpoints; tokenValid answers the endpoints that are not
+	// photo-scoped, and refuses share links outright.
+	var imgAuth imghttp.Authorizer
 	var tokenValid func(string) bool
 	if !isDev {
-		tokenValid = tokens.Valid
+		imgAuth = func(tok string) (imghttp.Access, bool) {
+			m := tokens.Match(tok)
+			switch {
+			case !m.OK:
+				return imghttp.Access{}, false
+			case m.Guest != nil:
+				return imghttp.Access{
+					FolderID:     m.Guest.FolderID,
+					BaseEditOnly: !m.Guest.Caps.Edits,
+					Downloads:    m.Guest.Caps.Downloads,
+				}, true
+			}
+			return imghttp.Access{}, true
+		}
+		tokenValid = func(tok string) bool {
+			m := tokens.Match(tok)
+			return m.OK && m.Guest == nil
+		}
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/ws", server)
-	img := &imghttp.Handler{DB: db, Cache: cache, TokenValid: tokenValid}
+	img := &imghttp.Handler{DB: db, Cache: cache, Authorize: imgAuth}
 	mux.Handle("GET /img/{id}/{level}", img)
 	mux.Handle("GET /img/{id}/tile/{tx}/{ty}", http.HandlerFunc(img.ServeTile))
-	mux.Handle("GET /wm/{name}", &imghttp.Assets{Dir: watermarkDir, TokenValid: tokenValid})
+	mux.Handle("GET /wm/{name}", &imghttp.Assets{Dir: watermarkDir, Authorize: imgAuth})
+	// Downloads: a full develop-pipeline render per photo, so the visitor gets
+	// the same pixels an export would produce rather than a preview upscaled.
+	// sRGB and the owner's credit, since these files leave the library.
+	dl := imghttp.NewDownloads(db, imgAuth, func(ctx context.Context, photoID int64) ([]byte, error) {
+		artist, copyright := api.ExportCredit(ctx, db)
+		return export.RenderJPEG(ctx, db, photoID, export.Request{
+			Format:      "jpeg",
+			JpegQuality: 92,
+			ColorSpace:  "srgb",
+			ExifMode:    "copyright",
+			Artist:      artist,
+			Copyright:   copyright,
+			AIMaps:      cache.AIMaps,
+			Lenses:      cache.Lenses,
+			Fills:       cache.Fills,
+		})
+	})
+	mux.Handle("GET /dl/{id}", dl)
+	mux.HandleFunc("GET /dl.zip", dl.ServeZip)
+	// The share page itself. The token rides in the path so the page can read
+	// it without a query string, and so its relative asset URLs land under the
+	// same prefix.
+	guestPage := &guestui.Handler{TokenValid: func(tok string) bool {
+		return tokens.Match(tok).Guest != nil
+	}}
+	mux.HandleFunc("GET /s/{token}", guestui.Redirect)
+	mux.Handle("GET /s/{token}/{path...}", guestPage)
 	// The bundled watermark fonts, so the editor preview renders with the
 	// byte-identical faces the exporter uses. Fonts are CORS-gated even on
 	// file:// — the wildcard origin is required, and safe under the same
@@ -316,6 +383,19 @@ func main() {
 	// Announce on the local network, now that the real port is known.
 	deps.StartAdvertising(context.Background())
 
+	// Share links outlive the process, so the tunnel that serves them has to
+	// come back with it — otherwise a link handed out yesterday is dead until
+	// the owner notices and mints another. In the background: raising a funnel
+	// runs the tailscale CLI, and the app must not wait on it to start.
+	funnel.SetPort(actualPort)
+	if len(tokens.Guests()) > 0 {
+		go func() {
+			if err := funnel.Enable(context.Background()); err != nil {
+				log.Printf("funnel: share links are not reachable from the internet: %v", err)
+			}
+		}()
+	}
+
 	// The handshake line the Electron main process waits for.
 	fmt.Printf("MARRAW_READY port=%d\n", actualPort)
 	log.Printf("marrawd listening on %s (data: %s)", deps.ListenAddr, *dataDir)
@@ -338,6 +418,13 @@ func main() {
 	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// Withdraw the tunnel before going away: with the daemon down a published
+	// port answers nothing, and leaving the machine advertised on the public
+	// internet for a service that is not running is worth avoiding. Startup
+	// puts it back when there are still links to serve.
+	if err := funnel.Disable(shutdownCtx); err != nil {
+		log.Printf("funnel: withdrawing on shutdown: %v", err)
+	}
 	server.Stop(shutdownCtx)
 	httpServer.Shutdown(shutdownCtx)
 }

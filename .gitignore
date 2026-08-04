@@ -2,7 +2,12 @@ third_party/
 build/
 node_modules/
 client/dist/
+client/dist-guest/
 client/node_modules/
+# The share page is copied in at build time (scripts/build-server.mjs); only
+# the placeholder that keeps the directory embeddable is tracked.
+internal/guestui/bundle/*
+!internal/guestui/bundle/.gitkeep
 dist/
 *.exe
 go.work

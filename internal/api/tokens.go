@@ -43,11 +43,15 @@ type Device struct {
 // tell a local window (launch token) from a remote client, which is what gates
 // the approval RPCs — approving your own pairing request from the machine
 // asking to be let in would defeat the whole exercise.
+// A Guest match is the odd one out: it is not the user at all, but someone
+// holding a share link, and it carries the link so callers can read the folder
+// and capabilities it is confined to (see guest.go).
 type TokenMatch struct {
 	OK       bool
 	Launch   bool
 	Pairing  bool
 	DeviceID string
+	Guest    *GuestLink
 }
 
 // AuthTokens validates client credentials: the per-launch token the Electron
@@ -59,6 +63,7 @@ type AuthTokens struct {
 	launch  string
 	pairing atomic.Value // string
 	devices atomic.Value // []Device
+	guests  atomic.Value // []GuestLink
 }
 
 // NewAuthTokens builds the holder. Either token may be empty; an empty token
@@ -67,6 +72,7 @@ func NewAuthTokens(launch, pairing string) *AuthTokens {
 	t := &AuthTokens{launch: launch}
 	t.pairing.Store(pairing)
 	t.devices.Store([]Device(nil))
+	t.guests.Store([]GuestLink(nil))
 	return t
 }
 
@@ -94,6 +100,16 @@ func (t *AuthTokens) Match(tok string) TokenMatch {
 			subtle.ConstantTimeCompare([]byte(tok), []byte(devices[i].Token)) == 1 {
 			m = TokenMatch{OK: true, DeviceID: devices[i].ID}
 		}
+	}
+	if m.OK {
+		return m
+	}
+	// Share links last: an expired one matches nothing at all, so a lapsed
+	// link is refused at the door rather than reaching a handler that would
+	// have to remember to check.
+	guests, _ := t.guests.Load().([]GuestLink)
+	if g := matchGuest(guests, tok); g != nil && !g.Expired(time.Now()) {
+		return TokenMatch{OK: true, Guest: g}
 	}
 	return m
 }
@@ -124,6 +140,19 @@ func (t *AuthTokens) Devices() []Device {
 // caller's job (see System.RevokeRemoteDevice).
 func (t *AuthTokens) SetDevices(devices []Device) {
 	t.devices.Store(append([]Device(nil), devices...))
+}
+
+// Guests returns a copy of the share-link list.
+func (t *AuthTokens) Guests() []GuestLink {
+	g, _ := t.guests.Load().([]GuestLink)
+	return append([]GuestLink(nil), g...)
+}
+
+// SetGuests swaps the share-link list. As with SetDevices, revoking here stops
+// the token authenticating anything new; dropping the guest's live connection
+// is the caller's job (see Deps.DisconnectGuest).
+func (t *AuthTokens) SetGuests(links []GuestLink) {
+	t.guests.Store(append([]GuestLink(nil), links...))
 }
 
 // LoadDevices reads the approved-device list from the settings table. A

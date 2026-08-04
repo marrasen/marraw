@@ -17,6 +17,7 @@ import {
   setDeviceName,
   setPairingOpen,
 } from '@/api/system';
+import { revokeLink, useListLinks } from '@/api/share';
 import { backend, canUseHostFs } from '@/lib/backend';
 import type { RemoteAccessPrefs, RemoteConnection, RemoteProbe } from '@/lib/electron';
 import {
@@ -1800,6 +1801,10 @@ function HostSection() {
         />
       )}
       {prefs?.enabled && <ApprovedDevices />}
+      {/* Not gated on remote access: a share is served through the Tailscale
+          tunnel, which reaches the daemon on loopback. Sharing an album does
+          not require opening this machine to the local network. */}
+      <SharedAlbums />
       <SettingRow
         title="Pairing token"
         description={
@@ -1902,6 +1907,83 @@ function ApprovedDevices() {
               ) : (
                 <Button variant="ghost" size="sm" onClick={() => setConfirmID(d.id)}>
                   Revoke
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      }
+    />
+  );
+}
+
+/**
+ * Albums shared as links. Unlike an approved computer, the holder of one of
+ * these is not the user and not trusted with the library — see the guest gate
+ * in the daemon. Withdrawing one drops whoever is holding it immediately.
+ */
+function SharedAlbums() {
+  const client = useApiClient();
+  const { data } = useListLinks();
+  const links = data ?? [];
+  const [confirmID, setConfirmID] = useState('');
+
+  if (links.length === 0) return null;
+
+  const revoke = (id: string, name: string) => {
+    setConfirmID('');
+    revokeLink(client, id)
+      .then(() => toast.success(`“${name}” is no longer shared`))
+      .catch((err) => toast.error((err as Error).message));
+  };
+
+  return (
+    <SettingRow
+      title="Shared albums"
+      description="Links you have handed out. Withdrawing one stops it working immediately, wherever it has been forwarded."
+      control={
+        <div className="flex w-64 flex-col gap-1.5" data-testid="shared-albums">
+          {links.map((l) => (
+            <div
+              key={l.id}
+              className="flex items-center gap-2 rounded-lg border bg-secondary px-2.5 py-1.5 dark:bg-white/5"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12px] font-medium">{l.name}</div>
+                <div className="truncate font-mono text-[10px] text-faint">
+                  {l.expired
+                    ? 'expired'
+                    : l.expiresAt
+                      ? `expires ${new Date(l.expiresAt).toLocaleDateString()}`
+                      : 'no expiry'}
+                  {' · '}
+                  {l.photoCount} photo{l.photoCount === 1 ? '' : 's'}
+                </div>
+              </div>
+              {l.url && !l.expired && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(l.url);
+                    toast.success('Link copied');
+                  }}
+                >
+                  Copy
+                </Button>
+              )}
+              {confirmID === l.id ? (
+                <>
+                  <Button variant="ghost" size="sm" onClick={() => setConfirmID('')}>
+                    Cancel
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => revoke(l.id, l.name)}>
+                    Withdraw
+                  </Button>
+                </>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => setConfirmID(l.id)}>
+                  Withdraw
                 </Button>
               )}
             </div>

@@ -12,8 +12,20 @@ export type Level = '256' | '512' | '1024' | '2048';
 export const TILE_SIZE = 1024;
 
 const q = new URLSearchParams(window.location.search);
-const host = q.get('apiHost') ?? `127.0.0.1:${q.get('apiPort') ?? '8483'}`;
-const token = q.get('token') ?? '';
+
+// A share link is served by the daemon itself at /s/<token>/, so that page's
+// own origin IS the backend and its token is in the path. Every other case —
+// the Electron shell, browser dev — is told where to go by query params.
+const share = /^\/s\/([0-9a-f]{32})\//.exec(window.location.pathname);
+
+const host = share ? window.location.host : (q.get('apiHost') ?? `127.0.0.1:${q.get('apiPort') ?? '8483'}`);
+const token = share ? share[1] : (q.get('token') ?? '');
+
+// Tailscale Funnel terminates TLS, so a share page arrives over https — and a
+// page on https may not open ws:// or load http:// images. Follow the page's
+// own scheme there. Everywhere else the daemon is plain http (the Electron
+// renderer runs on file://, where location.protocol says nothing useful).
+const secure = !!share && window.location.protocol === 'https:';
 
 export const backend = {
   token,
@@ -21,9 +33,11 @@ export const backend = {
   // that touches THIS machine's filesystem (native pickers, reveal) is wrong.
   isRemote: q.get('remote') === '1',
   remoteName: q.get('remoteName') ?? '',
-  http: `http://${host}`,
+  // isGuest: this is the shared album page, not the app.
+  isGuest: !!share,
+  http: `${secure ? 'https' : 'http'}://${host}`,
   // Trust rides in the first-message auth frame (see main.tsx), not the URL.
-  ws: `ws://${host}/ws`,
+  ws: `${secure ? 'wss' : 'ws'}://${host}/ws`,
 };
 
 // canUseHostFs: whether Electron bridges that touch THIS machine's filesystem
@@ -87,6 +101,23 @@ export function watermarkAssetUrl(fileName: string): string {
   if (backend.token) params.set('t', backend.token);
   const qs = params.toString();
   return `${backend.http}/wm/${fileName}${qs ? `?${qs}` : ''}`;
+}
+
+// downloadUrl is one photo as a finished full-resolution JPEG — a real render
+// through the develop pipeline, not a pyramid rendition, so it is slow and
+// uncacheable by design (the pixels change as the owner keeps editing).
+export function downloadUrl(id: number): string {
+  const params = new URLSearchParams();
+  if (backend.token) params.set('t', backend.token);
+  const qs = params.toString();
+  return `${backend.http}/dl/${id}${qs ? `?${qs}` : ''}`;
+}
+
+// zipUrl is a selection as one archive, rendered and streamed photo by photo.
+export function zipUrl(ids: number[]): string {
+  const params = new URLSearchParams({ ids: ids.join(',') });
+  if (backend.token) params.set('t', backend.token);
+  return `${backend.http}/dl.zip?${params}`;
 }
 
 // levelForSize picks the smallest pyramid level that covers cssPx on this

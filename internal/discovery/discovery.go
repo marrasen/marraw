@@ -181,6 +181,10 @@ var tailscaleBins = map[string][]string{
 	"linux": {"/usr/bin/tailscale", "/usr/local/bin/tailscale"},
 }
 
+// TailscaleBin returns the tailscale CLI path, or "" when it is not
+// installed. Exported for internal/tsfunnel, which drives the same binary.
+func TailscaleBin() string { return tailscaleBin() }
+
 func tailscaleBin() string {
 	for _, bin := range tailscaleBins[runtime.GOOS] {
 		if _, err := os.Stat(bin); err == nil {

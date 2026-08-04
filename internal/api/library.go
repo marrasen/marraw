@@ -330,6 +330,9 @@ func (l *Library) savePathListSetting(ctx context.Context, key string, paths []s
 // ListPhotos returns all photos of a folder, sorted by file name. It is a
 // subscription query: scan progress and structural changes push new results.
 func (l *Library) ListPhotos(ctx context.Context, folderID int64) ([]Photo, error) {
+	if err := l.deps.CheckGuestFolder(ctx, folderID); err != nil {
+		return nil, err
+	}
 	aprot.RegisterRefreshTrigger(ctx, photosKey(folderID))
 	aprot.RegisterRefreshTrigger(ctx, burstSettingsKey)
 	rows, err := l.deps.DB.ListPhotos(ctx, folderID)
@@ -422,6 +425,9 @@ func (l *Library) SetRating(ctx context.Context, ids []int64, rating int) error 
 	if rating < 0 || rating > 5 {
 		return aprot.ErrInvalidParams("rating must be 0..5")
 	}
+	if err := l.deps.CheckGuestPhotos(ctx, ids); err != nil {
+		return err
+	}
 	if err := l.deps.DB.SetRating(ctx, ids, rating, time.Now().UnixMilli()); err != nil {
 		return err
 	}
@@ -436,6 +442,9 @@ func (l *Library) SetRating(ctx context.Context, ids []int64, rating int) error 
 
 // SetFlag sets the cull flag of the given photos.
 func (l *Library) SetFlag(ctx context.Context, ids []int64, flag Flag) error {
+	if err := l.deps.CheckGuestPhotos(ctx, ids); err != nil {
+		return err
+	}
 	if err := l.deps.DB.SetFlag(ctx, ids, FlagToInt(flag), time.Now().UnixMilli()); err != nil {
 		return err
 	}
@@ -486,6 +495,9 @@ func (l *Library) DeletePhotos(ctx context.Context, ids []int64) (*DeleteResult,
 // SetVisible hints which photos the client's viewport shows so their
 // thumbnails are generated ahead of scroll. Fire-and-forget.
 func (l *Library) SetVisible(ctx context.Context, folderID int64, ids []int64) error {
+	if err := l.deps.CheckGuestPhotos(ctx, ids); err != nil {
+		return err
+	}
 	if len(ids) > 256 {
 		ids = ids[:256]
 	}
@@ -505,6 +517,9 @@ func (l *Library) SetVisible(ctx context.Context, folderID int64, ids []int64) e
 // folderID is accepted for symmetry with SetVisible but the single active
 // folder-jobs slot means the id alone suffices.
 func (l *Library) SetFocus(ctx context.Context, folderID int64, photoID int64) error {
+	if err := l.deps.CheckGuestPhotos(ctx, []int64{photoID}); err != nil {
+		return err
+	}
 	l.deps.focusPhotoID.Store(photoID)
 	return nil
 }

@@ -405,7 +405,14 @@ func (s *System) RevokeRemoteDevice(ctx context.Context, id string) error {
 
 // RegeneratePairingToken replaces the pairing token, invalidating the old one
 // for new connections. Clients already connected stay until they disconnect.
+//
+// Local windows only, like the other remote-access controls: this locks out
+// every client that stored the old token, which is not a remote client's
+// decision to make.
 func (s *System) RegeneratePairingToken(ctx context.Context) (*RemoteAccessInfo, error) {
+	if !s.deps.ConnIsLocal(ctx) {
+		return nil, aprot.ErrAuthFailed("local windows only")
+	}
 	tok, err := GeneratePairingToken()
 	if err != nil {
 		return nil, err

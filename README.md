@@ -170,6 +170,24 @@ approve the laptop when it asks, and this library appears under **Other
 computers** in the laptop's library rail — one click opens it over the network,
 no files copied.</sup>
 
+**Hand a shoot to the people in it.**
+Right-click a shoot → **Share album…**, tick what the link may do, and marraw
+gives you a URL to send. Whoever opens it gets a phone-shaped page — swipe
+through the shoot, pinch to zoom, tap to star and pick — and their picks land
+live in your library, on the same photos you are about to develop. No account,
+no app, no marraw at the other end. Three switches decide what the link is:
+*rate and pick*, *show my edits* (off serves the frames straight out of camera),
+and *allow downloads* (full-size JPEGs, one at a time or a selection as a zip).
+Links carry an expiry, and **Settings → Remote → Shared albums** withdraws one
+the instant you want it gone — wherever it has been forwarded to.
+
+The link is served by your own machine over [Tailscale
+Funnel](https://tailscale.com/kb/1223/funnel), so nothing is uploaded anywhere
+and the tunnel comes down with the last link. A share is *not* a remote
+connection: it reaches exactly one folder, may call five of the daemon's
+methods, and can neither browse your disks nor delete a frame — enforced at the
+daemon, not in the page.
+
 ---
 
 ## The workspace

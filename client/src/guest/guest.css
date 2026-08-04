@@ -1,0 +1,34 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/geist';
+
+/* The share page is dark unconditionally. It is a photo viewer opened from a
+   text message, usually one-handed: light chrome around someone's photographs
+   fights the pictures, and there is no settings screen to change it in. */
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #0b0b0c;
+  color: #f4f4f5;
+  font-family: 'Geist Variable', system-ui, sans-serif;
+  /* No rubber-banding: a vertical drag in the loupe is a gesture, not a
+     scroll, and the page bouncing under it feels broken. */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Tap targets are fingers here, so nothing relies on hover, and text
+   selection only ever fires by accident mid-swipe. */
+button {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}

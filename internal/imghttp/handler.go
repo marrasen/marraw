@@ -14,22 +14,52 @@ import (
 	"github.com/marrasen/marraw/internal/store"
 )
 
+// Access is what a credential is allowed to see. The owner's own tokens carry
+// the zero value, which is unrestricted; a share link is confined.
+type Access struct {
+	// FolderID confines the credential to one folder's photos. Zero is the
+	// whole library. Photo IDs are sequential integers anyone can count
+	// through, so this check is the only thing standing between a shared
+	// folder and the rest of the library.
+	FolderID int64
+	// BaseEditOnly serves the unedited rendition whatever edit state was
+	// asked for: a share made without the "show my edits" capability.
+	BaseEditOnly bool
+	// Downloads permits taking full renders away (see download.go). Only
+	// consulted for confined credentials — the owner may always download.
+	Downloads bool
+}
+
+// Authorizer resolves the ?t=/X-Marraw-Token credential to what it may see.
+// A func rather than a token string so regenerating a token, or revoking a
+// share, takes effect without re-wiring handlers.
+type Authorizer func(tok string) (Access, bool)
+
 type Handler struct {
 	DB    *store.DB
 	Cache *pyramid.Cache
-	// TokenValid validates the ?t=/X-Marraw-Token credential. Nil disables
-	// the check (dev mode). A func rather than a string so a regenerated
-	// pairing token takes effect without re-wiring handlers.
-	TokenValid func(string) bool
+	// Authorize checks the request credential. Nil disables the check and
+	// grants unrestricted access (dev mode).
+	Authorize Authorizer
 }
 
-// authorized checks the request's token against TokenValid, accepting either
-// the ?t= query param or the X-Marraw-Token header.
-func authorized(valid func(string) bool, r *http.Request) bool {
-	if valid == nil {
-		return true
+// access resolves the request's credential, accepting either the ?t= query
+// param or the X-Marraw-Token header.
+func access(auth Authorizer, r *http.Request) (Access, bool) {
+	if auth == nil {
+		return Access{}, true
 	}
-	return valid(r.URL.Query().Get("t")) || valid(r.Header.Get("X-Marraw-Token"))
+	if a, ok := auth(r.URL.Query().Get("t")); ok {
+		return a, true
+	}
+	return auth(r.Header.Get("X-Marraw-Token"))
+}
+
+// authorized reports whether the request carries a credential with
+// unrestricted access — what the endpoints that are not photo-scoped need.
+func authorized(auth Authorizer, r *http.Request) bool {
+	a, ok := access(auth, r)
+	return ok && a.FolderID == 0
 }
 
 // photoFor authorizes the request and resolves the photo record and edit
@@ -39,8 +69,9 @@ func authorized(valid func(string) bool, r *http.Request) bool {
 // The v query param makes URLs content-addressed: a changed file gets a new
 // cache key, hence a new URL, so responses are immutable and cacheable
 // forever. A stale v yields 409 so the client refetches the photo record.
-func (h *Handler) photoFor(w http.ResponseWriter, r *http.Request) (photo store.Photo, editHash string, ok bool) {
-	if !authorized(h.TokenValid, r) {
+func (h *Handler) photoFor(w http.ResponseWriter, r *http.Request) (photo store.Photo, editHash string, acc Access, ok bool) {
+	acc, allowed := access(h.Authorize, r)
+	if !allowed {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -53,8 +84,20 @@ func (h *Handler) photoFor(w http.ResponseWriter, r *http.Request) (photo store.
 	if editHash == "" {
 		editHash = edit.BaseHash
 	}
+	// A share without the edits capability asks for the current hash like any
+	// client — the photo record it read carries one — and is answered with the
+	// base rendition regardless.
+	if acc.BaseEditOnly {
+		editHash = edit.BaseHash
+	}
 	photo, err = h.DB.GetPhoto(r.Context(), id)
 	if err != nil {
+		http.Error(w, "unknown photo", http.StatusNotFound)
+		return
+	}
+	if acc.FolderID != 0 && photo.FolderID != acc.FolderID {
+		// Same status as an unknown photo would give a confined caller no
+		// information either way; 404 keeps the id space opaque.
 		http.Error(w, "unknown photo", http.StatusNotFound)
 		return
 	}
@@ -62,7 +105,7 @@ func (h *Handler) photoFor(w http.ResponseWriter, r *http.Request) (photo store.
 		http.Error(w, "stale cache key", http.StatusConflict)
 		return
 	}
-	return photo, editHash, true
+	return photo, editHash, acc, true
 }
 
 // generatable reports whether the edit state can be rendered on demand: only
@@ -79,7 +122,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad level", http.StatusBadRequest)
 		return
 	}
-	photo, editHash, ok := h.photoFor(w, r)
+	photo, editHash, acc, ok := h.photoFor(w, r)
 	if !ok {
 		return
 	}
@@ -93,7 +136,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// layer revalidates against the exact hash on top. Served no-store:
 		// the URL names the exact state, and an immutably-cached stale body
 		// would impersonate it forever.
-		if r.URL.Query().Get("stale") != "" {
+		//
+		// Never for a base-only share: "freshest rendition under any edit
+		// hash" is exactly what that share is not allowed to see.
+		if r.URL.Query().Get("stale") != "" && !acc.BaseEditOnly {
 			if alt := h.Cache.NewestLevel(photo.CacheKey, level); alt != "" {
 				h.serveFileHeaders(w, r, alt, "no-store")
 				return
@@ -138,7 +184,7 @@ func (h *Handler) ServeTile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad tile coordinates", http.StatusBadRequest)
 		return
 	}
-	photo, editHash, ok := h.photoFor(w, r)
+	photo, editHash, _, ok := h.photoFor(w, r)
 	if !ok {
 		return
 	}

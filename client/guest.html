@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover so the loupe can run under a phone's rounded
+         corners and home indicator; the layout pads itself back out with the
+         safe-area insets. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Opened from a link and often kept: "add to home screen" then gives a
+         full-screen album rather than a browser tab. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#111111" />
+    <!-- A share URL is a bearer credential; keep it out of referrers. -->
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Shared album</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/guest/main.tsx"></script>
+  </body>
+</html>

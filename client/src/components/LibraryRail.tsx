@@ -25,6 +25,7 @@ import {
   Search,
   Server,
   Settings,
+  Share2,
   Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -39,6 +40,7 @@ import {
 import { useApiClient } from '@/api/client';
 import { useSharedTasks } from '@/api/tasks';
 import { ChipSpinner } from '@/components/ui/task-chip';
+import { ShareDialog } from '@/components/ShareDialog';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -891,6 +893,7 @@ function ShootRow({
   const folderPath = useUIStore((s) => s.folderPath);
   const active = folderPath != null && samePath(folderPath, shoot.path);
   const scanning = useFolderBusy(shoot.path);
+  const [sharing, setSharing] = useState(false);
 
   const open = () => void openShoot(client, shoot);
 
@@ -991,6 +994,13 @@ function ShootRow({
         >
           <Copy /> <span className="flex-1">Copy path</span>
         </ContextMenuItem>
+        {/* Sharing mints a link against THIS daemon's library, so it is only
+            offered where the folder actually lives. */}
+        {!backend.isRemote && (
+          <ContextMenuItem onClick={() => setSharing(true)}>
+            <Share2 /> <span className="flex-1">Share album…</span>
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onClick={open}>
           <RefreshCw /> <span className="flex-1">Rescan for new photos</span>
         </ContextMenuItem>
@@ -1010,6 +1020,7 @@ function ShootRow({
           </>
         )}
       </ContextMenuContent>
+      <ShareDialog path={shoot.path} name={shoot.name} open={sharing} onOpenChange={setSharing} />
     </ContextMenu>
   );
 }
