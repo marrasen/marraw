@@ -78,30 +78,36 @@ func (h *Downloads) allowed(w http.ResponseWriter, r *http.Request) (Access, boo
 
 // photosFor resolves and scopes an id list, preserving the caller's order so a
 // selection arrives in the order it was made.
+//
+// It distinguishes the two ways an id can fail to resolve, because they mean
+// different things. An id belonging to another folder is a request a confined
+// caller had no business making, and the whole request is refused — a shared
+// link must not be able to name the rest of the library and quietly receive
+// the part of its list that happened to be in scope. An id that resolves to
+// nothing is just a race with the owner deleting a frame, and is skipped, so
+// "download all" still works on a selection made a moment ago.
 func (h *Downloads) photosFor(ctx context.Context, acc Access, ids []int64) ([]store.Photo, error) {
-	rows, err := h.DB.GetPhotos(ctx, ids)
+	folders, err := h.DB.PhotoFolders(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[int64]store.Photo, len(rows))
-	for _, p := range rows {
-		// The same confinement the image endpoints apply: a share may only
-		// reach its own folder, whatever ids the URL names.
-		if acc.FolderID != 0 && p.FolderID != acc.FolderID {
-			continue
+	if acc.FolderID != 0 {
+		for _, id := range ids {
+			if f, ok := folders[id]; ok && f != acc.FolderID {
+				return nil, fmt.Errorf("photo %d is not in this album", id)
+			}
 		}
-		byID[p.ID] = p
 	}
-	out := make([]store.Photo, 0, len(ids))
+	live := make([]int64, 0, len(ids))
 	for _, id := range ids {
-		if p, ok := byID[id]; ok {
-			out = append(out, p)
+		if _, ok := folders[id]; ok {
+			live = append(live, id)
 		}
 	}
-	if len(out) == 0 {
+	if len(live) == 0 {
 		return nil, fmt.Errorf("no photos")
 	}
-	return out, nil
+	return h.DB.GetPhotos(ctx, live)
 }
 
 // jpegName is the download's file name: the RAW's name with a .jpg extension.

@@ -373,12 +373,43 @@ func (db *DB) GetPhoto(ctx context.Context, id int64) (Photo, error) {
 	return scanPhoto(row)
 }
 
+// GetPhotos reads many photos in the caller's order. One query rather than one
+// per ID: several callers pass a whole selection, and one of them (the guest
+// scope check) is handed its list by someone outside the library.
+//
+// A missing ID is an error, not a short result — callers rely on the returned
+// slice lining up with the IDs they asked for.
 func (db *DB) GetPhotos(ctx context.Context, ids []int64) ([]Photo, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	ph, args := int64Placeholders(ids)
+	rows, err := db.QueryContext(ctx, `
+		SELECT `+photoCols+` FROM photos p JOIN folders f ON f.id = p.folder_id
+		WHERE p.id IN (`+ph+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byID := make(map[int64]Photo, len(ids))
+	for rows.Next() {
+		p, err := scanPhoto(rows)
+		if err != nil {
+			return nil, err
+		}
+		byID[p.ID] = p
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Rebuild in the caller's order, which the IN clause does not preserve.
+	// Duplicated IDs are returned as many times as they were asked for, as the
+	// per-ID loop this replaced did.
 	out := make([]Photo, 0, len(ids))
 	for _, id := range ids {
-		p, err := db.GetPhoto(ctx, id)
-		if err != nil {
-			return nil, fmt.Errorf("photo %d: %w", id, err)
+		p, ok := byID[id]
+		if !ok {
+			return nil, fmt.Errorf("photo %d: %w", id, sql.ErrNoRows)
 		}
 		out = append(out, p)
 	}

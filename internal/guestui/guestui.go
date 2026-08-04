@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -40,6 +41,7 @@ type Handler struct {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	harden(w, r)
 	if h.TokenValid != nil && !h.TokenValid(r.PathValue("token")) {
 		page(w, http.StatusNotFound, "Link not available",
 			"This share link has expired or been withdrawn. Ask for a new one.")
@@ -75,10 +77,57 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+// tokenShape is what GeneratePairingToken emits, and the only thing that can
+// name a share. Checking the shape before the token is echoed anywhere keeps
+// the unauthenticated surface to a fixed-size hex string.
+var tokenShape = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
 // Redirect sends /s/{token} to /s/{token}/ so the page's relative asset URLs
 // resolve under the token rather than at the site root.
+//
+// It validates the shape first. The redirect is harmless either way — the
+// prefix is fixed, so it can never become protocol-relative, and Go escapes
+// the URL into the body — but this endpoint is reachable by anyone who finds
+// the funnel hostname, and echoing an arbitrary caller-chosen string into a
+// response header for no reason is a habit worth not having.
 func Redirect(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/s/"+r.PathValue("token")+"/", http.StatusFound)
+	harden(w, r)
+	token := r.PathValue("token")
+	if !tokenShape.MatchString(token) {
+		page(w, http.StatusNotFound, "Link not available",
+			"This share link has expired or been withdrawn. Ask for a new one.")
+		return
+	}
+	http.Redirect(w, r, "/s/"+token+"/", http.StatusFound)
+}
+
+// harden sets the response headers the share page is served with. Everything
+// under /s/ is reachable by anyone who has the URL — and, once the funnel is
+// up, by anyone who guesses the hostname — so it gets the treatment a public
+// page gets rather than the treatment the desktop app's own bundle gets.
+//
+// The policy is exactly what the bundle needs: its own scripts, styles, fonts
+// and images, and a socket back to the daemon that served it. 'unsafe-inline'
+// is there for style only, because React writes style attributes (the loupe's
+// transforms) and the fallback page below carries a <style> block; no inline
+// script is allowed, which is the half that matters.
+func harden(w http.ResponseWriter, r *http.Request) {
+	h := w.Header()
+	h.Set("Content-Security-Policy", "default-src 'none'; "+
+		"script-src 'self'; "+
+		"style-src 'self' 'unsafe-inline'; "+
+		"img-src 'self'; "+
+		"font-src 'self'; "+
+		// Named as well as 'self': Safari historically refused a WebSocket
+		// under connect-src 'self', and a phone is the whole point of this page.
+		"connect-src 'self' wss://"+r.Host+" ws://"+r.Host+"; "+
+		"base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	h.Set("X-Content-Type-Options", "nosniff")
+	// The URL *is* the credential, so it must not ride along in a Referer to
+	// anywhere. The bundle's own <meta referrer> says the same thing; this
+	// covers the responses that are not the bundle.
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("X-Frame-Options", "DENY")
 }
 
 // contentType maps the handful of extensions vite emits. http.DetectContentType

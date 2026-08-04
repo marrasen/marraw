@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/marrasen/aprot"
+
 	"github.com/marrasen/marraw/internal/store"
 )
 
@@ -85,6 +87,145 @@ func TestGuestGateViewOnlyLinkCannotWrite(t *testing.T) {
 func TestGuestGateDeniesUnknownMethod(t *testing.T) {
 	if err := guestAllows(&GuestLink{Caps: GuestCaps{Cull: true}}, "Library.SomeMethodAddedLater"); err == nil {
 		t.Error("guestAllows(unknown method) = nil, want refusal: the allowlist must fail closed")
+	}
+}
+
+// The gate decides "is this a guest?" from the connection's identity, never
+// from whether its link still resolves. Conflating the two used to mean an
+// expired link — a page left open past its last hour — took the not-a-guest
+// path and reached the entire registry with the owner's rights.
+func TestGuestGateRefusesAConnectionWhoseLinkHasLapsed(t *testing.T) {
+	tokens := NewAuthTokens("launch", "pairing")
+	live, err := NewGuestLink(7, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+	if err != nil {
+		t.Fatalf("NewGuestLink: %v", err)
+	}
+	lapsed := live
+	lapsed.ID, lapsed.ExpiresAt = "lapsed", time.Now().Add(-time.Hour).UnixMilli()
+	// A link whose folder is 0 never comes from CreateLink, but a corrupt or
+	// hand-edited settings blob unmarshals straight into the sentinel that
+	// means "unconfined" everywhere else in this file.
+	unconfined := live
+	unconfined.ID, unconfined.FolderID = "unconfined", 0
+	tokens.SetGuests([]GuestLink{live, lapsed, unconfined})
+
+	for _, tc := range []struct {
+		name, connID string
+		wantDenied   bool
+	}{
+		{"live link", live.ID, false},
+		{"expired link", lapsed.ID, true},
+		{"folder-0 link", unconfined.ID, true},
+		{"link revoked mid-connection", "never-existed", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reached := false
+			gate := GuestGate(tokens)(func(context.Context, *aprot.Request) (any, error) {
+				reached = true
+				return nil, nil
+			})
+			ctx := aprot.WithTestConnectionUser(context.Background(), 1, ConnGuestPrefix+tc.connID)
+			// A method NO guest may ever call, so reaching the handler at all
+			// means the gate stopped treating this connection as a guest.
+			_, err := gate(ctx, &aprot.Request{Method: "Library.DeletePhotos"})
+			if reached {
+				t.Error("the connection reached Library.DeletePhotos")
+			}
+			if err == nil {
+				t.Error("the gate returned no error")
+			}
+			// The allowlisted methods are the real test of live vs lapsed.
+			reached = false
+			_, err = gate(ctx, &aprot.Request{Method: "Library.SetRating"})
+			if denied := err != nil; denied != tc.wantDenied {
+				t.Errorf("SetRating denied = %v (err %v), want %v", denied, err, tc.wantDenied)
+			}
+			if reached == tc.wantDenied {
+				t.Errorf("SetRating reached handler = %v, want %v", reached, !tc.wantDenied)
+			}
+		})
+	}
+}
+
+// The second lock on the same door: even if a lapsed connection reached a
+// handler, its confinement must not read as the owner's.
+func TestGuestScopeFailsClosedForALapsedLink(t *testing.T) {
+	tokens := NewAuthTokens("launch", "pairing")
+	tokens.SetGuests([]GuestLink{{
+		ID: "lapsed", Token: "tok", FolderID: 7,
+		ExpiresAt: time.Now().Add(-time.Hour).UnixMilli(),
+	}})
+	d := &Deps{Tokens: tokens}
+
+	ctx := aprot.WithTestConnectionUser(context.Background(), 1, ConnGuestPrefix+"lapsed")
+	if _, err := d.guestScope(ctx); err == nil {
+		t.Error("guestScope(lapsed guest) = nil error, want refusal: 0 means unconfined")
+	}
+	if err := d.CheckGuestFolder(ctx, 7); err == nil {
+		t.Error("CheckGuestFolder(lapsed guest, its own folder) = nil, want refusal")
+	}
+	if err := d.CheckGuestPhotos(ctx, []int64{1}); err == nil {
+		t.Error("CheckGuestPhotos(lapsed guest) = nil, want refusal")
+	}
+
+	// The owner, who has no guest prefix, still passes unconfined.
+	owner := aprot.WithTestConnectionUser(context.Background(), 2, ConnLocal)
+	if scope, err := d.guestScope(owner); err != nil || scope != 0 {
+		t.Errorf("guestScope(owner) = (%d, %v), want (0, nil)", scope, err)
+	}
+}
+
+// A confined caller chooses the length of the ID list the scope check runs on,
+// and that check happens before any per-method cap.
+func TestCheckPhotosScopeRefusesAnOversizedIDList(t *testing.T) {
+	d := &Deps{}
+	ids := make([]int64, maxScopeIDs+1)
+	if err := d.checkPhotosScope(context.Background(), 7, ids); err == nil {
+		t.Error("checkPhotosScope(too many ids) = nil, want refusal before any query runs")
+	}
+	// The owner is unconfined and never pays for the check at all.
+	if err := d.checkPhotosScope(context.Background(), 0, ids); err != nil {
+		t.Errorf("checkPhotosScope(owner, many ids) = %v, want nil", err)
+	}
+}
+
+// A link that runs out while someone is still looking at it has to close their
+// page, not merely start refusing its RPCs.
+func TestSweepGuestsDropsLapsedConnections(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	live, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+	if err != nil {
+		t.Fatalf("NewGuestLink: %v", err)
+	}
+	lapsed, err := NewGuestLink(2, "/photos/wedding", "wedding", GuestCaps{Cull: true}, 0, nil)
+	if err != nil {
+		t.Fatalf("NewGuestLink: %v", err)
+	}
+	lapsed.ExpiresAt = time.Now().Add(-time.Hour).UnixMilli()
+	tokens := NewAuthTokens("launch", "pairing")
+	tokens.SetGuests([]GuestLink{live, lapsed})
+	d := &Deps{DB: db, Tokens: tokens}
+
+	d.MarkGuestOnline(ctx, live.ID, 1)
+	d.MarkGuestOnline(ctx, lapsed.ID, 2)
+
+	// No server wired in, so DisconnectGuest cannot actually close the socket;
+	// what this asserts is which links the sweep SELECTS.
+	if got := d.lapsedGuestIDs(time.Now()); len(got) != 1 || got[0] != lapsed.ID {
+		t.Errorf("lapsedGuestIDs = %v, want just the expired link %s", got, lapsed.ID)
+	}
+	// Withdrawing the other link makes its open connection lapsed too, which is
+	// what closes the window between SetGuests and DisconnectGuest in Revoke.
+	tokens.SetGuests(nil)
+	got := d.lapsedGuestIDs(time.Now())
+	if len(got) != 2 {
+		t.Errorf("lapsedGuestIDs after revoking everything = %v, want both connections", got)
 	}
 }
 
@@ -366,6 +507,47 @@ func TestGuestPresenceTracksConnections(t *testing.T) {
 	}
 }
 
+// The auth hook runs again on a mid-session re-auth, and the token it carries
+// may name a different link. The connection has to leave the first link's books
+// on the way, or that link reads as "viewing now" until the daemon restarts.
+func TestGuestPresenceFollowsAConnectionThatReauthenticates(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	first, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+	if err != nil {
+		t.Fatalf("NewGuestLink: %v", err)
+	}
+	second, err := NewGuestLink(2, "/photos/wedding", "wedding", GuestCaps{Cull: true}, 0, nil)
+	if err != nil {
+		t.Fatalf("NewGuestLink: %v", err)
+	}
+	tokens := NewAuthTokens("launch", "pairing")
+	tokens.SetGuests([]GuestLink{first, second})
+	if err := SaveGuestLinks(ctx, db, []GuestLink{first, second}); err != nil {
+		t.Fatalf("SaveGuestLinks: %v", err)
+	}
+	d := &Deps{DB: db, Tokens: tokens}
+
+	d.MarkGuestOnline(ctx, first.ID, 1)
+	d.MarkGuestOnline(ctx, second.ID, 1) // same connection, re-authenticated
+
+	if d.GuestOnline(first.ID) {
+		t.Error("the link the connection left still reads as being viewed")
+	}
+	if !d.GuestOnline(second.ID) {
+		t.Error("the link the connection moved to does not read as being viewed")
+	}
+	d.MarkGuestOffline(second.ID, 1)
+	if d.GuestOnline(second.ID) {
+		t.Error("the link stayed online after its only connection went")
+	}
+}
+
 // Opening a link records when, so the rail can say "last opened 5 min ago"
 // once the visitor has gone.
 func TestGuestConnectStampsLastSeen(t *testing.T) {
@@ -408,6 +590,65 @@ func TestGuestConnectStampsLastSeen(t *testing.T) {
 	d.MarkGuestOnline(ctx, link.ID, 2)
 	if again := tokens.Guests()[0].LastSeen; again != got {
 		t.Errorf("a reconnect within the throttle rewrote LastSeen (%d → %d)", got, again)
+	}
+}
+
+// SetFocus is allowlisted so the shared page can say where the visitor is
+// looking, but the value it writes is process-global and steers the owner's
+// pre-render pass over the owner's own folder. The guest's id is foreign
+// there, so honouring it drags that pass back to position 0.
+func TestSetFocusIgnoresGuestsButHonoursTheOwner(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	folderID, err := db.UpsertFolder(ctx, "/photos/band-shoot")
+	if err != nil {
+		t.Fatalf("UpsertFolder: %v", err)
+	}
+	if _, err := db.SyncFolder(ctx, folderID, "/photos/band-shoot", []store.FileEntry{
+		{Name: "a.arw", Size: 1, MtimeNs: 1},
+		{Name: "b.arw", Size: 1, MtimeNs: 1},
+	}); err != nil {
+		t.Fatalf("SyncFolder: %v", err)
+	}
+	photos, err := db.ListPhotos(ctx, folderID)
+	if err != nil {
+		t.Fatalf("ListPhotos: %v", err)
+	}
+
+	link, err := NewGuestLink(folderID, "/photos/band-shoot", "band-shoot", GuestCaps{Cull: true}, 0, nil)
+	if err != nil {
+		t.Fatalf("NewGuestLink: %v", err)
+	}
+	tokens := NewAuthTokens("launch", "pairing")
+	tokens.SetGuests([]GuestLink{link})
+	l := &Library{deps: &Deps{DB: db, Tokens: tokens}}
+
+	owner := aprot.WithTestConnectionUser(ctx, 1, ConnLocal)
+	if err := l.SetFocus(owner, folderID, photos[0].ID); err != nil {
+		t.Fatalf("SetFocus(owner) = %v", err)
+	}
+	if got := l.deps.focusPhotoID.Load(); got != photos[0].ID {
+		t.Fatalf("focus after the owner set it = %d, want %d", got, photos[0].ID)
+	}
+
+	// The guest's own photo, in the folder it was shared: accepted, and
+	// ignored. Not an error — the page is doing nothing wrong.
+	guest := aprot.WithTestConnectionUser(ctx, 2, ConnGuestPrefix+link.ID)
+	if err := l.SetFocus(guest, folderID, photos[1].ID); err != nil {
+		t.Errorf("SetFocus(guest, own photo) = %v, want nil", err)
+	}
+	if got := l.deps.focusPhotoID.Load(); got != photos[0].ID {
+		t.Errorf("a guest moved the owner's render focus to %d", got)
+	}
+
+	// A folder the link was not minted for is still refused outright.
+	if err := l.SetFocus(guest, folderID+1, photos[1].ID); err == nil {
+		t.Error("SetFocus(guest, another folder) = nil, want refusal")
 	}
 }
 

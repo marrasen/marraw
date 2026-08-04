@@ -492,33 +492,61 @@ func (l *Library) DeletePhotos(ctx context.Context, ids []int64) (*DeleteResult,
 	return &DeleteResult{Deleted: len(photos)}, nil
 }
 
+// maxVisibleHints bounds one viewport hint. No screen shows more thumbnails
+// than this, and the cap is applied before anything reads the list — including
+// the scope check, which costs a query and whose length a shared link's
+// visitor would otherwise choose.
+const maxVisibleHints = 256
+
 // SetVisible hints which photos the client's viewport shows so their
 // thumbnails are generated ahead of scroll. Fire-and-forget.
 func (l *Library) SetVisible(ctx context.Context, folderID int64, ids []int64) error {
-	if err := l.deps.CheckGuestPhotos(ctx, ids); err != nil {
+	if len(ids) > maxVisibleHints {
+		ids = ids[:maxVisibleHints]
+	}
+	if err := l.deps.CheckGuestFolder(ctx, folderID); err != nil {
 		return err
 	}
-	if len(ids) > 256 {
-		ids = ids[:256]
+	if err := l.deps.CheckGuestPhotos(ctx, ids); err != nil {
+		return err
 	}
 	photos, err := l.deps.DB.GetPhotos(context.WithoutCancel(ctx), ids)
 	if err != nil {
 		return nil // vanished rows are not the client's problem
 	}
+	// Detached from the request — SetVisible returns at once and the renders
+	// outlive it — but NOT from the caller. A Background() decode has no
+	// watcher and nothing can cancel it, which is how a visitor who closed
+	// their page would leave RAW decodes running on the owner's machine.
+	warm := callerCtx(ctx)
 	for _, p := range photos {
-		go l.deps.Cache.Ensure(context.Background(), p, "512", currentHash(p), decode.PriorityPrefetch)
+		go l.deps.Cache.Ensure(warm, p, "512", currentHash(p), decode.PriorityPrefetch)
 	}
 	return nil
 }
 
 // SetFocus hints which photo the client's viewport is centred on so the
 // background pre-render pass renders outward from it — the loupe-ready
-// rendition nearest where the user is looking warms first. Fire-and-forget;
-// folderID is accepted for symmetry with SetVisible but the single active
-// folder-jobs slot means the id alone suffices.
+// rendition nearest where the user is looking warms first. Fire-and-forget.
+//
+// The single active folder-jobs slot means the photo id alone would suffice,
+// but folderID is checked anyway rather than ignored: an unread parameter is
+// one a confined caller may set to anything, and next time it may be read.
 func (l *Library) SetFocus(ctx context.Context, folderID int64, photoID int64) error {
+	if err := l.deps.CheckGuestFolder(ctx, folderID); err != nil {
+		return err
+	}
 	if err := l.deps.CheckGuestPhotos(ctx, []int64{photoID}); err != nil {
 		return err
+	}
+	// focusPhotoID is process-global and steers the pre-render pass over
+	// whichever folder the OWNER has open. A guest's photo is foreign to that
+	// folder's ordering and lands at position 0, so honouring the hint would
+	// let a visitor repeatedly drag the owner's background rendering back to
+	// the front of a shoot they cannot see. The id is theirs to name; the
+	// owner's render order is not theirs to steer.
+	if _, isGuest := guestConnID(ctx); isGuest {
+		return nil
 	}
 	l.deps.focusPhotoID.Store(photoID)
 	return nil

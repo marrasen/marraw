@@ -109,6 +109,21 @@ func (d *Deps) MarkGuestOnline(ctx context.Context, id string, conn uint64) {
 	if d.guestConns == nil {
 		d.guestConns = map[string]map[uint64]struct{}{}
 	}
+	// aprot runs the auth hook again on a mid-session re-auth, and the token it
+	// carries may name a different link. Take the connection out of wherever it
+	// was first: otherwise the link it left keeps this connection on its books
+	// and reads as "viewing now" until the daemon restarts.
+	for other, conns := range d.guestConns {
+		if other == id {
+			continue
+		}
+		if _, ok := conns[conn]; ok {
+			delete(conns, conn)
+			if len(conns) == 0 {
+				delete(d.guestConns, other)
+			}
+		}
+	}
 	if d.guestConns[id] == nil {
 		d.guestConns[id] = map[uint64]struct{}{}
 	}
@@ -131,6 +146,76 @@ func (d *Deps) MarkGuestOffline(id string, conn uint64) {
 	}
 	d.guestMu.Unlock()
 	d.TriggerRefresh(shareKey)
+}
+
+// guestSweepInterval is how often lapsed links are swept off their live
+// connections. Expiries are set in hours, so a minute of slack costs nothing
+// and keeps the sweep off the hot path.
+const guestSweepInterval = time.Minute
+
+// RunGuestSweep enforces link expiry on connections that are already open,
+// until ctx is done.
+//
+// Expiry is otherwise only checked at the door. aprot has no reason to close
+// an authenticated socket, and a browser answers pings by itself, so a phone
+// left on the shoot overnight keeps its connection long past the link's last
+// hour. GuestGate refuses that connection's RPCs — but "the page stops
+// working" is what expiry is supposed to mean, not "the page starts erroring".
+func (d *Deps) RunGuestSweep(ctx context.Context) {
+	t := time.NewTicker(guestSweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			d.SweepGuests(now)
+		}
+	}
+}
+
+// SweepGuests drops every live connection whose link has lapsed. Revocation
+// disconnects its own guest directly; this is for the links nobody withdrew,
+// which simply ran out — and for the sliver between a revocation storing the
+// new list and reaching its own DisconnectGuest call.
+func (d *Deps) SweepGuests(now time.Time) {
+	for _, id := range d.lapsedGuestIDs(now) {
+		log.Printf("share: link %s is no longer valid; closing its open page", id)
+		d.DisconnectGuest(id)
+		// Forget the link here too, rather than waiting for the disconnect
+		// hook. Normally the hook gets there first and this is a no-op, but a
+		// connection that has already gone without one would otherwise stay on
+		// the books and be swept — and logged — once a minute forever.
+		d.guestMu.Lock()
+		delete(d.guestConns, id)
+		d.guestMu.Unlock()
+	}
+}
+
+// lapsedGuestIDs is the set of links with a connection open that liveGuest
+// would no longer resolve. Split out of SweepGuests so the selection can be
+// tested without a live server, and so the disconnects happen outside guestMu:
+// dropping a connection runs the OnDisconnect hook, which takes that same lock
+// to clear the connection out of guestConns.
+func (d *Deps) lapsedGuestIDs(now time.Time) []string {
+	if d.Tokens == nil {
+		return nil
+	}
+	live := map[string]bool{}
+	for _, g := range d.Tokens.Guests() {
+		if g.FolderID != 0 && !g.Expired(now) {
+			live[g.ID] = true
+		}
+	}
+	d.guestMu.Lock()
+	defer d.guestMu.Unlock()
+	var lapsed []string
+	for id := range d.guestConns {
+		if !live[id] {
+			lapsed = append(lapsed, id)
+		}
+	}
+	return lapsed
 }
 
 // GuestOnline reports whether anyone is holding this link open right now.
@@ -193,13 +278,26 @@ var guestWriteMethods = map[string]bool{
 // silently grants every method added after it was written, and this is the one
 // place in marraw where the caller is not the user.
 //
-// Connections that are not guests pass straight through.
+// Connections that are not guests pass straight through. Whether a connection
+// IS a guest is decided by its identity alone — never by whether its link
+// still resolves. Those are different questions, and answering the first with
+// the second is what would let a link that has since expired read as the
+// owner: the lookup filters expired links out, so a lapsed guest would resolve
+// to nil and take the not-a-guest path into the whole registry.
 func GuestGate(tokens *AuthTokens) aprot.Middleware {
 	return func(next aprot.Handler) aprot.Handler {
 		return func(ctx context.Context, req *aprot.Request) (any, error) {
-			link := guestOf(ctx, tokens)
-			if link == nil {
+			id, isGuest := guestConnID(ctx)
+			if !isGuest {
 				return next(ctx, req)
+			}
+			link := liveGuest(tokens, id)
+			if link == nil {
+				// Expired, revoked, or a daemon with no token store. A guest
+				// whose link has gone is not demoted to a lesser guest — it is
+				// refused outright, because there is nothing left to scope it
+				// to. Its connection is dropped separately (see SweepGuests).
+				return nil, aprot.ErrAuthFailed("this share link is no longer valid")
 			}
 			if err := guestAllows(link, req.Method); err != nil {
 				return nil, err
@@ -207,6 +305,36 @@ func GuestGate(tokens *AuthTokens) aprot.Middleware {
 			return next(ctx, req)
 		}
 	}
+}
+
+// guestConnID reports the share-link ID a connection authenticated as, and
+// whether it is a guest at all. Identity only: it does not consult the link
+// list, so it keeps answering "yes, a guest" for a link that has since lapsed.
+func guestConnID(ctx context.Context) (string, bool) {
+	c := aprot.Connection(ctx)
+	if c == nil {
+		return "", false
+	}
+	return strings.CutPrefix(c.UserID(), ConnGuestPrefix)
+}
+
+// liveGuest returns the named link if it is still mintable into access: known,
+// unexpired, and confined to a real folder. A link carrying folder 0 is
+// refused rather than trusted — 0 is the unconfined sentinel throughout this
+// file, and CreateLink never mints one, so a link that has it came from a
+// corrupt or hand-edited settings blob.
+func liveGuest(tokens *AuthTokens, id string) *GuestLink {
+	if tokens == nil {
+		return nil
+	}
+	now := time.Now()
+	for _, g := range tokens.Guests() {
+		if g.ID == id && g.FolderID != 0 && !g.Expired(now) {
+			link := g
+			return &link
+		}
+	}
+	return nil
 }
 
 // guestAllows reports whether a guest holding link may call method. Split out
@@ -221,52 +349,49 @@ func guestAllows(link *GuestLink, method string) error {
 	return nil
 }
 
-// guestOf resolves the guest link behind a connection, or nil for any other
-// caller. The link is looked up by ID on every call rather than cached on the
-// connection so that revoking or re-scoping a share takes effect on the live
-// connection's next RPC, not at its next reconnect.
-func guestOf(ctx context.Context, tokens *AuthTokens) *GuestLink {
-	c := aprot.Connection(ctx)
-	if c == nil || tokens == nil {
-		return nil
-	}
-	id, ok := strings.CutPrefix(c.UserID(), ConnGuestPrefix)
-	if !ok {
-		return nil
-	}
-	now := time.Now()
-	for _, g := range tokens.Guests() {
-		if g.ID == id && !g.Expired(now) {
-			link := g
-			return &link
-		}
-	}
-	return nil
-}
-
 // GuestLink returns the share link the calling connection authenticated with,
-// or nil when the caller is the owner. Handlers use it to scope themselves;
-// see Library.ListPhotos.
+// or nil when the caller is the owner. The link is looked up by ID on every
+// call rather than cached on the connection so that revoking or re-scoping a
+// share takes effect on the live connection's next RPC, not at its next
+// reconnect.
+//
+// A guest whose link has lapsed also returns nil here, which is why callers
+// that need to tell "the owner" from "a guest with nothing left" must use
+// guestScope instead. Share.Session is the exception and wants exactly this:
+// nil means "no session to describe", whichever of the two it is.
 func (d *Deps) GuestLink(ctx context.Context) *GuestLink {
-	return guestOf(ctx, d.Tokens)
+	id, isGuest := guestConnID(ctx)
+	if !isGuest {
+		return nil
+	}
+	return liveGuest(d.Tokens, id)
 }
 
-// guestFolder is the folder a caller is confined to: 0 for the owner, the
-// link's folder for a guest. A revoked or expired guest whose connection is
-// still open resolves to nil in GuestLink and would read as unconfined here,
-// which is why the gate — which rejects that same connection outright — runs
-// first.
-func (d *Deps) guestFolder(ctx context.Context) int64 {
-	if g := d.GuestLink(ctx); g != nil {
-		return g.FolderID
+// guestScope is the folder a caller is confined to: 0 for the owner, the
+// link's folder for a guest. A guest whose link has expired or been revoked
+// mid-connection is an error rather than a 0, because 0 means unconfined and
+// that connection has just lost every claim it had. GuestGate refuses those
+// connections at the door; this is the second lock on the same door.
+func (d *Deps) guestScope(ctx context.Context) (int64, error) {
+	id, isGuest := guestConnID(ctx)
+	if !isGuest {
+		return 0, nil
 	}
-	return 0
+	link := liveGuest(d.Tokens, id)
+	if link == nil {
+		return 0, aprot.ErrForbidden("not shared")
+	}
+	return link.FolderID, nil
 }
 
 // CheckGuestFolder authorizes a guest's access to a folder by ID. The owner
 // passes unconditionally.
 func (d *Deps) CheckGuestFolder(ctx context.Context, folderID int64) error {
-	return checkFolderScope(d.guestFolder(ctx), folderID)
+	scope, err := d.guestScope(ctx)
+	if err != nil {
+		return err
+	}
+	return checkFolderScope(scope, folderID)
 }
 
 // CheckGuestPhotos authorizes a guest's access to a set of photos. It costs a
@@ -275,7 +400,11 @@ func (d *Deps) CheckGuestFolder(ctx context.Context, folderID int64) error {
 // the request — the boundary between a shared folder and the rest of the
 // library.
 func (d *Deps) CheckGuestPhotos(ctx context.Context, ids []int64) error {
-	return d.checkPhotosScope(ctx, d.guestFolder(ctx), ids)
+	scope, err := d.guestScope(ctx)
+	if err != nil {
+		return err
+	}
+	return d.checkPhotosScope(ctx, scope, ids)
 }
 
 // checkFolderScope authorizes access to one folder under a confinement, where
@@ -289,22 +418,32 @@ func checkFolderScope(scope, folderID int64) error {
 	return aprot.ErrForbidden("not shared")
 }
 
+// maxScopeIDs bounds how many photo IDs a confined caller may name in one
+// request. Comfortably above selecting every frame of a long shoot, and far
+// below what a 32 MiB request frame of repeated IDs would otherwise buy —
+// which is the point, because this check runs BEFORE any per-method cap and so
+// its cost is set by whatever the caller chose to send.
+const maxScopeIDs = 10_000
+
 // checkPhotosScope authorizes access to photo IDs under a confinement.
 func (d *Deps) checkPhotosScope(ctx context.Context, scope int64, ids []int64) error {
 	if scope == 0 || len(ids) == 0 {
 		return nil
 	}
-	photos, err := d.DB.GetPhotos(ctx, ids)
+	if len(ids) > maxScopeIDs {
+		return aprot.ErrInvalidParams("too many photos in one request")
+	}
+	// One query for the whole set, not one per ID: a confined caller picks the
+	// length of this list, so it must not cost a round trip each.
+	folders, err := d.DB.PhotoFolders(ctx, ids)
 	if err != nil {
 		return aprot.ErrForbidden("not shared")
 	}
-	// A vanished row is not in the folder either: comparing counts stops an id
-	// that resolves to nothing from riding along with legitimate ones.
-	if len(photos) != len(ids) {
-		return aprot.ErrForbidden("not shared")
-	}
-	for _, p := range photos {
-		if p.FolderID != scope {
+	for _, id := range ids {
+		// A vanished row is not in the folder either, and is refused rather
+		// than skipped: dropping it would let an ID that resolves to nothing
+		// ride along with legitimate ones.
+		if f, ok := folders[id]; !ok || f != scope {
 			return aprot.ErrForbidden("not shared")
 		}
 	}

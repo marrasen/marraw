@@ -197,6 +197,22 @@ func (d *Deps) ConnIsLocal(ctx context.Context) bool {
 	return c.UserID() == ConnLocal
 }
 
+// callerCtx is the lifetime of the connection that made this request, for work
+// that must outlive the request but not the caller — a prefetch warmed on a
+// viewport hint, say. It is the middle ground between the request context
+// (cancelled the moment the fire-and-forget handler returns) and
+// context.Background() (cancelled by nothing, so the work cannot be stopped
+// even after whoever asked for it has gone).
+//
+// Falls back to Background only where there is no connection at all: a
+// background pass, or a test.
+func callerCtx(ctx context.Context) context.Context {
+	if c := aprot.Connection(ctx); c != nil {
+		return c.Context()
+	}
+	return context.Background()
+}
+
 // DisconnectDevice drops every live connection belonging to one approved
 // device, so revoking access takes effect immediately rather than at the
 // client's next reconnect.

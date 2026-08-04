@@ -64,6 +64,76 @@ func TestDownloadsRequireTheCapability(t *testing.T) {
 	}
 }
 
+// A crafted id list must not quietly return the part of itself that happened
+// to be in scope, but an id that raced with the owner deleting a frame is not
+// the visitor's fault and must not fail the whole download.
+func TestDownloadScopingRefusesForeignIDsAndSkipsVanishedOnes(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	ids := func(path string, names ...string) []int64 {
+		folderID, err := db.UpsertFolder(ctx, path)
+		if err != nil {
+			t.Fatalf("UpsertFolder: %v", err)
+		}
+		files := make([]store.FileEntry, len(names))
+		for i, n := range names {
+			files[i] = store.FileEntry{Name: n, Size: 1, MtimeNs: 1}
+		}
+		if _, err := db.SyncFolder(ctx, folderID, path, files); err != nil {
+			t.Fatalf("SyncFolder: %v", err)
+		}
+		photos, err := db.ListPhotos(ctx, folderID)
+		if err != nil {
+			t.Fatalf("ListPhotos: %v", err)
+		}
+		out := make([]int64, len(photos))
+		for i, p := range photos {
+			out[i] = p.ID
+		}
+		return out
+	}
+
+	shared := ids("/photos/band-shoot", "a.arw", "b.arw")
+	private := ids("/photos/wedding", "secret.arw")
+	scope, err := db.UpsertFolder(ctx, "/photos/band-shoot")
+	if err != nil {
+		t.Fatalf("UpsertFolder: %v", err)
+	}
+	h := &Downloads{DB: db}
+	acc := Access{FolderID: scope, Downloads: true}
+
+	got, err := h.photosFor(ctx, acc, shared)
+	if err != nil || len(got) != 2 {
+		t.Errorf("photosFor(own folder) = %d photos, %v; want 2, nil", len(got), err)
+	}
+	// The interesting case: one real id from the shared folder alongside one
+	// from outside it. Returning the first and dropping the second would make
+	// a crafted list a partially-successful request.
+	if _, err := h.photosFor(ctx, acc, []int64{shared[0], private[0]}); err == nil {
+		t.Error("photosFor(shared + another folder's photo) = nil error, want refusal")
+	}
+	if _, err := h.photosFor(ctx, acc, private); err == nil {
+		t.Error("photosFor(another folder) = nil error, want refusal")
+	}
+	// A vanished row is a race, not an attack.
+	got, err = h.photosFor(ctx, acc, []int64{shared[0], 999999})
+	if err != nil || len(got) != 1 || got[0].ID != shared[0] {
+		t.Errorf("photosFor(shared + deleted) = %d photos, %v; want just the live one", len(got), err)
+	}
+	if _, err := h.photosFor(ctx, acc, []int64{999999}); err == nil {
+		t.Error("photosFor(nothing that resolves) = nil error, want refusal")
+	}
+	// The owner names whatever they like.
+	if got, err := h.photosFor(ctx, Access{}, append(append([]int64{}, shared...), private...)); err != nil || len(got) != 3 {
+		t.Errorf("photosFor(owner) = %d photos, %v; want 3, nil", len(got), err)
+	}
+}
+
 // photoNamed is a store.Photo with only the field jpegName reads.
 func photoNamed(name string) store.Photo { return store.Photo{FileName: name} }
 

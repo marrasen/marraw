@@ -242,7 +242,14 @@ func main() {
 	server.SetCheckOrigin(func(r *http.Request) bool { return true })
 	if !isDev {
 		server.OnAuth(func(ctx context.Context, conn *aprot.Conn, tok string) error {
-			switch m := tokens.Match(tok); {
+			m := tokens.Match(tok)
+			// A connection that came in through the funnel may only be a share
+			// link. The owner's launch and pairing tokens are refused there
+			// outright rather than merely being unlikely to be guessed.
+			if ctx.Value(funnelConn{}) != nil && m.Guest == nil {
+				return aprot.ErrAuthFailed("invalid token")
+			}
+			switch {
 			case m.Launch:
 				conn.SetUserID(api.ConnLocal)
 			case m.DeviceID != "":
@@ -278,52 +285,86 @@ func main() {
 	defer stop()
 
 	go janitor.Run(ctx)
+	// Link expiry is checked when a guest authenticates, but an already-open
+	// page holds its socket indefinitely. This is what makes a lapsed link
+	// actually stop working for the person still looking at it.
+	go deps.RunGuestSweep(ctx)
 
-	// Two credential checks for the HTTP endpoints, because a share link is a
+	// Three credential checks for the HTTP endpoints, because a share link is a
 	// valid credential that may see almost nothing. imgAuth resolves what a
 	// credential is allowed to see (one folder, base renditions only) for the
 	// photo endpoints; tokenValid answers the endpoints that are not
-	// photo-scoped, and refuses share links outright.
-	var imgAuth imghttp.Authorizer
+	// photo-scoped, and refuses share links outright; guestAuth is imgAuth with
+	// the owner's own credentials removed, for the funnel-facing listener.
+	accessFor := func(m api.TokenMatch) (imghttp.Access, bool) {
+		switch {
+		case !m.OK:
+			return imghttp.Access{}, false
+		case m.Guest != nil:
+			acc := imghttp.Access{
+				FolderID:     m.Guest.FolderID,
+				BaseEditOnly: !m.Guest.Caps.Edits,
+				Downloads:    m.Guest.Caps.Downloads,
+			}
+			if e := m.Guest.Export; e != nil {
+				acc.Download = imghttp.DownloadSpec{
+					LongEdge:       e.LongEdge,
+					JpegQuality:    e.JpegQuality,
+					ColorSpace:     e.ColorSpace,
+					SharpenTarget:  e.SharpenTarget,
+					SharpenAmount:  e.SharpenAmount,
+					ExifMode:       e.ExifMode,
+					RemoveLocation: e.RemoveLocation,
+					WatermarkID:    e.WatermarkID,
+				}
+			}
+			return acc, true
+		}
+		return imghttp.Access{}, true
+	}
+	var imgAuth, guestAuth imghttp.Authorizer
 	var tokenValid func(string) bool
 	if !isDev {
-		imgAuth = func(tok string) (imghttp.Access, bool) {
+		imgAuth = func(tok string) (imghttp.Access, bool) { return accessFor(tokens.Match(tok)) }
+		guestAuth = func(tok string) (imghttp.Access, bool) {
 			m := tokens.Match(tok)
-			switch {
-			case !m.OK:
+			if m.Guest == nil {
+				// Not a lesser credential on this listener — one that has no
+				// business arriving from the public internet at all.
 				return imghttp.Access{}, false
-			case m.Guest != nil:
-				acc := imghttp.Access{
-					FolderID:     m.Guest.FolderID,
-					BaseEditOnly: !m.Guest.Caps.Edits,
-					Downloads:    m.Guest.Caps.Downloads,
-				}
-				if e := m.Guest.Export; e != nil {
-					acc.Download = imghttp.DownloadSpec{
-						LongEdge:       e.LongEdge,
-						JpegQuality:    e.JpegQuality,
-						ColorSpace:     e.ColorSpace,
-						SharpenTarget:  e.SharpenTarget,
-						SharpenAmount:  e.SharpenAmount,
-						ExifMode:       e.ExifMode,
-						RemoveLocation: e.RemoveLocation,
-						WatermarkID:    e.WatermarkID,
-					}
-				}
-				return acc, true
 			}
-			return imghttp.Access{}, true
+			return accessFor(m)
 		}
 		tokenValid = func(tok string) bool {
 			m := tokens.Match(tok)
 			return m.OK && m.Guest == nil
 		}
 	}
+	// Two muxes, because the funnel publishes a whole port and there is no
+	// version-stable way to publish less of one. mux is the daemon: every
+	// endpoint, reachable by the Electron shell over loopback and — if the user
+	// turned remote access on — by their own other machines. guestMux is what
+	// the funnel points at, and carries only what a shared album needs.
+	//
+	// Nothing on guestMux answers an owner credential. Sharing one shoot with a
+	// friend should not put the pairing token's front door on the public
+	// internet, and the difference between "the token is 128 bits so guessing
+	// it is hopeless" and "the endpoint is not there" is the difference between
+	// surviving a future bug and not.
 	mux := http.NewServeMux()
 	mux.Handle("/ws", server)
+	// The same aprot server, with the connection marked as having arrived from
+	// the internet; the auth hook refuses everything but a share link on it.
+	funnelWS := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), funnelConn{}, true)))
+	})
 	img := &imghttp.Handler{DB: db, Cache: cache, Authorize: imgAuth}
+	guestImg := &imghttp.Handler{DB: db, Cache: cache, Authorize: guestAuth}
 	mux.Handle("GET /img/{id}/{level}", img)
 	mux.Handle("GET /img/{id}/tile/{tx}/{ty}", http.HandlerFunc(img.ServeTile))
+	// Deliberately not on the funnel: watermark assets belong to the library
+	// rather than to any one folder, and the shared page has no editor to
+	// preview them in.
 	mux.Handle("GET /wm/{name}", &imghttp.Assets{Dir: watermarkDir, Authorize: imgAuth})
 	// Downloads: a full develop-pipeline render per photo, so the visitor gets
 	// the same pixels an export would produce rather than a preview upscaled.
@@ -366,14 +407,20 @@ func main() {
 	})
 	mux.Handle("GET /dl/{id}", dl)
 	mux.HandleFunc("GET /dl.zip", dl.ServeZip)
+	guestDl := imghttp.NewDownloads(db, guestAuth, dl.Render)
 	// The share page itself. The token rides in the path so the page can read
 	// it without a query string, and so its relative asset URLs land under the
 	// same prefix.
+	//
+	// On mux as well as the funnel's own mux: without a funnel a link falls
+	// back to the node's tailnet name on the daemon's own port (see
+	// Share.shareBase), and that URL has to answer.
 	guestPage := &guestui.Handler{TokenValid: func(tok string) bool {
 		return tokens.Match(tok).Guest != nil
 	}}
 	mux.HandleFunc("GET /s/{token}", guestui.Redirect)
 	mux.Handle("GET /s/{token}/{path...}", guestPage)
+	guestMux := newGuestMux(funnelWS, guestImg, guestDl, guestPage)
 	// The bundled watermark fonts, so the editor preview renders with the
 	// byte-identical faces the exporter uses. Fonts are CORS-gated even on
 	// file:// — the wildcard origin is required, and safe under the same
@@ -427,6 +474,38 @@ func main() {
 		}
 	}()
 
+	// The funnel's own listener, always on loopback: `tailscale funnel` proxies
+	// from the tailnet's edge to a local port, so it never needs a routable
+	// bind — and binding one would put this reduced surface on the LAN too, for
+	// nothing. A failure here is not fatal: the daemon works, and the share UI
+	// reports the funnel as unavailable, exactly as it does without Tailscale.
+	//
+	// Never in dev: --dev disables every auth check, and the startup guard
+	// above refuses to let it bind beyond loopback. Publishing it through a
+	// funnel would be that same mistake by a longer route.
+	guestPort := 0
+	var guestLn net.Listener
+	var guestErr error
+	if !isDev {
+		guestLn, guestErr = net.Listen("tcp", "127.0.0.1:0")
+	}
+	switch {
+	case isDev:
+		log.Print("share: funnel disabled in dev mode")
+	case guestErr != nil:
+		log.Printf("share: no funnel listener (%v); links fall back to this machine's own address", guestErr)
+	default:
+		guestPort = guestLn.Addr().(*net.TCPAddr).Port
+		guestServer := &http.Server{Handler: guestMux}
+		defer guestServer.Close()
+		go func() {
+			if err := guestServer.Serve(guestLn); err != nil && err != http.ErrServerClosed {
+				log.Printf("share: funnel listener stopped: %v", err)
+			}
+		}()
+		log.Printf("share: funnel listener on 127.0.0.1:%d (share routes only)", guestPort)
+	}
+
 	// Announce on the local network, now that the real port is known.
 	deps.StartAdvertising(context.Background())
 
@@ -434,7 +513,12 @@ func main() {
 	// come back with it — otherwise a link handed out yesterday is dead until
 	// the owner notices and mints another. In the background: raising a funnel
 	// runs the tailscale CLI, and the app must not wait on it to start.
-	funnel.SetPort(actualPort)
+	//
+	// The funnel points at guestPort, not the daemon's own: publishing a whole
+	// port is the only thing the CLI does, so the port it publishes has to be
+	// one where every route is meant to be public. Without that listener there
+	// is nothing safe to publish, so the funnel stays down.
+	funnel.SetPort(guestPort)
 	if len(tokens.Guests()) > 0 {
 		go func() {
 			if err := funnel.Enable(context.Background()); err != nil {
@@ -500,6 +584,35 @@ func setupLogging(dataDir string) *os.File {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetOutput(io.MultiWriter(os.Stderr, f))
 	return f
+}
+
+// funnelConn marks a WebSocket connection that arrived on the funnel-facing
+// listener. It rides the request context, which aprot hands to the auth hook as
+// the connection's own context.
+type funnelConn struct{}
+
+// newGuestMux is everything the funnel publishes: the share page, the socket
+// its client speaks, the two image endpoints it draws from, and the downloads.
+//
+// `tailscale funnel` publishes a whole port and nothing smaller, so the
+// reduction has to happen on our side of it — which makes the list below the
+// actual boundary. A route absent here is a route the public internet cannot
+// reach, whatever credential it presents. Notably absent: /wm, /fonts,
+// /healthz, /authz, and the pairing and discovery routes.
+//
+// The handlers passed in are the guest-only variants, whose authorizers refuse
+// the owner's own credentials outright. Two locks, one door: the wrong route
+// is not there, and the right route will not take an owner token.
+func newGuestMux(ws http.Handler, img *imghttp.Handler, dl *imghttp.Downloads, page *guestui.Handler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/ws", ws)
+	mux.Handle("GET /img/{id}/{level}", img)
+	mux.Handle("GET /img/{id}/tile/{tx}/{ty}", http.HandlerFunc(img.ServeTile))
+	mux.Handle("GET /dl/{id}", dl)
+	mux.HandleFunc("GET /dl.zip", dl.ServeZip)
+	mux.HandleFunc("GET /s/{token}", guestui.Redirect)
+	mux.Handle("GET /s/{token}/{path...}", page)
+	return mux
 }
 
 // isLoopback reports whether host is unreachable from other machines.
