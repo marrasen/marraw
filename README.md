@@ -17,8 +17,9 @@ your zoom and pan as you arrow through.</sup>
 > AI-masked local editing, healing and content-aware fill, presets that carry
 > the AI, and opening a library hosted on another machine are all in. The gaps
 > that remain are real ones, though: read
-> [What marraw does *not* do](#what-marraw-does-not-do) before you invest time
-> in it. Windows is the primary platform; the macOS and Linux builds are newer
+> [What marraw does *not* do (yet)](#what-marraw-does-not-do-yet) and
+> [What marraw *won't* do (probably)](#what-marraw-wont-do-probably) before
+> you invest time in it. Windows is the primary platform; the macOS and Linux builds are newer
 > and less travelled — issue reports are very welcome.
 
 ---
@@ -220,7 +221,9 @@ are the controls you chose to keep at hand.</sup>
   size it), or paint over any shape with the heal brush, and it fills from a
   source patch marraw picks for you — heal (source texture tone-matched to
   the surroundings) or clone (verbatim) — with a draggable source, per-spot
-  feather, and `1`–`9`/`0` setting a selected spot's opacity. Visualize
+  feather, and `1`–`9`/`0` setting a selected spot's opacity. **Fill** mode
+  instead inpaints the region with an on-device ML model (a one-time ~28 MB
+  download, after asking). Visualize
   spots (`A`) flips to a high-contrast dust view with a sensitivity slider
   for hunting sensor spots. Spots are anchored to image content, so they
   survive recrops and re-straightens and render identically in previews,
@@ -294,7 +297,11 @@ already made. Instead, **RAW + XMP** export copies the original RAWs untouched
 and writes Adobe-compatible `.xmp` sidecars next to them: rating, flag, and
 your develop settings translated to Camera Raw's own tags (intent-level —
 close, not pixel-identical), ready for Lightroom to pick up. It can also write
-just the sidecars in place, next to the originals.
+just the sidecars in place, next to the originals. That is the handoff's whole
+scope, deliberately frozen: local adjustments, retouch, and FX will never
+translate to another editor (see
+[What marraw *won't* do](#what-marraw-wont-do-probably)) — if a photo needs
+them, finish it in marraw.
 
 ### Supported files
 
@@ -305,21 +312,12 @@ Adobe/various `.dng` · plus `.erf` `.mef` `.mos` `.mrw` `.rwl`
 
 ---
 
-## What marraw does *not* do
+## What marraw does *not* do (yet)
 
-Read this list before you install. These are absences, not bugs — if one of
-them is load-bearing for your work, marraw is not ready for you yet.
+Read this list before you install. These are absences, not bugs — real gaps
+that just haven't been built yet. If one of them is load-bearing for your
+work, marraw is not ready for you yet.
 
-**Editing**
-
-- ⚠️ **Local adjustments are not carried into RAW + XMP handoffs.** Every
-  mask type — AI (subject/depth/scene), drawn, and the luminance/color
-  **range** mask (select by tone and hue, with an eyedropper) — works inside
-  marraw, but none of it translates to Lightroom's local adjustments on export.
-- ⚠️ **Retouch is not carried into the RAW + XMP handoff.** Spots and the
-  heal brush heal/clone from another patch of the same photo, and Fill mode
-  inpaints the region with an on-device ML model (a one-time ~28 MB download,
-  after asking) — but none of it translates to Lightroom's retouch on export.
 - ❌ **No automatic defringe.** Lens profiles correct distortion, vignetting
   and lateral CA (see above), but there is no purple-fringe remover for the
   axial CA that a profile cannot describe — only the manual CA sliders.
@@ -327,34 +325,35 @@ them is load-bearing for your work, marraw is not ready for you yet.
   ML-assisted luminance and color NR.
 - ❌ **No HDR editing or output**, and no wide-gamut working space. The look
   math is sRGB-ish and highlights clip rather than grade.
-
-**Library**
-
-- ❌ **No XMP round-trip.** Working sidecars are marraw's own `.marraw.json`,
-  and marraw never *reads* XMP. Export can write Adobe-compatible `.xmp`
-  sidecars (see RAW + XMP above), but that is a one-way handoff, not sync.
-- ❌ **No photo search, keywords, or collections.** You filter by rating,
-  flag, and the culling signals (soft frames, blinks) within a folder.
-  That's it.
-- ❌ **No DCP camera profiles.**
-
-**Export & output**
-
-- ❌ **No keyword or IPTC metadata in exports.** EXIF (camera, exposure, lens,
-  GPS) and your copyright credit are written, but the library has no keywords
-  to carry.
-
-**Platform & workflow**
-
 - ❌ **Not code-signed.** Expect a SmartScreen warning on first install
   (Windows), or a "damaged and can't be opened" refusal on macOS that needs
   one `xattr` command to clear — see [Install](#install).
-- ❌ **No second-display window**, no tethered capture, no soft-proofing.
-- ❌ **No panorama stitch or HDR bracket merge.**
+- ❌ **No second-display window.**
 
 Multi-window (several windows, one library) *does* work. So do light/dark
 themes, per-photo edit undo/redo, one-`Ctrl+Z`-per-stroke culling undo, and a
 cache with a configurable size cap.
+
+## What marraw *won't* do (probably)
+
+marraw wants to be a fast, fun RAW editor for a folder of photos — not a
+digital asset manager, not a studio hub, not a print shop. These are not gaps
+waiting for their turn; they pull against what marraw is for:
+
+- ❌ **No XMP round-trip.** Working sidecars are marraw's own `.marraw.json`,
+  and marraw never *reads* XMP. The RAW + XMP export (see above) is a one-way
+  handoff, not sync, and its scope is frozen at rating, flag, and the global
+  develop settings — local adjustments, retouch, and FX will never translate
+  to another editor.
+- ❌ **No photo search, keywords, or collections.** You filter by rating,
+  flag, and the culling signals (soft frames, blinks) within a folder. That's
+  it — there is no catalog-wide index to build, maintain, or migrate.
+- ❌ **No keyword or IPTC metadata in exports.** EXIF (camera, exposure, lens,
+  GPS) and your copyright credit are written, but the library has no keywords
+  to carry.
+- ❌ **No DCP camera profiles.**
+- ❌ **No tethered capture, no soft-proofing.**
+- ❌ **No panorama stitch or HDR bracket merge.**
 
 ---
 
