@@ -134,6 +134,9 @@ export function useGestures({ onNext, onPrev, onClose }: Options) {
           now - prev.t < DOUBLE_TAP_MS &&
           Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < DOUBLE_TAP_PX
         ) {
+          // Suppress the browser's own double-tap handling — selecting the
+          // image (and tinting it blue) and page zoom both ride on this.
+          e.preventDefault();
           lastTap.current = null;
           setTransform((t) => (t.scale > 1 ? IDENTITY : { scale: 2.5, x: 0, y: 0 }));
           return 'zoom' as const;

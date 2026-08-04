@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"log"
 	"strings"
 	"time"
 
@@ -41,6 +42,28 @@ type GuestCaps struct {
 	Downloads bool `json:"downloads"`
 }
 
+// ShareExport is how a guest's downloads are rendered: the owner's chosen
+// export preset, resolved to its settings when the link was minted.
+//
+// A snapshot, not a reference to the preset. A link can live a month, and a
+// preset edited or deleted in the meantime must not silently change — or
+// break — what someone else's copy of the shoot looks like. Name is kept only
+// so the management list can say which preset it came from.
+//
+// The zero value is not used: a link with no preset carries a nil *ShareExport
+// and downloads at the endpoint's own defaults (full resolution, quality 92).
+type ShareExport struct {
+	Name           string `json:"name"`
+	LongEdge       int    `json:"longEdge"`
+	JpegQuality    int    `json:"jpegQuality"`
+	ColorSpace     string `json:"colorSpace"`
+	SharpenTarget  string `json:"sharpenTarget"`
+	SharpenAmount  string `json:"sharpenAmount"`
+	ExifMode       string `json:"exifMode"`
+	RemoveLocation bool   `json:"removeLocation"`
+	WatermarkID    string `json:"watermarkId"`
+}
+
 // GuestLink is one shared folder. Path and Name are copied at mint time purely
 // so the management list can name the share; the FolderID is what is enforced.
 type GuestLink struct {
@@ -58,11 +81,87 @@ type GuestLink struct {
 	ExpiresAt int64 `json:"expiresAt"`
 	CreatedAt int64 `json:"createdAt"`
 	LastSeen  int64 `json:"lastSeen"`
+	// Export renders this link's downloads; nil means the defaults. Links
+	// minted before shares could carry a preset unmarshal to nil, which is
+	// exactly the behaviour they already had.
+	Export *ShareExport `json:"export,omitempty"`
 }
 
 // Expired reports whether the link has passed its expiry.
 func (g GuestLink) Expired(now time.Time) bool {
 	return g.ExpiresAt != 0 && now.UnixMilli() >= g.ExpiresAt
+}
+
+// lastSeenThrottle is how stale a link's last-opened stamp may be before a
+// reconnect rewrites it. A guest on mobile data reconnects whenever the
+// network blips, and every write rewrites the whole settings blob and pushes
+// a refresh to every window — for a value the UI renders as "4 minutes ago".
+const lastSeenThrottle = time.Minute
+
+// MarkGuestOnline records that a connection is now authenticated as a share
+// link, and stamps when the link was last opened.
+//
+// Called from the auth hook, which has no request context — so the refresh
+// goes through the server directly. aprot.TriggerRefresh reads a queue off the
+// request context and silently does nothing without one.
+func (d *Deps) MarkGuestOnline(ctx context.Context, id string, conn uint64) {
+	d.guestMu.Lock()
+	if d.guestConns == nil {
+		d.guestConns = map[string]map[uint64]struct{}{}
+	}
+	if d.guestConns[id] == nil {
+		d.guestConns[id] = map[uint64]struct{}{}
+	}
+	d.guestConns[id][conn] = struct{}{}
+	d.stampLastSeenLocked(ctx, id)
+	d.guestMu.Unlock()
+	// Unconditional: presence changed even when the throttle skipped the write.
+	d.TriggerRefresh(shareKey)
+}
+
+// MarkGuestOffline records that a connection holding a share link has gone.
+// Called from the disconnect hook, which also has no request context.
+func (d *Deps) MarkGuestOffline(id string, conn uint64) {
+	d.guestMu.Lock()
+	if conns := d.guestConns[id]; conns != nil {
+		delete(conns, conn)
+		if len(conns) == 0 {
+			delete(d.guestConns, id)
+		}
+	}
+	d.guestMu.Unlock()
+	d.TriggerRefresh(shareKey)
+}
+
+// GuestOnline reports whether anyone is holding this link open right now.
+func (d *Deps) GuestOnline(id string) bool {
+	d.guestMu.Lock()
+	defer d.guestMu.Unlock()
+	return len(d.guestConns[id]) > 0
+}
+
+// stampLastSeenLocked records that a link was just opened. Caller holds
+// guestMu.
+func (d *Deps) stampLastSeenLocked(ctx context.Context, id string) {
+	if d.Tokens == nil || d.DB == nil {
+		return
+	}
+	now := time.Now()
+	links := d.Tokens.Guests()
+	for i := range links {
+		if links[i].ID != id {
+			continue
+		}
+		if now.Sub(time.UnixMilli(links[i].LastSeen)) < lastSeenThrottle {
+			return
+		}
+		links[i].LastSeen = now.UnixMilli()
+		d.Tokens.SetGuests(links)
+		if err := SaveGuestLinks(ctx, d.DB, links); err != nil {
+			log.Printf("share: recording last opened: %v", err)
+		}
+		return
+	}
 }
 
 // guestMethods is the entire RPC surface a guest connection may reach. Compare
@@ -240,7 +339,7 @@ func SaveGuestLinks(ctx context.Context, db *store.DB, links []GuestLink) error 
 // NewGuestLink mints a share of one folder. The token is 128 bits from
 // crypto/rand: it is a bearer credential on a public URL, so it has to survive
 // being guessed at by anyone who knows the funnel hostname.
-func NewGuestLink(folderID int64, path, name string, caps GuestCaps, expiresAt int64) (GuestLink, error) {
+func NewGuestLink(folderID int64, path, name string, caps GuestCaps, expiresAt int64, export *ShareExport) (GuestLink, error) {
 	id, err := GeneratePairingToken()
 	if err != nil {
 		return GuestLink{}, err
@@ -258,6 +357,7 @@ func NewGuestLink(folderID int64, path, name string, caps GuestCaps, expiresAt i
 		Caps:      caps,
 		ExpiresAt: expiresAt,
 		CreatedAt: time.Now().UnixMilli(),
+		Export:    export,
 	}, nil
 }
 

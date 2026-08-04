@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { backend, canUseHostFs } from '@/lib/backend';
 import {
   AppWindow,
@@ -38,6 +38,7 @@ import {
   type Shoot,
 } from '@/api/library';
 import { useApiClient } from '@/api/client';
+import { revokeLink, useListLinks, type ShareLink } from '@/api/share';
 import { useSharedTasks } from '@/api/tasks';
 import { ChipSpinner } from '@/components/ui/task-chip';
 import { ShareDialog } from '@/components/ShareDialog';
@@ -59,6 +60,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { expiryLabel, relativeTime } from '@/lib/relativeTime';
 import { cn } from '@/lib/utils';
 import {
   baseName,
@@ -134,6 +136,33 @@ function OfflineBadge({ className }: { className?: string }) {
 }
 
 /**
+ * Live share links, looked up by shoot path. A context rather than a prop
+ * because ShootRow is reached three different ways (managed parents, derived
+ * groups, plain roots) — and one subscription for the rail rather than a
+ * useListLinks() per row, which would open one per visible shoot.
+ */
+const SharedLinksContext = createContext<(path: string) => ShareLink[]>(() => []);
+
+const useSharedLinks = (path: string) => useContext(SharedLinksContext)(path);
+
+/** What the rail's share icon says on hover, including who is in there now. */
+function shareTitle(links: ShareLink[]): string {
+  const expiries = links.map((l) => expiryLabel(l.expiresAt));
+  const shared =
+    links.length === 1
+      ? `Shared as a link (${expiries[0]})`
+      : `Shared as ${links.length} links (${expiries.join(', ')})`;
+
+  const online = links.filter((l) => l.online).length;
+  if (online > 0) {
+    return `${shared}\n${online === 1 ? 'Viewing now' : `${online} people viewing now`}`;
+  }
+  // The most recent visit across the shoot's links; 0 means never opened.
+  const last = Math.max(0, ...links.map((l) => l.lastSeen));
+  return last > 0 ? `${shared}\nLast opened ${relativeTime(last)}` : `${shared}\nNot opened yet`;
+}
+
+/**
  * The curated library rail (resizable, 214px default): the shoot folders and
  * library folders the user added, with organize context menus. Hand-added
  * shoots are grouped by their parent directory on disk; a library folder is a
@@ -148,6 +177,13 @@ export function LibraryRail() {
   const groupAliases = useUIStore((s) => s.groupAliases);
   // One subscription for the whole rail, not one per row.
   const rootOnline = useRootOnline();
+  const { data: shareLinks } = useListLinks();
+  // Expired links are still listed (so they can be tidied up in Settings) but
+  // they share nothing, so they must not mark a shoot as shared.
+  const linksFor = useMemo(() => {
+    const live = (shareLinks ?? []).filter((l) => !l.expired);
+    return (path: string) => live.filter((l) => samePath(l.path, path));
+  }, [shareLinks]);
 
   const blocks = useMemo(() => railBlocks(roots), [roots]);
   const q = filter.trim().toLowerCase();
@@ -166,85 +202,87 @@ export function LibraryRail() {
     : blocks;
 
   return (
-    <div className="flex h-full flex-col bg-sidebar text-[12.5px]">
-      <div className="px-3 pt-3.5 pb-2.5">
-        <label className="flex h-[30px] items-center gap-2 rounded-lg border border-border bg-secondary px-2.5 text-xs text-muted-foreground focus-within:border-ring dark:bg-white/5">
-          <Search className="size-3.5 shrink-0" />
-          <input
-            className="w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
-            placeholder="Filter folders"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-        </label>
-      </div>
-
-      {roots.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-faint">
-          No folders yet
+    <SharedLinksContext.Provider value={linksFor}>
+      <div className="flex h-full flex-col bg-sidebar text-[12.5px]">
+        <div className="px-3 pt-3.5 pb-2.5">
+          <label className="flex h-[30px] items-center gap-2 rounded-lg border border-border bg-secondary px-2.5 text-xs text-muted-foreground focus-within:border-ring dark:bg-white/5">
+            <Search className="size-3.5 shrink-0" />
+            <input
+              className="w-full bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
+              placeholder="Filter folders"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          </label>
         </div>
-      ) : (
-        <>
-          <div className="flex items-center justify-between px-[18px] pb-2">
-            <span className="text-[10px] tracking-[.07em] text-faint uppercase">
-              In your library
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="font-mono text-[10.5px] text-faint">
-                {roots.length} folder{roots.length === 1 ? '' : 's'}
-              </span>
-              <RailSortMenu />
-            </span>
-          </div>
-          <div className="flex flex-1 flex-col gap-px overflow-y-auto px-2">
-            {visible.map((b) =>
-              b.kind === 'parent' ? (
-                <ManagedParent
-                  key={blockId(b)}
-                  root={b.root}
-                  roots={roots}
-                  blocks={blocks}
-                  filter={q}
-                  renaming={renaming}
-                  setRenaming={setRenaming}
-                  online={rootOnline(b.root.path)}
-                />
-              ) : (
-                <Group
-                  key={blockId(b)}
-                  group={b.group}
-                  blocks={blocks}
-                  roots={roots}
-                  renaming={renaming}
-                  setRenaming={setRenaming}
-                  forceOpen={q !== ''}
-                  rootOnline={rootOnline}
-                />
-              ),
-            )}
-          </div>
-        </>
-      )}
 
-      <div className="p-2">
+        {roots.length === 0 ? (
+          <div className="flex flex-1 items-center justify-center px-5 text-center text-faint">
+            No folders yet
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between px-[18px] pb-2">
+              <span className="text-[10px] tracking-[.07em] text-faint uppercase">
+                In your library
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="font-mono text-[10.5px] text-faint">
+                  {roots.length} folder{roots.length === 1 ? '' : 's'}
+                </span>
+                <RailSortMenu />
+              </span>
+            </div>
+            <div className="flex flex-1 flex-col gap-px overflow-y-auto px-2">
+              {visible.map((b) =>
+                b.kind === 'parent' ? (
+                  <ManagedParent
+                    key={blockId(b)}
+                    root={b.root}
+                    roots={roots}
+                    blocks={blocks}
+                    filter={q}
+                    renaming={renaming}
+                    setRenaming={setRenaming}
+                    online={rootOnline(b.root.path)}
+                  />
+                ) : (
+                  <Group
+                    key={blockId(b)}
+                    group={b.group}
+                    blocks={blocks}
+                    roots={roots}
+                    renaming={renaming}
+                    setRenaming={setRenaming}
+                    forceOpen={q !== ''}
+                    rootOnline={rootOnline}
+                  />
+                ),
+              )}
+            </div>
+          </>
+        )}
+
+        <div className="p-2">
+          <button
+            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 bg-primary/10 text-accent-text hover:bg-primary/15"
+            onClick={() => setAddFolderOpen(true)}
+          >
+            <Plus className="size-3.5" />
+            Add folder
+          </button>
+        </div>
+        <RemotesSection />
+        <UpdateRow />
         <button
-          className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/50 bg-primary/10 text-accent-text hover:bg-primary/15"
-          onClick={() => setAddFolderOpen(true)}
+          className="flex items-center gap-2 border-t px-3 py-2.5 text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => setSettingsOpen(true)}
         >
-          <Plus className="size-3.5" />
-          Add folder
+          <Settings className="size-3.5" />
+          Settings
         </button>
       </div>
-      <RemotesSection />
-      <UpdateRow />
-      <button
-        className="flex items-center gap-2 border-t px-3 py-2.5 text-xs text-muted-foreground hover:text-foreground"
-        onClick={() => setSettingsOpen(true)}
-      >
-        <Settings className="size-3.5" />
-        Settings
-      </button>
-    </div>
+    </SharedLinksContext.Provider>
   );
 }
 
@@ -894,8 +932,31 @@ function ShootRow({
   const active = folderPath != null && samePath(folderPath, shoot.path);
   const scanning = useFolderBusy(shoot.path);
   const [sharing, setSharing] = useState(false);
+  const shares = useSharedLinks(shoot.path);
 
   const open = () => void openShoot(client, shoot);
+
+  // A shoot can carry more than one link — a culling link for the band and a
+  // view-only one for the venue — so withdrawing sharing withdraws all of
+  // them. One click, like "Hide from library": the per-link confirm lives in
+  // Settings, where links are dealt with individually.
+  //
+  // One at a time, not Promise.all: every revocation pushes a fresh link list
+  // to subscribers, and concurrent ones race — the list from the first
+  // revocation can arrive last and leave the rail showing a share that is
+  // already gone.
+  const revokeShares = async () => {
+    try {
+      for (const l of shares) await revokeLink(client, l.id);
+      toast.success(
+        shares.length === 1
+          ? `${shoot.name} is no longer shared`
+          : `${shares.length} links to ${shoot.name} withdrawn`,
+      );
+    } catch (err) {
+      toast.error(`Could not withdraw sharing: ${(err as Error).message}`);
+    }
+  };
 
   const hide = () => {
     const next = roots.map((r) =>
@@ -943,6 +1004,17 @@ function ShootRow({
           {shoot.name}
           {shoot.isSelf && <span className="ml-1 text-faint">· loose files</span>}
         </span>
+        {shares.length > 0 && (
+          <span className="flex shrink-0 items-center gap-1" title={shareTitle(shares)}>
+            <Share2 className="size-3 text-accent-text" strokeWidth={1.5} />
+            {/* Someone is in the album right now. Same dot as a live remote
+                connection uses in RemotesSection, pulsing because this one
+                comes and goes on its own. */}
+            {shares.some((l) => l.online) && (
+              <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
+            )}
+          </span>
+        )}
         {scanning ? (
           <ChipSpinner className="size-3" />
         ) : shoot.photoCount > 0 ? (
@@ -1007,6 +1079,22 @@ function ShootRow({
         <ContextMenuItem onClick={() => void startFullres(client, shoot.path, shoot.name)}>
           <Maximize2 /> <span className="flex-1">Render 1:1</span>
         </ContextMenuItem>
+        {shares.length > 0 && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem variant="destructive" onClick={() => void revokeShares()}>
+              <Share2 />
+              <div className="flex flex-col gap-px">
+                <span>Revoke shared access</span>
+                <span className="text-[11px] text-faint">
+                  {shares.length === 1
+                    ? 'The link stops working immediately'
+                    : `${shares.length} links stop working immediately`}
+                </span>
+              </div>
+            </ContextMenuItem>
+          </>
+        )}
         {!shoot.isSelf && (
           <>
             <ContextMenuSeparator />

@@ -32,3 +32,32 @@ button {
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* Nothing in a photo viewer is meant to be selected, and on a phone the
+   second tap of a double-tap zoom otherwise selects the image and paints it
+   with the blue selection tint. The long-press callout ("Save Image…") goes
+   with it: saving is a button, and the sheet fires mid-gesture otherwise. */
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+img {
+  -webkit-user-drag: none;
+}
+
+/* Shown only to a mouse. The previous/next arrows are chrome for a pointer
+   that cannot swipe; a phone in landscape is still a phone, so a width
+   breakpoint is the wrong question to ask. A media query rather than
+   Tailwind's pointer-fine variant, which arrived in a 4.x minor. */
+.mouse-only {
+  display: none;
+}
+
+@media (pointer: fine) {
+  .mouse-only {
+    display: grid;
+  }
+}

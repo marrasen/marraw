@@ -18,6 +18,7 @@ import {
   setPairingOpen,
 } from '@/api/system';
 import { revokeLink, useListLinks } from '@/api/share';
+import { expiryLabel, relativeTime } from '@/lib/relativeTime';
 import { backend, canUseHostFs } from '@/lib/backend';
 import type { RemoteAccessPrefs, RemoteConnection, RemoteProbe } from '@/lib/electron';
 import {
@@ -1949,15 +1950,23 @@ function SharedAlbums() {
               className="flex items-center gap-2 rounded-lg border bg-secondary px-2.5 py-1.5 dark:bg-white/5"
             >
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[12px] font-medium">{l.name}</div>
+                <div className="flex items-center gap-1.5">
+                  <div className="truncate text-[12px] font-medium">{l.name}</div>
+                  {l.online && (
+                    <span
+                      className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500"
+                      title="Someone has this link open right now"
+                    />
+                  )}
+                </div>
                 <div className="truncate font-mono text-[10px] text-faint">
-                  {l.expired
-                    ? 'expired'
-                    : l.expiresAt
-                      ? `expires ${new Date(l.expiresAt).toLocaleDateString()}`
-                      : 'no expiry'}
+                  {l.expired ? 'expired' : expiryLabel(l.expiresAt)}
                   {' · '}
                   {l.photoCount} photo{l.photoCount === 1 ? '' : 's'}
+                  {l.caps.downloads && ` · ${l.exportName || 'full size'}`}
+                </div>
+                <div className="truncate font-mono text-[10px] text-faint">
+                  {l.online ? 'viewing now' : `opened ${relativeTime(l.lastSeen)}`}
                 </div>
               </div>
               {l.url && !l.expired && (
@@ -1992,16 +2001,4 @@ function SharedAlbums() {
       }
     />
   );
-}
-
-/** "3 minutes ago" for the devices list — coarse on purpose. */
-function relativeTime(ms: number): string {
-  if (!ms) return 'never';
-  const secs = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  if (secs < 90) return 'just now';
-  const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins} min ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 48) return `${hours} h ago`;
-  return `${Math.round(hours / 24)} days ago`;
 }

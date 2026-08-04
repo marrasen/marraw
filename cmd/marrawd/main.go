@@ -252,12 +252,24 @@ func main() {
 				conn.SetUserID(api.ConnPairing)
 			case m.Guest != nil:
 				conn.SetUserID(api.ConnGuestPrefix + m.Guest.ID)
+				// Presence for the rail's "someone is looking" dot, and the
+				// link's last-opened time. Detached context: this outlives the
+				// auth call, and must not be cancelled by it.
+				go deps.MarkGuestOnline(context.Background(), m.Guest.ID, conn.ID())
 			default:
 				return aprot.ErrAuthFailed("invalid token")
 			}
 			return nil
 		})
 	}
+	// The other half of guest presence. aprot keeps the connection's identity
+	// readable here, which is the only way to tell which share link has just
+	// gone away.
+	server.OnDisconnect(func(_ context.Context, conn *aprot.Conn) {
+		if id, ok := strings.CutPrefix(conn.UserID(), api.ConnGuestPrefix); ok {
+			deps.MarkGuestOffline(id, conn.ID())
+		}
+	})
 	if broker != nil {
 		broker.OnChange = deps.NotifyPairingChanged
 	}
@@ -281,11 +293,24 @@ func main() {
 			case !m.OK:
 				return imghttp.Access{}, false
 			case m.Guest != nil:
-				return imghttp.Access{
+				acc := imghttp.Access{
 					FolderID:     m.Guest.FolderID,
 					BaseEditOnly: !m.Guest.Caps.Edits,
 					Downloads:    m.Guest.Caps.Downloads,
-				}, true
+				}
+				if e := m.Guest.Export; e != nil {
+					acc.Download = imghttp.DownloadSpec{
+						LongEdge:       e.LongEdge,
+						JpegQuality:    e.JpegQuality,
+						ColorSpace:     e.ColorSpace,
+						SharpenTarget:  e.SharpenTarget,
+						SharpenAmount:  e.SharpenAmount,
+						ExifMode:       e.ExifMode,
+						RemoveLocation: e.RemoveLocation,
+						WatermarkID:    e.WatermarkID,
+					}
+				}
+				return acc, true
 			}
 			return imghttp.Access{}, true
 		}
@@ -303,9 +328,11 @@ func main() {
 	// Downloads: a full develop-pipeline render per photo, so the visitor gets
 	// the same pixels an export would produce rather than a preview upscaled.
 	// sRGB and the owner's credit, since these files leave the library.
-	dl := imghttp.NewDownloads(db, imgAuth, func(ctx context.Context, photoID int64) ([]byte, error) {
+	dl := imghttp.NewDownloads(db, imgAuth, func(ctx context.Context, photoID int64, spec imghttp.DownloadSpec) ([]byte, error) {
 		artist, copyright := api.ExportCredit(ctx, db)
-		return export.RenderJPEG(ctx, db, photoID, export.Request{
+		// The defaults, for a share minted without an export preset: the whole
+		// frame, near-transparent quality, and the owner's credit.
+		req := export.Request{
 			Format:      "jpeg",
 			JpegQuality: 92,
 			ColorSpace:  "srgb",
@@ -315,7 +342,27 @@ func main() {
 			AIMaps:      cache.AIMaps,
 			Lenses:      cache.Lenses,
 			Fills:       cache.Fills,
-		})
+		}
+		// A preset overrides them field by field, so one it does not carry
+		// (an older preset missing a newer setting) keeps the default rather
+		// than rendering at zero.
+		req.LongEdge = spec.LongEdge
+		req.SharpenTarget = spec.SharpenTarget
+		req.SharpenAmount = spec.SharpenAmount
+		req.RemoveLocation = spec.RemoveLocation
+		if spec.JpegQuality > 0 {
+			req.JpegQuality = spec.JpegQuality
+		}
+		if spec.ColorSpace != "" {
+			req.ColorSpace = spec.ColorSpace
+		}
+		if spec.ExifMode != "" {
+			req.ExifMode = spec.ExifMode
+		}
+		if spec.WatermarkID != "" {
+			req.Watermark = api.WatermarkSpecFor(ctx, db, watermarkDir, spec.WatermarkID)
+		}
+		return export.RenderJPEG(ctx, db, photoID, req)
 	})
 	mux.Handle("GET /dl/{id}", dl)
 	mux.HandleFunc("GET /dl.zip", dl.ServeZip)

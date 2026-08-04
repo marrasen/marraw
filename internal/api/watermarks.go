@@ -340,6 +340,17 @@ func (u *Settings) AddWatermarkAsset(ctx context.Context, data aprot.Blob) (*Wat
 // toWatermarkSpec resolves a stored watermark for the exporter: colors
 // parsed, asset names joined onto the asset dir, content-free elements
 // dropped.
+// WatermarkSpecFor resolves a stored watermark to render specs, or nil when
+// the ID is empty or names one that has since been deleted. Exported for the
+// share-download endpoint in cmd/marrawd, which renders outside this package.
+func WatermarkSpecFor(ctx context.Context, db *store.DB, assetDir, id string) *watermark.Spec {
+	wm := watermarkByID(ctx, db, id)
+	if wm == nil {
+		return nil
+	}
+	return toWatermarkSpec(*wm, assetDir)
+}
+
 func toWatermarkSpec(wm Watermark, assetDir string) *watermark.Spec {
 	spec := &watermark.Spec{}
 	for _, e := range wm.Elements {

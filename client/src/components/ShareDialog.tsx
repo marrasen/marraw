@@ -3,12 +3,21 @@ import { Check, Copy, Globe, Loader2, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useApiClient } from '@/api/client';
+import type { ExportPreset } from '@/api/settings';
 import { createLink, useStatus } from '@/api/share';
 import type { GuestCaps, ShareLink } from '@/api/share';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Segmented } from '@/components/ui/segmented';
 import { Switch } from '@/components/ui/switch';
+import { expiryLabel } from '@/lib/relativeTime';
+import { useUIStore } from '@/stores/uiStore';
 import { cn } from '@/lib/utils';
 
 // Sharing a shoot with someone who is not a photographer: a link they open on
@@ -16,9 +25,13 @@ import { cn } from '@/lib/utils';
 // interface — what the link can do is decided here, once, and enforced by the
 // daemon for as long as it lives.
 
+// Hours. A share is usually wanted for an afternoon or a weekend, not a month,
+// and the URL is a bearer credential — the shorter it lives, the less it
+// matters where the message it arrived in ends up.
 const EXPIRY_OPTIONS = [
-  { value: '7', label: '7 days' },
-  { value: '30', label: '30 days' },
+  { value: '4', label: '4 hours' },
+  { value: '24', label: '1 day' },
+  { value: '168', label: '7 days' },
   { value: '0', label: 'Never' },
 ];
 
@@ -45,10 +58,14 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
   const client = useApiClient();
   const status = useStatus();
   const [caps, setCaps] = useState<GuestCaps>({ cull: true, edits: true, downloads: false });
-  const [expiry, setExpiry] = useState('7');
+  // One day by default: long enough for someone to get to it, short
+  // enough that a forwarded link stops mattering quickly.
+  const [expiry, setExpiry] = useState('24');
   const [creating, setCreating] = useState(false);
   const [link, setLink] = useState<ShareLink | null>(null);
   const [copied, setCopied] = useState(false);
+  // Which export preset renders this link's downloads; empty = full size.
+  const [presetID, setPresetID] = useState('');
 
   const copy = (url: string) => {
     void navigator.clipboard.writeText(url);
@@ -59,7 +76,13 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
   const create = async () => {
     setCreating(true);
     try {
-      const created = await createLink(client, path, caps, Number(expiry));
+      const created = await createLink(
+        client,
+        path,
+        caps,
+        Number(expiry),
+        caps.downloads ? presetID : '',
+      );
       setLink(created);
       // Copy on creation: the reason anyone opened this dialog was to send the
       // link, and making them hunt for a copy button afterwards is a step for
@@ -99,10 +122,11 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
           />
           <Capability
             label="Allow downloads"
-            hint="They can save full-size JPEGs of any photo."
+            hint="They can save JPEGs of any photo."
             checked={caps.downloads}
             onChange={(v) => setCaps((c) => ({ ...c, downloads: v }))}
           />
+          {caps.downloads && <DownloadPreset presetID={presetID} onChange={setPresetID} />}
           <div className="mt-3 flex items-center justify-between">
             <span className="text-[13px]">Link expires</span>
             <Segmented value={expiry} onValueChange={setExpiry} items={EXPIRY_OPTIONS} size="sm" />
@@ -127,20 +151,84 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
   );
 }
 
+/**
+ * Which export preset a guest's downloads are rendered with. The settings are
+ * copied onto the link when it is minted, not looked up later — a link can
+ * outlive the preset, and a photo someone already downloaded should not change
+ * because the preset was edited afterwards.
+ */
+function DownloadPreset({ presetID, onChange }: { presetID: string; onChange: (id: string) => void }) {
+  const presets = useUIStore((s) => s.exportPresets);
+  const chosen = presets.find((p) => p.id === presetID);
+  return (
+    <div className="mt-1 mb-1 ml-11 flex flex-col gap-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[12.5px] text-muted-foreground">Download settings</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger className="flex h-[30px] items-center gap-2 rounded-lg border border-input bg-secondary px-2.5 text-xs text-secondary-foreground dark:bg-white/5">
+            <span className="max-w-[180px] truncate">{chosen?.name ?? 'Full size'}</span>
+            <span className="text-[10px] opacity-60">▾</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="w-[220px] rounded-[11px] border-glass-border bg-popover/98 p-[7px]"
+          >
+            <DropdownMenuItem
+              className="flex h-8 rounded-[7px] px-2.5 text-[13px] text-muted-foreground"
+              onClick={() => onChange('')}
+            >
+              Full size
+            </DropdownMenuItem>
+            {presets.map((p) => (
+              <DropdownMenuItem
+                key={p.id}
+                className={cn(
+                  'flex h-8 rounded-[7px] px-2.5 text-[13px]',
+                  p.id === presetID && 'font-semibold text-foreground',
+                )}
+                onClick={() => onChange(p.id)}
+              >
+                <span className="truncate">{p.name}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      <span className="text-[11.5px] text-muted-foreground">{presetSummary(chosen)}</span>
+    </div>
+  );
+}
+
+/** One line of what a guest will actually receive. */
+function presetSummary(preset?: ExportPreset): string {
+  if (!preset) return 'Full resolution, quality 92.';
+  const o = preset.options;
+  const parts = [
+    o.resizeMode === 'edge' ? `${o.edgePx} px long edge` : 'full resolution',
+    `quality ${o.jpegQuality}`,
+  ];
+  if (o.watermarkId) parts.push('watermarked');
+  // Presets can name other formats; downloads are always JPEG.
+  return `${parts.join(', ')}. Saved as it is now — later edits to the preset don’t change this link.`;
+}
+
 function Created({ link, copied, onCopy }: { link: ShareLink; copied: boolean; onCopy: () => void }) {
   return (
     <div className="px-5 py-4">
-      <div className="flex items-center gap-2 rounded-[7px] border bg-muted/40 p-2">
-        <code className="min-w-0 flex-1 truncate font-mono text-[11.5px]">{link.url}</code>
-        <Button size="sm" variant="secondary" onClick={onCopy}>
+      {/* min-w-0: the dialog is a grid, and a grid item's min-width is auto,
+          so an unbreakable URL would push the whole dialog wider than its
+          fixed width rather than wrapping inside it. */}
+      <div className="flex min-w-0 items-start gap-2 overflow-hidden rounded-[7px] border bg-muted/40 p-2">
+        <code className="line-clamp-2 min-w-0 flex-1 font-mono text-[11.5px] break-all">
+          {link.url}
+        </code>
+        <Button size="sm" variant="secondary" className="shrink-0" onClick={onCopy}>
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           {copied ? 'Copied' : 'Copy'}
         </Button>
       </div>
       <p className="mt-2 text-[12px] text-muted-foreground">
-        {link.expiresAt
-          ? `Expires ${new Date(link.expiresAt).toLocaleDateString()}.`
-          : 'Does not expire.'}{' '}
+        {link.expiresAt ? `${capitalize(expiryLabel(link.expiresAt))}.` : 'Does not expire.'}{' '}
         You can withdraw it any time in Settings → Remote.
       </p>
     </div>
@@ -221,3 +309,5 @@ function Capability({
     </label>
   );
 }
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);

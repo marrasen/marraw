@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -206,6 +208,206 @@ func TestCheckFolderScope(t *testing.T) {
 	}
 	if err := checkFolderScope(0, 8); err != nil {
 		t.Errorf("checkFolderScope(owner) = %v, want nil", err)
+	}
+}
+
+// A share's downloads are rendered from a snapshot of the owner's export
+// preset, taken when the link is minted — so editing or deleting the preset
+// afterwards cannot change what a link already handed out produces.
+func TestResolveExportSnapshotsThePreset(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	presets := []ExportPreset{{
+		ID:   "web",
+		Name: "Web 2560",
+		Options: ExportOptions{
+			Format: ExportJPEG, JpegQuality: 88, ResizeMode: "edge", EdgePx: 2560,
+			ColorSpace: ColorSpaceSRGB, ExifMode: ExifModeCopyright, WatermarkID: "wm1",
+		},
+	}, {
+		ID:      "full",
+		Name:    "Full size",
+		Options: ExportOptions{Format: ExportJPEG, JpegQuality: 95, ResizeMode: "full", EdgePx: 2160},
+	}}
+	raw, err := json.Marshal(presets)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := db.SetSetting(ctx, settingUIExportPresets, string(raw)); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	s := &Share{deps: &Deps{DB: db}}
+
+	got := s.resolveExport(ctx, "web")
+	if got == nil {
+		t.Fatal("resolveExport(web) = nil, want the preset's settings")
+	}
+	if got.Name != "Web 2560" || got.LongEdge != 2560 || got.JpegQuality != 88 || got.WatermarkID != "wm1" {
+		t.Errorf("resolveExport(web) = %+v", got)
+	}
+
+	// "full" keeps EdgePx around for when the user switches back, so it must
+	// not leak out as a resize.
+	if full := s.resolveExport(ctx, "full"); full == nil || full.LongEdge != 0 {
+		t.Errorf("resolveExport(full) = %+v, want no long edge", full)
+	}
+
+	// No preset, and a preset deleted since the link was minted, both fall back
+	// to the endpoint's defaults rather than refusing to mint.
+	if none := s.resolveExport(ctx, ""); none != nil {
+		t.Errorf("resolveExport(\"\") = %+v, want nil", none)
+	}
+	if gone := s.resolveExport(ctx, "deleted-preset"); gone != nil {
+		t.Errorf("resolveExport(unknown) = %+v, want nil", gone)
+	}
+}
+
+// Revoking every link on a shoot fires one call per link at once — the rail's
+// "Revoke shared access" does exactly that. Each one rewrites the whole list,
+// so without serialization the later write restores what the earlier removed
+// and a link the owner believes is withdrawn keeps working.
+func TestConcurrentRevokeRemovesEveryLink(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	links := make([]GuestLink, 4)
+	for i := range links {
+		l, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+		if err != nil {
+			t.Fatalf("NewGuestLink: %v", err)
+		}
+		links[i] = l
+	}
+	tokens := NewAuthTokens("launch", "pairing")
+	tokens.SetGuests(links)
+	if err := SaveGuestLinks(ctx, db, links); err != nil {
+		t.Fatalf("SaveGuestLinks: %v", err)
+	}
+	// LoopbackOnly with no connection in context is how a local window reads.
+	s := &Share{deps: &Deps{DB: db, Tokens: tokens, LoopbackOnly: true}}
+
+	var wg sync.WaitGroup
+	for _, l := range links {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			if err := s.RevokeLink(ctx, id); err != nil {
+				t.Errorf("RevokeLink(%s): %v", id, err)
+			}
+		}(l.ID)
+	}
+	wg.Wait()
+
+	if got := tokens.Guests(); len(got) != 0 {
+		t.Errorf("%d links survived concurrent revocation, want 0", len(got))
+	}
+	if got := LoadGuestLinks(ctx, db); len(got) != 0 {
+		t.Errorf("%d links survived in the store, want 0", len(got))
+	}
+}
+
+// Presence is a set of connection IDs, not a count, because aprot's auth hook
+// also runs on a mid-session re-auth. A counter would climb on every re-auth
+// with only one disconnect to balance it, leaving a link stuck reading
+// "viewing now" until the daemon restarted.
+func TestGuestPresenceTracksConnections(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	link, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+	if err != nil {
+		t.Fatalf("NewGuestLink: %v", err)
+	}
+	tokens := NewAuthTokens("launch", "pairing")
+	tokens.SetGuests([]GuestLink{link})
+	if err := SaveGuestLinks(ctx, db, []GuestLink{link}); err != nil {
+		t.Fatalf("SaveGuestLinks: %v", err)
+	}
+	d := &Deps{DB: db, Tokens: tokens}
+
+	if d.GuestOnline(link.ID) {
+		t.Error("a link nobody has opened reads as online")
+	}
+
+	// Two devices on one link — the band's phone and the drummer's laptop.
+	d.MarkGuestOnline(ctx, link.ID, 1)
+	d.MarkGuestOnline(ctx, link.ID, 2)
+	if !d.GuestOnline(link.ID) {
+		t.Fatal("link is not online with two connections open")
+	}
+	// A re-auth on a connection already counted must not add a second tally.
+	d.MarkGuestOnline(ctx, link.ID, 1)
+
+	d.MarkGuestOffline(link.ID, 1)
+	if !d.GuestOnline(link.ID) {
+		t.Error("link went offline while a second connection was still open")
+	}
+	d.MarkGuestOffline(link.ID, 2)
+	if d.GuestOnline(link.ID) {
+		t.Error("link still reads as online after every connection closed")
+	}
+	// A disconnect for a connection that was never counted is harmless.
+	d.MarkGuestOffline(link.ID, 99)
+	if d.GuestOnline(link.ID) {
+		t.Error("an unknown disconnect brought the link back online")
+	}
+}
+
+// Opening a link records when, so the rail can say "last opened 5 min ago"
+// once the visitor has gone.
+func TestGuestConnectStampsLastSeen(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	link, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+	if err != nil {
+		t.Fatalf("NewGuestLink: %v", err)
+	}
+	if link.LastSeen != 0 {
+		t.Fatalf("a fresh link starts with LastSeen %d, want 0", link.LastSeen)
+	}
+	tokens := NewAuthTokens("launch", "pairing")
+	tokens.SetGuests([]GuestLink{link})
+	if err := SaveGuestLinks(ctx, db, []GuestLink{link}); err != nil {
+		t.Fatalf("SaveGuestLinks: %v", err)
+	}
+	d := &Deps{DB: db, Tokens: tokens}
+
+	before := time.Now().UnixMilli()
+	d.MarkGuestOnline(ctx, link.ID, 1)
+	got := tokens.Guests()[0].LastSeen
+	if got < before {
+		t.Errorf("LastSeen = %d, want >= %d", got, before)
+	}
+	// Persisted, not just in memory: the rail must still say when it was last
+	// opened after a restart.
+	if stored := LoadGuestLinks(ctx, db); len(stored) != 1 || stored[0].LastSeen != got {
+		t.Errorf("stored LastSeen = %v, want %d", stored, got)
+	}
+
+	// A phone on flaky mobile data reconnects constantly; each rewrite is a
+	// whole settings blob and a refresh to every window, for a value rendered
+	// as "just now" either way.
+	d.MarkGuestOnline(ctx, link.ID, 2)
+	if again := tokens.Guests()[0].LastSeen; again != got {
+		t.Errorf("a reconnect within the throttle rewrote LastSeen (%d → %d)", got, again)
 	}
 }
 

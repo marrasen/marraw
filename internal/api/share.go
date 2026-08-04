@@ -20,6 +20,9 @@ import (
 // Every method except Session is local-windows-only. A share is the owner
 // handing out access to their own library, so it is not a decision a paired
 // laptop — let alone a guest — gets to make.
+//
+// Every read-modify-write of the link list is serialized on Deps.guestMu,
+// which a guest connecting also takes to stamp its link's last-opened time.
 type Share struct {
 	deps *Deps
 	lib  *Library
@@ -45,6 +48,12 @@ type ShareLink struct {
 	Expired    bool      `json:"expired"`
 	PhotoCount int       `json:"photoCount"`
 	URL        string    `json:"url"`
+	// Online: someone has this link open right now. LastSeen is when it was
+	// last opened, which is what the UI shows once they have gone.
+	Online bool `json:"online"`
+	// ExportName is the export preset downloads are rendered with, as it was
+	// named when the link was minted; empty means the defaults.
+	ExportName string `json:"exportName"`
 }
 
 // ShareStatus describes the tunnel the links are served over.
@@ -122,17 +131,22 @@ func (s *Share) ListLinks(ctx context.Context) ([]ShareLink, error) {
 
 // CreateLink shares one folder and returns the link to send.
 //
-// expiresInDays 0 never expires. The dialog defaults to a bounded life because
-// the URL is the credential, and a URL lives in someone else's message history
-// long after the shoot is delivered.
-func (s *Share) CreateLink(ctx context.Context, path string, caps GuestCaps, expiresInDays int) (*ShareLink, error) {
+// expiresInHours 0 never expires. Hours rather than days because the useful
+// lifetime of a share is often an afternoon — "look through these before you
+// leave" — and the dialog defaults to a bounded one either way: the URL is the
+// credential, and it lives in someone else's message history long after the
+// shoot is delivered.
+//
+// exportPresetID names one of the owner's saved export presets to render
+// downloads with; empty renders at the endpoint's defaults.
+func (s *Share) CreateLink(ctx context.Context, path string, caps GuestCaps, expiresInHours int, exportPresetID string) (*ShareLink, error) {
 	if !s.deps.ConnIsLocal(ctx) {
 		return nil, aprot.ErrAuthFailed("local windows only")
 	}
 	if s.deps.Tokens == nil {
 		return nil, aprot.ErrInvalidParams("sharing is unavailable on this daemon")
 	}
-	if expiresInDays < 0 {
+	if expiresInHours < 0 {
 		return nil, aprot.ErrInvalidParams("expiry must not be negative")
 	}
 	// Scan the folder so the guest has photo rows to list. Deliberately the
@@ -150,18 +164,23 @@ func (s *Share) CreateLink(ctx context.Context, path string, caps GuestCaps, exp
 	}
 
 	var expiresAt int64
-	if expiresInDays > 0 {
-		expiresAt = time.Now().AddDate(0, 0, expiresInDays).UnixMilli()
+	if expiresInHours > 0 {
+		expiresAt = time.Now().Add(time.Duration(expiresInHours) * time.Hour).UnixMilli()
 	}
-	link, err := NewGuestLink(folderID, abs, filepath.Base(abs), caps, expiresAt)
+	link, err := NewGuestLink(folderID, abs, filepath.Base(abs), caps, expiresAt, s.resolveExport(ctx, exportPresetID))
 	if err != nil {
 		return nil, err
 	}
+	s.deps.guestMu.Lock()
 	links := append(s.deps.Tokens.Guests(), link)
-	if err := SaveGuestLinks(ctx, s.deps.DB, links); err != nil {
+	err = SaveGuestLinks(ctx, s.deps.DB, links)
+	if err == nil {
+		s.deps.Tokens.SetGuests(links)
+	}
+	s.deps.guestMu.Unlock()
+	if err != nil {
 		return nil, err
 	}
-	s.deps.Tokens.SetGuests(links)
 
 	// Publish the tunnel now rather than at first visit: the owner is about to
 	// send this URL to somebody, and a link that only starts working minutes
@@ -189,25 +208,70 @@ func (s *Share) RevokeLink(ctx context.Context, id string) error {
 	if s.deps.Tokens == nil {
 		return aprot.ErrInvalidParams("sharing is unavailable on this daemon")
 	}
+	s.deps.guestMu.Lock()
 	next := []GuestLink{}
 	for _, g := range s.deps.Tokens.Guests() {
 		if g.ID != id {
 			next = append(next, g)
 		}
 	}
-	if err := SaveGuestLinks(ctx, s.deps.DB, next); err != nil {
+	err := SaveGuestLinks(ctx, s.deps.DB, next)
+	if err == nil {
+		s.deps.Tokens.SetGuests(next)
+	}
+	remaining := len(next)
+	s.deps.guestMu.Unlock()
+	if err != nil {
 		return err
 	}
-	s.deps.Tokens.SetGuests(next)
 	s.deps.DisconnectGuest(id)
 	// Nothing left to serve: take the tunnel down rather than leaving the
 	// machine published to the internet for a share that no longer exists.
-	if len(next) == 0 && s.deps.Funnel != nil {
+	if remaining == 0 && s.deps.Funnel != nil {
 		if err := s.deps.Funnel.Disable(context.WithoutCancel(ctx)); err != nil {
 			log.Printf("share: withdrawing funnel: %v", err)
 		}
 	}
 	aprot.TriggerRefresh(ctx, shareKey)
+	return nil
+}
+
+// resolveExport turns a preset ID into the settings a guest's downloads will
+// be rendered with. Nil when no preset was chosen, or when the named one has
+// since been deleted — a share that quietly renders at the defaults is better
+// than one that refuses to mint over a stale ID.
+func (s *Share) resolveExport(ctx context.Context, presetID string) *ShareExport {
+	if presetID == "" {
+		return nil
+	}
+	for _, p := range jsonSetting(ctx, s.deps.DB, settingUIExportPresets, []ExportPreset(nil)) {
+		if p.ID != presetID {
+			continue
+		}
+		// Normalize on read, as the settings reader does: a preset written by
+		// an older build may be missing fields that would otherwise render as
+		// quality 0.
+		o := normalizeExportOptions(p.Options)
+		out := &ShareExport{
+			Name:           p.Name,
+			JpegQuality:    o.JpegQuality,
+			ColorSpace:     string(o.ColorSpace),
+			SharpenTarget:  string(o.SharpenTarget),
+			SharpenAmount:  string(o.SharpenAmount),
+			ExifMode:       string(o.ExifMode),
+			RemoveLocation: o.RemoveLocation,
+			WatermarkID:    o.WatermarkID,
+		}
+		// "full" keeps EdgePx around for when the user switches back, so only
+		// an explicit edge resize becomes a long edge.
+		if o.ResizeMode == "edge" {
+			out.LongEdge = o.EdgePx
+		}
+		// Format is deliberately not carried: the download endpoint serves
+		// image/jpeg, and a preset set to TIFF or "RAW + XMP" describes a
+		// delivery to disk, not a photo someone taps to save on a phone.
+		return out
+	}
 	return nil
 }
 
@@ -252,6 +316,10 @@ func (s *Share) toShareLink(ctx context.Context, g GuestLink, base string, now t
 		ID: g.ID, Name: g.Name, Path: g.Path, FolderID: g.FolderID,
 		Caps: g.Caps, ExpiresAt: g.ExpiresAt, CreatedAt: g.CreatedAt,
 		LastSeen: g.LastSeen, Expired: g.Expired(now),
+		Online: s.deps.GuestOnline(g.ID),
+	}
+	if g.Export != nil {
+		out.ExportName = g.Export.Name
 	}
 	if base != "" {
 		out.URL = base + "/s/" + g.Token + "/"

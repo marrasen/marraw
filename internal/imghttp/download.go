@@ -27,10 +27,10 @@ type Downloads struct {
 	// Authorize checks the credential and reports what it may see. Nil
 	// disables the check (dev mode).
 	Authorize Authorizer
-	// Render produces the finished JPEG for one photo. Injected so this
-	// package keeps out of the export/libraw dependency chain, and so the
-	// caller decides the quality, colour space and EXIF policy.
-	Render func(ctx context.Context, photoID int64) ([]byte, error)
+	// Render produces the finished JPEG for one photo, to the credential's
+	// own settings. Injected so this package keeps out of the export/libraw
+	// dependency chain, and so the caller owns the render vocabulary.
+	Render func(ctx context.Context, photoID int64, spec DownloadSpec) ([]byte, error)
 
 	sem chan struct{}
 }
@@ -43,7 +43,7 @@ const maxZipPhotos = 200
 // NewDownloads builds the handler with a concurrency limit. Two at a time: one
 // render saturates several cores already, and a visitor on a phone gains
 // nothing from a third running in parallel with their first two.
-func NewDownloads(db *store.DB, auth Authorizer, render func(context.Context, int64) ([]byte, error)) *Downloads {
+func NewDownloads(db *store.DB, auth Authorizer, render func(context.Context, int64, DownloadSpec) ([]byte, error)) *Downloads {
 	return &Downloads{DB: db, Authorize: auth, Render: render, sem: make(chan struct{}, 2)}
 }
 
@@ -130,7 +130,7 @@ func (h *Downloads) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return // visitor navigated away while queued
 	}
 	defer h.release()
-	data, err := h.Render(r.Context(), photos[0].ID)
+	data, err := h.Render(r.Context(), photos[0].ID, acc.Download)
 	if err != nil {
 		if r.Context().Err() != nil {
 			return
@@ -199,7 +199,7 @@ func (h *Downloads) ServeZip(w http.ResponseWriter, r *http.Request) {
 		if err := h.acquire(r.Context()); err != nil {
 			return
 		}
-		data, err := h.Render(r.Context(), p.ID)
+		data, err := h.Render(r.Context(), p.ID, acc.Download)
 		h.release()
 		if err != nil {
 			if r.Context().Err() != nil {

@@ -28,6 +28,27 @@ type Access struct {
 	// Downloads permits taking full renders away (see download.go). Only
 	// consulted for confined credentials — the owner may always download.
 	Downloads bool
+	// Download is how those renders are produced: what the owner's chosen
+	// export preset resolved to when the share was minted. The zero value
+	// means the endpoint's own defaults.
+	Download DownloadSpec
+}
+
+// DownloadSpec is the render settings for a share's downloads. Plain fields
+// rather than the export package's request type: this package serves cache
+// files and knows nothing about developing, and the caller that supplies the
+// render func is the one that owns that vocabulary.
+type DownloadSpec struct {
+	// LongEdge resizes the output; 0 is full resolution.
+	LongEdge int
+	// JpegQuality is 1-100; 0 lets the renderer choose.
+	JpegQuality    int
+	ColorSpace     string
+	SharpenTarget  string
+	SharpenAmount  string
+	ExifMode       string
+	RemoveLocation bool
+	WatermarkID    string
 }
 
 // Authorizer resolves the ?t=/X-Marraw-Token credential to what it may see.

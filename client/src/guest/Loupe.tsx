@@ -66,11 +66,15 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
   const offset = drag ?? { x: 0, y: 0 };
 
   return (
-    <div className="fixed inset-0 z-10 flex flex-col bg-black">
+    <div className="fixed inset-0 z-10 bg-black">
       <div
+        // absolute inset-0, not a flex child: the chrome floats over the photo
+        // rather than sitting beside it, so showing and hiding it cannot
+        // resize the image area and make the photo jump.
+        //
         // touch-none: every gesture here is ours, and letting the browser also
         // scroll or page-zoom makes both feel unreliable.
-        className="relative flex-1 touch-none overflow-hidden"
+        className="no-select absolute inset-0 touch-none overflow-hidden"
         {...handlers}
         onPointerUp={(e) => {
           const kind = handlers.onPointerUp(e);
@@ -118,7 +122,7 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
       </div>
 
       {chrome && (
-        <div className="bg-zinc-950/95 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent pt-6 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           {saveError && <p className="px-3 pt-2 text-center text-xs text-rose-400">{saveError}</p>}
           <div className="flex items-center gap-2 px-2 py-2">
             <RatingBar
@@ -163,7 +167,9 @@ function NavButton({
       disabled={disabled}
       aria-label={side === 'left' ? 'Previous photo' : 'Next photo'}
       className={cn(
-        'absolute top-1/2 hidden -translate-y-1/2 place-items-center rounded-full bg-black/40 p-2 sm:grid',
+        // mouse-only, not a width breakpoint: a phone in landscape is wider
+        // than sm: and still has no cursor to reach for these.
+        'mouse-only absolute top-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/40 p-2',
         side === 'left' ? 'left-2' : 'right-2',
         disabled && 'opacity-30',
       )}

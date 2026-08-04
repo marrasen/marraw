@@ -1,6 +1,7 @@
 package imghttp
 
 import (
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -65,3 +66,48 @@ func TestDownloadsRequireTheCapability(t *testing.T) {
 
 // photoNamed is a store.Photo with only the field jpegName reads.
 func photoNamed(name string) store.Photo { return store.Photo{FileName: name} }
+
+// The share's export settings must reach the renderer untouched: they are the
+// difference between a friend getting a 2560px web JPEG and a 60 MB original.
+func TestDownloadSpecReachesRender(t *testing.T) {
+	want := DownloadSpec{
+		LongEdge: 2560, JpegQuality: 88, ColorSpace: "adobergb",
+		SharpenTarget: "screen", SharpenAmount: "high",
+		ExifMode: "copyright", RemoveLocation: true, WatermarkID: "wm1",
+	}
+	var got DownloadSpec
+	h := &Downloads{
+		Authorize: func(string) (Access, bool) {
+			return Access{FolderID: 7, Downloads: true, Download: want}, true
+		},
+		Render: func(_ context.Context, _ int64, spec DownloadSpec) ([]byte, error) {
+			got = spec
+			return []byte{0xff, 0xd8}, nil
+		},
+	}
+	acc, ok := h.allowed(httptest.NewRecorder(), httptest.NewRequest("GET", "/dl/1?t=x", nil))
+	if !ok {
+		t.Fatal("allowed = false for a link with downloads enabled")
+	}
+	if _, err := h.Render(context.Background(), 1, acc.Download); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if got != want {
+		t.Errorf("Render got %+v, want %+v", got, want)
+	}
+}
+
+// A link minted without a preset carries the zero spec, which is what tells
+// the renderer to use its own defaults rather than quality 0.
+func TestNoPresetYieldsZeroSpec(t *testing.T) {
+	h := &Downloads{Authorize: func(string) (Access, bool) {
+		return Access{FolderID: 7, Downloads: true}, true
+	}}
+	acc, ok := h.allowed(httptest.NewRecorder(), httptest.NewRequest("GET", "/dl/1?t=x", nil))
+	if !ok {
+		t.Fatal("allowed = false")
+	}
+	if (acc.Download != DownloadSpec{}) {
+		t.Errorf("Download = %+v, want the zero spec", acc.Download)
+	}
+}

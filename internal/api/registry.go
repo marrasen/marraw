@@ -79,6 +79,19 @@ type Deps struct {
 	mu     sync.RWMutex
 	server *aprot.Server
 
+	// guestMu serializes every read-modify-write of the share-link list —
+	// minting, revoking, and stamping a link's last-opened time. Three
+	// mutations from two types over one list, so the lock lives with the list
+	// rather than with any one of them: a guest connecting mid-revoke would
+	// otherwise write back the link that was just withdrawn.
+	guestMu sync.Mutex
+	// guestConns maps a share link's ID to the connections currently
+	// authenticated as it. A set of connection IDs rather than a count: the
+	// auth hook also runs on a mid-session re-auth, and a counter would climb
+	// with nothing to balance it and leave a link reading as "viewing now"
+	// forever.
+	guestConns map[string]map[uint64]struct{}
+
 	// jobMu guards the single folder-jobs slot: opening a folder cancels the
 	// previous folder's metadata/pre-render passes.
 	jobMu            sync.Mutex

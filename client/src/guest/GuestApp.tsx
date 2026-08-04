@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { Check, Download, Loader2, X } from 'lucide-react';
+import { Download, Loader2, Star, X } from 'lucide-react';
 
 import { useApiClient } from '@/api/client';
 import { setFlag, setFocus, setRating, setVisible, useListPhotos } from '@/api/library';
 import type { FlagType, Photo } from '@/api/library';
+import type { FlagFilterType } from '@/api/settings';
 import { useSession } from '@/api/share';
 import type { GuestSession } from '@/api/share';
 import { cn } from '@/lib/utils';
@@ -31,13 +32,18 @@ export function GuestApp() {
 }
 
 type Override = { rating?: number; flag?: FlagType };
-type Filter = 'all' | 'picks';
 
 function Album({ session }: { session: GuestSession }) {
   const client = useApiClient();
   const photos = useListPhotos(session.folderId);
-  const [filter, setFilter] = useState<Filter>('all');
-  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  // The app's own filter vocabulary (see lib/usePhotos), defaulting to hiding
+  // rejects: someone handed a shoot to pick from should not have to wade back
+  // through the frames already thrown out.
+  const [flagFilter, setFlagFilter] = useState<FlagFilterType>('not-excluded');
+  const [minRating, setMinRating] = useState(0);
+  // The loupe tracks the photo by id, not by position. Positions shift under
+  // it whenever a filter or a rating changes; an id does not.
+  const [openId, setOpenId] = useState<number | null>(null);
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
@@ -72,8 +78,23 @@ function Album({ session }: { session: GuestSession }) {
     [photos.data, overrides],
   );
   const shown = useMemo(
-    () => (filter === 'picks' ? all.filter((p) => p.flag === 'pick') : all),
-    [all, filter],
+    () =>
+      all.filter((p) => {
+        // The photo the loupe is on always stays in the list. Otherwise
+        // tapping Reject while rejects are hidden would make the frame vanish
+        // mid-look and slide the next one under the viewer's thumb.
+        if (p.id === openId) return true;
+        if (p.rating < minRating) return false;
+        switch (flagFilter) {
+          case 'pick':
+            return p.flag === 'pick';
+          case 'not-excluded':
+            return p.flag !== 'exclude';
+          default:
+            return true;
+        }
+      }),
+    [all, flagFilter, minRating, openId],
   );
 
   const rate = useCallback(
@@ -91,10 +112,11 @@ function Album({ session }: { session: GuestSession }) {
     [client],
   );
 
-  // A filter change can strand the loupe past the end of the shorter list, so
-  // clamp on the way out rather than storing an index that may not exist.
-  const loupeIndex =
-    openIndex === null || shown.length === 0 ? null : Math.min(openIndex, shown.length - 1);
+  // Resolve the open photo to a position in the current list. A photo that has
+  // disappeared entirely (deleted in the app) closes the loupe rather than
+  // stranding it on an index that no longer means anything.
+  const found = openId === null ? -1 : shown.findIndex((p) => p.id === openId);
+  const loupeIndex = found === -1 ? null : found;
 
   // Tell the daemon what is on screen so the renditions ahead of the swipe are
   // warm. Fire-and-forget, and worth it: an unwarmed frame is a RAW decode.
@@ -146,26 +168,51 @@ function Album({ session }: { session: GuestSession }) {
             </button>
           )}
         </div>
-        <div className="mt-2 flex gap-1.5">
-          <Chip active={filter === 'all'} onClick={() => setFilter('all')}>
-            All
-          </Chip>
-          <Chip active={filter === 'picks'} onClick={() => setFilter('picks')}>
-            <Check className="size-3.5" /> Picks
-          </Chip>
+        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto">
+          {FLAG_CHIPS.map((c) => (
+            <Chip key={c.value} active={flagFilter === c.value} onClick={() => setFlagFilter(c.value)}>
+              {c.label}
+            </Chip>
+          ))}
+          <span className="mx-0.5 h-5 w-px shrink-0 bg-white/15" />
+          {/* Minimum rating, same rule as the app's filter bar: tapping the
+              star you are already on clears the filter. */}
+          <div className="flex shrink-0 gap-px" role="group" aria-label="Minimum rating filter">
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                type="button"
+                aria-label={`Show ${n} stars and up`}
+                aria-pressed={n <= minRating}
+                onClick={() => setMinRating(minRating === n ? 0 : n)}
+                className="p-1"
+              >
+                <Star
+                  className={cn(
+                    'size-4',
+                    n <= minRating ? 'fill-amber-400 text-amber-400' : 'fill-white/20 text-transparent',
+                  )}
+                />
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
       {shown.length === 0 ? (
         <p className="p-8 text-center text-sm text-white/50">
-          {filter === 'picks' ? 'Nothing picked yet.' : 'This album is empty.'}
+          {flagFilter === 'pick'
+            ? 'Nothing picked yet.'
+            : minRating > 0
+              ? 'No photos at that rating.'
+              : 'This album is empty.'}
         </p>
       ) : (
         <Grid
           photos={shown}
           selecting={selecting}
           selected={selected}
-          onOpen={setOpenIndex}
+          onOpen={(i) => setOpenId(shown[i].id)}
           onToggleSelect={toggleSelect}
         />
       )}
@@ -188,8 +235,8 @@ function Album({ session }: { session: GuestSession }) {
           photos={shown as Photo[]}
           index={loupeIndex}
           canDownload={session.caps.downloads}
-          onIndex={setOpenIndex}
-          onClose={() => setOpenIndex(null)}
+          onIndex={(i) => setOpenId(shown[i]?.id ?? null)}
+          onClose={() => setOpenId(null)}
           onRate={session.caps.cull ? rate : noop}
           onFlag={session.caps.cull ? flag : noop}
         />
@@ -199,6 +246,14 @@ function Album({ session }: { session: GuestSession }) {
 }
 
 const noop = () => {};
+
+// Worded as the app words them (components/FilterBar), so the owner and the
+// guest are talking about the same thing when they compare notes.
+const FLAG_CHIPS: { value: FlagFilterType; label: string }[] = [
+  { value: 'not-excluded', label: 'Not excluded' },
+  { value: 'pick', label: 'Picks' },
+  { value: 'all', label: 'All' },
+];
 
 function Chip({
   active,
