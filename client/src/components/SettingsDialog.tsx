@@ -1938,67 +1938,74 @@ function SharedAlbums() {
       .catch((err) => toast.error((err as Error).message));
   };
 
+  // A list of its own rather than a SettingRow control: an album name and when
+  // the link runs out are the two things worth reading here, and neither fits
+  // in the narrow column beside a title. Same shape as the connections list,
+  // but it keeps the SettingRow spacing so the section's rhythm is unbroken.
   return (
-    <SettingRow
-      title="Shared albums"
-      description="Links you have handed out. Withdrawing one stops it working immediately, wherever it has been forwarded."
-      control={
-        <div className="flex w-64 flex-col gap-1.5" data-testid="shared-albums">
-          {links.map((l) => (
-            <div
-              key={l.id}
-              className="flex items-center gap-2 rounded-lg border bg-secondary px-2.5 py-1.5 dark:bg-white/5"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <div className="truncate text-[12px] font-medium">{l.name}</div>
-                  {l.online && (
-                    <span
-                      className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500"
-                      title="Someone has this link open right now"
-                    />
-                  )}
-                </div>
-                <div className="truncate font-mono text-[10px] text-faint">
-                  {l.expired ? 'expired' : expiryLabel(l.expiresAt)}
-                  {' · '}
-                  {l.photoCount} photo{l.photoCount === 1 ? '' : 's'}
-                  {l.caps.downloads && ` · ${l.exportName || 'full size'}`}
-                </div>
-                <div className="truncate font-mono text-[10px] text-faint">
-                  {l.online ? 'viewing now' : `opened ${relativeTime(l.lastSeen)}`}
-                </div>
+    <div className="flex flex-col border-b py-4 first:pt-0 last:border-0">
+      <div className="text-sm font-medium">Shared albums</div>
+      <p className="mt-0.5 mb-2.5 text-xs leading-normal text-muted-foreground">
+        Links you have handed out. Withdrawing one stops it working immediately, wherever it has
+        been forwarded.
+      </p>
+      <div className="flex flex-col gap-1.5" data-testid="shared-albums">
+        {links.map((l) => (
+          <div
+            key={l.id}
+            className="flex items-center gap-3 rounded-lg border bg-secondary px-3 py-2 dark:bg-white/5"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-[13px] font-medium">{l.name}</span>
+                {l.online && (
+                  <span
+                    className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500"
+                    title="Someone has this link open right now"
+                  />
+                )}
               </div>
-              {l.url && !l.expired && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(l.url);
-                    toast.success('Link copied');
-                  }}
-                >
-                  Copy
+              <div className="truncate font-mono text-[10.5px] text-faint">
+                {l.expired ? 'expired' : expiryLabel(l.expiresAt)}
+                {' · '}
+                {l.photoCount} photo{l.photoCount === 1 ? '' : 's'}
+                {l.caps.downloads && ` · ${l.exportName || 'full size'}`}
+              </div>
+              {/* Its own line: the two together overrun the row even at full
+                  width, and the expiry is the half worth reading. */}
+              <div className="truncate font-mono text-[10.5px] text-faint">
+                {l.online ? 'viewing now' : `opened ${relativeTime(l.lastSeen)}`}
+              </div>
+            </div>
+            {l.url && !l.expired && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard.writeText(l.url);
+                  toast.success('Link copied');
+                }}
+              >
+                Copy
+              </Button>
+            )}
+            {confirmID === l.id ? (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => setConfirmID('')}>
+                  Cancel
                 </Button>
-              )}
-              {confirmID === l.id ? (
-                <>
-                  <Button variant="ghost" size="sm" onClick={() => setConfirmID('')}>
-                    Cancel
-                  </Button>
-                  <Button variant="destructive" size="sm" onClick={() => revoke(l.id, l.name)}>
-                    Withdraw
-                  </Button>
-                </>
-              ) : (
-                <Button variant="ghost" size="sm" onClick={() => setConfirmID(l.id)}>
+                <Button variant="destructive" size="sm" onClick={() => revoke(l.id, l.name)}>
                   Withdraw
                 </Button>
-              )}
-            </div>
-          ))}
-        </div>
-      }
-    />
+              </>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={() => setConfirmID(l.id)}>
+                Withdraw
+              </Button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

@@ -60,6 +60,9 @@ export function useGestures({ onNext, onPrev, onClose }: Options) {
   }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
+    // A press that starts on a control is a click, not a gesture: capturing it
+    // steals the click from the button and toggles the chrome under it.
+    if ((e.target as HTMLElement).closest('button')) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 1) {
@@ -116,6 +119,8 @@ export function useGestures({ onNext, onPrev, onClose }: Options) {
 
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
+      // Not ours: the press started on a control, so it never became a gesture.
+      if (!pointers.current.has(e.pointerId)) return;
       pointers.current.delete(e.pointerId);
       if (pointers.current.size < 2) pinchStart.current = null;
       if (pointers.current.size > 0) return;
@@ -161,6 +166,7 @@ export function useGestures({ onNext, onPrev, onClose }: Options) {
   );
 
   const onPointerCancel = useCallback((e: React.PointerEvent) => {
+    if (!pointers.current.has(e.pointerId)) return;
     pointers.current.delete(e.pointerId);
     pinchStart.current = null;
     start.current = null;

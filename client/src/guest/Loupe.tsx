@@ -101,7 +101,7 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
 
         {chrome && (
           <>
-            <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between bg-gradient-to-b from-black/70 to-transparent p-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 bg-gradient-to-b from-black/70 to-transparent p-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
               <button
                 type="button"
                 onClick={onClose}
@@ -110,7 +110,12 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
               >
                 <X className="size-6" />
               </button>
-              <span className="pointer-events-none pt-3 pr-2 text-sm text-white/70 tabular-nums">
+              {/* Which frame this is. Only ever visible with the chrome, so it
+                  never sits over the photo while someone is looking at it. */}
+              <span className="min-w-0 flex-1 truncate text-center text-[13px] text-white/80">
+                {photo.fileName}
+              </span>
+              <span className="shrink-0 pr-2 text-sm text-white/70 tabular-nums">
                 {index + 1} / {photos.length}
               </span>
             </div>
@@ -124,9 +129,9 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
       {chrome && (
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/60 to-transparent pt-6 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           {saveError && <p className="px-3 pt-2 text-center text-xs text-rose-400">{saveError}</p>}
-          <div className="flex items-center gap-2 px-2 py-2">
+          <div className="flex items-center gap-1.5 px-1.5 py-2">
             <RatingBar
-              className="flex-1"
+              className="min-w-0 flex-1"
               rating={photo.rating}
               flag={photo.flag}
               onRate={(r) => onRate(photo.id, r)}
@@ -138,7 +143,7 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
                 onClick={() => void save()}
                 disabled={saving}
                 aria-label="Save photo"
-                className="grid size-11 shrink-0 place-items-center rounded-full bg-white/10 active:bg-white/20 disabled:opacity-50"
+                className="grid size-9 shrink-0 place-items-center rounded-full bg-white/10 active:bg-white/20 disabled:opacity-50"
               >
                 {saving ? <Loader2 className="size-5 animate-spin" /> : <Download className="size-5" />}
               </button>
