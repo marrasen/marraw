@@ -68,6 +68,8 @@ if (import.meta.env.DEV) {
       esAddMask: (type: unknown) => es.esAddMask(client, type as never),
       esUpdateMask: (i: number, patch: unknown) => es.esUpdateMask(client, i, patch as never),
       esSetActiveMask: (i: number | null) => es.esSetActiveMask(i),
+      // Mask removal (the `maskremove` shot surface).
+      esToggleMaskRemove: (i: number, on: boolean) => es.esToggleMaskRemove(client, i, on),
       // AI region pick tool (the `personpick` / `aiscene` shot surfaces).
       esSetAIHover: (h: unknown) => es.esSetAIHover(h as never),
       esArmAIPick: (kind: unknown) => es.esArmAIPick(kind as never),

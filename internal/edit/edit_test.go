@@ -700,3 +700,151 @@ func TestSpotsOmittedFromNoSpotJSON(t *testing.T) {
 		t.Errorf("spot-free params must omit the spots key, got %s", b)
 	}
 }
+
+// --- Mask removal (Remove) ---
+
+func personRemoveMask() Mask {
+	return Mask{Type: MaskAI, AIKind: AIPerson, MapVer: "rfdetr-1", ClassID: 2, Remove: true}
+}
+
+func brushRemoveMask() Mask {
+	return Mask{Type: MaskBrush, Remove: true,
+		Strokes: []Stroke{{Radius: 0.05, Pts: []float64{0.4, 0.5, 0.6, 0.5}}}}
+}
+
+func TestMaskRemoveNormalizeClearsIneligible(t *testing.T) {
+	// Only a binary, bounded, param-derivable region may be removed; every
+	// other type must come out of Normalize with the flag cleared, so what the
+	// panel offers can never disagree with what the render does.
+	cases := []struct {
+		name string
+		mask Mask
+		want bool
+	}{
+		{"person", personRemoveMask(), true},
+		{"brush", brushRemoveMask(), true},
+		{"subject", Mask{Type: MaskAI, AIKind: AISubject, Remove: true}, true},
+		{"class", Mask{Type: MaskAI, AIKind: AIClass, ClassID: 3, Remove: true}, true},
+		{"linear", Mask{Type: MaskLinear, X1: 1, Y1: 1, Remove: true}, false},
+		{"radial", Mask{Type: MaskRadial, CX: 0.5, CY: 0.5, RX: 0.3, RY: 0.2, Remove: true}, false},
+		{"depth", Mask{Type: MaskAI, AIKind: AIDepth, DepthLo: 0.2, DepthHi: 0.8, Remove: true}, false},
+		{"range", Mask{Type: MaskRange, RangeLumaHi: 1, Remove: true}, false},
+		{"background", Mask{Type: MaskAI, AIKind: AIBackground, Remove: true}, false},
+		{"inverted subject", Mask{Type: MaskAI, AIKind: AISubject, Invert: true, Remove: true}, false},
+		{"inverted background", Mask{Type: MaskAI, AIKind: AIBackground, Invert: true, Remove: true}, true},
+		{"inverted brush", func() Mask { m := brushRemoveMask(); m.Invert = true; return m }(), false},
+		{"empty brush", Mask{Type: MaskBrush, Remove: true}, false},
+	}
+	for _, c := range cases {
+		e := &Params{Masks: []Mask{c.mask}}
+		e.Normalize()
+		if len(e.Masks) == 0 {
+			t.Fatalf("%s: mask was dropped entirely", c.name)
+		}
+		if got := e.Masks[0].Remove; got != c.want {
+			t.Errorf("%s: Remove = %v, want %v", c.name, got, c.want)
+		}
+		if got := c.mask.MaskRemoveAllowed(); got != c.want {
+			t.Errorf("%s: MaskRemoveAllowed = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestHasMaskFills(t *testing.T) {
+	if (&Params{Masks: []Mask{radialMask()}}).HasMaskFills() {
+		t.Error("a plain mask must not report a removal")
+	}
+	if !(&Params{Masks: []Mask{personRemoveMask()}}).HasMaskFills() {
+		t.Error("a Remove mask must report a removal")
+	}
+	hidden := personRemoveMask()
+	hidden.Disabled = true
+	if (&Params{Masks: []Mask{hidden}}).HasMaskFills() {
+		t.Error("a hidden Remove mask must not report a removal")
+	}
+	if (*Params)(nil).HasMaskFills() {
+		t.Error("nil params must not report a removal")
+	}
+}
+
+func TestMaskRemoveJSONBackCompat(t *testing.T) {
+	// omitempty is load-bearing: an edit with no removal must marshal
+	// byte-identical to older builds so existing edit hashes stay stable.
+	b, _ := json.Marshal(&Params{Masks: []Mask{radialMask()}})
+	if bytes.Contains(b, []byte(`"remove"`)) {
+		t.Errorf("unset remove must be omitted, got %s", b)
+	}
+	// And it must be part of the edit hash when set — a removal changes pixels.
+	plain := &Params{Masks: []Mask{{Type: MaskAI, AIKind: AIPerson, MapVer: "rfdetr-1", ClassID: 2}}}
+	if plain.Hash() == (&Params{Masks: []Mask{personRemoveMask()}}).Hash() {
+		t.Error("toggling Remove must change the edit hash")
+	}
+}
+
+func TestMaskFillKey(t *testing.T) {
+	base := &Params{Masks: []Mask{personRemoveMask()}}
+	key := func(e *Params) string {
+		n := *e
+		n.Normalize()
+		return n.MaskFillKey(&n.Masks[0])
+	}
+	want := key(base)
+
+	// Composite-only changes must NOT re-key: they never alter the pixels the
+	// model is asked to synthesize, and an inference is expensive.
+	for _, c := range []struct {
+		name string
+		edit func(*Params)
+	}{
+		{"feather", func(e *Params) { e.Masks[0].Feather = 0.8 }},
+		{"adjust", func(e *Params) { e.Masks[0].Adjust.ExpEV = 1.5 }},
+		{"fx", func(e *Params) { e.Masks[0].Adjust.Blur = 0.4 }},
+		{"disabled", func(e *Params) { e.Masks[0].Disabled = true }},
+		{"crop", func(e *Params) { e.CropX, e.CropY, e.CropW, e.CropH = 0.1, 0.1, 0.5, 0.5 }},
+		{"straighten", func(e *Params) { e.CropAngle = 3 }},
+		{"look", func(e *Params) { e.Contrast = 0.6 }},
+	} {
+		e := &Params{Masks: []Mask{personRemoveMask()}}
+		c.edit(e)
+		if got := key(e); got != want {
+			t.Errorf("%s must not re-key the patch: %s != %s", c.name, got, want)
+		}
+	}
+
+	// Region- and decode-shaping changes MUST re-key: the cached pixels no
+	// longer match what the mask now covers or what it would be cut from.
+	for _, c := range []struct {
+		name string
+		edit func(*Params)
+	}{
+		{"instance", func(e *Params) { e.Masks[0].ClassID = 3 }},
+		{"mapVer", func(e *Params) { e.Masks[0].MapVer = "rfdetr-2" }},
+		{"kind", func(e *Params) { e.Masks[0] = Mask{Type: MaskAI, AIKind: AISubject, Remove: true} }},
+		{"threshold", func(e *Params) {
+			e.Masks[0] = Mask{Type: MaskAI, AIKind: AISubject, Threshold: 0.7, Remove: true}
+		}},
+		{"rotate", func(e *Params) { e.Rotate = 1 }},
+		{"flip", func(e *Params) { e.FlipH = true }},
+		{"exposure", func(e *Params) { e.ExpEV = 1 }},
+	} {
+		e := &Params{Masks: []Mask{personRemoveMask()}}
+		c.edit(e)
+		if got := key(e); got == want {
+			t.Errorf("%s must re-key the patch, got the same key %s", c.name, got)
+		}
+	}
+
+	// Strokes shape a brush removal's region.
+	b1 := &Params{Masks: []Mask{brushRemoveMask()}}
+	b2 := &Params{Masks: []Mask{brushRemoveMask()}}
+	b2.Masks[0].Strokes[0].Radius = 0.09
+	if key(b1) == key(b2) {
+		t.Error("a repainted brush must re-key its patch")
+	}
+
+	// A mask key and a spot key must never collide, whatever the geometry.
+	sp := &Params{Spots: []Spot{{Kind: "stroke", Strokes: brushRemoveMask().Strokes}}}
+	if key(b1) == sp.SpotFillKey(&sp.Spots[0]) {
+		t.Error("mask and spot fill keys must be domain-separated")
+	}
+}

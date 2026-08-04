@@ -64,6 +64,7 @@ export interface Mask {
     rangeHueHi?: number;
     rangeSatMin?: number;
     adjust: MaskAdjust;
+    remove?: boolean;
 }
 
 export interface MaskAdjust {

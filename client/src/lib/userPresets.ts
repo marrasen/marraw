@@ -113,6 +113,9 @@ function sanitizeMaskRecipes(raw: unknown): Mask[] | undefined {
         depthHi: finite(r.depthHi),
         threshold: finite(r.threshold),
         feather: finite(r.feather),
+        // A removal is a legitimate part of a recipe ("erase the people"), and
+        // the server clears the flag on any kind that can't carry it.
+        remove: r.remove === true || undefined,
         adjust,
       });
     } else if (r.type === 'range') {

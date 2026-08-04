@@ -288,6 +288,89 @@ if (shot === 'cull') {
     centreUnchanged: before.centre.every((v, i) => Math.abs(v - after.centre[i]) <= 4),
     fxRowsShown: document.querySelectorAll('[data-testid="mask-fx-toggle"]').length,
   };
+} else if (shot === 'maskremove') {
+  // Mask removal: the Remove pill is offered only on mask types whose region
+  // is binary and bounded, and toggling it inpaints that region away. Uses a
+  // painted brush mask so the check works on any fixture (person detection
+  // finds nothing in a landscape).
+  ui().setMode('develop');
+  ui().setDevelopTab('masks');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200);
+  // Sampled at 256px, not 64: the region may be inpainted with more of the
+  // same wall/sky, and a coarse downsample would average that difference away.
+  const pixelsAt = async (blob) => {
+    const bmp = await createImageBitmap(blob, { resizeWidth: 256 });
+    const c = document.createElement('canvas');
+    c.width = bmp.width;
+    c.height = bmp.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bmp, 0, 0);
+    const d = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const px = (fx, fy) => {
+      const i = (Math.floor(fy * (bmp.height - 1)) * bmp.width + Math.floor(fx * (bmp.width - 1))) * 4;
+      return [d[i], d[i + 1], d[i + 2]];
+    };
+    // A grid across the painted stroke, and one well outside it.
+    const region = [];
+    for (let fx = 0.42; fx <= 0.58; fx += 0.02) {
+      for (let fy = 0.46; fy <= 0.54; fy += 0.02) region.push(px(fx, fy));
+    }
+    return { region, corner: px(0.06, 0.06) };
+  };
+  // Idempotence: drop any masks a previous run persisted, and settle so the
+  // before/after comparison is settle-to-settle.
+  mw.esUpdate({ masks: [] });
+  mw.esCommit();
+  await until(() => es.getState().preview?.blob && mw.esPreviewSettled(), 30000);
+  const before = await pixelsAt(es.getState().preview.blob);
+
+  // A radial mask must NOT offer the pill (its region is soft and unbounded).
+  mw.esAddMask('radial');
+  await sleep(200);
+  mw.esSetActiveMask(0);
+  await sleep(300);
+  const pillOnRadial = document.querySelectorAll('[data-testid="mask-remove-toggle"]').length;
+
+  // A painted brush mask must.
+  mw.esUpdate({ masks: [] });
+  mw.esAddMask('brush');
+  await sleep(200);
+  mw.esUpdateMask(0, {
+    strokes: [{ radius: 0.06, feather: 0.4, pts: [0.4, 0.46, 0.5, 0.52, 0.6, 0.5] }],
+  });
+  mw.esCommit();
+  await sleep(300);
+  mw.esSetActiveMask(0);
+  await sleep(300);
+  const pill = document.querySelector('[data-testid="mask-remove-toggle"]');
+  pill?.click();
+  // Generation downloads nothing here (the model is already on disk from the
+  // fill work) but still runs a forward pass.
+  await until(() => es.getState().draft?.masks?.[0]?.remove === true, 10000);
+  await until(() => mw.esPreviewSettled() && !es.getState().maskFillBusy.length, 120000);
+  await sleep(600);
+  const after = await pixelsAt(es.getState().preview.blob);
+
+  // Largest per-channel change anywhere across the painted region. The
+  // synthesized pixels can legitimately resemble what they replaced (a wall
+  // inpainted with more wall), so this is reported as a magnitude rather than
+  // asserted against a threshold — internal/pyramid's tests and
+  // scripts/maskremove-verify.mjs pin the composite exactly.
+  const maxDelta = (a, b) =>
+    Math.max(...a.map((p, i) => Math.max(...p.map((v, c) => Math.abs(v - b[i][c])))));
+  window.__maskRemoveProbe = {
+    pillOnRadial,
+    pillOnBrush: pill != null ? 1 : 0,
+    pillLit: pill?.getAttribute('aria-pressed') === 'true',
+    removeFlag: es.getState().draft?.masks?.[0]?.remove === true,
+    // The painted region got new pixels…
+    regionDelta: maxDelta(before.region, after.region),
+    regionChanged: maxDelta(before.region, after.region) > 0,
+    // …and the rest of the frame did not.
+    cornerUnchanged: before.corner.every((v, i) => Math.abs(v - after.corner[i]) <= 3),
+  };
 } else if (shot === 'aitint') {
   // AI mask hover tint: generate an AI mask via the real button (subject by
   // default; ?shotAI=depth|scene picks another kind), hover its row header,
@@ -1999,6 +2082,7 @@ const probe =
   window.__remoteProbe ??
   window.__updatesProbe ??
   window.__maskProbe ??
+  window.__maskRemoveProbe ??
   window.__lensProbe ??
   window.__presetsProbe ??
   window.__presetMasksProbe ??

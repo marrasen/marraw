@@ -196,23 +196,19 @@ func (s *FillStore) Load(photoKey, fillKey string) *FillPatch {
 	return p
 }
 
-// SetFor loads the patch for every enabled fill spot in the edit. Missing
-// patches are simply absent from the set — the spot composites nothing until
-// the patch is generated; rendering never fails on a missing patch. Nil-safe
-// on a nil store (renders that predate wiring, TS-generation Deps).
+// SetFor loads the patch for every enabled fill spot and Remove mask in the
+// edit. Missing patches are simply absent from the set — the spot or mask
+// composites nothing until the patch is generated; rendering never fails on a
+// missing patch. Nil-safe on a nil store (renders that predate wiring,
+// TS-generation Deps).
 func (s *FillStore) SetFor(photoKey string, e *edit.Params) FillSet {
 	if s == nil || e == nil || photoKey == "" {
 		return nil
 	}
 	var set FillSet
-	for i := range e.Spots {
-		sp := &e.Spots[i]
-		if sp.Mode != edit.SpotFill || sp.Disabled {
-			continue
-		}
-		k := e.SpotFillKey(sp)
+	load := func(k string) {
 		if _, done := set[k]; done {
-			continue
+			return
 		}
 		if p := s.Load(photoKey, k); p != nil {
 			if set == nil {
@@ -220,6 +216,20 @@ func (s *FillStore) SetFor(photoKey string, e *edit.Params) FillSet {
 			}
 			set[k] = p
 		}
+	}
+	for i := range e.Spots {
+		sp := &e.Spots[i]
+		if sp.Mode != edit.SpotFill || sp.Disabled {
+			continue
+		}
+		load(e.SpotFillKey(sp))
+	}
+	for i := range e.Masks {
+		m := &e.Masks[i]
+		if !m.Remove || m.Disabled {
+			continue
+		}
+		load(e.MaskFillKey(m))
 	}
 	return set
 }
@@ -234,10 +244,7 @@ func (s *FillStore) SetFor(photoKey string, e *edit.Params) FillSet {
 func SpotFillWindow(aspect float64, s *edit.Spot) (x0, y0, x1, y1 float64) {
 	// Work in long-edge units so both axes share the radius' scale, then
 	// convert back to per-axis fractions at the end.
-	fw, fh := 1.0, 1.0/aspect // frame extents in long-edge units
-	if aspect < 1 {
-		fw, fh = aspect, 1.0
-	}
+	fw, fh := frameLongUnits(aspect)
 	minX, minY := math.Inf(1), math.Inf(1)
 	maxX, maxY := math.Inf(-1), math.Inf(-1)
 	grow := func(x, y, r float64) {
@@ -262,13 +269,231 @@ func SpotFillWindow(aspect float64, s *edit.Spot) (x0, y0, x1, y1 float64) {
 	if minX > maxX {
 		return 0, 0, 0, 0
 	}
+	return fillWindowFromBBox(fw, fh, minX, minY, maxX, maxY, math.Inf(1))
+}
+
+// frameLongUnits gives the frame's extents in long-edge units (the long axis
+// is 1), the space region bounding boxes and radii share. aspect is
+// frameW/frameH.
+func frameLongUnits(aspect float64) (fw, fh float64) {
+	if aspect < 1 {
+		return aspect, 1.0
+	}
+	return 1.0, 1.0 / aspect
+}
+
+// fillWindowFromBBox pads a region's bounding box into the context window an
+// ML fill is generated in and composited from. Inputs are in long-edge units
+// (fw×fh is the frame there); the result is per-axis frame fractions, clamped
+// to the frame. The pad is the region's own span — a small region wants
+// context wider than itself — floored at 5% of the long edge so a dust spot
+// still gets something to inpaint from, and capped at maxPad so a large
+// region does not drag half the frame into a window the model resolves at a
+// fixed 512px.
+func fillWindowFromBBox(fw, fh, minX, minY, maxX, maxY, maxPad float64) (x0, y0, x1, y1 float64) {
+	if minX > maxX || minY > maxY {
+		return 0, 0, 0, 0
+	}
 	span := math.Max(maxX-minX, maxY-minY)
-	pad := math.Max(span, 0.05)
+	pad := math.Min(math.Max(span, 0.05), maxPad)
 	x0 = clampF((minX-pad)/fw, 0, 1)
 	x1 = clampF((maxX+pad)/fw, 0, 1)
 	y0 = clampF((minY-pad)/fh, 0, 1)
 	y1 = clampF((maxY+pad)/fh, 0, 1)
 	return x0, y0, x1, y1
+}
+
+// --- Mask removal regions ---
+
+const (
+	// maskFillDilate grows the binary region before it goes to the model, as a
+	// fraction of the region plane's long edge. The composite edge is feathered
+	// and AI mattes are edge-snapped against the render's own pixels, so the
+	// blend can reach slightly outside the plane's own boundary; synthesizing a
+	// margin means it never blends back toward the thing being removed.
+	maskFillDilate = 0.008
+	// maskFillMaxPad caps the context margin around a removal window, in
+	// long-edge units — see fillWindowFromBBox.
+	maskFillMaxPad = 0.25
+	// MaskFillMaxArea is the largest share of the frame a removal may cover.
+	// Past this there is not enough surround left to synthesize from and the
+	// model's fixed internal resolution shows badly, so the RPC refuses rather
+	// than spending an inference on a result the photographer will discard.
+	MaskFillMaxArea = 0.40
+)
+
+// MaskRegion is the binary region a mask removal inpaints: a 0/255 plane in
+// oriented-frame space plus the bounds and coverage derived from it. It is a
+// pure function of the mask's parameters and its stored AI map — never of the
+// rendered pixels — so generation and composite agree without storing it, the
+// SpotFillWindow contract.
+type MaskRegion struct {
+	Plane          []uint8 // 0 or 255, W*H, row-major
+	W, H           int
+	X0, Y0, X1, Y1 float64 // bounding box, frame fractions
+	Area           float64 // covered share of the frame, 0..1
+}
+
+// MaskFillRegion derives the removal region for a Remove mask, or ok=false
+// when the mask is not eligible, its AI map is not generated yet, or the
+// region is empty. frameW/frameH are the oriented frame's pixel dimensions
+// (only their ratio matters).
+//
+// Feather is deliberately ignored here: it softens the composite edge, and
+// baking it into the region would make every feather tweak cost an inference
+// (see edit.MaskFillKey). The model gets a hard, dilated region instead.
+func MaskFillRegion(m *edit.Mask, frameW, frameH float64, ai AIMapSet) (*MaskRegion, bool) {
+	if m == nil || frameW <= 0 || frameH <= 0 || !m.MaskRemoveAllowed() {
+		return nil, false
+	}
+	var src []uint8
+	var pw, ph int
+	switch m.Type {
+	case edit.MaskBrush:
+		pw, ph = brushPlaneDims(frameW, frameH)
+		src = brushPlaneFor(m.Strokes, pw, ph)
+	case edit.MaskAI:
+		am := ai[aiSetKey(m.AIKind.MapKind(), m.MapVer)]
+		if am == nil || am.W == 0 || am.H == 0 {
+			return nil, false
+		}
+		hard := *m
+		hard.Feather = 0
+		src = deriveCoverage(am, &hard)
+		pw, ph = am.W, am.H
+	default:
+		return nil, false
+	}
+	if pw <= 0 || ph <= 0 || len(src) < pw*ph {
+		return nil, false
+	}
+	// Binarize into a fresh plane: brushPlaneFor and deriveCoverage hand back
+	// LRU-cached slices other renders share, so neither may be written to.
+	plane := make([]uint8, pw*ph)
+	for i, v := range src[:pw*ph] {
+		if v >= 128 {
+			plane[i] = 255
+		}
+	}
+	dilateU8(plane, pw, ph, max(4, int(math.Round(float64(max(pw, ph))*maskFillDilate))))
+
+	minX, minY, maxX, maxY := pw, ph, -1, -1
+	covered := 0
+	for y := 0; y < ph; y++ {
+		row := plane[y*pw : (y+1)*pw]
+		for x, v := range row {
+			if v == 0 {
+				continue
+			}
+			covered++
+			if maxY < 0 {
+				minY = y
+			}
+			maxY = y
+			if x < minX {
+				minX = x
+			}
+			if x > maxX {
+				maxX = x
+			}
+		}
+	}
+	if maxX < 0 {
+		return nil, false
+	}
+	return &MaskRegion{
+		Plane: plane, W: pw, H: ph,
+		X0: float64(minX) / float64(pw), X1: float64(maxX+1) / float64(pw),
+		Y0: float64(minY) / float64(ph), Y1: float64(maxY+1) / float64(ph),
+		Area: float64(covered) / float64(pw*ph),
+	}, true
+}
+
+// MaskFillWindow is the context window a mask removal is generated in and
+// composited from, as fractions of the oriented frame — SpotFillWindow's
+// counterpart, recomputed from the region on both sides rather than stored.
+// aspect is frameW/frameH.
+func MaskFillWindow(aspect float64, r *MaskRegion) (x0, y0, x1, y1 float64) {
+	if r == nil {
+		return 0, 0, 0, 0
+	}
+	fw, fh := frameLongUnits(aspect)
+	return fillWindowFromBBox(fw, fh, r.X0*fw, r.Y0*fh, r.X1*fw, r.Y1*fh, maskFillMaxPad)
+}
+
+// MaskFillMask rasterizes a removal region into the model's mask over the
+// window rect: 255 = keep, 0 = inpaint (the MI-GAN convention, as
+// SpotFillMask). rect is the window in pixels of an uncropped oriented buffer
+// whose frame is frameW×frameH px; the mask is mw×mh mapped linearly onto
+// rect. The region plane is already binary and dilated, so nearest sampling
+// is exact.
+func MaskFillMask(rect image.Rectangle, mw, mh int, frameW, frameH float64, r *MaskRegion) *image.Gray {
+	m := image.NewGray(image.Rect(0, 0, mw, mh))
+	for i := range m.Pix {
+		m.Pix[i] = 255
+	}
+	if rect.Dx() <= 0 || rect.Dy() <= 0 || r == nil || r.W == 0 || r.H == 0 {
+		return m
+	}
+	for y := 0; y < mh; y++ {
+		fy := float64(rect.Min.Y) + (float64(y)+0.5)*float64(rect.Dy())/float64(mh)
+		py := int(fy / frameH * float64(r.H))
+		if py < 0 || py >= r.H {
+			continue
+		}
+		prow := r.Plane[py*r.W : (py+1)*r.W]
+		row := m.Pix[y*m.Stride:]
+		for x := 0; x < mw; x++ {
+			fx := float64(rect.Min.X) + (float64(x)+0.5)*float64(rect.Dx())/float64(mw)
+			px := int(fx / frameW * float64(r.W))
+			if px < 0 || px >= r.W {
+				continue
+			}
+			if prow[px] != 0 {
+				row[x] = 0
+			}
+		}
+	}
+	return m
+}
+
+// dilateU8 grows the non-zero areas of a binary plane by radius pixels, in
+// place, with a separable running-max pass per axis (the boxBlurU8 shape).
+func dilateU8(p []uint8, w, h, radius int) {
+	if radius < 1 || w == 0 || h == 0 {
+		return
+	}
+	tmp := make([]uint8, len(p))
+	// Horizontal: a pixel survives if any neighbour within radius is set.
+	for y := 0; y < h; y++ {
+		row := p[y*w : (y+1)*w]
+		out := tmp[y*w : (y+1)*w]
+		for x := 0; x < w; x++ {
+			lo, hi := max(0, x-radius), min(w-1, x+radius)
+			var v uint8
+			for i := lo; i <= hi; i++ {
+				if row[i] != 0 {
+					v = 255
+					break
+				}
+			}
+			out[x] = v
+		}
+	}
+	// Vertical.
+	for x := 0; x < w; x++ {
+		for y := 0; y < h; y++ {
+			lo, hi := max(0, y-radius), min(h-1, y+radius)
+			var v uint8
+			for i := lo; i <= hi; i++ {
+				if tmp[i*w+x] != 0 {
+					v = 255
+					break
+				}
+			}
+			p[y*w+x] = v
+		}
+	}
 }
 
 // SpotFillMask rasterizes the spot's region into a mask over the window rect:

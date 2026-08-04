@@ -13,6 +13,7 @@ import {
   generateAIMap,
   generateAIMaps,
   generateFill,
+  generateMaskFill,
   getEditParams,
   pasteEditParams,
   pickRangeColor,
@@ -197,6 +198,12 @@ interface EditSessionState {
   // Spot index whose fill needs the model downloaded: set when GenerateFill
   // refuses without consent, drives the download dialog in the Retouch group.
   fillConsent: number | null;
+  // The same two, for mask removals (Remove pill). Kept separate from the spot
+  // pair rather than folded into a tagged union: the dialogs live in different
+  // panel groups and decline reverts a different field, so one shared slot
+  // would have to be discriminated at every use.
+  maskFillBusy: number[];
+  maskFillConsent: number | null;
   // The selected local-adjustment mask (index into draft.masks): its overlay
   // handles show on the loupe and its sliders expand in the Masks tab.
   activeMask: number | null;
@@ -275,6 +282,8 @@ export const useEditSession = create<EditSessionState>(() => ({
   spotVisualizeThreshold: 0.4,
   fillBusy: [],
   fillConsent: null,
+  maskFillBusy: [],
+  maskFillConsent: null,
   activeMask: null,
   activeMaskControl: null,
   maskPaint: false,
@@ -1219,6 +1228,7 @@ export function esCommit(client: ApiClient, patch?: Partial<Params>) {
   // Fill spots need their ML patch to exist for the state just committed;
   // the server fast-paths when nothing changed, so this is free noise-wise.
   void esEnsureFills(client);
+  void esEnsureMaskFills(client);
 }
 
 // esEnsureFills asks the server for the inpaint patch of every enabled fill
@@ -1279,6 +1289,88 @@ export function esDeclineFillDownload(client: ApiClient) {
   if (index == null || !s.draft?.spots?.[index]) return;
   esUpdateSpot(client, index, { mode: undefined });
   void esFinishSpot(client, index);
+}
+
+// esEnsureMaskFills is esEnsureFills for Remove masks: it asks the server for
+// the inpaint patch of every enabled removal in the draft. Same contract —
+// GenerateMaskFill is idempotent and cheap when the patch is cached, and
+// re-keys itself when the region or the decode settings changed, so one hook
+// after each commit covers new removals, repainted brushes, a different
+// person picked, and develop changes that invalidate a patch.
+//
+// A removal whose AI map hasn't been generated yet is skipped quietly (the
+// server says so): esEnsureAIMaps runs the detection, its commit lands here
+// again, and the patch generates then.
+async function esEnsureMaskFills(client: ApiClient, allowDownload = false, only?: number) {
+  const s = useEditSession.getState();
+  if (s.photoId == null || !s.draft?.masks) return;
+  const pid = s.photoId;
+  const draft = s.draft;
+  for (let i = 0; i < (draft.masks?.length ?? 0); i++) {
+    const m = draft.masks![i];
+    if (!m.remove || m.disabled) continue;
+    if (only != null && i !== only) continue;
+    if (useEditSession.getState().maskFillBusy.includes(i)) continue;
+    setState((st) => ({ maskFillBusy: [...st.maskFillBusy, i] }));
+    try {
+      const res = await generateMaskFill(client, pid, draft, i, allowDownload);
+      if (useEditSession.getState().photoId !== pid) return;
+      if (res.generated) {
+        // New pixels for the same edit hash: refresh thumbs and the loupe.
+        bumpImgBust(pid);
+        schedulePreview(client, 'settle');
+      }
+    } catch (err) {
+      if (useEditSession.getState().photoId !== pid) return;
+      const msg = (err as Error).message;
+      if (isModelNotDownloaded(err)) {
+        setState((st) => (st.maskFillConsent == null ? { maskFillConsent: i } : {}));
+      } else if (msg.includes(MASK_FILL_TOO_LARGE)) {
+        toast.error('That region covers too much of the frame to fill convincingly.');
+        esUpdateMask(client, i, { remove: undefined });
+        esCommit(client);
+      } else if (!msg.includes(MASK_FILL_NO_REGION)) {
+        // No region yet just means the AI map is still coming; anything else
+        // is worth surfacing.
+        toast.error(`Remove failed: ${msg}`);
+      }
+    } finally {
+      setState((st) => ({ maskFillBusy: st.maskFillBusy.filter((b) => b !== i) }));
+    }
+  }
+}
+
+// Server sentinels for a refused removal (internal/api/fill.go). Matched as
+// substrings, the isModelNotDownloaded precedent.
+const MASK_FILL_TOO_LARGE = 'mask region is too large to remove';
+const MASK_FILL_NO_REGION = 'mask has no region to remove';
+
+// esToggleMaskRemove flips a mask into or out of inpaint mode and kicks off
+// the generation for the state just committed.
+export function esToggleMaskRemove(client: ApiClient, index: number, on: boolean) {
+  esUpdateMask(client, index, { remove: on ? true : undefined });
+  esCommit(client);
+  if (on) void esEnsureMaskFills(client, false, index);
+}
+
+// esConfirmMaskFillDownload re-runs the consent-blocked removal with the
+// download allowed — the dialog's confirm action.
+export function esConfirmMaskFillDownload(client: ApiClient) {
+  const index = useEditSession.getState().maskFillConsent;
+  setState({ maskFillConsent: null });
+  if (index == null) return;
+  void esEnsureMaskFills(client, true, index);
+}
+
+// esDeclineMaskFillDownload clears the Remove flag: without the model the mask
+// would keep its removal pill lit while rendering nothing.
+export function esDeclineMaskFillDownload(client: ApiClient) {
+  const s = useEditSession.getState();
+  const index = s.maskFillConsent;
+  setState({ maskFillConsent: null });
+  if (index == null || !s.draft?.masks?.[index]) return;
+  esUpdateMask(client, index, { remove: undefined });
+  esCommit(client);
 }
 
 // An AI mask is a RECIPE, not pixels: it names a model map by (aiKind,

@@ -105,7 +105,7 @@ func MeanLuma(img *image.RGBA) float64 {
 // its ML fill patches (FillStore.SetFor); either is nil when the edit has
 // none or they are unavailable.
 func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fills FillSet) {
-	ApplyHeal(img, e, fills)
+	ApplyHeal(img, e, ai, fills)
 	ApplyLook(img, gamma, e)
 	suppress := ApplyMasks(img, e, ai)
 	ApplyDetail(img, e, suppress)

@@ -35,6 +35,7 @@ import {
   backgroundMask,
   isMaskShapeControl,
   maskAdjustIsNeutral,
+  maskCanRemove,
   maskHasFX,
   maskLabel,
   type MaskControlId,
@@ -71,6 +72,9 @@ import {
   esSetRangePicking,
   esConfirmFillDownload,
   esDeclineFillDownload,
+  esConfirmMaskFillDownload,
+  esDeclineMaskFillDownload,
+  esToggleMaskRemove,
   esSetSpotMode,
   esSetSpotTool,
   esSetSpotBrush,
@@ -1292,6 +1296,25 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   const [generating, setGenerating] = useState<AIKindType | null>(null);
   // A feature waiting on download consent; non-null renders the dialog.
   const [pendingAI, setPendingAI] = useState<PendingAIDownload | null>(null);
+  // The same gate for the inpainting model behind a mask's Remove pill — kept
+  // apart from pendingAI because declining reverts the flag rather than just
+  // closing (the Retouch group's fill dialog precedent).
+  const maskFillConsent = useEditSession((s) => s.maskFillConsent);
+  const [pendingMaskFill, setPendingMaskFill] = useState<PendingAIDownload | null>(null);
+  useEffect(() => {
+    if (maskFillConsent == null) return;
+    let stale = false;
+    fillModelStatus(client)
+      .then((st) => {
+        if (!stale) setPendingMaskFill({ kind: 'fill', bytes: st.bytes, mode: 'add' });
+      })
+      .catch(() => {
+        if (!stale) setPendingMaskFill({ kind: 'fill', bytes: 0, mode: 'add' });
+      });
+    return () => {
+      stale = true;
+    };
+  }, [client, maskFillConsent]);
   const masks = useMemo(() => draft.masks ?? [], [draft.masks]);
   // A chip is "added" when the draft already carries its mask — marked with a
   // check, but still clickable (a second mask of the same region with its own
@@ -1576,6 +1599,17 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
         }}
         onCancel={() => setPendingAI(null)}
       />
+      <AIModelDialog
+        pending={maskFillConsent != null ? pendingMaskFill : null}
+        onConfirm={() => {
+          setPendingMaskFill(null);
+          esConfirmMaskFillDownload(client);
+        }}
+        onCancel={() => {
+          setPendingMaskFill(null);
+          esDeclineMaskFillDownload(client);
+        }}
+      />
     </div>
   );
 }
@@ -1594,9 +1628,11 @@ function MaskRow({
   onSelect: () => void;
 }) {
   const activeMaskControl = useEditSession((s) => s.activeMaskControl);
+  const maskFillBusy = useEditSession((s) => s.maskFillBusy.includes(index));
   const adjust = mask.adjust ?? {};
   const changed = !maskAdjustIsNeutral(adjust);
   const fxChanged = maskHasFX(adjust);
+  const canRemove = maskCanRemove(mask);
   // Collapse state is pure UI, not photo state, so it stays local — the
   // BrushToolRow precedent. Opens on its own when the mask already carries an
   // effect (a preset, a pasted look, the Background button).
@@ -1666,7 +1702,26 @@ function MaskRow({
         >
           <span className="text-[11.5px] text-secondary-foreground">{maskLabel(mask, index)}</span>
           {changed && <span className="size-[5px] shrink-0 rounded-full bg-primary" title="Has adjustments" />}
+          {maskFillBusy && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
         </button>
+        {/* Remove: inpaint the masked region away. Only on types whose region
+            is binary and bounded — the server refuses the rest, so offering
+            the pill there would just un-toggle itself. */}
+        {canRemove && (
+          <button
+            type="button"
+            className={cn(
+              'rounded px-1 text-[9px] font-semibold tracking-[.05em] uppercase',
+              mask.remove ? 'bg-primary/18 text-accent-text' : 'text-faint hover:text-foreground',
+            )}
+            title="Remove what this mask covers, filling from the surround"
+            aria-pressed={!!mask.remove}
+            data-testid="mask-remove-toggle"
+            onClick={() => esToggleMaskRemove(client, index, !mask.remove)}
+          >
+            Remove
+          </button>
+        )}
         <button
           type="button"
           className={cn(

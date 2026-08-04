@@ -36,7 +36,7 @@ const AI_KIND_INFO: Record<string, { title: string; feature: string }> = {
   },
   fill: {
     title: 'content-aware fill',
-    feature: 'Fills a retouch spot by synthesizing new pixels from its surround — for blemishes and distractions where no clean source patch exists to heal or clone from.',
+    feature: 'Synthesizes new pixels from the surround to fill a region — a retouch spot, or everything a mask covers — for blemishes and distractions where no clean source patch exists to heal or clone from.',
   },
 };
 

@@ -454,7 +454,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		// Mirrors ApplyFinish stage for stage — kept inline only for the
 		// progress ticks between the stages.
 		report(0.72)
-		ApplyHeal(rgba, edits, fills)
+		ApplyHeal(rgba, edits, ai, fills)
 		ApplyLook(rgba, gamma, edits)
 		report(0.78)
 		suppress := ApplyMasks(rgba, edits, ai)

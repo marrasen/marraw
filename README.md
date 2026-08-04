@@ -239,7 +239,11 @@ are the controls you chose to keep at hand.</sup>
   blur, zoom blur, glow, anamorphic light streaks, prism (radial colour
   fringing) and mosaic. A **Background** button is the one-click version — it
   detects the subject, inverts the mask and defocuses everything else with a
-  bloom and light streaks. Masks are anchored to
+  bloom and light streaks. A mask can also **Remove** what it
+  covers — the region is synthesized away from its surround by the same
+  on-device model content-aware fill uses, so masking a person and pressing
+  Remove erases them; it is offered on brushed and AI (Subject / Scene /
+  People) masks, whose region has an edge to work from. Masks are anchored to
   image content, so they survive recrops and re-straightens, and render
   identically in previews, 1:1 tiles and exports.
 - **Tone** — exposure (±5 EV), preserve highlights, brightness, gamma, shadow

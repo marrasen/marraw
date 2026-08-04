@@ -240,6 +240,72 @@ type Mask struct {
 	RangeSatMin float64 `json:"rangeSatMin,omitempty"`
 
 	Adjust MaskAdjust `json:"adjust"`
+
+	// Remove inpaints the mask's region from its surround with the ML model
+	// (internal/inpaint), the SpotFill treatment applied to a mask: the pixels
+	// are not derivable from the params, so renders composite a cached patch
+	// (pyramid.FillStore) in the pre-look stage and skip the removal while none
+	// exists. It lives here rather than on Adjust because it describes the
+	// region, not an adjustment value — Adjust must stay ==-comparable for
+	// IsNeutral, and a Remove mask with a neutral Adjust must still render.
+	// Adjust still applies on top of the filled pixels, so a mask can remove
+	// something and then grade what replaced it. Only types with a binary,
+	// param-derivable region may set it (MaskRemoveAllowed); normalizeMasks
+	// clears it elsewhere. Appended last on purpose: json.Marshal emits
+	// declaration order, so every older sidecar and edit hash stays
+	// byte-identical, and a build predating this field renders the mask as
+	// tone-only rather than mis-rendering it.
+	Remove bool `json:"remove,omitempty"`
+}
+
+// MaskRemoveAllowed reports whether this mask's type and parameters admit
+// inpaint mode. The region handed to the model must be binary, bounded and
+// derivable from the params alone, which rules out three groups:
+//
+//   - Linear and radial gradients are soft by construction and a linear ramp
+//     runs to the frame edge; there is no object-shaped region to remove, and
+//     brush masks plus fill-mode spots already cover "remove this blob".
+//   - Depth windows select a slab of the scene, rarely a thing.
+//   - Range masks compute coverage from the render's own developed pixels, so
+//     their region moves with the look sliders — no stable fill key could
+//     exist for one.
+//
+// An effectively-inverted mask is refused too: its region is "everything
+// except the subject", which cannot be inpainted from a surround it does not
+// have. Background is the inverted subject matte, hence the XOR.
+func (m *Mask) MaskRemoveAllowed() bool {
+	switch m.Type {
+	case MaskBrush:
+		return !m.Invert && len(m.Strokes) > 0
+	case MaskAI:
+		if m.Invert != (m.AIKind == AIBackground) {
+			return false
+		}
+		// Keyed on the MAP kind, not the mask kind: the region is the map's own
+		// un-inverted coverage, so an inverted Background mask — which selects
+		// the subject — qualifies exactly as a Subject mask does.
+		switch m.AIKind.MapKind() {
+		case AISubject, AIPerson, AIClass:
+			return true
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// HasMaskFills reports whether any enabled mask asks for removal — the gate
+// that decides whether the pre-look stage derives mask regions at all.
+func (e *Params) HasMaskFills() bool {
+	if e == nil {
+		return false
+	}
+	for i := range e.Masks {
+		if e.Masks[i].Remove && !e.Masks[i].Disabled {
+			return true
+		}
+	}
+	return false
 }
 
 // SpotMode selects how a retouch spot fills its destination. "" (the default)
@@ -845,6 +911,12 @@ func (e *Params) normalizeMasks() {
 		m.Adjust.Glow = clamp(m.Adjust.Glow, 0, 1)
 		m.Adjust.Mosaic = clamp(m.Adjust.Mosaic, 0, 1)
 		m.Adjust.Prism = clamp(m.Adjust.Prism, -1, 1)
+		// Clear an inpaint flag the type or parameters don't support, so an
+		// equivalent state hashes identically and the render rule can never
+		// drift from what the panel offers.
+		if m.Remove && !m.MaskRemoveAllowed() {
+			m.Remove = false
+		}
 		if m.Adjust.MotionBlur == 0 && m.Adjust.Streaks == 0 {
 			// Inert: nothing reads the angle, so equivalent states must hash
 			// identically (and a stray angle drag must not make a neutral mask
@@ -934,6 +1006,40 @@ func (e *Params) SpotFillKey(s *Spot) string {
 	}{
 		Decode: e.LibrawInputsHash(), Rotate: e.RotateTurns(), FlipH: e.FlipH,
 		Kind: s.Kind, CX: s.CX, CY: s.CY, Radius: s.Radius, Str: s.Strokes,
+	}
+	b, _ := json.Marshal(&seed)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// MaskFillKey identifies the pixels an ML removal for m is generated from:
+// the mask's region parameters plus everything that shapes the pre-look
+// oriented frame it is inpainted against — the SpotFillKey contract, applied
+// to a mask. Composite-only fields stay out of the key: Feather softens the
+// blend edge (the region handed to the model is dilated past it either way,
+// so feathering must never cost an inference), and Adjust, Disabled, crop and
+// the look stage all apply after the patch is composited. Range fields are
+// absent because a range mask can never be a Remove mask. The seed is
+// domain-separated from SpotFillKey so a spot and a mask can never collide on
+// one patch. The model version is appended by the store, the MapVer
+// precedent.
+func (e *Params) MaskFillKey(m *Mask) string {
+	seed := struct {
+		MaskFill  bool     `json:"maskfill"`
+		Decode    string   `json:"decode"`
+		Rotate    int      `json:"rotate"`
+		FlipH     bool     `json:"flipH,omitempty"`
+		Type      MaskType `json:"type"`
+		Str       []Stroke `json:"strokes,omitempty"`
+		AIKind    AIKind   `json:"aiKind,omitempty"`
+		MapVer    string   `json:"mapVer,omitempty"`
+		ClassID   int      `json:"classId,omitempty"`
+		Threshold float64  `json:"threshold,omitempty"`
+	}{
+		MaskFill: true,
+		Decode:   e.LibrawInputsHash(), Rotate: e.RotateTurns(), FlipH: e.FlipH,
+		Type: m.Type, Str: m.Strokes,
+		AIKind: m.AIKind, MapVer: m.MapVer, ClassID: m.ClassID, Threshold: m.Threshold,
 	}
 	b, _ := json.Marshal(&seed)
 	sum := sha256.Sum256(b)

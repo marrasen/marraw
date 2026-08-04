@@ -206,6 +206,19 @@ export function subscribeGenerateFill(client: ApiClient, photoID: number, params
 }
 
 
+export function generateMaskFill(client: ApiClient, photoID: number, params: Params, maskIndex: number, allowDownload: boolean, options?: RequestOptions): Promise<FillResult> {
+    return client.request<FillResult>('Edits.GenerateMaskFill', [photoID, params, maskIndex, allowDownload], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+generateMaskFill.method = 'Edits.GenerateMaskFill' as const;
+
+export function subscribeGenerateMaskFill(client: ApiClient, photoID: number, params: Params, maskIndex: number, allowDownload: boolean, callback: (data: FillResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<FillResult>('Edits.GenerateMaskFill', [photoID, params, maskIndex, allowDownload], callback, onError, options);
+}
+
+
 export function getEditParams(client: ApiClient, photoID: number, options?: RequestOptions): Promise<Params> {
     return client.request<Params>('Edits.GetEditParams', [photoID], options);
 }
@@ -512,6 +525,21 @@ export function useGenerateFill(photoID: number, params: Params, spotIndex: numb
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, params, spotIndex, allowDownload], _subscribe: { method: 'Edits.GenerateFill', params: [photoID, params, spotIndex, allowDownload] } });
+}
+
+/**
+ * Subscribes to `Edits.GenerateMaskFill` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useGenerateMaskFill(photoID: number, params: Params, maskIndex: number, allowDownload: boolean, options?: UseQueryOptions<FillResult>): UseQueryResult<FillResult> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, maskIndex: number, allowDownload: boolean) => generateMaskFill(client, photoID, params, maskIndex, allowDownload, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, maskIndex, allowDownload], _subscribe: { method: 'Edits.GenerateMaskFill', params: [photoID, params, maskIndex, allowDownload] } });
 }
 
 /**

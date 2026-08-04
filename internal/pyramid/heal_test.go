@@ -44,8 +44,8 @@ func lumaAt(img *image.RGBA, x, y int) int {
 func TestApplyHealNeutralNoOp(t *testing.T) {
 	img := gradientImage(64, 48)
 	before := clonePix(img)
-	ApplyHeal(img, nil, nil)
-	ApplyHeal(img, &edit.Params{}, nil)
+	ApplyHeal(img, nil, nil, nil)
+	ApplyHeal(img, &edit.Params{}, nil, nil)
 	for i := range before {
 		if img.Pix[i] != before[i] {
 			t.Fatalf("neutral ApplyHeal changed pixel %d: %d -> %d", i, before[i], img.Pix[i])
@@ -64,7 +64,7 @@ func TestApplyHealClone(t *testing.T) {
 		SX: 0.75, SY: 0.5, // source at (150,100)
 		Feather: 0.1,
 	}}}
-	ApplyHeal(img, e, nil)
+	ApplyHeal(img, e, nil, nil)
 	if got := lumaAt(img, 50, 100); got < 190 {
 		t.Errorf("clone center should copy the bright source (~200), got %d", got)
 	}
@@ -79,7 +79,7 @@ func TestApplyHealClone(t *testing.T) {
 // the source brightness.
 func TestApplyHealToneMatches(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 200, 200))
-	fillFlat(img, 100)            // destination surround
+	fillFlat(img, 100)               // destination surround
 	fillDisc(img, 150, 100, 22, 200) // bright source patch (constant)
 	fillDisc(img, 50, 100, 10, 0)    // black blemish to cover
 	before := lumaAt(img, 50, 100)
@@ -91,7 +91,7 @@ func TestApplyHealToneMatches(t *testing.T) {
 		SX: 0.75, SY: 0.5,
 		Feather: 0.1,
 	}}}
-	ApplyHeal(img, e, nil)
+	ApplyHeal(img, e, nil, nil)
 	got := lumaAt(img, 50, 100)
 	if got < 90 || got > 110 {
 		t.Errorf("heal should tone-match the ~100 surround, got %d", got)
@@ -114,7 +114,7 @@ func TestApplyHealSkipsUnknownKindsAndModes(t *testing.T) {
 		// A stroke spot with an unknown MODE must be skipped too.
 		{Kind: "stroke", Mode: "bogus", CX: 0.5, CY: 0.5, SX: 0.2, SY: 0.2,
 			Strokes: []edit.Stroke{{Radius: 0.05, Pts: []float64{0.4, 0.5, 0.6, 0.5}}}},
-	}}, nil)
+	}}, nil, nil)
 	for i := range before {
 		if img.Pix[i] != before[i] {
 			t.Fatalf("unknown kind/mode spot changed pixel %d: %d -> %d", i, before[i], img.Pix[i])
@@ -123,7 +123,7 @@ func TestApplyHealSkipsUnknownKindsAndModes(t *testing.T) {
 	// The un-normalized "heal" spelling of the default mode still heals.
 	ApplyHeal(img, &edit.Params{Spots: []edit.Spot{
 		{Mode: "heal", CX: 0.5, CY: 0.5, Radius: 0.1, SX: 0.2, SY: 0.2, Feather: 0.1},
-	}}, nil)
+	}}, nil, nil)
 	changed := false
 	for i := range before {
 		if img.Pix[i] != before[i] {
@@ -144,7 +144,7 @@ func TestApplyHealNearEdge(t *testing.T) {
 		{CX: 0.01, CY: 0.01, Radius: 0.08, SX: 0.5, SY: 0.5, Feather: 0.4},
 		{CX: 0.99, CY: 0.99, Radius: 0.08, SX: 0.5, SY: 0.5, Mode: edit.SpotClone},
 	}}
-	ApplyHeal(img, e, nil) // just needs to survive
+	ApplyHeal(img, e, nil, nil) // just needs to survive
 }
 
 // strokeSpot paints a horizontal bar via one stroke: dest reference at
@@ -173,7 +173,7 @@ func TestApplyHealStrokeClone(t *testing.T) {
 		}
 	}
 	e := &edit.Params{Spots: []edit.Spot{strokeSpot(0.5, 0.5, 0, 0.3, 0.04, edit.SpotClone)}}
-	ApplyHeal(img, e, nil)
+	ApplyHeal(img, e, nil, nil)
 	if got := lumaAt(img, 100, 100); got < 190 {
 		t.Errorf("stroke clone center should copy the bright source (~200), got %d", got)
 	}
@@ -202,7 +202,7 @@ func TestApplyHealStrokeToneMatches(t *testing.T) {
 		}
 	}
 	e := &edit.Params{Spots: []edit.Spot{strokeSpot(0.5, 0.5, 0, 0.3, 0.04, edit.SpotHeal)}}
-	ApplyHeal(img, e, nil)
+	ApplyHeal(img, e, nil, nil)
 	got := lumaAt(img, 100, 100)
 	if got < 85 || got > 115 {
 		t.Errorf("stroke heal should tone-match the ~100 surround, got %d", got)
@@ -217,7 +217,7 @@ func TestApplyHealStrokeNearEdge(t *testing.T) {
 		strokeSpot(0.02, 0.02, 0.5, 0.5, 0.06, edit.SpotHeal),
 		strokeSpot(0.98, 0.98, 0.5, 0.5, 0.06, edit.SpotClone),
 	}}
-	ApplyHeal(img, e, nil) // just needs to survive
+	ApplyHeal(img, e, nil, nil) // just needs to survive
 }
 
 // TestApplyHealStrokeResolutionStable checks a stroke heals to the same tone
@@ -238,8 +238,8 @@ func TestApplyHealStrokeResolutionStable(t *testing.T) {
 	e := &edit.Params{Spots: []edit.Spot{strokeSpot(0.5, 0.5, 0, 0.3, 0.04, edit.SpotHeal)}}
 	big := mk(400, 300)
 	small := mk(200, 150)
-	ApplyHeal(big, e, nil)
-	ApplyHeal(small, e, nil)
+	ApplyHeal(big, e, nil, nil)
+	ApplyHeal(small, e, nil, nil)
 	gb := lumaAt(big, 200, 150)
 	gs := lumaAt(small, 100, 75)
 	if diff := gb - gs; diff < -12 || diff > 12 {
@@ -346,8 +346,8 @@ func TestApplyHealResolutionStable(t *testing.T) {
 	}}}
 	big := mk(400, 300)
 	small := mk(200, 150)
-	ApplyHeal(big, e, nil)
-	ApplyHeal(small, e, nil)
+	ApplyHeal(big, e, nil, nil)
+	ApplyHeal(small, e, nil, nil)
 	gb := lumaAt(big, 100, 150)
 	gs := lumaAt(small, 50, 75)
 	if diff := gb - gs; diff < -12 || diff > 12 {
@@ -374,7 +374,7 @@ func TestApplyFillCompositesPatch(t *testing.T) {
 	}
 	fills := FillSet{e.SpotFillKey(s): &FillPatch{Img: patch}}
 
-	ApplyHeal(img, e, fills)
+	ApplyHeal(img, e, nil, fills)
 
 	// Center of the disc: the patch color at full weight.
 	co := img.PixOffset(60, 45)
@@ -393,7 +393,7 @@ func TestApplyFillCompositesPatch(t *testing.T) {
 	img2 := gradientImage(120, 90)
 	before2 := clonePix(img2)
 	e.Spots[0].Disabled = true
-	ApplyHeal(img2, e, fills)
+	ApplyHeal(img2, e, nil, fills)
 	for i := range before2 {
 		if img2.Pix[i] != before2[i] {
 			t.Fatalf("disabled fill spot changed pixel %d", i)
@@ -418,5 +418,112 @@ func TestSpotFillWindowDeterminism(t *testing.T) {
 		if x0 > 0.5-0.05 || x1 < 0.5+0.05 || y0 > 0.5-0.05 || y1 < 0.5+0.05 {
 			t.Fatalf("window does not cover the spot at aspect %v: %v %v %v %v", aspect, x0, y0, x1, y1)
 		}
+	}
+}
+
+// --- Mask removals ---
+
+// maskFillFixture builds a Remove mask over a centered label rectangle plus a
+// constant-colour patch spanning its window, at a resolution unrelated to the
+// render's so the composite has to resample rather than assume.
+func maskFillFixture(colour [3]uint8) (*edit.Params, AIMapSet, FillSet) {
+	e := &edit.Params{Masks: []edit.Mask{
+		{Type: edit.MaskAI, AIKind: edit.AIPerson, MapVer: "rfdetr-1", ClassID: 2, Remove: true, Feather: 0.3},
+	}}
+	ai := personMap(100, 100, 40, 30, 60, 70)
+	patch := image.NewRGBA(image.Rect(0, 0, 48, 64))
+	for i := 0; i < len(patch.Pix); i += 4 {
+		patch.Pix[i], patch.Pix[i+1], patch.Pix[i+2], patch.Pix[i+3] = colour[0], colour[1], colour[2], 255
+	}
+	return e, ai, FillSet{e.MaskFillKey(&e.Masks[0]): &FillPatch{Img: patch}}
+}
+
+func TestApplyMaskFillCompositesPatch(t *testing.T) {
+	e, ai, fills := maskFillFixture([3]uint8{10, 200, 30})
+	img := gradientImage(120, 120)
+	before := clonePix(img)
+	ApplyHeal(img, e, ai, fills)
+
+	// Region center (frame fraction .5,.5 → px 60,60): the patch colour.
+	co := img.PixOffset(60, 60)
+	if img.Pix[co+1] < 150 || img.Pix[co] > 60 {
+		t.Errorf("region center did not take the patch: rgb=%d,%d,%d",
+			img.Pix[co], img.Pix[co+1], img.Pix[co+2])
+	}
+	// Well outside the region (and its feather): untouched.
+	oo := img.PixOffset(5, 5)
+	for c := 0; c < 3; c++ {
+		if img.Pix[oo+c] != before[oo+c] {
+			t.Fatalf("pixel far outside the region changed: %d -> %d", before[oo+c], img.Pix[oo+c])
+		}
+	}
+}
+
+func TestApplyMaskFillNoPatchIsNoOp(t *testing.T) {
+	// The neutral contract every stage shares: a removal whose patch has not
+	// been generated yet (or whose map is missing) must leave the buffer
+	// byte-identical, never render a hole.
+	e, ai, _ := maskFillFixture([3]uint8{10, 200, 30})
+	for _, c := range []struct {
+		name  string
+		ai    AIMapSet
+		fills FillSet
+	}{
+		{"no patch", ai, nil},
+		{"no map", nil, nil},
+	} {
+		img := gradientImage(120, 120)
+		before := clonePix(img)
+		ApplyHeal(img, e, c.ai, c.fills)
+		for i := range before {
+			if img.Pix[i] != before[i] {
+				t.Fatalf("%s: changed pixel %d: %d -> %d", c.name, i, before[i], img.Pix[i])
+			}
+		}
+	}
+	// A hidden removal composites nothing even with its patch in hand.
+	e2, ai2, fills2 := maskFillFixture([3]uint8{10, 200, 30})
+	e2.Masks[0].Disabled = true
+	img := gradientImage(120, 120)
+	before := clonePix(img)
+	ApplyHeal(img, e2, ai2, fills2)
+	for i := range before {
+		if img.Pix[i] != before[i] {
+			t.Fatalf("disabled removal changed pixel %d", i)
+		}
+	}
+}
+
+func TestApplyMaskFillAnchoredToContent(t *testing.T) {
+	// Masks live in oriented-frame fractions, so a removal must land on the
+	// same image content at every render size — the mask_test anchoring
+	// contract, now covering the pre-look fill stage.
+	e, ai, fills := maskFillFixture([3]uint8{10, 200, 30})
+	big := gradientImage(240, 240)
+	small := gradientImage(120, 120)
+	ApplyHeal(big, e, ai, fills)
+	ApplyHeal(small, e, ai, fills)
+	for _, p := range []struct{ x, y float64 }{{0.5, 0.5}, {0.45, 0.4}, {0.1, 0.1}} {
+		bo := big.PixOffset(int(p.x*240), int(p.y*240))
+		so := small.PixOffset(int(p.x*120), int(p.y*120))
+		bg := big.Pix[bo+1] > 150 && big.Pix[bo] < 60
+		sg := small.Pix[so+1] > 150 && small.Pix[so] < 60
+		if bg != sg {
+			t.Errorf("fraction %.2f,%.2f: filled=%v at 240px but %v at 120px", p.x, p.y, bg, sg)
+		}
+	}
+}
+
+func TestApplyMaskFillsBeforeSpots(t *testing.T) {
+	// Removals composite first so a retouch spot can heal a seam the inpaint
+	// left; the reverse order would overwrite the repair.
+	e, ai, fills := maskFillFixture([3]uint8{10, 200, 30})
+	// A clone spot covering the region center, sourced from a corner.
+	e.Spots = []edit.Spot{{Mode: edit.SpotClone, CX: 0.5, CY: 0.5, Radius: 0.08, SX: 0.1, SY: 0.1}}
+	img := gradientImage(120, 120)
+	ApplyHeal(img, e, ai, fills)
+	co := img.PixOffset(60, 60)
+	if img.Pix[co+1] > 150 && img.Pix[co] < 60 {
+		t.Error("the spot did not run after the removal: center still shows the patch")
 	}
 }

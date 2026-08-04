@@ -85,6 +85,40 @@ new rendition flicker-free. Transient drags decode once to scene-linear and
 fold WB/exposure/brightness/gamma in Go without re-demosaicing; the WB
 approximation there is deliberate and is corrected by the exact 2048 settle.
 
+### ML fills (retouch spots and mask removals)
+
+Fill-mode retouch spots and a mask's **Remove** flag share one path: the pixels
+cannot be derived from the params, so an inference writes an RGBA patch to
+`pyramid.FillStore` (its own directory, not the preview cache — patches cost a
+model run, so they survive `Clear`/`Relocate`) and `ApplyHeal` composites it in
+the **pre-look** stage, before `ApplyLook`, so synthesized pixels develop with
+the frame they came from. Mask removals composite before spots, so a spot can
+heal a seam an inpaint left. A missing patch composites nothing — never a hole,
+never an error.
+
+Both sides re-derive the context window and the model mask from the params
+rather than storing them (`SpotFillWindow` / `MaskFillWindow`), so there is
+nothing to drift. Two rules keep the cache honest:
+
+- **The patch key** (`edit.SpotFillKey`, `edit.MaskFillKey`) covers the region
+  geometry plus everything shaping the pre-look oriented frame — the LibRaw
+  decode subset and the quarter-rotate/mirror. Composite-only fields stay OUT:
+  feather, opacity, `Adjust`, `Disabled`, crop, straighten and the look stage
+  must never cost an inference. The two seeds are domain-separated so a spot
+  and a mask cannot collide.
+- **A removal's region is a pure function of the mask params and its stored AI
+  map** — never of rendered pixels. That is why `MaskRemoveAllowed` refuses
+  range masks (their coverage is computed from developed pixels, so no stable
+  key could exist), the soft/unbounded types (linear, radial, depth), and
+  effectively inverted masks (whose region is everything *but* the subject).
+  The region is binarized at 128 and dilated before it goes to the model;
+  `Feather` softens only the composite edge. `client/src/lib/controlSpecs.ts`
+  mirrors this rule as `maskCanRemove` and must stay in sync.
+
+Generation is serialized daemon-wide by `fillSem` in `internal/api/fill.go`: a
+run pins a LibRaw handle for its warm decode, and browsing must never queue
+behind it.
+
 ## Prerequisites
 
 - Go 1.26+

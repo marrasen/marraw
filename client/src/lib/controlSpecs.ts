@@ -410,6 +410,22 @@ export function maskHasFX(a: MaskAdjust | undefined): boolean {
   return MASK_FX_ORDER.some((k) => k !== 'fxAngle' && (a[k] ?? 0) !== 0);
 }
 
+// maskCanRemove mirrors the server's Mask.MaskRemoveAllowed — KEEP IN SYNC:
+// normalizeMasks clears the flag on anything this rejects, so a pill offered
+// here that the server refuses would silently un-toggle itself. Removal needs
+// a binary, bounded region derivable from the params alone, which leaves out
+// the soft/unbounded types (linear, radial, depth, range) and any effectively
+// inverted mask, whose region is everything *but* the subject.
+export function maskCanRemove(m: Mask): boolean {
+  if (m.type === 'brush') return !m.invert && (m.strokes?.length ?? 0) > 0;
+  if (m.type !== 'ai') return false;
+  if (!!m.invert !== (m.aiKind === 'background')) return false;
+  // Keyed on the MAP kind (background samples the subject matte), so an
+  // inverted Background mask — which selects the subject — qualifies too.
+  const mapKind = m.aiKind === 'background' ? 'subject' : m.aiKind;
+  return mapKind === 'subject' || mapKind === 'person' || mapKind === 'class';
+}
+
 export const MASK_TYPE_LABELS: Record<string, string> = {
   linear: 'Linear gradient',
   radial: 'Radial',

@@ -7,21 +7,28 @@ import (
 	"github.com/marrasen/marraw/internal/edit"
 )
 
-// ApplyHeal transplants the edit's retouch spots into a post-geometry render.
-// It runs before ApplyLook (see ApplyFinish) so healed pixels develop
-// identically to their source — a spot copied in scene space picks up the same
-// tone curve, color and detail as everything around it. Spots apply in list
-// order: a later spot sees the earlier spots' output.
+// ApplyHeal transplants the edit's mask removals and retouch spots into a
+// post-geometry render. It runs before ApplyLook (see ApplyFinish) so
+// transplanted pixels develop identically to their source — a spot copied in
+// scene space picks up the same tone curve, color and detail as everything
+// around it, and an inpainted region develops with the frame it was
+// synthesized from.
 //
-// Spot geometry lives in fractional coordinates of the oriented frame (the
-// crop-rectangle space, like masks), recovered from the params alone via
-// newMaskFrame, so a spot lands on the same image content across every preview
+// Mask removals composite first, then spots in list order, so a spot can heal
+// a seam an inpaint left behind — the reverse order would overwrite the
+// repair. A later spot sees the earlier spots' output.
+//
+// Spot and mask geometry live in fractional coordinates of the oriented frame
+// (the crop-rectangle space), recovered from the params alone via
+// newMaskFrame, so they land on the same image content across every preview
 // level, 1:1 tile and export. A disc is rotation-invariant, so only the two
 // centers are mapped through the frame transform; the radius (a fraction of the
 // frame long edge) carries straight over because output→frame is a pure
-// rotation with no scale.
-func ApplyHeal(img *image.RGBA, e *edit.Params, fills FillSet) {
-	if !e.HasSpots() {
+// rotation with no scale. ai supplies the maps AI mask removals derive their
+// region from; it is nil when the edit has none or they are unavailable, in
+// which case those masks composite nothing.
+func ApplyHeal(img *image.RGBA, e *edit.Params, ai AIMapSet, fills FillSet) {
+	if !e.HasSpots() && !e.HasMaskFills() {
 		return
 	}
 	b := img.Bounds()
@@ -31,6 +38,7 @@ func ApplyHeal(img *image.RGBA, e *edit.Params, fills FillSet) {
 	}
 	f := newMaskFrame(w, h, e)
 	long := math.Max(f.frameW, f.frameH)
+	applyMaskFills(img, w, h, &f, e, ai, fills)
 	for i := range e.Spots {
 		s := &e.Spots[i]
 		if s.Disabled {
@@ -55,6 +63,96 @@ func ApplyHeal(img *image.RGBA, e *edit.Params, fills FillSet) {
 			applyHealStroke(img, w, h, &f, long, s)
 		}
 	}
+}
+
+// applyMaskFills composites the cached inpaint patch of every enabled Remove
+// mask. The region is re-derived from the mask's parameters and its AI map
+// (MaskFillRegion) rather than stored, so it agrees with what generation fed
+// the model; the mask's Feather softens only the blend edge here, which is why
+// it stays out of the patch key. A mask whose patch is not generated yet — or
+// whose AI map is missing — composites nothing, exactly like an ungenerated
+// fill spot.
+func applyMaskFills(img *image.RGBA, w, h int, f *maskFrame, e *edit.Params, ai AIMapSet, fills FillSet) {
+	if !e.HasMaskFills() || f.frameW == 0 || f.frameH == 0 {
+		return
+	}
+	var wrow []uint16
+	for i := range e.Masks {
+		m := &e.Masks[i]
+		if !m.Remove || m.Disabled {
+			continue
+		}
+		p := fills[e.MaskFillKey(m)]
+		if p == nil {
+			continue
+		}
+		r, ok := MaskFillRegion(m, f.frameW, f.frameH, ai)
+		if !ok {
+			continue
+		}
+		wx0, wy0, wx1, wy1 := MaskFillWindow(f.frameW/f.frameH, r)
+		if wx1 <= wx0 || wy1 <= wy0 {
+			continue
+		}
+		pb := p.Img.Bounds()
+		pw, ph := pb.Dx(), pb.Dy()
+		if pw == 0 || ph == 0 {
+			continue
+		}
+		// patchAt samples the patch at an output-space coordinate: output →
+		// frame fractions → window-relative → patch pixels (the applyFill map).
+		patchAt := func(ox, oy float64) (r, g, b float64, ok bool) {
+			fx, fy := f.framePoint(ox, oy)
+			u := (fx/f.frameW - wx0) / (wx1 - wx0)
+			v := (fy/f.frameH - wy0) / (wy1 - wy0)
+			if u < 0 || u > 1 || v < 0 || v > 1 {
+				return 0, 0, 0, false
+			}
+			r8, g8, b8, _ := sampleBilinear(p.Img, u*float64(pw-1), v*float64(ph-1))
+			return float64(r8), float64(g8), float64(b8), true
+		}
+		ev := &brushEval{
+			f: *f, plane: featheredRegion(r, m.Feather), pw: r.W, ph: r.H,
+			covToW: covToWeight,
+			xMin:   0, xMax: 1 << 30, yMin: 0, yMax: 1 << 30,
+		}
+		ev.coverageBounds()
+		x0, x1 := max(0, ev.xMin), min(w, ev.xMax)
+		y0, y1 := max(0, ev.yMin), min(h, ev.yMax)
+		if x0 >= x1 || y0 >= y1 {
+			continue
+		}
+		if wrow == nil {
+			wrow = make([]uint16, w)
+		}
+		for y := y0; y < y1; y++ {
+			rx0, rx1 := ev.weightRow(y, wrow)
+			if rx0 >= rx1 {
+				continue
+			}
+			row := img.Pix[y*img.Stride:]
+			for x := rx0; x < rx1; x++ {
+				if wq := int32(wrow[x]); wq != 0 {
+					blendFillPixel(row, x, wq, float64(x), float64(y), patchAt)
+				}
+			}
+		}
+	}
+}
+
+// featheredRegion softens a removal region's hard edge into the blend weights
+// the composite gathers through — labelCoverage's treatment, on a copy so the
+// region itself (which generation must agree on byte for byte) is untouched.
+func featheredRegion(r *MaskRegion, feather float64) []uint8 {
+	plane := make([]uint8, len(r.Plane))
+	copy(plane, r.Plane)
+	if feather > 0 {
+		if rad := int(math.Round(feather * float64(max(r.W, r.H)) * 0.03)); rad > 0 {
+			boxBlurU8(plane, r.W, r.H, rad)
+			boxBlurU8(plane, r.W, r.H, rad) // two passes ≈ triangular
+		}
+	}
+	return plane
 }
 
 // healModeKnown reports whether the spot's fill mode is one this build renders
