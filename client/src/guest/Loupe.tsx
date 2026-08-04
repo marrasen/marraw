@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Download, Loader2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Loader2, Maximize, Minimize, X } from 'lucide-react';
 
 import type { FlagType, Photo } from '@/api/library';
 import { imgUrl, levelForSize } from '@/lib/backend';
 import { cn } from '@/lib/utils';
 
+import { fullscreenElement, useFullscreen } from './fullscreen';
 import { useGestures } from './gestures';
 import { RatingBar } from './RatingBar';
 import { savePhoto } from './save';
@@ -24,6 +25,18 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
   const [chrome, setChrome] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const fs = useFullscreen();
+
+  // Entering fullscreen (or rotating) can grow the viewport past what the
+  // current pyramid level covers; tracking the size lets the img re-pick it.
+  const [viewportMax, setViewportMax] = useState(() =>
+    Math.max(window.innerWidth, window.innerHeight),
+  );
+  useEffect(() => {
+    const onResize = () => setViewportMax(Math.max(window.innerWidth, window.innerHeight));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const next = () => onIndex(Math.min(photos.length - 1, index + 1));
   const prev = () => onIndex(Math.max(0, index - 1));
@@ -39,7 +52,12 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight') next();
       else if (e.key === 'ArrowLeft') prev();
-      else if (e.key === 'Escape') onClose();
+      else if (e.key === 'Escape') {
+        // In fullscreen the browser maps Escape to exiting it; also closing
+        // the loupe would take both away in one press.
+        if (fullscreenElement()) return;
+        onClose();
+      }
       else if (e.key >= '0' && e.key <= '5') onRate(photo.id, Number(e.key));
       else if (e.key === 'p') onFlag(photo.id, photo.flag === 'pick' ? 'none' : 'pick');
       else if (e.key === 'x') onFlag(photo.id, photo.flag === 'exclude' ? 'none' : 'exclude');
@@ -86,7 +104,7 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
           // 2048 is the largest pyramid level; past it the app switches to
           // full-resolution tiles, which is a lot of machinery for "does this
           // frame work". Deep zoom can come later if anyone misses it.
-          src={imgUrl(photo, levelForSize(Math.max(window.innerWidth, window.innerHeight)))}
+          src={imgUrl(photo, levelForSize(viewportMax))}
           alt={photo.fileName}
           draggable={false}
           className="size-full object-contain"
@@ -115,9 +133,21 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
               <span className="min-w-0 flex-1 truncate text-center text-[13px] text-white/80">
                 {photo.fileName}
               </span>
-              <span className="shrink-0 pr-2 text-sm text-white/70 tabular-nums">
+              <span className="shrink-0 text-sm text-white/70 tabular-nums">
                 {index + 1} / {photos.length}
               </span>
+              {/* iPhone Safari has no fullscreen API; there the bar simply
+                  ends at the counter, as it always has. */}
+              {fs.supported && (
+                <button
+                  type="button"
+                  onClick={fs.toggle}
+                  aria-label={fs.active ? 'Exit full screen' : 'Enter full screen'}
+                  className="pointer-events-auto grid size-11 place-items-center rounded-full bg-black/40 active:bg-white/10"
+                >
+                  {fs.active ? <Minimize className="size-6" /> : <Maximize className="size-6" />}
+                </button>
+              )}
             </div>
             {/* Arrows for mouse users; a finger uses the swipe. */}
             <NavButton side="left" disabled={index === 0} onClick={prev} />
