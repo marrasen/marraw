@@ -196,7 +196,12 @@ check(tooLarge, 'a frame-swallowing region is refused by the area cap');
 const subj = await call('Edits.GenerateAIMap', [photo.id, 'subject', true]);
 const aiParams = {
   ...marker,
-  masks: [{ type: 'ai', aiKind: 'subject', mapVer: subj.mapVer, remove: true, feather: 0.2, adjust: {} }],
+  // Threshold is jittered for the same reason the strokes are: it is part of
+  // the patch key, so each run derives a region no previous run cached.
+  masks: [{
+    type: 'ai', aiKind: 'subject', mapVer: subj.mapVer, remove: true,
+    feather: 0.2, threshold: jc(0.45), adjust: {},
+  }],
 };
 await call('Edits.SetEditParams', [photo.id, aiParams]);
 const aiSaved = await call('Edits.GetEditParams', [photo.id]);
@@ -212,7 +217,34 @@ await call('Edits.SetEditParams', [photo.id, inverted]);
 check(!(await call('Edits.GetEditParams', [photo.id])).masks?.[0]?.remove,
   'remove clears on an inverted subject mask');
 
-// --- 10. The sidecar carries the flag. ---
+// --- 10. A patch generated against a draft the DB row has moved past must
+// still invalidate the renditions cached for THAT draft. The client commits
+// and asks for the patch in the same tick without awaiting the write, so the
+// row read inside the RPC routinely carries the previous edit; keying the
+// invalidation on it leaves stale pre-fill levels on disk, and the removed
+// thing reappears as soon as the loupe asks for one of them. ---
+{
+  const region = { ...brushMask(), strokes: [{ ...brushStrokes[0], radius: 0.052 }] };
+  const A = { contrast: 0.07, masks: [region] };            // the draft the patch is for
+  const B = { contrast: 0.31, masks: [region] };            // same region, different edit hash
+  await call('Edits.SetEditParams', [photo.id, A]);
+  let c = (await call('Library.ListPhotos', [info.folderId]))[0];
+  const hashA = c.editHash;
+  const preFill = await fetchImg(`http://127.0.0.1:8483/img/${photo.id}/512?v=${c.cacheKey}&e=${hashA}`);
+
+  await call('Edits.SetEditParams', [photo.id, B]);         // row moves off A
+  const savedA = { ...A, masks: [region] };
+  await call('Edits.GenerateMaskFill', [photo.id, savedA, 0, true]);
+
+  await call('Edits.SetEditParams', [photo.id, A]);         // back to A
+  c = (await call('Library.ListPhotos', [info.folderId]))[0];
+  check(c.editHash === hashA, 'returning to the draft restores its edit hash');
+  const postFill = await fetchImg(`http://127.0.0.1:8483/img/${photo.id}/512?v=${c.cacheKey}&e=${c.editHash}`);
+  check(!postFill.equals(preFill),
+    'a patch generated against a stale row still drops that draft\'s cached levels');
+}
+
+// --- 11. The sidecar carries the flag. ---
 await call('Edits.SetEditParams', [photo.id, eligible]);
 await new Promise((r) => setTimeout(r, 500));
 const sidecar = readFileSync(join(FOLDER, `${photo.fileName}.marraw.json`), 'utf8');

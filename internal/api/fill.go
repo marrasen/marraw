@@ -275,9 +275,19 @@ func (e *Edits) generateFillPatch(ctx context.Context, photo store.Photo, params
 	if err := e.deps.Cache.Fills.Save(photo.CacheKey, key, out); err != nil {
 		return nil, err
 	}
-	// A fresh patch changes pixels for the SAVED edit without changing its
-	// hash (the generateAIMap precedent): drop the stale cached renditions.
-	if photo.EditHash != edit.BaseHash {
+	// A fresh patch changes pixels for an edit whose hash did NOT change (the
+	// generateAIMap precedent), so every cached rendition of that edit is now
+	// stale. Invalidate the hash of the params the patch was generated for —
+	// the client commits and asks for the patch in the same tick without
+	// awaiting the write, so the row read at the top of the RPC can still
+	// carry the PREVIOUS edit, and keying only on that leaves the levels the
+	// photographer is actually looking at showing pre-fill pixels. The saved
+	// hash is dropped too when it differs, since a render may already have
+	// been cached under it.
+	if h := params.Hash(); h != edit.BaseHash {
+		e.deps.Cache.InvalidateEdit(photo.CacheKey, h)
+	}
+	if photo.EditHash != edit.BaseHash && photo.EditHash != params.Hash() {
 		e.deps.Cache.InvalidateEdit(photo.CacheKey, photo.EditHash)
 	}
 	if downloaded {
