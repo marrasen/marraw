@@ -217,7 +217,7 @@ func (e *Edits) generateFillPatch(ctx context.Context, photo store.Photo, params
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	decode, err := e.previewDecode(ctx, photo.ID, photo, params)
+	decode, wbComp, err := e.previewDecode(ctx, photo.ID, photo, params)
 	if err != nil {
 		return nil, err
 	}
@@ -254,10 +254,12 @@ func (e *Edits) generateFillPatch(ctx context.Context, photo store.Photo, params
 	}
 	window := image.NewRGBA(image.Rect(0, 0, max(1, mw), max(1, mh)))
 	xdraw.CatmullRom.Scale(window, window.Bounds(), oriented, rect, xdraw.Src, nil)
-	// The stops LibRaw's exp_shift couldn't bake — the render paths' post-
-	// decode fold, applied here to the window copy (pointwise, so window-then-
-	// fold equals fold-then-window).
-	pyramid.ApplyExposureEV(window, params.ResidualExpEV(), params)
+	// The stops LibRaw's exp_shift couldn't bake, plus the white-balance
+	// normalization the render paths take back out — their post-decode fold,
+	// applied here to the window copy (pointwise, so window-then-fold equals
+	// fold-then-window). The patch is generated from, and composited onto, the
+	// rendered frame, so it has to be inpainted at the rendered brightness.
+	pyramid.ApplyExposureEV(window, params.ResidualExpEV()+wbComp, params)
 
 	rectFrame := rect.Sub(ob.Min)
 	mask := maskFor(rectFrame, window.Bounds().Dx(), window.Bounds().Dy(), frameW, frameH)

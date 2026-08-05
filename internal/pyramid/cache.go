@@ -180,7 +180,7 @@ func nested(a, b string) bool {
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r11"
+const renderVersion = "r12"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
@@ -402,6 +402,9 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	if level == "full" && (edits == nil || edits.Demosaic == "") {
 		params.UserQual = libraw.DemosaicPPG
 	}
+	// Read the as-shot balance BEFORE Process resolves the chosen WB into
+	// pre_mul in place: the compensation below is measured against it.
+	wbCompEV := edits.WBCompEV(proc.CamMul(), proc.CamXYZ())
 	// Fraction budget across the whole render: decode 0–0.70, look/detail
 	// 0.70–0.90, write-out 0.90–1. Throttled here (not per source) so the
 	// parallel tile writers share one clock; the final 1 always goes out.
@@ -434,8 +437,10 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		return err
 	}
 	// The exposure stops LibRaw's exp_shift couldn't bake fold in post-decode,
-	// before any look stage — same slot as RenderPreview's expDeltaEV.
-	ApplyExposureEV(rgba, edits.ResidualExpEV(), edits)
+	// before any look stage — same slot as RenderPreview's expDeltaEV — and
+	// with them the white-balance normalization LibRaw applied, so a tile
+	// matches the preview whose place it takes (see edit.Params.WBCompEV).
+	ApplyExposureEV(rgba, edits.ResidualExpEV()+wbCompEV, edits)
 	// Heal the stored dimensions against the FULL uncropped decode — the crop
 	// stage below shrinks the render, so this must read the pre-geometry size.
 	if level == "full" {
@@ -692,13 +697,15 @@ func outputEncoding(edits *edit.Params) (pwr, ts float64) {
 }
 
 // WritePreview writes the 2048 rendition on the interactive path so a
-// following commit serves the same pixels over /img.
-func (c *Cache) WritePreview(src *image.RGBA, photo store.Photo, editHash string, lookGamma float64, edits *edit.Params) error {
+// following commit serves the same pixels over /img. wbCompEV is the caller's
+// edit.Params.WBCompEV for src's decode — it folds in beside the residual
+// exposure so this rendition lands at the brightness the drag showed.
+func (c *Cache) WritePreview(src *image.RGBA, photo store.Photo, editHash string, lookGamma float64, edits *edit.Params, wbCompEV float64) error {
 	cacheKey := photo.CacheKey
 	ai := c.AIMaps.SetFor(cacheKey, edits)
 	fills := c.Fills.SetFor(cacheKey, edits)
 	lensc := c.Lenses.For(photo)
-	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits, edits.ResidualExpEV(), ai, fills, lensc), cacheKey, "2048", editHash, 80)
+	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits, edits.ResidualExpEV()+wbCompEV, ai, fills, lensc), cacheKey, "2048", editHash, 80)
 }
 
 // WriteLevels writes a chain of downscaled renditions from src, skipping

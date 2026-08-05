@@ -191,6 +191,62 @@ func AdjustWB(mul [4]float64, temp, tint float64) [4]float64 {
 	return mul
 }
 
+// ScaleNorm returns the divisor scale_colors normalizes white-balance
+// multipliers by before applying them: the smallest component (so the channel
+// needing least gain is left alone and nothing beyond the white level is
+// invented) — or the largest when highlight recovery is on, which instead
+// scales everything down so no channel clips.
+//
+// Mirrors dcraw's `for c<4 {dmin,dmax}; if (!highlight) dmax = dmin;
+// pre_mul[c] /= dmax`, including its zero-fallbacks: the fourth multiplier
+// stands in as green on a three-colour camera.
+func ScaleNorm(mul [4]float64, highlight int) float64 {
+	m := mul
+	if m[1] <= 0 {
+		m[1] = 1
+	}
+	if m[3] == 0 {
+		m[3] = m[1]
+	}
+	lo, hi := m[0], m[0]
+	for _, v := range m {
+		lo = min(lo, v)
+		hi = max(hi, v)
+	}
+	if highlight != 0 {
+		if hi <= 0 {
+			return 1
+		}
+		return hi
+	}
+	if lo <= 0 {
+		return 1
+	}
+	return lo
+}
+
+// WBExpCompEV is the exposure correction, in stops, that a decode at `target`
+// needs so its white balance carries the same brightness as one at `cam` —
+// the convention the interactive fold renders in, where changing white balance
+// only shifts colour and never exposure.
+//
+// LibRaw normalizes multipliers by their min (see ScaleNorm), so green's gain
+// depends on the whole set: a picked [1.98, 1, 0.389] leaves the decode 1/0.389
+// ≈ 2.6× brighter than the same edit folded green-normalized. Every exact
+// render folds this scalar back in post-decode, so preview and final agree.
+// Zero when target and cam are the same balance, which keeps camera-WB edits
+// rendering byte-identically.
+func WBExpCompEV(target, cam [4]float64, highlight int) float64 {
+	if target[1] <= 0 || cam[1] <= 0 {
+		return 0
+	}
+	s := (cam[1] / ScaleNorm(cam, highlight)) * (ScaleNorm(target, highlight) / target[1])
+	if s <= 0 {
+		return 0
+	}
+	return math.Log2(s)
+}
+
 // caFactor sanitizes a CA channel scale: 0 means off (1.0), and anything
 // outside a ±2% band is clamped — larger values are never lateral CA.
 func caFactor(v float64) float64 {

@@ -16,19 +16,99 @@ import (
 // is demosaiced a single time into a 16-bit scene-linear reference (see
 // edit.LinearRefLibrawParams); every subsequent white-balance, exposure,
 // brightness and gamma change is then a cheap per-pixel pass over that buffer
-// instead of a fresh ~400 ms demosaic. The white balance is applied post-
-// demosaic in the output space, which is an approximation LibRaw does before
-// demosaic — good enough for the transient drag frame, and the deferred 2048
-// settle re-decodes exactly (see cache.RenderPreview), so committed pixels are
-// unaffected.
+// instead of a fresh ~400 ms demosaic.
+//
+// White balance is applied where LibRaw applies it — to the camera's own
+// channels, before the colour matrix. The reference is already through that
+// matrix, so the fold goes back through its inverse, scales, and returns (see
+// FoldParams.M). Scaling the developed pixels instead is a different operation:
+// the matrix's negative cross-terms mean a big blue boost crushes green in a
+// real decode, and a preview that skipped them turned magenta the moment the
+// settle landed.
 
 // FoldParams are the per-frame raw-stage adjustments folded into the linear
-// reference: K is the per-channel linear gain (white-balance ratio × 2^EV ×
-// brightness) and Pwr/Ts are the LibRaw output-gamma power and toe slope.
+// reference.
+//
+// D is the white-balance change as per-camera-channel gain, relative to the
+// balance the reference was decoded at and normalized to green (D[1] = 1), so
+// white balance shifts colour and never exposure — Exp and Bright carry
+// brightness alone. M/Minv convert between the reference's output space and
+// the camera channels D acts on; when HasMatrix is false (a four-colour sensor
+// or a file with no usable matrix) the fold falls back to scaling the output
+// channels directly, as it always did. Pwr/Ts are the LibRaw output-gamma
+// power and toe slope.
+//
+// The exact decode of the same edit normalizes multipliers by their minimum
+// instead (dcraw's scale_colors), which also moves brightness; every accurate
+// render folds edit.Params.WBCompEV back in so the two agree.
 type FoldParams struct {
-	K   [3]float64
-	Pwr float64
-	Ts  float64
+	D      [3]float64
+	Exp    float64
+	Bright float64
+	// White is the ceiling the camera channels clip at, in the reference's
+	// units. LibRaw clips at the white level AFTER dividing the multipliers by
+	// their smallest, so on an edit the compensation darkens (a pick with a
+	// channel below green) the decode loses highlights the reference still
+	// holds. Clipping the fold at the same place is what keeps the preview
+	// honest about what the settle will show. Zero means the plain white level.
+	White     float64
+	M, Minv   [3][3]float64
+	HasMatrix bool
+	Pwr       float64
+	Ts        float64
+}
+
+// white is the clip ceiling, defaulting to the 16-bit white level.
+func (fp FoldParams) white() float64 {
+	if fp.White <= 0 {
+		return 65535
+	}
+	return fp.White
+}
+
+// scalarGain is the per-output-channel gain for the no-matrix path: the WB
+// ratio applied directly to the developed channels, times exposure and
+// brightness.
+func (fp FoldParams) scalarGain() [3]float64 {
+	var k [3]float64
+	for c := range 3 {
+		k[c] = fp.D[c] * fp.Exp * fp.Bright
+	}
+	return k
+}
+
+// flat reports whether D is close enough to no white-balance change that the
+// matrix round trip is pointless: M·(d·I)·M⁻¹ = d·I exactly, so an exposure,
+// brightness or gamma drag takes the cheap scalar path with identical output.
+func (fp FoldParams) flat() bool {
+	lo, hi := fp.D[0], fp.D[0]
+	for _, v := range fp.D {
+		lo, hi = min(lo, v), max(hi, v)
+	}
+	return lo > 0 && hi/lo-1 < 1e-3
+}
+
+// Invert3 inverts a 3×3 matrix by its adjugate, reporting false when it is
+// singular (or near enough that the inverse would amplify noise absurdly).
+func Invert3(m [3][3]float64) ([3][3]float64, bool) {
+	c00 := m[1][1]*m[2][2] - m[1][2]*m[2][1]
+	c01 := m[1][2]*m[2][0] - m[1][0]*m[2][2]
+	c02 := m[1][0]*m[2][1] - m[1][1]*m[2][0]
+	det := m[0][0]*c00 + m[0][1]*c01 + m[0][2]*c02
+	if math.Abs(det) < 1e-9 {
+		return [3][3]float64{}, false
+	}
+	inv := [3][3]float64{
+		{c00, m[0][2]*m[2][1] - m[0][1]*m[2][2], m[0][1]*m[1][2] - m[0][2]*m[1][1]},
+		{c01, m[0][0]*m[2][2] - m[0][2]*m[2][0], m[0][2]*m[1][0] - m[0][0]*m[1][2]},
+		{c02, m[0][1]*m[2][0] - m[0][0]*m[2][1], m[0][0]*m[1][1] - m[0][1]*m[1][0]},
+	}
+	for i := range 3 {
+		for j := range 3 {
+			inv[i][j] /= det
+		}
+	}
+	return inv, true
 }
 
 // FromLibrawLinear converts a 16-bit interleaved linear RGB LibRaw image (as
@@ -192,11 +272,15 @@ func RenderPreviewLinear(lin *image.RGBA64, longEdge int, fp FoldParams, lookGam
 // output pixels, so decoding the reference at full half-size and downscaling
 // here per frame is no more expensive than pre-scaling would be.
 func foldScale(lin *image.RGBA64, ow, oh int, fp FoldParams) *image.RGBA {
+	if fp.HasMatrix && !fp.flat() {
+		return foldScaleMatrix(lin, ow, oh, fp)
+	}
 	gtab := gammaTable(fp.Pwr, fp.Ts)
 	// Per-channel gain as 16.16 fixed point: index = (linear16 * kfix) >> 16.
 	var kfix [3]int64
+	k := fp.scalarGain()
 	for c := range 3 {
-		kfix[c] = int64(fp.K[c] * 65536)
+		kfix[c] = int64(k[c] * 65536)
 	}
 	b := lin.Bounds()
 	sw, sh := b.Dx(), b.Dy()
@@ -241,4 +325,98 @@ func foldScale(lin *image.RGBA64, ow, oh int, fp FoldParams) *image.RGBA {
 		}
 	}
 	return dst
+}
+
+// foldScaleMatrix is foldScale for a real white-balance change: it takes each
+// resampled pixel back to camera channels through Minv, scales there (where
+// LibRaw scales), clips at the white level the way scale_colors does, and
+// returns through M with brightness folded into its rows.
+//
+// The clip between the two matrices is what reproduces a decode's behaviour on
+// a channel driven past white: without it a boosted channel would come back
+// through M as an out-of-gamut colour rather than clipping to it. What is left
+// is the demosaic-order difference — LibRaw scales the CFA before interpolating
+// and this scales after — which fold_verify_test measures and bounds.
+func foldScaleMatrix(lin *image.RGBA64, ow, oh int, fp FoldParams) *image.RGBA {
+	gtab := gammaTable(fp.Pwr, fp.Ts)
+	// The white balance clips, then exposure clips again — scale_colors and
+	// exp_bef are separate pre-matrix stages in LibRaw, each with its own clip
+	// at the white level. Brightness is post-matrix, so it folds into M's rows
+	// for free and reaches past the ceiling the way LibRaw's does.
+	white := fp.white()
+	d0, d1, d2 := fp.D[0], fp.D[1], fp.D[2]
+	exp := fp.Exp
+	bright := fp.Bright
+	if bright <= 0 {
+		bright = 1
+	}
+	// Hoisted into locals so the inner loop keeps them in registers.
+	n00, n01, n02 := fp.Minv[0][0], fp.Minv[0][1], fp.Minv[0][2]
+	n10, n11, n12 := fp.Minv[1][0], fp.Minv[1][1], fp.Minv[1][2]
+	n20, n21, n22 := fp.Minv[2][0], fp.Minv[2][1], fp.Minv[2][2]
+	m00, m01, m02 := fp.M[0][0]*bright, fp.M[0][1]*bright, fp.M[0][2]*bright
+	m10, m11, m12 := fp.M[1][0]*bright, fp.M[1][1]*bright, fp.M[1][2]*bright
+	m20, m21, m22 := fp.M[2][0]*bright, fp.M[2][1]*bright, fp.M[2][2]*bright
+
+	b := lin.Bounds()
+	sw, sh := b.Dx(), b.Dy()
+	dst := image.NewRGBA(image.Rect(0, 0, ow, oh))
+	sx := float64(sw) / float64(ow)
+	sy := float64(sh) / float64(oh)
+	for y := range oh {
+		fy := (float64(y)+0.5)*sy - 0.5
+		y0 := int(math.Floor(fy))
+		wy := fy - float64(y0)
+		y0c := clampInt(y0, 0, sh-1)
+		y1c := clampInt(y0+1, 0, sh-1)
+		drow := dst.Pix[y*dst.Stride : y*dst.Stride+ow*4]
+		for x := range ow {
+			fx := (float64(x)+0.5)*sx - 0.5
+			x0 := int(math.Floor(fx))
+			wx := fx - float64(x0)
+			x0c := clampInt(x0, 0, sw-1)
+			x1c := clampInt(x0+1, 0, sw-1)
+			i00 := lin.PixOffset(x0c, y0c)
+			i10 := lin.PixOffset(x1c, y0c)
+			i01 := lin.PixOffset(x0c, y1c)
+			i11 := lin.PixOffset(x1c, y1c)
+			var p [3]float64
+			for c := range 3 {
+				o := c * 2
+				s00 := float64(uint32(lin.Pix[i00+o])<<8 | uint32(lin.Pix[i00+o+1]))
+				s10 := float64(uint32(lin.Pix[i10+o])<<8 | uint32(lin.Pix[i10+o+1]))
+				s01 := float64(uint32(lin.Pix[i01+o])<<8 | uint32(lin.Pix[i01+o+1]))
+				s11 := float64(uint32(lin.Pix[i11+o])<<8 | uint32(lin.Pix[i11+o+1]))
+				top := s00 + (s10-s00)*wx
+				bot := s01 + (s11-s01)*wx
+				p[c] = top + (bot-top)*wy
+			}
+			// Output space → camera channels, white-balance, clip, expose,
+			// clip — the two pre-matrix stages LibRaw runs, in its order.
+			c0 := min(max((n00*p[0]+n01*p[1]+n02*p[2])*d0, 0), white)
+			c1 := min(max((n10*p[0]+n11*p[1]+n12*p[2])*d1, 0), white)
+			c2 := min(max((n20*p[0]+n21*p[1]+n22*p[2])*d2, 0), white)
+			c0 = min(c0*exp, white)
+			c1 = min(c1*exp, white)
+			c2 = min(c2*exp, white)
+			// Back to output space, brightness already in the rows.
+			di := x * 4
+			drow[di] = gtab[clampIdx(m00*c0+m01*c1+m02*c2)]
+			drow[di+1] = gtab[clampIdx(m10*c0+m11*c1+m12*c2)]
+			drow[di+2] = gtab[clampIdx(m20*c0+m21*c1+m22*c2)]
+			drow[di+3] = 0xff
+		}
+	}
+	return dst
+}
+
+// clampIdx rounds a linear value onto the gamma table's 16-bit index range.
+func clampIdx(v float64) int {
+	if v <= 0 {
+		return 0
+	}
+	if v >= 65535 {
+		return 65535
+	}
+	return int(v)
 }

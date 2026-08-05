@@ -44,32 +44,109 @@ func TestClampPickedWB(t *testing.T) {
 	}
 }
 
+// TestFoldParamsForUnitScales guards the fold's WB ratio against a
+// normalization-unit mismatch: a picked custom WBMul is normalized to green=1,
+// while the reference cam_mul is in raw units (green ~1024 on many cameras).
+// Without normalizing both to green the ratio collapses to ~1/1000 and the
+// preview goes black — the regression this test pins down.
 func TestFoldParamsForUnitScales(t *testing.T) {
 	// Raw-units as-shot WB, green ~1024 (typical Sony cam_mul).
 	refMul := [4]float64{2400, 1024, 1500, 1024}
+	// A plausible camera→sRGB matrix (rows sum to 1: neutral stays neutral).
+	rgbCam := [3][4]float64{
+		{1.74, -0.79, 0.05, 0},
+		{-0.19, 1.51, -0.32, 0},
+		{0.03, -0.54, 1.51, 0},
+	}
 	// A picked custom WB near as-shot, normalized to green=1.
 	ep := &edit.Params{
 		WBMode: edit.WBCustom,
 		WBMul:  [4]float64{2400.0 / 1024, 1, 1500.0 / 1024, 1},
 	}
-	fp := foldParamsFor(ep, refMul, [4][3]float64{})
+	fp := foldParamsFor(ep, refMul, [4][3]float64{}, rgbCam)
 
 	// Same chromaticity as as-shot ⇒ all gains ≈ 1, none crushed toward black.
-	for c, k := range fp.K {
-		if k < 0.5 || k > 2 {
-			t.Errorf("K[%d] = %.4g, want ≈1 (unit mismatch would give ~0.001)", c, k)
+	for c, d := range fp.D {
+		if d < 0.5 || d > 2 {
+			t.Errorf("D[%d] = %.4g, want ≈1 (unit mismatch would give ~0.001)", c, d)
 		}
 	}
-	if g := fp.K[1]; math.Abs(g-1) > 1e-9 {
+	if g := fp.D[1]; math.Abs(g-1) > 1e-9 {
 		t.Errorf("green gain = %.6f, want 1 (WB must not change luminance)", g)
+	}
+	if !fp.HasMatrix {
+		t.Error("a three-colour invertible matrix must be usable by the fold")
 	}
 
 	// A warmer custom pick (more red, less blue) must raise red and lower blue
 	// relative to green, still without collapsing.
 	ep.WBMul = [4]float64{3000.0 / 1024, 1, 1100.0 / 1024, 1}
-	fp = foldParamsFor(ep, refMul, [4][3]float64{})
-	if !(fp.K[0] > fp.K[1] && fp.K[1] > fp.K[2]) {
-		t.Errorf("warm pick gains not ordered R>G>B: %v", fp.K)
+	fp = foldParamsFor(ep, refMul, [4][3]float64{}, rgbCam)
+	if !(fp.D[0] > fp.D[1] && fp.D[1] > fp.D[2]) {
+		t.Errorf("warm pick gains not ordered R>G>B: %v", fp.D)
+	}
+
+	// A four-colour sensor (non-zero fourth column) and an unusable matrix both
+	// fall back to scaling the developed channels, as the fold always did.
+	four := rgbCam
+	four[1][3] = 0.4
+	if fp := foldParamsFor(ep, refMul, [4][3]float64{}, four); fp.HasMatrix {
+		t.Error("a four-colour sensor must not take the matrix path")
+	}
+	if fp := foldParamsFor(ep, refMul, [4][3]float64{}, [3][4]float64{}); fp.HasMatrix {
+		t.Error("an all-zero matrix must not take the matrix path")
+	}
+}
+
+// TestPickWBNeutralizesInCameraSpace: the multipliers a pick produces are
+// applied to the camera's channels before the colour matrix, so they have to
+// be derived there. Feeding the formula a patch that is a known imbalance in
+// camera space must hand back the multipliers that undo it — which the
+// post-matrix ratio the picker used before did not.
+func TestPickWBNeutralizesInCameraSpace(t *testing.T) {
+	rgbCam := [3][4]float64{
+		{1.74, -0.79, 0.05, 0},
+		{-0.19, 1.51, -0.32, 0},
+		{0.03, -0.54, 1.51, 0},
+	}
+	m, minv, ok := foldMatrix(rgbCam)
+	if !ok {
+		t.Fatal("test matrix should be usable")
+	}
+	// A grey surface the decode rendered off-balance: in camera channels the
+	// patch reads 1.4/1.0/0.6, so a correct pick multiplies by 1/1.4, 1, 1/0.6.
+	cam := [3]float64{1.4, 1.0, 0.6}
+	var patch [3]float64
+	for i := range 3 {
+		for j := range 3 {
+			patch[i] += m[i][j] * cam[j]
+		}
+	}
+	eff := [4]float64{2.0, 1, 0.5, 1} // whatever the frame was developed at
+
+	// The formula under test, as PickWhiteBalance runs it.
+	var p [3]float64
+	for i := range 3 {
+		for j := range 3 {
+			p[i] += minv[i][j] * patch[j]
+		}
+	}
+	got := [3]float64{eff[0] / eff[1] * (p[1] / p[0]), 1, eff[2] / eff[1] * (p[1] / p[2])}
+	want := [3]float64{eff[0] / eff[1] / 1.4, 1, eff[2] / eff[1] / 0.6}
+	for c := range 3 {
+		if math.Abs(got[c]-want[c]) > 1e-9 {
+			t.Errorf("mul[%d] = %.6g, want %.6g", c, got[c], want[c])
+		}
+	}
+
+	// And the result really does neutralize: scaling the camera-space patch by
+	// the pick (relative to what the frame carried) equalizes the channels.
+	var out [3]float64
+	for c := range 3 {
+		out[c] = cam[c] * got[c] / (eff[c] / eff[1])
+	}
+	if math.Abs(out[0]-out[1]) > 1e-9 || math.Abs(out[2]-out[1]) > 1e-9 {
+		t.Errorf("picked WB does not neutralize the patch: %v", out)
 	}
 }
 
@@ -83,13 +160,13 @@ func TestApproxDecodeExposureReuse(t *testing.T) {
 
 	stored := &edit.Params{ExpEV: 0.5, WBTemp: 10}
 	key, noExpKey, expEV := decodeKeys(stored)
-	e.storeDecode(7, key, noExpKey, expEV, rgba)
+	e.storeDecode(7, key, noExpKey, expEV, 0, rgba)
 
 	// Same LibRaw inputs, a different exposure, plus look-stage offsets an auto
 	// preset layers on (contrast/vignette are post-decode) — must still reuse
 	// and report the baked 0.5, since the no-exposure key ignores all of it.
 	want := &edit.Params{ExpEV: 1.8, WBTemp: 10, Contrast: 0.4, Vignette: 0.3, Saturation: 0.2}
-	got, baked, ok := e.approxDecode(7, want)
+	got, baked, _, ok := e.approxDecode(7, want)
 	if !ok {
 		t.Fatal("exposure-only change did not reuse the decode")
 	}
@@ -101,13 +178,13 @@ func TestApproxDecodeExposureReuse(t *testing.T) {
 	}
 
 	// A different photo misses.
-	if _, _, ok := e.approxDecode(8, want); ok {
+	if _, _, _, ok := e.approxDecode(8, want); ok {
 		t.Error("reused a decode across photos")
 	}
 
 	// A white-balance change (a real LibRaw input) misses.
 	wbChanged := &edit.Params{ExpEV: 1.8, WBTemp: 40}
-	if _, _, ok := e.approxDecode(7, wbChanged); ok {
+	if _, _, _, ok := e.approxDecode(7, wbChanged); ok {
 		t.Error("reused a decode across a white-balance change")
 	}
 
@@ -119,8 +196,8 @@ func TestApproxDecodeExposureReuse(t *testing.T) {
 	if expEV != edit.LibrawMaxExpEV {
 		t.Errorf("decodeKeys baked EV for +4.5 = %v, want %v", expEV, edit.LibrawMaxExpEV)
 	}
-	e.storeDecode(7, key, noExpKey, expEV, rgba)
-	if _, baked, ok := e.approxDecode(7, &edit.Params{ExpEV: 2, WBTemp: 10}); !ok || baked != edit.LibrawMaxExpEV {
+	e.storeDecode(7, key, noExpKey, expEV, 0, rgba)
+	if _, baked, _, ok := e.approxDecode(7, &edit.Params{ExpEV: 2, WBTemp: 10}); !ok || baked != edit.LibrawMaxExpEV {
 		t.Errorf("reuse of a clamped-bake decode reported %v, want %v", baked, edit.LibrawMaxExpEV)
 	}
 }

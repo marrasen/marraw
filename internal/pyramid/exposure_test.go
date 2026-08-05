@@ -123,7 +123,7 @@ func TestFoldScalePrecisionAtExtremeEV(t *testing.T) {
 	}
 	for _, ev := range []float64{edit.MinExpEV, edit.MaxExpEV} {
 		k := math.Exp2(ev)
-		got := foldScale(lin, 256, 2, FoldParams{K: [3]float64{k, k, k}, Pwr: pwr, Ts: ts})
+		got := foldScale(lin, 256, 2, FoldParams{D: [3]float64{1, 1, 1}, Exp: k, Bright: 1, Pwr: pwr, Ts: ts})
 		for x := range 256 {
 			exact := math.Round(255 * enc(math.Min(1, float64(x*257)/65535*k)))
 			if d := math.Abs(float64(got.Pix[got.PixOffset(x, 0)]) - exact); d > 1 {

@@ -181,6 +181,11 @@ func renderPhoto(ctx context.Context, photo store.Photo, req Request) (*image.RG
 	}
 	lp.OutputColor = ColorSpaceOutput(req.ColorSpace)
 
+	// Read the as-shot balance before Process resolves the chosen WB into
+	// pre_mul in place. The compensation is a scalar in linear light, so it is
+	// the same whatever output space this export is headed for.
+	wbCompEV := params.WBCompEV(proc.CamMul(), proc.CamXYZ())
+
 	// The handle is per-file and closed on return, so a cancelled export
 	// (recycle-on-cancel) costs nothing extra — it just stops burning a core.
 	img, err := proc.Process(ctx, lp)
@@ -193,7 +198,7 @@ func renderPhoto(ctx context.Context, photo store.Photo, req Request) (*image.RG
 		gamma = pyramid.FallbackLookGamma
 	}
 
-	return renderFinal(img, gamma, params, photo, req)
+	return renderFinal(img, gamma, params, photo, req, wbCompEV)
 }
 
 // RenderOne renders a single photo to final pixels without writing anything
@@ -243,7 +248,7 @@ func exportOne(ctx context.Context, photo store.Photo, outPath string, req Reque
 // saw in the loupe: crop and straighten, the look, detail, then the output
 // resize and sharpening. Both encoders share it — a JPEG and a TIFF of the
 // same photo differ only in how the pixels are written down.
-func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, photo store.Photo, req Request) (*image.RGBA, error) {
+func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, photo store.Photo, req Request, wbCompEV float64) (*image.RGBA, error) {
 	if img.Bits != 8 {
 		return nil, fmt.Errorf("export: needs 8-bit output, got %d", img.Bits)
 	}
@@ -258,8 +263,9 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, phot
 	// can reclaim ~3 B/px before geometry/detail allocate their own planes.
 	img.Data = nil
 	// Exposure stops beyond LibRaw's exp_shift range fold in post-decode,
-	// exactly as the pyramid renders do.
-	pyramid.ApplyExposureEV(rgba, params.ResidualExpEV(), params)
+	// exactly as the pyramid renders do — and with them the white-balance
+	// normalization, so an export matches the loupe it was judged in.
+	pyramid.ApplyExposureEV(rgba, params.ResidualExpEV()+wbCompEV, params)
 	rgba = pyramid.ApplyLens(rgba,
 		pyramid.LensWarp(req.Lenses.For(photo), params, rgba.Bounds().Dx(), rgba.Bounds().Dy()), params)
 	rgba = pyramid.ApplyGeometry(rgba, params)

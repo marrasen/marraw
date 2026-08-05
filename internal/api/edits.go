@@ -17,7 +17,6 @@ import (
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
-	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
 )
@@ -59,6 +58,7 @@ type decodeCache struct {
 	key      string
 	noExpKey string      // LibrawInputsHashNoExp: matches across exposure-only changes
 	expEV    float64     // the exposure baked into rgba (BakedExpEV, via LibRaw exp_shift)
+	wbCompEV float64     // edit.WBCompEV for this decode's WB — every render folds it in
 	rgba     *image.RGBA // never mutated in place once cached
 }
 
@@ -67,6 +67,7 @@ type linCache struct {
 	key     string        // LinearInputsHash: pre-demosaic inputs only
 	refMul  [4]float64    // as-shot WB the reference was decoded at
 	camXYZ  [4][3]float64 // camera matrix, for resolving Kelvin WB in Go
+	rgbCam  [3][4]float64 // camera→sRGB matrix, for folding WB where LibRaw applies it
 	lin     *image.RGBA64 // scene-linear reference; never mutated once cached
 	clipped bool          // a channel is floored where the frame is lit — see refClipped
 }
@@ -75,8 +76,13 @@ type pickCache struct {
 	photoID  int64
 	key      string // Hash of the pinned base (masks stripped)
 	longEdge int
-	mul      [4]float64  // the multipliers the decode actually applied
-	rgba     *image.RGBA // developed, display-oriented; never mutated once cached
+	mul      [4]float64 // the multipliers the decode actually applied
+	// The camera→sRGB matrix and its inverse: a pick is measured in camera
+	// channels, because that is where the multipliers it produces are applied.
+	// hasM is false for a four-colour sensor or an uninvertible matrix.
+	m, minv [3][3]float64
+	hasM    bool
+	rgba    *image.RGBA // developed, display-oriented; never mutated once cached
 }
 
 // GetEditParams returns the stored edit state. An untouched photo returns
@@ -178,20 +184,23 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 	// a fresh decode that is ResidualExpEV, the stops beyond LibRaw's
 	// exp_shift range.
 	var rgba *image.RGBA
-	var expDelta float64
-	if reused, baked, ok := e.approxDecode(photoID, ep); ok {
-		rgba = reused
+	var expDelta, wbComp float64
+	if reused, baked, comp, ok := e.approxDecode(photoID, ep); ok {
+		rgba, wbComp = reused, comp
 		if ep != nil {
 			expDelta = ep.ExpEV - baked
 		}
 	} else {
-		rgba, err = e.previewDecode(ctx, photoID, photo, ep)
+		rgba, wbComp, err = e.previewDecode(ctx, photoID, photo, ep)
 		if err != nil {
 			return nil, err
 		}
 		expDelta = ep.ResidualExpEV()
 	}
-	return jpegBlob(pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta,
+	// The WB compensation rides the same slot: it is a linear-light scalar
+	// exactly like the residual exposure, and without it this frame lands at a
+	// different brightness than the folded one it replaces.
+	return jpegBlob(pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta+wbComp,
 		e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep),
 		e.deps.Cache.Fills.SetFor(photo.CacheKey, ep),
 		e.deps.Cache.Lenses.For(photo)))
@@ -232,7 +241,7 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 		ep = &params
 	}
 
-	rgba, err := e.previewDecode(ctx, photoID, photo, ep)
+	rgba, wbComp, err := e.previewDecode(ctx, photoID, photo, ep)
 	if err != nil {
 		return "", err
 	}
@@ -248,7 +257,7 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 	}
 	// WritePreview never mutates its input, so handing it the shared cached
 	// decode is safe.
-	if err := e.deps.Cache.WritePreview(rgba, photo, hash, gamma, ep); err != nil {
+	if err := e.deps.Cache.WritePreview(rgba, photo, hash, gamma, ep, wbComp); err != nil {
 		return "", err
 	}
 	return path, nil
@@ -258,7 +267,12 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 // state, reusing the cached decode when only geometry/look changed —
 // otherwise it runs the (expensive) demosaic once and caches it for the next
 // drag frame.
-func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params) (*image.RGBA, error) {
+// The second return is edit.Params.WBCompEV for this decode — the stops that
+// take LibRaw's white-balance normalization back out. Every caller must fold it
+// in alongside ResidualExpEV (pyramid.ApplyExposureEV / RenderPreview's expDelta)
+// or the render comes out at a different brightness than the preview it settles
+// behind.
+func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params) (*image.RGBA, float64, error) {
 	return e.decodePreview(ctx, photoID, photo, ep, true)
 }
 
@@ -273,17 +287,17 @@ func (e *Edits) previewDecode(ctx context.Context, photoID int64, photo store.Ph
 // entry, so a non-zero residual meters a copy; the common case (|ExpEV| ≤ 3)
 // costs nothing.
 func (e *Edits) statsDecode(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params) (*image.RGBA, error) {
-	rgba, err := e.previewDecode(ctx, photoID, photo, ep)
+	rgba, wbComp, err := e.previewDecode(ctx, photoID, photo, ep)
 	if err != nil {
 		return nil, err
 	}
-	residual := ep.ResidualExpEV()
-	if residual == 0 {
+	delta := ep.ResidualExpEV() + wbComp
+	if delta == 0 {
 		return rgba, nil
 	}
 	dup := image.NewRGBA(rgba.Rect)
 	copy(dup.Pix, rgba.Pix)
-	pyramid.ApplyExposureEV(dup, residual, ep)
+	pyramid.ApplyExposureEV(dup, delta, ep)
 	return dup, nil
 }
 
@@ -292,19 +306,23 @@ func (e *Edits) statsDecode(ctx context.Context, photoID int64, photo store.Phot
 // it, so a background scan can't evict the interactive editor's warm decode —
 // each scan frame would otherwise replace the entry and every look-stage
 // slider drag would pay a fresh ~400 ms demosaic while the scan runs.
-func (e *Edits) decodePreview(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params, cache bool) (*image.RGBA, error) {
+func (e *Edits) decodePreview(ctx context.Context, photoID int64, photo store.Photo, ep *edit.Params, cache bool) (*image.RGBA, float64, error) {
 	libKey, noExpKey, expEV := decodeKeys(ep)
-	if rgba := e.cachedDecode(photoID, libKey); rgba != nil {
-		return rgba, nil
+	if rgba, wbComp, ok := e.cachedDecodeComp(photoID, libKey); ok {
+		return rgba, wbComp, nil
 	}
 	proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if ctx.Err() != nil {
 		release()
-		return nil, ctx.Err() // superseded while waiting for the handle
+		return nil, 0, ctx.Err() // superseded while waiting for the handle
 	}
+	// Read the file's balance BEFORE Process: scale_colors resolves the chosen
+	// WB into pre_mul in place, and camMulOf falls back to pre_mul, so after a
+	// decode this would read normalized values instead of the as-shot ones.
+	wbComp := ep.WBCompEV(proc.CamMul(), proc.CamXYZ())
 	// Real ctx: LibRaw aborts at its next progress checkpoint, so a photo
 	// the user has already browsed away from stops burning its core mid-
 	// demosaic instead of blocking the handle for the full decode. The cancel
@@ -327,17 +345,17 @@ func (e *Edits) decodePreview(ctx context.Context, photoID int64, photo store.Ph
 			// one that fails every Process.
 			e.deps.Handles.Invalidate(photoID)
 		}
-		return nil, err
+		return nil, 0, err
 	}
 	release()
 	rgba, err := pyramid.FromLibraw(img)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if cache {
-		e.storeDecode(photoID, libKey, noExpKey, expEV, rgba)
+		e.storeDecode(photoID, libKey, noExpKey, expEV, wbComp, rgba)
 	}
-	return rgba, nil
+	return rgba, wbComp, nil
 }
 
 // decodeKeys derives the decode cache keys for a LibRaw-input state: the exact
@@ -352,36 +370,42 @@ func decodeKeys(ep *edit.Params) (key, noExpKey string, expEV float64) {
 	return ep.LibrawInputsHash(), ep.LibrawInputsHashNoExp(), ep.BakedExpEV()
 }
 
-// cachedDecode returns the cached half-size decode for (photoID, key), or nil.
-func (e *Edits) cachedDecode(photoID int64, key string) *image.RGBA {
+// cachedDecodeComp returns the cached half-size decode for (photoID, key)
+// along with the WB compensation it was decoded under, or ok=false.
+func (e *Edits) cachedDecodeComp(photoID int64, key string) (rgba *image.RGBA, wbCompEV float64, ok bool) {
 	e.decodeMu.Lock()
 	defer e.decodeMu.Unlock()
 	if e.decodeEntry != nil && e.decodeEntry.photoID == photoID && e.decodeEntry.key == key {
-		return e.decodeEntry.rgba
+		return e.decodeEntry.rgba, e.decodeEntry.wbCompEV, true
 	}
-	return nil
+	return nil, 0, false
 }
 
 // approxDecode returns a decode reusable for a transient preview of ep: the
 // cached one when it matches every LibRaw input except exposure, along with the
 // exposure baked into it so the caller can fold the difference in post-decode
-// (an exact match reports delta 0). Miss → ok=false. Only the fast preview path
-// uses this; the accurate render keys on the full LibrawInputsHash.
-func (e *Edits) approxDecode(photoID int64, ep *edit.Params) (rgba *image.RGBA, bakedExpEV float64, ok bool) {
+// (an exact match reports delta 0) and the WB compensation it was decoded
+// under. Miss → ok=false. Only the fast preview path uses this; the accurate
+// render keys on the full LibrawInputsHash.
+//
+// The compensation carries over unconditionally: the no-exposure key still
+// covers every WB field and Highlight, so a reusable decode is by construction
+// one whose white balance — and therefore its normalization — is identical.
+func (e *Edits) approxDecode(photoID int64, ep *edit.Params) (rgba *image.RGBA, bakedExpEV, wbCompEV float64, ok bool) {
 	_, noExpKey, _ := decodeKeys(ep)
 	e.decodeMu.Lock()
 	defer e.decodeMu.Unlock()
 	if e.decodeEntry != nil && e.decodeEntry.photoID == photoID && e.decodeEntry.noExpKey == noExpKey {
-		return e.decodeEntry.rgba, e.decodeEntry.expEV, true
+		return e.decodeEntry.rgba, e.decodeEntry.expEV, e.decodeEntry.wbCompEV, true
 	}
-	return nil, 0, false
+	return nil, 0, 0, false
 }
 
 // storeDecode replaces the single-entry decode cache.
-func (e *Edits) storeDecode(photoID int64, key, noExpKey string, expEV float64, rgba *image.RGBA) {
+func (e *Edits) storeDecode(photoID int64, key, noExpKey string, expEV, wbCompEV float64, rgba *image.RGBA) {
 	e.decodeMu.Lock()
 	defer e.decodeMu.Unlock()
-	e.decodeEntry = &decodeCache{photoID: photoID, key: key, noExpKey: noExpKey, expEV: expEV, rgba: rgba}
+	e.decodeEntry = &decodeCache{photoID: photoID, key: key, noExpKey: noExpKey, expEV: expEV, wbCompEV: wbCompEV, rgba: rgba}
 }
 
 // foldable reports whether the fold path can render ep: it needs a
@@ -405,7 +429,7 @@ func (e *Edits) previewLinear(ctx context.Context, photoID int64, photo store.Ph
 	if entry.clipped {
 		return nil, false, nil // reference can't carry a WB change; decode exactly
 	}
-	fp := foldParamsFor(ep, entry.refMul, entry.camXYZ)
+	fp := foldParamsFor(ep, entry.refMul, entry.camXYZ, entry.rgbCam)
 	ai := e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep)
 	fills := e.deps.Cache.Fills.SetFor(photo.CacheKey, ep)
 	return pyramid.RenderPreviewLinear(entry.lin, longEdge, fp, gamma, ep, ai, fills, e.deps.Cache.Lenses.For(photo)), true, nil
@@ -430,6 +454,7 @@ func (e *Edits) linearMaster(ctx context.Context, photoID int64, photo store.Pho
 	}
 	refMul := proc.CamMul()
 	camXYZ := proc.CamXYZ()
+	rgbCam := proc.RgbCam()
 	// Real ctx with reopen-on-cancel, exactly as previewDecode.
 	img, err := proc.Process(ctx, ep.LinearRefLibrawParams())
 	if err != nil {
@@ -449,7 +474,7 @@ func (e *Edits) linearMaster(ctx context.Context, photoID int64, photo store.Pho
 	if err != nil {
 		return nil, err
 	}
-	c := &linCache{photoID: photoID, key: key, refMul: refMul, camXYZ: camXYZ, lin: lin, clipped: refClipped(lin)}
+	c := &linCache{photoID: photoID, key: key, refMul: refMul, camXYZ: camXYZ, rgbCam: rgbCam, lin: lin, clipped: refClipped(lin)}
 	e.storeLinear(c)
 	return c, nil
 }
@@ -511,21 +536,22 @@ func (e *Edits) storeLinear(c *linCache) {
 	e.linEntry = c
 }
 
-// foldParamsFor turns an edit into the raw-stage fold: the per-channel linear
-// gain (WB ratio from the reference's as-shot WB × 2^EV × brightness) and the
-// output-gamma power/toe. Temp/tint fold exactly (the as-shot WB cancels in the
-// ratio); custom/Kelvin picks are approximate in output space, which the 2048
-// settle corrects.
+// foldParamsFor turns an edit into the raw-stage fold: the white-balance
+// change as per-camera-channel gain, exposure and brightness as scalars, the
+// matrix pair that moves between the reference's output space and the camera
+// channels, and the output-gamma power/toe.
 //
 // Both multipliers are normalized to green before the ratio: the target may be
 // in a different unit scale than the reference — a picked/custom WBMul is
 // normalized to green=1, while cam_mul is in raw units (green ~1024 on many
 // cameras) — so the raw ratio would be ~1/1000 and paint the frame black. With
 // green=1 on both, the ratio is unit-independent and green (luminance) is
-// preserved, so WB shifts only tint, not exposure.
-func foldParamsFor(ep *edit.Params, refMul [4]float64, camXYZ [4][3]float64) pyramid.FoldParams {
-	target := targetWBMul(ep, refMul, camXYZ)
-	exp := math.Exp2(ep.ExpEV)
+// preserved, so WB shifts only tint, not exposure. The exact decode normalizes
+// by the minimum multiplier instead, which does move exposure; edit.WBCompEV
+// takes that back out (see previewDecode and the tile path), so the settle
+// lands on the frame that was dragged.
+func foldParamsFor(ep *edit.Params, refMul [4]float64, camXYZ [4][3]float64, rgbCam [3][4]float64) pyramid.FoldParams {
+	target := ep.EffectiveWBMul(refMul, camXYZ)
 	bright := ep.Bright
 	if bright <= 0 {
 		bright = 1
@@ -538,13 +564,13 @@ func foldParamsFor(ep *edit.Params, refMul [4]float64, camXYZ [4][3]float64) pyr
 	if rG <= 0 {
 		rG = 1
 	}
-	var k [3]float64
+	var d [3]float64
 	for c := range 3 {
 		rc := refMul[c] / rG
 		if rc <= 0 {
 			rc = 1
 		}
-		k[c] = (target[c] / tG) / rc * exp * bright
+		d[c] = (target[c] / tG) / rc
 	}
 	g := ep.Gamma
 	if g <= 0 {
@@ -554,30 +580,41 @@ func foldParamsFor(ep *edit.Params, refMul [4]float64, camXYZ [4][3]float64) pyr
 	if s <= 0 {
 		s = 4.5
 	}
-	return pyramid.FoldParams{K: k, Pwr: 1 / g, Ts: s}
+	fp := pyramid.FoldParams{D: d, Exp: math.Exp2(ep.ExpEV), Bright: bright, Pwr: 1 / g, Ts: s}
+	// Where the decode clips. LibRaw clips at the white level after dividing
+	// the multipliers by their smallest, and the compensation then darkens the
+	// result — so in the reference's units the ceiling sits that much lower,
+	// and highlights the reference still holds are gone from the settle. A
+	// preview that kept them would blow out a region the final render doesn't.
+	// Zero compensation (the ordinary case, where green already needs the
+	// least gain) leaves this at the plain white level.
+	fp.White = 65535 * math.Exp2(ep.WBCompEV(refMul, camXYZ))
+	fp.M, fp.Minv, fp.HasMatrix = foldMatrix(rgbCam)
+	return fp
 }
 
-// targetWBMul resolves the effective WB multipliers for ep, mirroring
-// edit.LibrawParams + libraw's apply so the folded frame matches the exact
-// decode. refMul is the reference's as-shot WB; camXYZ resolves Kelvin.
-func targetWBMul(ep *edit.Params, refMul [4]float64, camXYZ [4][3]float64) [4]float64 {
-	switch ep.WBMode {
-	case edit.WBKelvin:
-		if ep.WBKelvin > 0 {
-			return libraw.AdjustWB(libraw.KelvinMulFromMatrix(camXYZ, ep.WBKelvin), 0, ep.WBTint)
+// foldMatrix turns LibRaw's rgb_cam into the 3×3 pair the fold scales between,
+// or reports false when it can't be used: a four-colour sensor (a non-zero
+// fourth column — the fold has three channels to work with) or a matrix that
+// won't invert. Both fall back to scaling the developed channels directly,
+// which is what the fold did everywhere before; the exposure compensation is
+// matrix-independent and still applies, so those files lose the hue accuracy
+// (and the clip ceiling, which only the matrix loop honours) but not the
+// brightness agreement.
+func foldMatrix(rgbCam [3][4]float64) (m, minv [3][3]float64, ok bool) {
+	for i := range 3 {
+		if math.Abs(rgbCam[i][3]) > 1e-6 {
+			return m, minv, false
 		}
-	case edit.WBCustom:
-		base := ep.WBMul
-		if base == ([4]float64{}) {
-			base = refMul
-		}
-		return libraw.AdjustWB(base, ep.WBTemp, ep.WBTint)
-	default: // camera (as-shot) base, optionally warmed/tinted
-		if ep.WBTemp != 0 || ep.WBTint != 0 {
-			return libraw.AdjustWB(refMul, ep.WBTemp, ep.WBTint)
+		for j := range 3 {
+			m[i][j] = rgbCam[i][j]
 		}
 	}
-	return refMul
+	minv, ok = pyramid.Invert3(m)
+	if !ok {
+		return [3][3]float64{}, [3][3]float64{}, false
+	}
+	return m, minv, true
 }
 
 // wbPickLongEdge is the size of the pinned frame the WB picker samples. It
@@ -624,18 +661,40 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params, bas
 		return nil, aprot.ErrInvalidParams("picked area is too dark — pick a brighter neutral area")
 	}
 
+	// The multipliers act on the camera's own channels, before the colour
+	// matrix, so the patch has to be measured there too: the sample is a
+	// developed pixel, several matrix rows' worth of mixing away from the
+	// channels the pick will scale. Taking it back through the inverse asks the
+	// right question — "what gain makes THESE channels equal?" — and because
+	// the matrix maps neutral to neutral, equal camera channels come out grey.
+	// The old post-matrix ratio neutralized the preview and nothing else.
+	pr, pg, pb := rl, gl, bl
+	if frame.hasM {
+		cr := frame.minv[0][0]*rl + frame.minv[0][1]*gl + frame.minv[0][2]*bl
+		cg := frame.minv[1][0]*rl + frame.minv[1][1]*gl + frame.minv[1][2]*bl
+		cb := frame.minv[2][0]*rl + frame.minv[2][1]*gl + frame.minv[2][2]*bl
+		if cr > 1e-6 && cg > 1e-6 && cb > 1e-6 {
+			pr, pg, pb = cr, cg, cb
+		} else {
+			// A deeply saturated patch can land outside the camera's gamut and
+			// come back negative. No neutral answer exists there; fall back to
+			// the output-space ratio, which at least still points the right way.
+			log.Printf("wb pick: patch at (%.3f,%.3f) is out of camera gamut (cam %.4g/%.4g/%.4g); using output-space ratio", x, y, cr, cg, cb)
+		}
+	}
+
 	// The pinned frame was developed at frame.mul, so neutralizing the patch
 	// means scaling those by the patch's own imbalance: m[c] = mul[c]·(g/c).
-	// Normalized to green, then held inside what the Kelvin dial can express.
+	// Normalized to green, then held within 3 stops of the frame's own balance.
 	eff := frame.mul
 	eg := eff[1]
 	if eg <= 0 {
 		eg = 1
 	}
 	mul := clampPickedWB([4]float64{
-		eff[0] / eg * (gl / rl),
+		eff[0] / eg * (pg / pr),
 		1,
-		eff[2] / eg * (gl / bl),
+		eff[2] / eg * (pg / pb),
 		1,
 	}, eff)
 
@@ -692,6 +751,10 @@ func (e *Edits) wbPickFrame(ctx context.Context, photoID int64, photo store.Phot
 		release()
 		return nil, ctx.Err() // superseded while waiting for the handle
 	}
+	// Both read before Process: CamMul because scale_colors overwrites the
+	// pre_mul it falls back to, RgbCam because the pick is computed through it.
+	wbComp := ep.WBCompEV(proc.CamMul(), proc.CamXYZ())
+	rgbCam := proc.RgbCam()
 	img, err := proc.Process(ctx, ep.LibrawParams(true))
 	if err != nil {
 		healthy := true
@@ -715,12 +778,20 @@ func (e *Edits) wbPickFrame(ctx context.Context, photoID int64, photo store.Phot
 	if gamma == 0 {
 		gamma = pyramid.FallbackLookGamma
 	}
+	m, minv, hasM := foldMatrix(rgbCam)
 	c := &pickCache{
 		photoID:  photoID,
 		key:      key,
 		longEdge: wbPickLongEdge,
 		mul:      mul,
-		rgba: pyramid.RenderPreview(rgba, wbPickLongEdge, gamma, ep, ep.ResidualExpEV(),
+		m:        m,
+		minv:     minv,
+		hasM:     hasM,
+		// Rendered with the same WB compensation every accurate render carries,
+		// so the frame under the magnifier is the one the loupe is showing. It
+		// is a scalar on all three channels, so the pick's ratios — and with
+		// them the answer — are unchanged either way.
+		rgba: pyramid.RenderPreview(rgba, wbPickLongEdge, gamma, ep, ep.ResidualExpEV()+wbComp,
 			e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep),
 			e.deps.Cache.Fills.SetFor(photo.CacheKey, ep),
 			e.deps.Cache.Lenses.For(photo)),
@@ -842,15 +913,15 @@ func (e *Edits) developedBaseForMask(ctx context.Context, photoID int64, photo s
 		return img, nil
 	}
 	var rgba *image.RGBA
-	var expDelta float64
-	if reused, baked, ok := e.approxDecode(photoID, ep); ok {
-		rgba = reused
+	var expDelta, wbComp float64
+	if reused, baked, comp, ok := e.approxDecode(photoID, ep); ok {
+		rgba, wbComp = reused, comp
 		if ep != nil {
 			expDelta = ep.ExpEV - baked
 		}
 	} else {
 		var err error
-		rgba, err = e.previewDecode(ctx, photoID, photo, ep)
+		rgba, wbComp, err = e.previewDecode(ctx, photoID, photo, ep)
 		if err != nil {
 			return nil, err
 		}
@@ -858,7 +929,7 @@ func (e *Edits) developedBaseForMask(ctx context.Context, photoID int64, photo s
 			expDelta = ep.ResidualExpEV()
 		}
 	}
-	return pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta,
+	return pyramid.RenderPreview(rgba, longEdge, gamma, ep, expDelta+wbComp,
 		e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep),
 		e.deps.Cache.Fills.SetFor(photo.CacheKey, ep),
 		e.deps.Cache.Lenses.For(photo)), nil
@@ -1006,7 +1077,10 @@ func (e *Edits) SuggestHealSource(ctx context.Context, photoID int64, params edi
 	// cropped/straightened frame the user is looking at. ApplyGeometry returns
 	// the shared decode unchanged for neutral geometry; SuggestHealSource only
 	// reads it, so no defensive copy is needed.
-	rgba, err := e.previewDecode(ctx, photoID, photo, ep)
+	// The WB compensation is dropped here as the residual exposure already is:
+	// this searches for a patch that matches another patch in the same frame,
+	// and a scalar applied to the whole frame can't change which one wins.
+	rgba, _, err := e.previewDecode(ctx, photoID, photo, ep)
 	if err != nil {
 		return nil, err
 	}

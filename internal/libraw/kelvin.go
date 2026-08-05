@@ -25,6 +25,27 @@ func (p *Processor) CamXYZ() [4][3]float64 {
 	return cam
 }
 
+// RgbCam returns the camera-space→output-space matrix LibRaw applies after
+// demosaic (convert_to_rgb copies it into out_cam verbatim for the sRGB output
+// this app renders in). Valid after Open — it is set during identify and not
+// touched by Process. All-zero for files without one.
+//
+// The fold path needs it because LibRaw applies white balance to the CFA
+// channels BEFORE this matrix: scaling the developed sRGB pixels instead is a
+// different operation, and the difference grows with the multiplier. Its rows
+// are normalized so a neutral camera pixel maps to a neutral output pixel
+// (M·1 = 1), which is what lets a pick be expressed as "equal camera-space
+// channels" — see PickWhiteBalance.
+func (p *Processor) RgbCam() [3][4]float64 {
+	var m [3][4]float64
+	for i := range 3 {
+		for j := range 4 {
+			m[i][j] = float64(p.h.color.rgb_cam[i][j])
+		}
+	}
+	return m
+}
+
 // KelvinMulFromMatrix is KelvinMul computed from a previously read camera
 // matrix (see CamXYZ) rather than a live handle, so the interactive fold path
 // can resolve Kelvin WB with no cgo call.

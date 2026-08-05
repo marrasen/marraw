@@ -1227,6 +1227,57 @@ func (e *Params) LinearRefLibrawParams() libraw.Params {
 	return p
 }
 
+// EffectiveWBMul resolves the white-balance multipliers this edit asks LibRaw
+// for, mirroring LibrawParams + libraw's apply(). camMul is the file's as-shot
+// balance (the base temp/tint adjust, and the answer when nothing overrides
+// it); camXYZ resolves a Kelvin dial in Go. Auto WB is decided inside dcraw
+// from the pixels, so it reports camMul — callers that need the real answer
+// read it back with Processor.EffectiveMul after a decode.
+//
+// Both the interactive fold and the exposure compensation below resolve the
+// target this way, so a folded frame and the exact decode of the same edit are
+// talking about the same multipliers.
+func (e *Params) EffectiveWBMul(camMul [4]float64, camXYZ [4][3]float64) [4]float64 {
+	if e == nil {
+		return camMul
+	}
+	switch e.WBMode {
+	case WBKelvin:
+		if e.WBKelvin > 0 {
+			return libraw.AdjustWB(libraw.KelvinMulFromMatrix(camXYZ, e.WBKelvin), 0, e.WBTint)
+		}
+	case WBCustom:
+		base := e.WBMul
+		if base == ([4]float64{}) {
+			base = camMul
+		}
+		return libraw.AdjustWB(base, e.WBTemp, e.WBTint)
+	default: // camera (as-shot) base, optionally warmed/tinted
+		if e.WBTemp != 0 || e.WBTint != 0 {
+			return libraw.AdjustWB(camMul, e.WBTemp, e.WBTint)
+		}
+	}
+	return camMul
+}
+
+// WBCompEV is the exposure correction, in stops, an exact decode of this edit
+// needs so its white balance changes only colour and not brightness — the
+// convention the interactive preview renders in. Every accurate render (the
+// 2048 settle, the tile pyramid, exports) folds it in post-decode alongside
+// ResidualExpEV, so what settles matches what was dragged.
+//
+// Zero for the base look and for auto WB, whose multipliers dcraw derives from
+// the pixels — there is no fold preview to reconcile with (see the api's
+// foldable), and Normalize leaves auto no temp/tint to shift the balance with.
+// Also zero whenever the edit lands on the as-shot balance, so camera-WB edits
+// render byte-identically. Nil-safe.
+func (e *Params) WBCompEV(camMul [4]float64, camXYZ [4][3]float64) float64 {
+	if e == nil || e.WBMode == WBAuto {
+		return 0
+	}
+	return libraw.WBExpCompEV(e.EffectiveWBMul(camMul, camXYZ), camMul, e.Highlight)
+}
+
 // caScale maps the ±1 CA sliders onto channel magnification: ±0.2% shifts
 // the channel by ~8 px at the edge of an 8000 px sensor — beyond any real
 // lateral CA.

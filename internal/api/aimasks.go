@@ -363,7 +363,9 @@ func (e *Edits) generateAIMap(ctx context.Context, photo store.Photo, kind edit.
 		return nil, false, fmt.Errorf("ai masks: %s", aiModelNotDownloadedMsg)
 	}
 
-	rgba, err := e.decodePreview(ctx, photo.ID, photo, nil, cacheDecode)
+	// Nil params: the base look carries no white balance of its own, so the
+	// compensation is zero by construction.
+	rgba, _, err := e.decodePreview(ctx, photo.ID, photo, nil, cacheDecode)
 	if err != nil {
 		return nil, false, err
 	}
