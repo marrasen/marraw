@@ -556,8 +556,14 @@ export function CinemaImage({
   // render kicks after a 350ms dwell, surfaced through the progress chip.
   // (The first fit-only version of this gate missed numeric zoom states —
   // on 4K that left the old render-on-demand path live almost everywhere.)
+  // In CULL at fit the kick is off entirely: culling dwell (1-3s per frame)
+  // sails past 350ms on every frame, so on a 4K display the kick fired the
+  // full-resolution render — the daemon's most expensive op — per photo
+  // looked at, saturating the pool and starving the cheap requests. The
+  // upscaled 2048 from the dwell-kick below is plenty for a cull decision;
+  // a deliberate zoom (atFit false) still kicks for focus checks.
   const atFit = zoom === 'fit';
-  const tilesWarm = useTilesWarm(photo, tileDepth, true);
+  const tilesWarm = useTilesWarm(photo, tileDepth, uiMode !== 'cull' || !atFit);
   const wantTiles = tileDepth && tilesWarm;
   const src = previewUrl ?? imgUrl(photo, level === 'tiles' ? '2048' : level);
   // The pyramid level fit displays (never 'tiles' in the fit branch below).
@@ -946,7 +952,18 @@ export function CinemaImage({
     shownSrc !== '' &&
     (shownSrc.includes(`/img/${photo.id}/`) ||
       (shownSrc.startsWith('blob:') && preview != null && preview.photoId === photo.id));
-  const loadingPhoto = haveDims && shownSrc !== '' && !showsCurrent;
+  // The very first frame of a session has no previous pixels to hold
+  // (shownSrc is ''), so a stuck cold decode there used to be a silent blank
+  // — no frame AND no chip. Flag it after a beat: a warm first mount decodes
+  // well inside the timer and never blinks the chip.
+  const [firstFrameSlow, setFirstFrameSlow] = useState(false);
+  useEffect(() => {
+    if (shownSrc !== '') return;
+    setFirstFrameSlow(false);
+    const t = window.setTimeout(() => setFirstFrameSlow(true), 200);
+    return () => window.clearTimeout(t);
+  }, [shownSrc, photo.id]);
+  const loadingPhoto = haveDims && !showsCurrent && (shownSrc !== '' || firstFrameSlow);
   // Live progress for whichever render the chip is waiting on: 1:1 tiles,
   // an interactive level render during a photo switch, or the dwell-kicked
   // tile render sharpening the current photo — the server reports all of
@@ -1071,16 +1088,15 @@ export function CinemaImage({
               // (superseded settle, janitor eviction) must still show the
               // RIGHT photo instantly — at a previous edit state if need be —
               // instead of holding the previous photo while a decode runs.
-              // cacheOnly too: `stale` already serves the photo's freshest
-              // rendition of this level at ANY edit state, so the ONLY time it
-              // would fall through is a photo with zero renditions (never
-              // pre-rendered). Skimming must never block on a decode there — it
-              // 404s, and DecodedImage keeps the previous frame shown on a load
-              // failure (naturalWidth stays 0), so the box holds the last photo
-              // rather than blanking; the focus-first pre-render pass fills this
-              // one. Prevents a cold cull frame from firing a PriorityVisible
-              // RAW decode.
-              <DecodedImage src={imgUrl(photo, '512', { stale: true, cacheOnly: true })} className="absolute inset-0 size-full" />
+              // fast: when the photo has zero renditions (never pre-rendered),
+              // the server derives a 512 from the camera's embedded JPEG in
+              // tens of milliseconds instead of 404ing — the RIGHT photo at
+              // its base look, replaced by the real render as it lands.
+              // Neither ever blocks on a RAW decode; the only remaining miss
+              // is a cold file with no usable embedded JPEG, where
+              // DecodedImage keeps the previous frame shown (naturalWidth
+              // stays 0) rather than blanking.
+              <DecodedImage src={imgUrl(photo, '512', { stale: true, fast: true })} className="absolute inset-0 size-full" />
             )}
             <SharpImage
               photo={photo}
@@ -1577,6 +1593,9 @@ function SharpImage({
   const target = previewUrl ?? imgUrl(photo, level, renderAllowed ? undefined : { cacheOnly: true });
   // Render-allowed URL for the dwell-kick that fills a missing cacheOnly file.
   const renderUrl = previewUrl ?? imgUrl(photo, level);
+  // Decode-free fallback for a cacheOnly miss: the server answers from the
+  // embedded camera JPEG (base-look provisional, no-store) in tens of ms.
+  const fastUrl = imgUrl(photo, level, { fast: true });
   const cacheOnly = !previewUrl && !renderAllowed;
 
   // Depends on onShown too: the caller may attach it after mount, and shown may
@@ -1589,6 +1608,11 @@ function SharpImage({
     let alive = true;
     let dwell = 0;
     let kick: HTMLImageElement | null = null;
+    let fast: HTMLImageElement | null = null;
+    // Set once the dwell-kicked real render is up: the fast provisional
+    // usually decodes first, but on a slow thumb extraction it could land
+    // AFTER the render and must not replace real pixels with base-look ones.
+    let realShown = false;
     const img = new Image();
     img.src = target;
     img
@@ -1603,17 +1627,29 @@ function SharpImage({
         }
         // Genuine miss. A render-allowed (plain) miss is a superseded/aborted
         // render: keep the frame already up rather than blank. A cacheOnly miss
-        // (404, not warm yet) keeps the frame too AND dwell-kicks one render so
-        // a frame paused on sharpens — a skim changes `target` per photo, which
-        // re-runs this effect and clears the timer before it fires, so no RAW
-        // decode ever STARTS while skimming (not even the uncancellable unpack).
+        // (404, not warm yet) paints the decode-free fast rendition NOW — the
+        // right photo from its embedded JPEG instead of holding the previous
+        // one — AND dwell-kicks one render so a frame paused on sharpens into
+        // the real pixels. A skim changes `target` per photo, which re-runs
+        // this effect and clears the timer before it fires, so no RAW decode
+        // ever STARTS while skimming (not even the uncancellable unpack).
         if (!cacheOnly) return;
+        fast = new Image();
+        fast.src = fastUrl;
+        fast
+          .decode()
+          .then(() => alive && !realShown && setShown(fastUrl))
+          .catch(() => {});
         dwell = window.setTimeout(() => {
           kick = new Image();
           kick.src = renderUrl; // render-allowed: one render for this photo
           kick
             .decode()
-            .then(() => alive && setShown(renderUrl))
+            .then(() => {
+              if (!alive) return;
+              realShown = true;
+              setShown(renderUrl);
+            })
             .catch(() => {});
         }, 350);
       });
@@ -1624,8 +1660,9 @@ function SharpImage({
       // the server can cancel the render.
       if (!img.complete) img.src = '';
       if (kick && !kick.complete) kick.src = '';
+      if (fast && !fast.complete) fast.src = '';
     };
-  }, [target, renderUrl, cacheOnly]);
+  }, [target, renderUrl, fastUrl, cacheOnly]);
 
   // Only the very first mount, before anything has decoded, has no frame to
   // hold; the always-warm 512 underlay behind shows through until then.

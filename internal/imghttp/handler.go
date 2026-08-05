@@ -168,6 +168,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// No rendition of this photo+level exists at all (fresh import):
 			// fall through to the ordinary render path.
 		}
+		// fast callers (the cull/loupe cold-frame fallback) want pixels NOW,
+		// without a RAW decode: the cached file, a downscale of an existing
+		// 2048, or the camera's embedded JPEG. A provisional (thumb-derived,
+		// base-look) body must never enter the browser's immutable cache —
+		// the content-addressed URL's promise is the real render, which will
+		// exist later under this exact URL. 404 means "nothing derivable"
+		// (no usable embedded JPEG); the client keeps its previous frame and
+		// the dwell-kicked render fills in, exactly as before fast existed.
+		if r.URL.Query().Get("fast") != "" {
+			if p, provisional, err := h.Cache.EnsureFast(r.Context(), photo, level, editHash); err == nil {
+				if provisional {
+					w.Header().Set("X-Marraw-Provisional", "1")
+					h.serveFileHeaders(w, r, p, "no-store")
+				} else {
+					h.serveFile(w, r, p)
+				}
+				return
+			}
+			http.Error(w, "not derivable", http.StatusNotFound)
+			return
+		}
 		// cacheOnly callers (the fit loupe) want the pre-rendered rendition or
 		// nothing — never an on-demand RAW decode. Browsing then paints the
 		// warm low-res underlay instead of blocking on a full render, and the

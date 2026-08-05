@@ -138,6 +138,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open cache: %v", err)
 	}
+	defer cache.Close()
 	// AI-mask maps and ML fill patches live beside (not inside) the preview
 	// cache: they cost an inference to regenerate, so preview Clear/Relocate
 	// must not touch them.

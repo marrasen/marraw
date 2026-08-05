@@ -75,7 +75,12 @@ type Cache struct {
 	// lock-free.
 	dir  atomic.Pointer[string]
 	pool *decode.Pool
-	db   *store.DB
+	// fastPool runs EnsureFast's work: embedded-thumb extraction and pure-Go
+	// downscales, never a RAW decode. Its own tiny pool so a fast request has
+	// bounded latency even while every main-pool worker is grinding through a
+	// multi-second render (pre-render pass + dwell-kicked visible decodes).
+	fastPool *decode.Pool
+	db       *store.DB
 	// AIMaps resolves model-generated mask maps for renders; nil is valid
 	// (maps unavailable → AI masks render as no-ops).
 	AIMaps *AIMapStore
@@ -103,10 +108,13 @@ func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	c := &Cache{pool: pool, db: db, Lenses: NewLensProfiles()}
+	c := &Cache{pool: pool, fastPool: decode.NewPool(2), db: db, Lenses: NewLensProfiles()}
 	c.dir.Store(&dir)
 	return c, nil
 }
+
+// Close joins the fast pool's workers. The main pool is owned by the caller.
+func (c *Cache) Close() { c.fastPool.Close() }
 
 func (c *Cache) Dir() string { return *c.dir.Load() }
 
@@ -194,6 +202,18 @@ func (c *Cache) PathForTile(cacheKey string, tx, ty int, editHash string) string
 		fmt.Sprintf("%s_t%dx%d_%s_%s.jpg", cacheKey, tx, ty, editHash, renderVersion))
 }
 
+// PathForProvisional is the file location of a thumb-derived stand-in: the
+// camera's embedded JPEG at pyramid size, edit-independent (base look). The
+// level token is "p2048" and the hash slot the literal "thumb", so the name
+// never matches PathFor, NewestLevel's glob, InvalidateEdit's glob, or the
+// pre-render pass's Stat of PathFor(…, "2048", …) — a provisional must never
+// make anything believe the real render exists. The janitor sweeps it by
+// mtime like every other cache file.
+func (c *Cache) PathForProvisional(cacheKey string, level int) string {
+	return filepath.Join(c.Dir(), cacheKey[:2],
+		fmt.Sprintf("%s_p%d_thumb_%s.jpg", cacheKey, level, renderVersion))
+}
+
 // InvalidateEdit deletes every cached rendition (levels and tiles) of one
 // edit state. Needed when derived inputs OUTSIDE the edit hash change the
 // pixels — today that's an AI-mask map being (re)generated for an edit that
@@ -234,6 +254,78 @@ func (c *Cache) Ensure(ctx context.Context, photo store.Photo, level, editHash s
 		return "", err
 	}
 	return path, nil
+}
+
+// EnsureFast returns pixels for one level without ever RAW-decoding: the
+// cached rendition, a downscale of the same edit's existing 2048, the
+// embedded camera JPEG written as real base levels (the thumb route's
+// canonical territory, ≤1024 unedited), or a provisional base-look stand-in.
+// provisional=true marks the last case — the caller must serve it no-store,
+// because the real render will replace it under the same content-addressed
+// URL. Returns fs.ErrNotExist when nothing is derivable (no usable embedded
+// JPEG). All work runs on the fast pool, so a cull skim gets an answer in
+// tens of milliseconds no matter what the decode pool is grinding on.
+func (c *Cache) EnsureFast(ctx context.Context, photo store.Photo, level, editHash string) (string, bool, error) {
+	path := c.PathFor(photo.CacheKey, level, editHash)
+	if _, err := os.Stat(path); err == nil {
+		return path, false, nil
+	}
+	// Same-edit 2048 on disk: a one-JPEG downscale produces the real
+	// rendition (mirrors generate's fast path, but off the decode pool).
+	if level != "2048" {
+		if _, err := os.Stat(c.PathFor(photo.CacheKey, "2048", editHash)); err == nil {
+			err := c.fastPool.Do(ctx, photo.CacheKey+"|derive|"+editHash, decode.PriorityVisible,
+				func(context.Context, *libraw.Processor) error {
+					if _, err := os.Stat(path); err == nil {
+						return nil
+					}
+					src := c.readLevel(photo.CacheKey, "2048", editHash)
+					if src == nil {
+						return fs.ErrNotExist
+					}
+					return c.WriteLevels(src, photo.CacheKey, editHash, 1024, 512, 256)
+				})
+			if err == nil {
+				if _, err := os.Stat(path); err == nil {
+					return path, false, nil
+				}
+			} else if ctx.Err() != nil {
+				return "", false, err
+			}
+		}
+	}
+	// Embedded-JPEG derivation. One job per photo (no level, no hash in the
+	// key): the decode is paid once and every level the concurrent underlay
+	// and sharp layer ask for falls out of it.
+	n, _ := strconv.Atoi(level)
+	base := editHash == edit.BaseHash
+	provPath := c.PathForProvisional(photo.CacheKey, n)
+	if _, err := os.Stat(provPath); err != nil {
+		err := c.fastPool.Do(ctx, photo.CacheKey+"|thumb", decode.PriorityVisible,
+			func(_ context.Context, proc *libraw.Processor) error {
+				// Direct open, not OpenForDecode: the thumb read touches a
+				// small slice of the file and must not wait out a staged
+				// whole-file read through the diskio gate.
+				if err := proc.Open(photo.Path()); err != nil {
+					return err
+				}
+				return c.deriveFromThumb(proc, photo, base)
+			})
+		if err != nil {
+			return "", false, err
+		}
+	}
+	// The derivation may have written the real file for canonical thumb
+	// territory (base, ≤1024) — prefer it, immutable-cacheable.
+	if base && n <= 1024 {
+		if _, err := os.Stat(path); err == nil {
+			return path, false, nil
+		}
+	}
+	if _, err := os.Stat(provPath); err == nil {
+		return provPath, true, nil
+	}
+	return "", false, fs.ErrNotExist
 }
 
 // EnsureTile guarantees one full-resolution tile exists on disk and returns
@@ -545,30 +637,39 @@ func (c *Cache) lookGammaFor(proc *libraw.Processor, photo store.Photo, isBase b
 	return gamma
 }
 
-// tryThumbRoute serves grid-size levels from the embedded JPEG preview when
-// it is large enough. Returns ok=false to fall back to a RAW decode.
-func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level int, editHash string) (bool, error) {
+// thumbRGBA decodes the open file's embedded JPEG preview and corrects its
+// orientation, or returns nil when there is no usable JPEG thumb (some DNGs,
+// scans). Orientation from the open file, not the DB row: on-demand requests
+// can arrive before the metadata backfill has written photo.Orientation, and
+// a thumb cached unrotated stays wrong forever.
+func thumbRGBA(proc *libraw.Processor) *image.RGBA {
 	data, err := proc.EmbeddedThumb()
 	if err != nil {
-		return false, nil
+		return nil
 	}
 	img, err := jpeg.Decode(bytes.NewReader(data))
 	if err != nil {
-		return false, nil
-	}
-	b := img.Bounds()
-	if max(b.Dx(), b.Dy()) < level {
-		return false, nil // too small; decode RAW instead
+		return nil
 	}
 	rgba, ok := img.(*image.RGBA)
 	if !ok {
-		rgba = image.NewRGBA(b)
-		xdraw.Copy(rgba, image.Point{}, img, b, xdraw.Src, nil)
+		rgba = image.NewRGBA(img.Bounds())
+		xdraw.Copy(rgba, image.Point{}, img, img.Bounds(), xdraw.Src, nil)
 	}
-	// Orientation from the open file, not the DB row: on-demand requests can
-	// arrive before the metadata backfill has written photo.Orientation, and
-	// a thumb cached unrotated stays wrong forever.
-	rgba = rotateFlip(rgba, proc.Metadata().Orientation)
+	return rotateFlip(rgba, proc.Metadata().Orientation)
+}
+
+// tryThumbRoute serves grid-size levels from the embedded JPEG preview when
+// it is large enough. Returns ok=false to fall back to a RAW decode.
+func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level int, editHash string) (bool, error) {
+	rgba := thumbRGBA(proc)
+	if rgba == nil {
+		return false, nil
+	}
+	b := rgba.Bounds()
+	if max(b.Dx(), b.Dy()) < level {
+		return false, nil // too small; decode RAW instead
+	}
 	// Write every level the thumb can serve, largest first.
 	var levels []int
 	for _, l := range []int{1024, 512, 256} {
@@ -577,6 +678,48 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 		}
 	}
 	return true, c.WriteLevels(rgba, photo.CacheKey, editHash, levels...)
+}
+
+// deriveFromThumb is EnsureFast's worker: decode the embedded JPEG once and
+// write every stand-in it can. base (the request is for the unedited look)
+// additionally writes the real ≤1024 levels the thumb covers — the same
+// canonical territory tryThumbRoute owns, so those are full-fledged cache
+// files. Provisional levels are always written, one per pyramid level, each
+// holding min(thumb, level) pixels — a small thumb still beats holding the
+// previous photo on screen; the client stretches it. Real thumb-route levels
+// keep their size gate: a real cache file must actually have the resolution
+// its name claims.
+func (c *Cache) deriveFromThumb(proc *libraw.Processor, photo store.Photo, base bool) error {
+	rgba := thumbRGBA(proc)
+	if rgba == nil {
+		return fs.ErrNotExist
+	}
+	b := rgba.Bounds()
+	if base {
+		var levels []int
+		for _, l := range []int{1024, 512, 256} {
+			if max(b.Dx(), b.Dy()) >= l {
+				levels = append(levels, l)
+			}
+		}
+		if len(levels) > 0 {
+			if err := c.WriteLevels(rgba, photo.CacheKey, edit.BaseHash, levels...); err != nil {
+				return err
+			}
+		}
+	}
+	cur := rgba
+	for _, l := range []int{2048, 1024, 512, 256} {
+		cur = scaleToLongEdge(cur, l)
+		q := 80
+		if l >= 1024 {
+			q = 85
+		}
+		if err := writeJPEGFile(c.PathForProvisional(photo.CacheKey, l), cur, q); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RenderPreview produces an interactive-path rendition at the given long

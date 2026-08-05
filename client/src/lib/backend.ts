@@ -65,7 +65,7 @@ const RENDER_VERSION = 'r12';
 export function imgUrl(
   p: ImgRef,
   level: Level,
-  opts?: { editHash?: string; cacheOnly?: boolean; stale?: boolean },
+  opts?: { editHash?: string; cacheOnly?: boolean; stale?: boolean; fast?: boolean },
 ): string {
   const e = opts?.editHash ?? p.editHash;
   const params = new URLSearchParams({ v: p.cacheKey, r: RENDER_VERSION });
@@ -75,6 +75,10 @@ export function imgUrl(
   // photo's freshest rendition of this level at ANY edit state (no-store)
   // instead of blocking on a decode — right photo now, right pixels soon.
   if (opts?.stale) params.set('stale', '1');
+  // fast: never a RAW decode — the cached file, a downscale of an existing
+  // 2048, or the camera's embedded JPEG (a base-look provisional, no-store),
+  // else 404. What lets a cold cull frame paint in tens of milliseconds.
+  if (opts?.fast) params.set('fast', '1');
   // b: per-photo cache-buster (server-ignored). Advances when a restored AI-mask
   // map regenerates pixels under an unchanged edit hash — see imgCacheBust.
   const b = getImgBust(p.id);
