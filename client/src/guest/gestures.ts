@@ -1,13 +1,17 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-// Touch handling for the loupe. The desktop loupe zooms on the wheel (a
-// trackpad pinch arrives as ctrl+wheel) and pans with a single pointer, which
-// is why the share page has its own: on a phone the same gestures are two
-// fingers and a drag, and none of that exists in the app.
+// Gesture handling for the loupe. The desktop loupe pans by scrolling a
+// padded container and zooms only on ctrl+wheel, which is why the share page
+// has its own: on a phone the same gestures are two fingers and a drag, and
+// none of that exists in the app.
 //
 // One pointer does double duty. Zoomed in it pans; at fit it is a swipe —
 // horizontally to change photo, downwards to close — and the image follows the
 // finger so the gesture is visibly doing something before it commits.
+//
+// Whoever opens the link on a laptop gets the wheel instead, plain as well as
+// ctrl-held: there is nothing under the loupe to scroll, and a link opened
+// from a message is not a place to discover that zooming needs a double click.
 
 export interface Transform {
   scale: number;
@@ -32,6 +36,13 @@ interface Options {
   onNext: () => void;
   onPrev: () => void;
   onClose: () => void;
+  /**
+   * The element the wheel zooms over — the loupe's outer box, so the chrome
+   * bars outside the gesture surface are covered too. React delegates wheel
+   * listeners as passive, where preventDefault is silently ignored, so this
+   * has to be a native non-passive listener on a real element.
+   */
+  root?: React.RefObject<HTMLElement | null>;
 }
 
 interface Pointer {
@@ -39,7 +50,7 @@ interface Pointer {
   y: number;
 }
 
-export function useGestures({ onNext, onPrev, onClose }: Options) {
+export function useGestures({ onNext, onPrev, onClose, root }: Options) {
   const [transform, setTransform] = useState<Transform>(IDENTITY);
   // Live drag offset while a swipe is in progress, so the photo tracks the
   // finger. Separate from transform: it springs back rather than persisting.
@@ -58,6 +69,60 @@ export function useGestures({ onNext, onPrev, onClose }: Options) {
     setTransform(IDENTITY);
     setDrag(null);
   }, []);
+
+  // Wheel-zoom base. A trackpad delivers wheel events faster than React
+  // re-renders, so deriving each step from the state read at listener-install
+  // time reads the same stale base many times over — most of the gesture is
+  // dropped and the zoom crawls, then jumps. The freshest value lives on a
+  // ref; the sync below keeps reset() and pinch authoritative. It syncs in an
+  // effect rather than during render (per react-hooks/refs), which is safe
+  // because a wheel event can only arrive after the commit that follows.
+  const live = useRef<Transform>(IDENTITY);
+  useEffect(() => {
+    live.current = transform;
+  }, [transform]);
+
+  useEffect(() => {
+    const el = root?.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      // Unconditionally: the loupe covers the album, so a wheel that reaches
+      // the page scrolls the grid behind the photo someone is looking at.
+      e.preventDefault();
+      // Firefox reports wheel deltas in lines, where the raw number is ~3 per
+      // notch and the curve below would barely move. Normalise to pixels.
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
+      const t = live.current;
+      // The same curve as the desktop loupe, so a trackpad feels the same in
+      // both. Never past fit: at scale 1 the photo is the whole subject.
+      const scale = Math.min(MAX_SCALE, Math.max(1, t.scale * Math.exp(-e.deltaY * unit * 0.003)));
+      if (scale === t.scale) return;
+      let x = 0;
+      let y = 0;
+      if (scale > 1) {
+        // Map-style zoom: the point under the cursor stays under the cursor.
+        // The photo is transformed about the box's centre, so the cursor is
+        // measured from there, and the pan follows from wanting that offset
+        // to map to itself at the new scale.
+        const rect = el.getBoundingClientRect();
+        const ux = e.clientX - rect.left - rect.width / 2;
+        const uy = e.clientY - rect.top - rect.height / 2;
+        x = ux - ((ux - t.x) * scale) / t.scale;
+        y = uy - ((uy - t.y) * scale) / t.scale;
+        // The same bound the drag-pan uses, so the two cannot disagree about
+        // how far off centre the photo may sit.
+        const maxX = (rect.width * (scale - 1)) / 2;
+        const maxY = (rect.height * (scale - 1)) / 2;
+        x = Math.max(-maxX, Math.min(maxX, x));
+        y = Math.max(-maxY, Math.min(maxY, y));
+      }
+      const next = { scale, x, y };
+      live.current = next;
+      setTransform(next);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [root]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     // A press that starts on a control is a click, not a gesture: capturing it

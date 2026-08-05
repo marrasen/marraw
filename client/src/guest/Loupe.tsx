@@ -43,7 +43,15 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
 
   const next = () => onIndex(Math.min(photos.length - 1, index + 1));
   const prev = () => onIndex(Math.max(0, index - 1));
-  const { transform, drag, zoomed, reset, handlers } = useGestures({ onNext: next, onPrev: prev, onClose });
+  // The whole loupe, including the chrome bars outside the gesture surface:
+  // the wheel must be caught over those too, or it scrolls the album behind.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const { transform, drag, zoomed, reset, handlers } = useGestures({
+    onNext: next,
+    onPrev: prev,
+    onClose,
+    root: rootRef,
+  });
 
   // The surface the gestures run on, and the box the photo occupies inside it.
   // The share page has no edit state, but the server mirrors rotate/crop onto
@@ -144,7 +152,7 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
   };
 
   return (
-    <div className="fixed inset-0 z-10 bg-black">
+    <div ref={rootRef} className="fixed inset-0 z-10 bg-black">
       <div
         ref={surface}
         // absolute inset-0, not a flex child: the chrome floats over the photo
