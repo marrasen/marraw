@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Loader2, Maximize, Minimize, X } from 'lucide-react';
 
 import type { FlagType, Photo } from '@/api/library';
+import { TileLayer, type ContainerMetrics } from '@/components/TileLayer';
 import { imgUrl, levelForSize } from '@/lib/backend';
+import { displayDims, renderedDims } from '@/lib/crop';
+import { useTilesWarm } from '@/lib/tiles';
 import { cn } from '@/lib/utils';
 
 import { fullscreenElement, useFullscreen } from './fullscreen';
@@ -42,6 +45,21 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
   const prev = () => onIndex(Math.max(0, index - 1));
   const { transform, drag, zoomed, reset, handlers } = useGestures({ onNext: next, onPrev: prev, onClose });
 
+  // The surface the gestures run on, and the box the photo occupies inside it.
+  // The share page has no edit state, but the server mirrors rotate/crop onto
+  // every photo, so the rendered size is known without loading any.
+  const surface = useRef<HTMLDivElement | null>(null);
+  const [surfaceSize, setSurfaceSize] = useState<[number, number]>([0, 0]);
+  useEffect(() => {
+    const el = surface.current;
+    if (!el) return;
+    const update = () => setSurfaceSize([el.clientWidth, el.clientHeight]);
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    update();
+    return () => ro.disconnect();
+  }, []);
+
   // A new photo starts at fit — carrying the previous one's zoom over would
   // drop the viewer into the middle of an image they have not seen yet.
   useEffect(() => reset(), [index, reset]);
@@ -80,12 +98,55 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
     }
   };
 
+  // The photo's box inside the surface: object-contain letterboxes it, and
+  // the tile layer has to land on exactly the same rectangle.
+  const [fdw, fdh] = photo ? displayDims(photo) : [0, 0];
+  const [dw, dh] = renderedDims(fdw, fdh, photo);
+  const [cw, ch] = surfaceSize;
+  const fitScale = dw > 0 && dh > 0 && cw > 0 && ch > 0 ? Math.min(cw / dw, ch / dh) : 0;
+  const boxW = dw * fitScale;
+  const boxH = dh * fitScale;
+  const boxLeft = (cw - boxW) / 2;
+  const boxTop = (ch - boxH) / 2;
+
+  // Past fit the 2048 is being upscaled, so full-resolution tiles are the only
+  // thing that adds detail. Warm-only under 2x: a casual pinch must never put
+  // a visitor's fingers on the owner's decode pool. Past 2x the zoom is
+  // deliberate enough to pay for one render — and useTilesWarm still requires
+  // a dwell, and aborts it the moment the gesture moves on.
+  const wantTiles = fitScale > 0 && transform.scale > 1;
+  const tilesWarm = useTilesWarm(photo, wantTiles, transform.scale >= 2);
+
   if (!photo) return null;
   const offset = drag ?? { x: 0, y: 0 };
+
+  // One transform for the photo and the tiles over it: computed once so the
+  // two layers cannot drift apart mid-gesture.
+  const panX = transform.x + offset.x;
+  const panY = transform.y + offset.y;
+  const frame = `translate3d(${panX}px, ${panY}px, 0) scale(${transform.scale})`;
+  // No transition while a finger is down: the image must track the gesture
+  // exactly, and ease back only once it is released.
+  const ease = drag ? 'none' : 'transform 180ms ease-out';
+
+  // Screen back to image pixels: the photo is transformed about the surface's
+  // centre, so undo the pan and the zoom around that point, then step into the
+  // letterboxed box.
+  const viewportFor = (m: ContainerMetrics) => {
+    const cx = m.clientWidth / 2;
+    const cy = m.clientHeight / 2;
+    return {
+      x: (cx + (-cx - panX) / transform.scale - boxLeft) / fitScale,
+      y: (cy + (-cy - panY) / transform.scale - boxTop) / fitScale,
+      w: m.clientWidth / transform.scale / fitScale,
+      h: m.clientHeight / transform.scale / fitScale,
+    };
+  };
 
   return (
     <div className="fixed inset-0 z-10 bg-black">
       <div
+        ref={surface}
         // absolute inset-0, not a flex child: the chrome floats over the photo
         // rather than sitting beside it, so showing and hiding it cannot
         // resize the image area and make the photo jump.
@@ -101,21 +162,50 @@ export function Loupe({ photos, index, canDownload, onIndex, onClose, onRate, on
       >
         <img
           key={photo.id}
-          // 2048 is the largest pyramid level; past it the app switches to
-          // full-resolution tiles, which is a lot of machinery for "does this
-          // frame work". Deep zoom can come later if anyone misses it.
+          // 2048 is the largest pyramid level, and it is the underlay at any
+          // zoom: the tile layer below sharpens whatever part of it is
+          // actually on screen, and a photo whose tiles are cold still shows
+          // this one upscaled rather than nothing.
           src={imgUrl(photo, levelForSize(viewportMax))}
           alt={photo.fileName}
           draggable={false}
           className="size-full object-contain"
           style={{
-            transform: `translate3d(${transform.x + offset.x}px, ${transform.y + offset.y}px, 0) scale(${transform.scale})`,
-            // No transition while a finger is down: the image must track the
-            // gesture exactly, and ease back only once it is released.
-            transition: drag ? 'none' : 'transform 180ms ease-out',
+            transform: frame,
+            transition: ease,
             opacity: drag && !zoomed ? Math.max(0.35, 1 - Math.abs(offset.y) / 400) : 1,
           }}
         />
+
+        {/* Full-resolution detail once the viewer has zoomed in. The wrapper
+            carries the same transform as the photo, so the tiles ride the
+            gesture with it; inside it they sit on the letterboxed box. */}
+        {wantTiles && tilesWarm && (
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{ transform: frame, transition: ease }}
+          >
+            <div
+              className="absolute"
+              style={{ left: boxLeft, top: boxTop, width: boxW, height: boxH }}
+            >
+              <TileLayer
+                key={`${photo.id}|${photo.cacheKey}|${photo.editHash}`}
+                photo={photo}
+                dw={dw}
+                dh={dh}
+                scale={fitScale}
+                container={surface}
+                viewportFor={viewportFor}
+                // A phone panning around a 45MP frame would otherwise hold
+                // every tile it has ever crossed. Roughly two screenfuls of
+                // history: panning back is still instant, memory is not open
+                // ended.
+                maxTiles={24}
+              />
+            </div>
+          </div>
+        )}
 
         {chrome && (
           <>

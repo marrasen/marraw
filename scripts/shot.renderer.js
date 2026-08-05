@@ -2060,6 +2060,85 @@ if (shot === 'cull') {
     canvas: !!canvas,
     canvasDrawn: !!canvas && canvas.width > 0,
   };
+} else if (shot === 'tiles') {
+  // Tile depth: at 1:1 the loupe covers the visible part of the photo with
+  // full-resolution tiles over the 2048 underlay. This asserts the geometry
+  // rather than the look — the tile layer derives its viewport from the
+  // scroll container, so a sign error or a missing slack offset shows up as
+  // tiles that load but sit somewhere else. Panning re-probes, because the
+  // interesting failure is "the first screenful is right, the next is not".
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1500); // fit preview settles
+  ui().setLoupeZoom(1);
+  // The tile set is rendered on demand (dwell + 1.5-2.5s per photo).
+  const tileEls = () => [...document.querySelectorAll('img[src*="/tile/"]')];
+  await until(() => tileEls().length > 0, 40000).catch(() => {});
+  await sleep(2500); // tiles decode and fade in
+
+  const scroller = document.querySelector('.no-scrollbar.overflow-auto');
+  // The underlay fills the photo's box exactly; the tile layer's scaled grid
+  // must land on the same rectangle or every tile is off by the same amount.
+  const underlay = document.querySelector('main img, img.absolute.inset-0') ??
+    [...document.querySelectorAll('img')].find((i) => !i.src.includes('/tile/') && i.src.includes('/img/'));
+  const grid = document.querySelector('img[src*="/tile/"]')?.parentElement ?? null;
+  const rectOf = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
+  };
+  // Coverage: sample the viewport and require a loaded tile under every point
+  // that falls inside the photo's box. A gap or an offset fails this.
+  const coverage = () => {
+    const sc = scroller?.getBoundingClientRect();
+    const box = underlay?.getBoundingClientRect();
+    if (!sc || !box) return { probed: 0, covered: 0 };
+    const loaded = tileEls().filter((t) => t.naturalWidth > 0).map((t) => t.getBoundingClientRect());
+    let probed = 0;
+    let covered = 0;
+    for (let iy = 1; iy < 8; iy++) {
+      for (let ix = 1; ix < 8; ix++) {
+        const x = sc.left + (sc.width * ix) / 8;
+        const y = sc.top + (sc.height * iy) / 8;
+        if (x < box.left || x > box.right || y < box.top || y > box.bottom) continue;
+        probed++;
+        if (loaded.some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom)) covered++;
+      }
+    }
+    return { probed, covered };
+  };
+
+  const first = coverage();
+  const tilesFirst = tileEls().length;
+  const gridRect = rectOf(grid);
+  const boxRect = rectOf(underlay);
+
+  // Pan a screenful right and down and let the layer catch up.
+  let panned = { probed: 0, covered: 0 };
+  let tilesAfterPan = 0;
+  if (scroller) {
+    scroller.scrollLeft += scroller.clientWidth;
+    scroller.scrollTop += scroller.clientHeight * 0.5;
+    await sleep(3000);
+    tilesAfterPan = tileEls().length;
+    panned = coverage();
+  }
+
+  window.__tilesProbe = {
+    zoom: ui().loupeZoom,
+    tilesFirst,
+    tilesAfterPan,
+    // The grid rect must equal the underlay's box: same origin, same size.
+    gridRect,
+    boxRect,
+    aligned:
+      !!gridRect && !!boxRect && gridRect.every((v, i) => Math.abs(v - boxRect[i]) <= 1),
+    coverFirst: first,
+    coverAfterPan: panned,
+    fullyCovered: first.probed > 0 && first.covered === first.probed &&
+      panned.probed > 0 && panned.covered === panned.probed,
+  };
 }
 // Let previews decode, then wake the chrome (capture fires on resolve).
 // ?shotNoWake=1 leaves the auto-hiding chrome (filmstrip deck) hidden.
@@ -2095,5 +2174,6 @@ const probe =
   window.__welcomeProbe ??
   window.__folderViewProbe ??
   window.__exportCopyProbe ??
-  window.__exportPresetsProbe;
+  window.__exportPresetsProbe ??
+  window.__tilesProbe;
 return probe ? { shot, ...probe } : shot;

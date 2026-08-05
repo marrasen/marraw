@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Crop as CropIcon, FlipHorizontal2, FlipVertical2, Pipette, RotateCcwSquare, RotateCwSquare, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { onRenderProgressEvent, type Photo } from '@/api/library';
@@ -9,8 +9,10 @@ import { Slider } from '@/components/ui/slider';
 import { Segmented } from '@/components/ui/segmented';
 import { ChipSpinner } from '@/components/ui/task-chip';
 import { PyramidImage } from '@/components/PyramidImage';
+import { TileLayer, type ContainerMetrics } from '@/components/TileLayer';
 import { cn } from '@/lib/utils';
-import { imgUrl, tileUrl, TILE_SIZE, type Level } from '@/lib/backend';
+import { imgUrl, type Level } from '@/lib/backend';
+import { levelForPx, useTilePrefetch, useTilesWarm } from '@/lib/tiles';
 import {
   esClearPreview,
   esCommit,
@@ -254,136 +256,6 @@ function slackFor(box: number, viewport: number): number {
   return Math.round(viewport * 0.4) + Math.max(0, viewport - box);
 }
 
-// levelForPx picks the smallest rendition covering px device pixels; past
-// pyramid depth the loupe switches to full-resolution tiles.
-function levelForPx(px: number): Level | 'tiles' {
-  for (const l of ['256', '512', '1024', '2048'] as const) {
-    if (Number(l) >= px) return l;
-  }
-  return 'tiles';
-}
-
-// useTilesWarm reports whether the photo's full-resolution tile set is
-// already rendered (tile (0,0) is the grid-complete sentinel), optionally
-// kicking ONE background render for the focused photo when it isn't. This is
-// what keeps high-DPI fit view browsable: on a 4K display the fit box
-// exceeds 2048 device pixels, so the loupe wants tiles for EVERY photo — but
-// the pre-render pass deliberately stops at 2048, and rendering the full
-// tile set on demand costs 1.5-2.5s per photo. So at fit, tiles engage only
-// once they exist; a cold photo shows the warm 2048 (upscaled — exactly what
-// was on screen before this hook existed) while the kicked render sharpens
-// it if the user pauses. Skimming past aborts the kick mid-decode.
-function useTilesWarm(photo: Photo, want: boolean, kick: boolean): boolean {
-  const [warm, setWarm] = useState(false);
-  // Key the probe on the tile URL, not the photo OBJECT: it encodes id +
-  // cacheKey + editHash, the only things that change which tiles exist. A
-  // background metadata/rating push hands down a fresh photo object with the
-  // same rendered state — resetting `warm` on that identity change would drop
-  // wantTiles false→true for a frame, flashing the tile layer off and on.
-  const url0 = tileUrl(photo, 0, 0);
-  useEffect(() => {
-    // New render state starts cold before the async probe/kick below.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWarm(false);
-    if (!want) return;
-    const ac = new AbortController();
-    let dwell = 0;
-    (async () => {
-      try {
-        const probe = await fetch(url0 + '&cacheOnly=1', { signal: ac.signal });
-        if (probe.ok) {
-          setWarm(true);
-          return;
-        }
-        if (!kick) return;
-        // Kick only after a real dwell: while the user is skimming, no full
-        // render ever STARTS — cheaper and more robust than starting one per
-        // step and racing to cancel it (a render that slips past its
-        // cancellation checkpoint blocks the pipeline for seconds).
-        dwell = window.setTimeout(async () => {
-          try {
-            const render = await fetch(url0, { signal: ac.signal });
-            if (render.ok) setWarm(true);
-          } catch {
-            // aborted: the user moved on mid-render
-          }
-        }, 350);
-      } catch {
-        // aborted: the user moved on
-      }
-    })();
-    return () => {
-      window.clearTimeout(dwell);
-      ac.abort();
-    };
-  }, [url0, want, kick]);
-  return warm;
-}
-
-// useTilePrefetch warms the photos adjacent to the focused one so stepping
-// through a burst stays instant. It pre-decodes their 2048 rendition — the
-// fit underlay AND the 1:1 bridge, and the single decode the backend runs for
-// it also yields every smaller level, so whatever level the neighbour's fit
-// needs is warm too. `active` runs this whenever the loupe is up (fit included,
-// which is where a cold 2048 otherwise stalls the arrow keys). `tiles`
-// additionally requests one full-res tile per neighbour, making the backend
-// render the whole tile set ahead of a 1:1 landing — only worth its cost past
-// pyramid depth. Underlay refs are held only for the current window so the
-// browser can evict older decodes.
-function useTilePrefetch(photos: Photo[], photo: Photo, active: boolean, tiles: boolean, fitLevel: Level) {
-  const held = useRef<Map<string, HTMLImageElement>>(new Map());
-  const triggered = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!active) return;
-    const i = photos.findIndex((p) => p.id === photo.id);
-    if (i < 0) return;
-    const ac = new AbortController();
-    const next = new Map<string, HTMLImageElement>();
-    const warm = (p: Photo, lvl: Level, cacheOnly = false) => {
-      const url = imgUrl(p, lvl, cacheOnly ? { cacheOnly: true } : undefined);
-      const img = held.current.get(url) ?? new Image();
-      if (!img.src) {
-        img.src = url;
-        img.decode().catch(() => {});
-      }
-      next.set(url, img);
-    };
-    for (const j of [i + 1, i - 1, i + 2]) {
-      const p = photos[j];
-      if (!p) continue;
-      // Warm the neighbour's fit-level rendition, cacheOnly: pull it into the
-      // browser cache IF it is already on disk (the exact URL SharpImage requests
-      // while browsing — imgUrl(p, fitLevel, {cacheOnly:true}) — so arrowing onto
-      // it is a cache hit at any viewport), but NEVER let a neighbour trigger a RAW
-      // decode. A plain (render-allowed) warm fires a PriorityVisible render
-      // per cold neighbour, saturating the pool with long uncancellable unpacks
-      // and freezing the browse the instant the user skims onto an unrendered
-      // run. Cold neighbours are filled by the focus-first background
-      // pre-render pass instead. The heavy 2048 is warmed ONLY at tile depth
-      // (1:1), where browsing is deliberate and the on-demand render is the point.
-      warm(p, fitLevel, true);
-      if (!tiles) continue;
-      warm(p, '2048');
-      const tile = tileUrl(p, 0, 0);
-      if (!triggered.current.has(tile)) {
-        triggered.current.add(tile);
-        // On abort, un-remember the trigger so a later revisit retries.
-        fetch(tile, { signal: ac.signal }).catch(() => triggered.current.delete(tile));
-      }
-    }
-    // Warm underlays that fell out of the neighbor window: stop their
-    // downloads too, not just release them for eviction.
-    for (const [url, img] of held.current) {
-      if (!next.has(url) && !img.complete) img.src = '';
-    }
-    held.current = next;
-    // Aborting on every focus change is fine: if the user lands on the
-    // prefetched neighbor, the main image/tile layer re-requests it at
-    // visible priority and the pool dedups against any run still going.
-    return () => ac.abort();
-  }, [photos, photo, active, tiles, fitLevel]);
-}
-
 // renderStage names what the backend is doing at a given progress fraction,
 // mirroring pyramid.generate's budget: LibRaw decode 0–0.70, look/masks/
 // detail 0.70–0.90, JPEG write-out from 0.90.
@@ -621,6 +493,22 @@ export function CinemaImage({
   // 0.5 keeps the photo centered. Crop mode pins the frame centered.
   const slackX = cropping ? 0 : slackFor(boxW, container[0]);
   const slackY = cropping ? 0 : slackFor(boxH, container[1]);
+
+  // What the tile layer can see. This loupe pans by scrolling, and the box
+  // sits centered in its slack wrapper, so the box's edge in scroll
+  // coordinates is offset by the per-side slack. Memoized on exactly the
+  // inputs it reads: an identity change re-subscribes the layer's scroll
+  // listener, which must not happen on every render.
+  const tileScale = boxW / dw;
+  const viewportFor = useCallback(
+    (m: ContainerMetrics) => ({
+      x: (m.scrollLeft - slackX) / tileScale,
+      y: (m.scrollTop - slackY) / tileScale,
+      w: m.clientWidth / tileScale,
+      h: m.clientHeight / tileScale,
+    }),
+    [slackX, slackY, tileScale],
+  );
 
   // Entering crop at Fit leaves the frame flush against the container, so the
   // edge/corner handles sit on the window border where the OS claims the
@@ -1218,10 +1106,9 @@ export function CinemaImage({
                 photo={photo}
                 dw={dw}
                 dh={dh}
-                boxW={boxW}
-                slackX={slackX}
-                slackY={slackY}
+                scale={tileScale}
                 container={containerRef}
+                viewportFor={viewportFor}
                 onProgress={(pending, loaded) => setPendingTiles([pending, loaded])}
               />
             )}
@@ -1595,153 +1482,6 @@ function NavigatorInset({
       </div>
       <NavigatorMap photo={photo} viewport={viewport} onPan={onPan} />
     </div>
-  );
-}
-
-// TileLayer sharpens the loupe past pyramid depth: the part of the image in
-// the scrolled viewport (plus a margin) is covered with full-resolution
-// TILE_SIZE tiles scaled into the display box, on top of the always-present
-// 2048 underlay. Tiles accumulate for the component's lifetime, so panning
-// back never re-fades — the caller keys this component by photo + edit
-// state, so a switch starts from scratch. A tile a hair off the rendered
-// image's edge 404s and simply stays hidden, leaving the underlay visible.
-function TileLayer({
-  photo,
-  dw,
-  dh,
-  boxW,
-  slackX,
-  slackY,
-  container,
-  onProgress,
-}: {
-  photo: Photo;
-  dw: number; // rendered (crop-aware) display width
-  dh: number;
-  boxW: number;
-  /** Per-side pan slack around the box (see slackFor) — the box's offset in scroll coordinates. */
-  slackX: number;
-  slackY: number;
-  container: React.RefObject<HTMLDivElement | null>;
-  /** Reports (pending, loaded) tile counts for the rendering indicator. */
-  onProgress?: (pending: number, loaded: number) => void;
-}) {
-  const cols = Math.ceil(dw / TILE_SIZE);
-  const rows = Math.ceil(dh / TILE_SIZE);
-  const scale = boxW / dw;
-  // Tile keys mounted so far.
-  const [tiles, setTiles] = useState<string[]>([]);
-  const [loaded, setLoaded] = useState(0);
-  // Keep the latest callback without retriggering the count effect below;
-  // updated in an effect (not during render) per react-hooks/refs.
-  const onProgressRef = useRef(onProgress);
-  useEffect(() => {
-    onProgressRef.current = onProgress;
-  });
-  useEffect(() => {
-    onProgressRef.current?.(Math.max(0, tiles.length - loaded), loaded);
-  }, [tiles.length, loaded]);
-  // Component unmount (leaving 1:1 or switching photo) clears the indicator.
-  useEffect(() => () => onProgressRef.current?.(0, 0), []);
-
-  useEffect(() => {
-    const el = container.current;
-    if (!el) return;
-    let raf = 0;
-    const update = () => {
-      raf = 0;
-      // Viewport rect in image pixels. The box sits centered in its slack
-      // wrapper (pan freedom), so its edge in scroll coordinates is offset
-      // by the per-side slack.
-      const offX = slackX;
-      const offY = slackY;
-      const margin = TILE_SIZE / 2;
-      const x0 = Math.max(0, Math.floor(((el.scrollLeft - offX) / scale - margin) / TILE_SIZE));
-      const y0 = Math.max(0, Math.floor(((el.scrollTop - offY) / scale - margin) / TILE_SIZE));
-      const x1 = Math.min(cols - 1, Math.floor(((el.scrollLeft - offX + el.clientWidth) / scale + margin) / TILE_SIZE));
-      const y1 = Math.min(rows - 1, Math.floor(((el.scrollTop - offY + el.clientHeight) / scale + margin) / TILE_SIZE));
-      setTiles((prev) => {
-        const have = new Set(prev);
-        const added: string[] = [];
-        for (let ty = y0; ty <= y1; ty++) {
-          for (let tx = x0; tx <= x1; tx++) {
-            const k = `${tx},${ty}`;
-            if (!have.has(k)) added.push(k);
-          }
-        }
-        return added.length > 0 ? [...prev, ...added] : prev;
-      });
-    };
-    const schedule = () => {
-      if (!raf) raf = requestAnimationFrame(update);
-    };
-    el.addEventListener('scroll', schedule);
-    update();
-    return () => {
-      el.removeEventListener('scroll', schedule);
-      cancelAnimationFrame(raf);
-    };
-  }, [container, scale, cols, rows, slackX, slackY]);
-
-  return (
-    <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div
-        className="absolute top-0 left-0 origin-top-left"
-        style={{ width: dw, height: dh, transform: `scale(${scale})` }}
-      >
-        {tiles.map((k) => {
-          const [tx, ty] = k.split(',').map(Number);
-          return (
-            <Tile
-              key={k}
-              src={tileUrl(photo, tx, ty)}
-              left={tx * TILE_SIZE}
-              top={ty * TILE_SIZE}
-              onSettled={() => setLoaded((n) => n + 1)}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// Tile renders at its natural size (the server decides edge-tile dimensions)
-// and fades in once loaded; a 404 off the rendered edge stays invisible.
-// onSettled fires on load AND error so the rendering indicator never hangs
-// on an edge tile that does not exist.
-function Tile({
-  src,
-  left,
-  top,
-  onSettled,
-}: {
-  src: string;
-  left: number;
-  top: number;
-  onSettled?: () => void;
-}) {
-  const [loaded, setLoaded] = useState(false);
-  const settled = useRef(false);
-  const settle = () => {
-    if (!settled.current) {
-      settled.current = true;
-      onSettled?.();
-    }
-  };
-  return (
-    <img
-      src={src}
-      alt=""
-      draggable={false}
-      onLoad={() => {
-        setLoaded(true);
-        settle();
-      }}
-      onError={settle}
-      className="absolute max-w-none transition-opacity duration-150"
-      style={{ left, top, opacity: loaded ? 1 : 0 }}
-    />
   );
 }
 
