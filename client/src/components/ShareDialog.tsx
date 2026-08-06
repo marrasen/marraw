@@ -78,6 +78,15 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
   const [copied, setCopied] = useState(false);
   // Which export preset renders this link's downloads; empty = full size.
   const [presetID, setPresetID] = useState('');
+  // Whether the exposure warning has been read. See needsConsent.
+  const [consented, setConsented] = useState(false);
+
+  // This link would open the tunnel: a public share, on a machine that is not
+  // published yet. Asked once per state change rather than once per link — a
+  // second album shared while the funnel is already up exposes nothing new,
+  // and a warning that fires every time is a warning nobody reads.
+  const needsConsent =
+    reach === ShareReach.Public && !!status.data?.available && !status.data.running;
 
   const copy = (url: string) => {
     void navigator.clipboard.writeText(url);
@@ -86,6 +95,12 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
   };
 
   const create = async () => {
+    // First click on a share that would publish this machine arms the warning
+    // instead of minting; the second click is the consent.
+    if (needsConsent && !consented) {
+      setConsented(true);
+      return;
+    }
     setCreating(true);
     try {
       const created = await createLink(
@@ -138,12 +153,15 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
                     : undefined,
               }))}
               size="sm"
+              // w-fit: the track is in a column, so it would otherwise stretch
+              // the dialog's width and leave dead rail beside the last segment.
+              className="w-fit"
               aria-label="Who can open it"
             />
             <span className="text-[11.5px] text-muted-foreground">
               {reach === ShareReach.Tailnet
                 ? 'Devices signed in to your Tailscale network. This computer is never published to the internet.'
-                : 'Published over Tailscale Funnel, so anyone you send it to can open it — no account, no app.'}
+                : 'Published on the public internet over Tailscale Funnel, so anyone you send it to can open it — no account, no app.'}
             </span>
           </div>
           <Capability
@@ -172,7 +190,14 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
         </div>
       )}
 
-      <Reachability status={status.data} reach={reach} />
+      {/* The warning takes the note's place rather than stacking under it:
+          "will publish when you create the link" is the same sentence with
+          the consequence left out. */}
+      {needsConsent && consented && !link ? (
+        <PublishWarning hostname={status.data?.hostname ?? ''} />
+      ) : (
+        <Reachability status={status.data} reach={reach} />
+      )}
 
       <div className="flex justify-end gap-2 border-t px-5 py-3">
         <Button variant="ghost" onClick={onClose}>
@@ -187,7 +212,7 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
             disabled={creating || !reachBase(status.data, reach)}
           >
             {creating && <Loader2 className="size-3.5 animate-spin" />}
-            Create link
+            {needsConsent && consented ? 'Publish and create link' : 'Create link'}
           </Button>
         )}
       </div>
@@ -371,6 +396,23 @@ function Reachability({
   return (
     <Note tone="info">
       Served from <span className="font-mono">{status.hostname}</span> over Tailscale Funnel.
+    </Note>
+  );
+}
+
+// Shown once, on the click that would raise the tunnel. Opening a funnel is
+// the one thing marraw does that changes what the outside world can reach, and
+// it happens on the way to something else — the owner came here to send a
+// link, not to publish a machine. So it is said plainly, with what actually
+// confines it and where that confinement ends.
+function PublishWarning({ hostname }: { hostname: string }) {
+  return (
+    <Note tone="warn">
+      This publishes your computer on the public internet as{' '}
+      <span className="font-mono">{hostname}</span>, over Tailscale Funnel. A visitor can reach only
+      this album, through a link that expires and that you can withdraw at any time, and the tunnel
+      comes down with the last public link. Beyond that there are no guarantees: the URL is the
+      whole credential, so treat it like one.
     </Note>
   );
 }

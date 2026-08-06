@@ -774,6 +774,87 @@ if (shot === 'cull') {
     croppedAspect: cellAspect('sample2.arw'),
     rotatedAspect: cellAspect('sample3.arw'),
   };
+} else if (shot === 'share' || shot === 'share-publish') {
+  // The share dialog, reached the way a user reaches it: right-click a shoot
+  // in the rail. Needs MARRAW_SHOT_OWN_DAEMON=1 — the shared `marrawd --dev`
+  // registers no share listeners at all (see main.go), so Share.Status reports
+  // nowhere to serve from and the dialog refuses to mint against it.
+  //
+  // `share-publish` goes one click further, to the exposure warning that arms
+  // when creating the link would raise a funnel.
+  ui().setMode('library');
+  // "Share album…" is on a SHOOT row, not a library-root row, so the folder's
+  // parent goes in as a parent root and the shoot appears beneath it.
+  const folder = ui().folderPath ?? new URLSearchParams(location.search).get('folder');
+  const parent = folder.replace(/[\\/][^\\/]+$/, '');
+  await mw.setLibraryRoots([
+    { path: parent, alias: '', includeSubfolders: false, photoCount: 0, isParent: true },
+  ]);
+  await sleep(1500);
+  window.__shareProbe = { stage: 'waiting for rail' };
+  try {
+    if (!document.querySelector('[data-testid="rail-shoot"]')) {
+      document.querySelector('[data-testid="rail-parent"]')?.click();
+      await sleep(1200);
+    }
+    const shoot = await until(() => document.querySelector('[data-testid="rail-shoot"]'), 10000);
+  window.__shareProbe.stage = 'opening context menu';
+  const box = shoot.getBoundingClientRect();
+  shoot.dispatchEvent(
+    new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      buttons: 2,
+      clientX: box.left + 20,
+      clientY: box.top + 10,
+    }),
+  );
+  const item = await until(
+    () =>
+      [...document.querySelectorAll('[role="menuitem"]')].find((e) =>
+        e.textContent.includes('Share album'),
+      ),
+    8000,
+  );
+  window.__shareProbe.stage = 'opening dialog';
+  item.click();
+  const dialog = await until(() => {
+    const d = [...document.querySelectorAll('[role="dialog"]')].find((e) =>
+      e.textContent.includes('Who can open it'),
+    );
+    // Wait for Share.Status to land, or the reach control reads as if this
+    // machine had no tailnet and the shot catches the wrong branch.
+    return d && d.textContent.includes('Tailscale') ? d : null;
+  }, 12000);
+  if (shot === 'share-publish') {
+    [...dialog.querySelectorAll('button')]
+      .find((b) => b.textContent.trim() === 'Create link')
+      ?.click();
+    await sleep(400);
+  }
+  const text = dialog.textContent ?? '';
+  window.__shareProbe = {
+    stage: 'done',
+    offersBothReaches:
+      text.includes('Anyone with the link') && text.includes('Only my devices'),
+    // The warning must appear on the second surface and only there.
+    warnsAboutPublicInternet: text.includes('publishes your computer on the public internet'),
+    saysNoGuarantees: text.includes('no guarantees'),
+    // Case-insensitive: consenting turns "Create link" into "Publish and
+    // create link", and that relabel is the point of the second surface.
+    buttonLabel:
+      [...dialog.querySelectorAll('button')]
+        .map((b) => b.textContent.trim())
+        .find((t) => /create link/i.test(t)) ?? '',
+    // Must stay false: the shot is for review, and a real token would be in it.
+    leaksToken: /\b[0-9a-f]{32}\b/.test(text),
+  };
+  } catch (err) {
+    // Report where it stopped instead of failing the whole run: the capture
+    // still happens, and the frame shows what the driver was looking at.
+    window.__shareProbe.error = String(err);
+  }
 } else if (shot === 'addfolder') {
   ui().setAddFolderOpen(true);
 } else if (shot === 'shortcuts') {
@@ -2175,5 +2256,6 @@ const probe =
   window.__folderViewProbe ??
   window.__exportCopyProbe ??
   window.__exportPresetsProbe ??
+  window.__shareProbe ??
   window.__tilesProbe;
 return probe ? { shot, ...probe } : shot;

@@ -106,6 +106,11 @@ if (import.meta.env.DEV) {
       setLastSeenVersion: (v: string) => us.updateLastSeenVersion(client, v),
       // Folder hop for the `folderview` shot (per-folder view memory).
       openPath: (path: string) => lib.openShoot(client, { path } as never),
+      // Library roots for the `share` shot surfaces. The share dialog is
+      // reached by right-clicking a rail shoot, and those shots run against a
+      // throwaway profile whose library starts empty — MARRAW_OPEN_FOLDER
+      // opens a folder without adding it.
+      setLibraryRoots: (roots: unknown) => lib.saveRoots(client, roots as never),
       // The changelog parser, probed by the `welcome` shot surface.
       changelog: cl,
       startExport: (req: unknown) => ex.startExport(client, req as never),
