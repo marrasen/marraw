@@ -485,8 +485,8 @@ function DevelopPanel({
           hotkey="E"
           value={draft.expEV}
           display={`${draft.expEV >= 0 ? '+' : ''}${draft.expEV.toFixed(2)} EV`}
-          min={-2}
-          max={3}
+          min={-5}
+          max={5}
           step={0.05}
           // Default is the seeded camera-mimic lift, not 0 — reset returns
           // there (a lone expEV=0 renders identically to the seed anyway,
