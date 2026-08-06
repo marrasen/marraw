@@ -5,10 +5,12 @@ import (
 	"log"
 	"net"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/marrasen/aprot"
 
+	"github.com/marrasen/marraw/internal/discovery"
 	"github.com/marrasen/marraw/internal/store"
 )
 
@@ -71,6 +73,12 @@ type ShareStatus struct {
 	// LinkCount is how many shares are live, so the UI can warn before the
 	// tunnel comes down.
 	LinkCount int `json:"linkCount"`
+	// Base is the origin a link minted right now would be served on, empty
+	// when this machine has no address anyone else could reach. The share
+	// dialog asks before it offers to mint: a link is only discovered to be
+	// unreachable by the person it was sent to, so the owner has to learn it
+	// here instead.
+	Base string `json:"base"`
 }
 
 // GuestSession is what the shared page needs to know about itself. It is the
@@ -99,7 +107,7 @@ func (s *Share) Status(ctx context.Context) (*ShareStatus, error) {
 		return nil, aprot.ErrAuthFailed("local windows only")
 	}
 	aprot.RegisterRefreshTrigger(ctx, shareKey)
-	out := &ShareStatus{}
+	out := &ShareStatus{Base: s.shareBase(ctx)}
 	if s.deps.Tokens != nil {
 		out.LinkCount = len(s.deps.Tokens.Guests())
 	}
@@ -287,6 +295,10 @@ func ExportCredit(ctx context.Context, db *store.DB) (artist, copyright string) 
 // shareBase is the origin share URLs are built on. Three cases, in descending
 // order of reach — and the URL always names something that actually answers,
 // because a link is discovered to be broken by the person you sent it to.
+//
+// Computed per read rather than stored on the link: a share minted while
+// Tailscale was down starts working the moment it comes back, without the
+// owner having to notice and mint another.
 func (s *Share) shareBase(ctx context.Context) string {
 	if s.deps.Funnel != nil {
 		// Published: reachable by anyone, which is the point of the feature.
@@ -299,16 +311,41 @@ func (s *Share) shareBase(ctx context.Context) string {
 		// to share with your own laptop, not with a client.
 		if !s.deps.LoopbackOnly {
 			if host := s.deps.Funnel.Hostname(ctx); host != "" {
-				if _, port, err := net.SplitHostPort(s.deps.ListenAddr); err == nil {
-					return "http://" + net.JoinHostPort(host, port)
+				if port := s.listenPort(); port != 0 {
+					return "http://" + net.JoinHostPort(host, strconv.Itoa(port))
 				}
 			}
 		}
 	}
-	if s.deps.ListenAddr == "" {
-		return ""
+	// No tunnel and no tailnet, but the daemon is bound wide: the local
+	// network. Built from an interface address rather than from ListenAddr,
+	// which is the *bind* — "0.0.0.0:8482" is a perfectly good thing to listen
+	// on and a URL that resolves nowhere.
+	if !s.deps.LoopbackOnly {
+		if port := s.listenPort(); port != 0 {
+			if addrs := discovery.ReachableAddresses(port); len(addrs) > 0 {
+				return "http://" + addrs[0]
+			}
+		}
 	}
-	return "http://" + s.deps.ListenAddr
+	// Every address this daemon answers on is this machine. There is no link
+	// to hand out, and the honest answer is none: a URL on 127.0.0.1 opens
+	// perfectly in the owner's own browser, which is exactly what makes it
+	// such a bad thing to put on the clipboard.
+	return ""
+}
+
+// listenPort is the port the daemon bound, 0 when it has not bound yet.
+func (s *Share) listenPort() int {
+	_, portStr, err := net.SplitHostPort(s.deps.ListenAddr)
+	if err != nil {
+		return 0
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0
+	}
+	return port
 }
 
 func (s *Share) toShareLink(ctx context.Context, g GuestLink, base string, now time.Time) ShareLink {

@@ -141,7 +141,10 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
           {link ? 'Done' : 'Cancel'}
         </Button>
         {!link && (
-          <Button onClick={() => void create()} disabled={creating}>
+          // Nothing to mint against: the daemon would hand back a link with no
+          // URL on it. Better to refuse here, where the note beside the button
+          // says which of the two switches to go and turn on.
+          <Button onClick={() => void create()} disabled={creating || !status.data?.base}>
             {creating && <Loader2 className="size-3.5 animate-spin" />}
             Create link
           </Button>
@@ -213,6 +216,18 @@ function presetSummary(preset?: ExportPreset): string {
 }
 
 function Created({ link, copied, onCopy }: { link: ShareLink; copied: boolean; onCopy: () => void }) {
+  // The share exists but has no address yet — Tailscale went down between the
+  // dialog's last status push and the mint. Not an error: the URL is derived
+  // per read, so the link starts working on its own once there is somewhere to
+  // serve it from, and Settings → Remote will have the copy button by then.
+  if (!link.url) {
+    return (
+      <div className="px-5 py-4 text-[12.5px] text-muted-foreground">
+        “{link.name}” is shared, but this computer is not reachable from anywhere right now, so
+        there is no link to copy yet. It will appear under Settings → Remote once it is.
+      </div>
+    );
+  }
   return (
     <div className="px-5 py-4">
       {/* min-w-0: the dialog is a grid, and a grid item's min-width is auto,
@@ -240,19 +255,34 @@ function Created({ link, copied, onCopy }: { link: ShareLink; copied: boolean; o
 // useless one to send a band — so say which one this is.
 function Reachability({ status }: { status: ReturnType<typeof useStatus>['data'] }) {
   if (!status) return null;
+  // Nowhere to serve from. Said first and said plainly: whatever Tailscale's
+  // trouble is, the outcome is that there is no link to hand out, and the two
+  // ways out of it are the only useful thing to read here.
+  if (!status.base) {
+    return (
+      <Note tone="warn">
+        {status.err
+          ? `Tailscale could not publish this machine: ${status.err} `
+          : 'Tailscale isn’t running, '}
+        and this computer has no other address anyone else can reach. Start Tailscale, or turn on
+        Settings → Remote → Allow remote connections to share over your local network.
+      </Note>
+    );
+  }
   if (status.err) {
     return (
       <Note tone="warn">
-        Tailscale could not publish this machine: {status.err} The link still works over your tailnet
-        or local network.
+        Tailscale could not publish this machine: {status.err} The link still works where this
+        computer is reachable, at <span className="font-mono">{baseHost(status.base)}</span>.
       </Note>
     );
   }
   if (!status.available) {
     return (
       <Note tone="warn">
-        Tailscale isn’t running, so the link only works on your local network. Start Tailscale and
-        enable Funnel to share it over the internet.
+        Tailscale isn’t running, so the link only works on your local network, at{' '}
+        <span className="font-mono">{baseHost(status.base)}</span>. Start Tailscale and enable Funnel
+        to share it over the internet.
       </Note>
     );
   }
@@ -311,3 +341,12 @@ function Capability({
 }
 
 const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** The host:port out of a share origin, which is the part worth reading. */
+function baseHost(base: string): string {
+  try {
+    return new URL(base).host;
+  } catch {
+    return base;
+  }
+}

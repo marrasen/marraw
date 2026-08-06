@@ -42,6 +42,7 @@ export interface ShareStatus {
     hostname: string;
     err: string;
     linkCount: number;
+    base: string;
 }
 
 
