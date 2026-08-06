@@ -387,7 +387,11 @@ export function useKeyboard() {
         return;
       }
 
-      if (CONTROL_KEYS[key] && es.draft && s.mode !== 'cull') {
+      // The Library grid's aside is info only — there is no slider to reveal
+      // there, so a control key would adjust the photo with nothing on screen
+      // to show for it. Everywhere else the panel puts the control in view.
+      const libraryGrid = s.mode === 'library' && s.view === 'grid';
+      if (CONTROL_KEYS[key] && es.draft && s.mode !== 'cull' && !libraryGrid) {
         e.preventDefault();
         s.setDevelopTab('develop'); // reveal the slider if on the Presets/Info tab
         esSetActive(client, CONTROL_KEYS[key]);

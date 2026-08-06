@@ -382,7 +382,7 @@ function Workspace({ folderId }: { folderId: number }) {
       </main>
       {structured && showEditPanel && (
         <aside className="w-[300px] shrink-0 border-l">
-          <EditPanel photos={all} />
+          <EditPanel photos={all} variant="library" />
         </aside>
       )}
       <ExportDialog photos={visible} />

@@ -618,16 +618,29 @@ try {
   }
 
   // --- selection bar takes over the filter row on multi-select --------------
+  // The bar keeps the cull actions; the edit actions (paste, restore, presets)
+  // sit in the right panel instead, which is what pins the session's apply
+  // targets to the selection — so they can't drift out of sync with it.
   ui().focus(ids0[0]);
   ui().focus(ids0[1], { toggle: true });
+  const aside = () => document.querySelector('aside.w-\\[300px\\]');
+  const asideBtn = (t) =>
+    [...(aside()?.querySelectorAll('button') ?? [])].find((b) => b.textContent.trim() === t);
   R.selectionBar = !!(await until(
     () =>
-      buttons().find((b) => b.textContent.trim() === 'Paste settings') &&
-      buttons().find((b) => b.textContent.trim() === 'Restore original') &&
+      asideBtn('Paste settings') &&
+      asideBtn('Restore original') &&
+      buttons().some((b) => b.textContent.trim().startsWith('Pick')) &&
       [...document.querySelectorAll('span')].some((s) => s.textContent.trim() === 'selected'),
     5000,
     'selection bar',
   ));
+  // The moved buttons must be gone from the filter row itself.
+  R.selectionBarNoEditActions = !buttons().some(
+    (b) =>
+      !aside()?.contains(b) &&
+      ['Paste settings', 'Restore original'].includes(b.textContent.trim()),
+  );
   key('Escape'); // Esc clears the selection
   await sleep(200);
   R.selectionEscClears = ui().selection.size <= 1;

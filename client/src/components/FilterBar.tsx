@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { ArrowUpDown, Contrast, Eye, EyeOff, Focus, Layers, LayoutGrid, PanelRight, Star, Trash2, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePhotos } from '@/api/library';
-import { resetEdits } from '@/api/edits';
 import { useApiClient } from '@/api/client';
 import { GapControl } from '@/components/cinema/GapControl';
 import { Segmented } from '@/components/ui/segmented';
@@ -27,7 +26,6 @@ import { cn } from '@/lib/utils';
 import { applyFlag, applyRating, judgeAllBursts } from '@/lib/actions';
 import type { BurstInfo } from '@/lib/bursts';
 import { useFeature } from '@/lib/features';
-import { esApplyParams } from '@/lib/editSession';
 import { updateFolderFilters, updateLibrarySort } from '@/lib/uiSettings';
 import { useUIStore, type FlagFilter, type LibrarySort } from '@/stores/uiStore';
 
@@ -421,12 +419,13 @@ export function FilterBar({
   );
 }
 
-// SelectionBar: batch rate / flag / paste / restore for the whole selection,
-// in the filter row's slot. Esc clears the selection.
+// SelectionBar: batch rate / flag / delete for the whole selection, in the
+// filter row's slot. Esc clears the selection. The edit-side batch actions
+// (paste settings, restore original, presets) live in the right panel, which
+// is what pins the edit session's apply targets to this selection.
 function SelectionBar() {
   const client = useApiClient();
   const selection = useUIStore((s) => s.selection);
-  const clipboard = useUIStore((s) => s.clipboard);
   const clearSelection = useUIStore((s) => s.clearSelection);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -485,31 +484,6 @@ function SelectionBar() {
         </button>
       </div>
       <div className="flex gap-[7px]">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!clipboard}
-          title={clipboard ? `Paste copied settings onto ${selection.size} photos` : 'Copy settings first (Ctrl+C)'}
-          onClick={() => {
-            if (!clipboard) return;
-            esApplyParams(client, clipboard, { label: 'Paste' });
-            toast.success(`Settings pasted to ${selection.size} photos`);
-          }}
-        >
-          Paste settings
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          title="Reset all edits on the selection"
-          onClick={() => {
-            resetEdits(client, ids)
-              .then(() => toast.success(`Restored ${selection.size} photos to original`))
-              .catch((err) => toast.error((err as Error).message));
-          }}
-        >
-          Restore original
-        </Button>
         <Button
           variant="ghost"
           size="icon-sm"

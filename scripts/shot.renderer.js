@@ -1456,6 +1456,86 @@ if (shot === 'cull') {
   const ids = ui().visibleIds;
   ui().focus(ids[2]);
   for (const id of ids.slice(3, 14)) ui().focus(id, { toggle: true });
+} else if (shot === 'libpanel' || shot === 'libpanel-batch') {
+  // The Library aside: info only for one photo (no tab strip, no navigator —
+  // there is no loupe image behind the grid to navigate), and the batch stack
+  // for several (relative sliders, the whole-selection paste/restore pair,
+  // presets without the clipboard/history sections). The Develop drawer keeps
+  // its tabs and its navigator, so probe that too.
+  ui().setMode('library');
+  ui().setView('grid');
+  ui().setShowEditPanel(true);
+  await sleep(600);
+  const aside = () => document.querySelector('aside.w-\\[300px\\]');
+  // Match on leaf text: the info rows are dt/dd and the flag buttons wrap a
+  // shortcut span, so a whole-subtree textContent comparison misses both.
+  const texts = (root) =>
+    [...(root?.querySelectorAll('*') ?? [])]
+      .filter((n) => ![...n.children].some((c) => c.textContent?.trim()))
+      .map((n) => n.textContent?.trim());
+  const has = (root, t) => texts(root).some((s) => s === t);
+  await until(() => aside());
+
+  const single = aside();
+  const singleProbe = {
+    tabs: has(single, 'Develop') || has(single, 'Curve') || has(single, 'Presets'),
+    navigator: has(single, 'Navigator'),
+    histogram: has(single, 'Histogram'),
+    info: has(single, 'Resolution') && has(single, 'File size'),
+  };
+
+  // The develop drawer must be untouched: tabs present, Info tab keeps the map.
+  ui().setMode('develop');
+  const drawer = await until(() =>
+    [...document.querySelectorAll('.glass')].find((n) => has(n, 'Presets')),
+  );
+  mw.useUIStore.getState().setDevelopTab('info');
+  await sleep(600);
+  const developProbe = {
+    tabs: has(drawer, 'Develop') && has(drawer, 'Presets') && has(drawer, 'Info'),
+    navigator: has(drawer, 'Navigator'),
+  };
+  mw.useUIStore.getState().setDevelopTab('develop');
+  ui().setMode('library');
+  ui().setView('grid');
+  await sleep(500);
+
+  // Now several photos: the batch stack.
+  const ids = ui().visibleIds;
+  ui().focus(ids[2]);
+  for (const id of ids.slice(3, 9)) ui().focus(id, { toggle: true });
+  await sleep(900);
+  const batch = aside();
+  const batchProbe = {
+    sliders: has(batch, 'Exposure') && has(batch, 'Contrast') && has(batch, 'Saturation'),
+    paste: has(batch, 'Paste settings'),
+    restore: has(batch, 'Restore original'),
+    presets: has(batch, 'Auto everything') && has(batch, 'Creative presets') && has(batch, 'My presets'),
+    appliesBadge: texts(batch).some((s) => /^applies to \d+ photos$/.test(s ?? '')),
+    clipboard: has(batch, 'Clipboard'),
+    history: has(batch, 'History'),
+    oldHint: texts(batch).some((s) => /Absolute edits\?/.test(s ?? '')),
+  };
+  // The SelectionBar keeps rating/flag/delete and loses the edit actions.
+  const bar = [...document.querySelectorAll('main div')].find((n) => has(n, 'Esc to clear'));
+  const btn = (root, t) =>
+    [...(root?.querySelectorAll('button') ?? [])].some((b) => b.textContent?.trim().startsWith(t));
+  const barProbe = {
+    found: !!bar,
+    pick: btn(bar, 'Pick'), // wraps a shortcut span, so match the leading text
+    rate: has(bar, 'Rate'),
+    paste: btn(bar, 'Paste settings'),
+    restore: btn(bar, 'Restore original'),
+  };
+  // Everything in the batch panel — paste, restore, presets — fans out over
+  // the session's apply targets, so they must cover the whole selection.
+  batchProbe.applyIds = mw.useEditSession.getState().applyIds.length;
+  batchProbe.selected = ui().selection.size;
+  if (shot === 'libpanel') {
+    ui().focus(ids[2]); // back to a single selection for the capture
+    await sleep(700);
+  }
+  window.__libPanelProbe = { single: singleProbe, develop: developProbe, batch: batchProbe, bar: barProbe };
 } else if (shot === 'render-progress') {
   // 1:1 on a photo whose tile grid is cold → the decoding indicator must
   // upgrade from indeterminate to a live percent (RenderProgressEvent), and
@@ -2257,5 +2337,6 @@ const probe =
   window.__exportCopyProbe ??
   window.__exportPresetsProbe ??
   window.__shareProbe ??
+  window.__libPanelProbe ??
   window.__tilesProbe;
 return probe ? { shot, ...probe } : shot;

@@ -60,10 +60,14 @@ export function PresetsPanel({
   client,
   photo,
   targetCount,
+  showClipboardHistory = true,
 }: {
   client: ApiClient;
   photo?: Photo;
   targetCount: number;
+  // The batch panel hosts its own paste/restore pair and the history tracks
+  // only the focused photo, so a multi-selection drops both sections.
+  showClipboardHistory?: boolean;
 }) {
   const draft = useEditSession((s) => s.draft ?? s.lastDraft);
   const clipboard = useUIStore((s) => s.clipboard);
@@ -115,40 +119,44 @@ export function PresetsPanel({
 
       <AmountSection client={client} />
 
-      <Section title="Clipboard">
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!draft}
-            onClick={() => {
-              if (!draft) return;
-              setClipboard(draft);
-              toast.success('Edit settings copied');
-            }}
-          >
-            <Copy data-icon="inline-start" />
-            Copy
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!clipboard}
-            onClick={() => clipboard && esApplyParams(client, clipboard, { label: 'Paste' })}
-          >
-            <ClipboardPaste data-icon="inline-start" />
-            Paste
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => esReset(client)}>
-            <RotateCcw data-icon="inline-start" />
-            Reset
-          </Button>
-        </div>
-      </Section>
+      {showClipboardHistory && (
+        <>
+          <Section title="Clipboard">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!draft}
+                onClick={() => {
+                  if (!draft) return;
+                  setClipboard(draft);
+                  toast.success('Edit settings copied');
+                }}
+              >
+                <Copy data-icon="inline-start" />
+                Copy
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!clipboard}
+                onClick={() => clipboard && esApplyParams(client, clipboard, { label: 'Paste' })}
+              >
+                <ClipboardPaste data-icon="inline-start" />
+                Paste
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => esReset(client)}>
+                <RotateCcw data-icon="inline-start" />
+                Reset
+              </Button>
+            </div>
+          </Section>
 
-      <Section title="History">
-        <HistoryList client={client} />
-      </Section>
+          <Section title="History">
+            <HistoryList client={client} />
+          </Section>
+        </>
+      )}
     </div>
   );
 }

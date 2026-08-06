@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  Pipette, Undo2, Redo2, Crop, ChevronRight, Info, RotateCcw,
+  Pipette, Undo2, Redo2, Crop, ChevronRight, RotateCcw, ClipboardPaste,
   Image as ImageIcon, Plus, Trash2, Paintbrush, Circle, Eraser,
   Eye, EyeOff, Focus, Layers, Loader2, Shapes, ScanSearch, Users, Check, Blend, Aperture,
 } from 'lucide-react';
@@ -56,6 +56,7 @@ import { useUIStore } from '@/stores/uiStore';
 import {
   esAddMask,
   esAddMaskObject,
+  esApplyParams,
   esAuto,
   esCanRedo,
   esCanUndo,
@@ -64,6 +65,7 @@ import {
   esLoad,
   esRedo,
   esRemoveMask,
+  esReset,
   esSetActive,
   esSetActiveMask,
   esSetActiveMaskControl,
@@ -135,7 +137,10 @@ const TINT_GRADIENT = 'bg-gradient-to-r from-[#5cd06e] via-[#d9d9d9] to-[#c86fd0
 // Full hue wheel left→right (0→1), for the range mask's hue-window track.
 const HUE_GRADIENT = 'bg-[linear-gradient(to_right,#ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)]';
 
-export function EditPanel({ photos }: { photos: Photo[] }) {
+// variant tells the two mount sites apart: the Develop drawer carries the full
+// tab strip, the Library aside is read-only info for a single photo (editing
+// there means opening Develop). Both share the batch panel.
+export function EditPanel({ photos, variant }: { photos: Photo[]; variant: 'library' | 'develop' }) {
   const client = useApiClient();
   const selection = useUIStore((s) => s.selection);
   const focusId = useUIStore((s) => s.focusId);
@@ -160,14 +165,30 @@ export function EditPanel({ photos }: { photos: Photo[] }) {
   if (focusId == null) {
     return <PanelPlaceholder />;
   }
-  // A multi-photo selection swaps the panel for relative adjustment: deltas
-  // that add to each photo's own current values (handoff "BATCH"). Keyed by
-  // the selection so a different set starts from zero deltas.
-  if (ids.length > 1) {
-    return <BatchSection key={ids.join(',')} client={client} ids={ids} />;
-  }
   const photo = photos.find((p) => p.id === focusId);
+  // A multi-photo selection swaps the panel for the batch stack: relative
+  // deltas, the whole-selection paste/restore pair, and presets.
+  if (ids.length > 1) {
+    return <BatchPanel client={client} ids={ids} photo={photo} />;
+  }
+  if (variant === 'library') {
+    return <LibraryInfoPanel photo={photo} />;
+  }
   return <SinglePhotoPanel client={client} photo={photo} targetCount={ids.length} />;
+}
+
+// LibraryInfoPanel: the Library aside for a single photo — the identity/cull
+// header over the read-only info stack. No tabs and no navigator: the grid has
+// no loupe image to navigate, and the edit controls live in Develop.
+function LibraryInfoPanel({ photo }: { photo?: Photo }) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      {photo && <PhotoHeader photo={photo} />}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {photo && <InfoPanel photo={photo} showNavigator={false} />}
+      </div>
+    </div>
+  );
 }
 
 // SinglePhotoPanel: the identity/cull header, then the Develop / Local /
@@ -2902,13 +2923,86 @@ const NULL_DELTA: Delta = {
   vibrance: null,
 };
 
-// BatchSection offers relative adjustments on top of the absolute controls
-// above (which already apply to the whole selection).
-// BatchSection is the whole right panel while several photos are selected:
-// relative deltas with NO apply button — each slider release applies the
-// increment since the last one, so thumbnails follow the drag and mixed
-// per-photo edits stay intact.
-function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
+// BatchPanel is the whole right panel while several photos are selected:
+// relative deltas on top, then the absolute whole-selection actions and the
+// presets — every apply path below follows the session's applyIds, which the
+// effect above keeps pinned to this selection.
+function BatchPanel({ client, ids, photo }: { client: ApiClient; ids: number[]; photo?: Photo }) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="border-b px-4 pt-[15px] pb-[13px]">
+        <span className="text-[10px] tracking-[.07em] text-muted-foreground uppercase">
+          Relative adjustment
+        </span>
+        <span className="mt-1.5 block text-[13px] text-foreground">{ids.length} photos selected</span>
+        <div className="mt-1 text-[11.5px] leading-snug text-muted-foreground">
+          Deltas add to each photo's own current value — mixed edits stay intact.
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Keyed here rather than on the panel: a changed set restarts the
+            deltas at zero without remounting PresetsPanel, whose thumbnails
+            cost a render per preset. */}
+        <BatchSliders key={ids.join(',')} client={client} ids={ids} />
+        <BatchActions client={client} count={ids.length} />
+        <PresetsPanel
+          client={client}
+          photo={photo}
+          targetCount={ids.length}
+          showClipboardHistory={false}
+        />
+      </div>
+    </div>
+  );
+}
+
+// BatchActions: the absolute whole-selection actions. They used to sit in the
+// grid's SelectionBar, where paste rode applyIds the panel had set — so hiding
+// the panel silently narrowed it to the focused photo. Here they can't drift.
+function BatchActions({ client, count }: { client: ApiClient; count: number }) {
+  const clipboard = useUIStore((s) => s.clipboard);
+  return (
+    <div className="flex flex-col gap-2 px-4 pb-1">
+      <span className="text-[10px] tracking-[.07em] text-muted-foreground uppercase">Selection</span>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!clipboard}
+          title={clipboard ? `Paste copied settings onto ${count} photos` : 'Copy settings first (Ctrl+C)'}
+          onClick={() => {
+            if (!clipboard) return;
+            esApplyParams(client, clipboard, { label: 'Paste' });
+            toast.success(`Settings pasted to ${count} photos`);
+          }}
+        >
+          <ClipboardPaste data-icon="inline-start" />
+          Paste settings
+        </Button>
+        {/* esReset over the raw ResetEdits call the SelectionBar used: same
+            RPC across applyIds, but it also reloads the focused draft and
+            records the step in history. */}
+        <Button
+          size="sm"
+          variant="outline"
+          title="Reset all edits on the selection"
+          onClick={() => {
+            esReset(client);
+            toast.success(`Restoring ${count} photos to original`);
+          }}
+        >
+          <RotateCcw data-icon="inline-start" />
+          Restore original
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// BatchSliders: relative deltas with NO apply button — each slider release
+// applies the increment since the last one, so thumbnails follow the drag and
+// mixed per-photo edits stay intact.
+function BatchSliders({ client, ids }: { client: ApiClient; ids: number[] }) {
   type Field = 'expEV' | 'contrast' | 'saturation';
   const [pos, setPos] = useState<Record<Field, number>>({ expEV: 0, contrast: 0, saturation: 0 });
   const [busy, setBusy] = useState(0);
@@ -2929,16 +3023,7 @@ function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
-      <div className="border-b px-4 pt-[15px] pb-[13px]">
-        <span className="text-[10px] tracking-[.07em] text-muted-foreground uppercase">
-          Relative adjustment
-        </span>
-        <span className="mt-1.5 block text-[13px] text-foreground">{ids.length} photos selected</span>
-        <div className="mt-1 text-[11.5px] leading-snug text-muted-foreground">
-          Deltas add to each photo's own current value — mixed edits stay intact.
-        </div>
-      </div>
+    <div className="flex flex-col">
       <div className="flex flex-col gap-4 p-4">
         <EditSlider
           label="Exposure"
@@ -2976,14 +3061,8 @@ function BatchSection({ client, ids }: { client: ApiClient; ids: number[] }) {
           onCommit={(v) => commit('saturation')(v / 100)}
           onClear={() => commit('saturation')(0)}
         />
-        <div className="flex items-center gap-2 rounded-[9px] border border-primary/22 bg-primary/8 px-3 py-2.5">
-          <Info className="size-3.5 shrink-0 text-[#aab0ff]" strokeWidth={1.5} />
-          <span className="text-[11.5px] leading-snug text-secondary-foreground">
-            Absolute edits? Open one in Develop and Paste settings across.
-          </span>
-        </div>
       </div>
-      <div className="mt-auto flex items-center gap-2 border-t px-4 py-[13px] text-[11.5px] text-muted-foreground">
+      <div className="flex items-center gap-2 px-4 pb-3 text-[11.5px] text-muted-foreground">
         {busy > 0 ? (
           <>
             <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />

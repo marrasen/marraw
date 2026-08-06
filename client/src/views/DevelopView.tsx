@@ -115,7 +115,7 @@ export function DevelopView({
         )}
       >
         <div className="min-h-0 flex-1">
-          <EditPanel photos={all} />
+          <EditPanel photos={all} variant="develop" />
         </div>
       </div>
       {!overlayActive && (

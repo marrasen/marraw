@@ -2,6 +2,8 @@
 // navigator (fed from the shared loupeNav store, so it works even though the
 // always-visible drawer covers the floating canvas one), and the photo's
 // technical metadata — resolution, file size, camera/EXIF, capture time.
+// The Library aside reuses it with showNavigator off: no loupe image is
+// mounted there, so the map would show whatever viewport was left behind.
 import type { Photo } from '@/api/library';
 import { EYES_CLOSED_BADGE } from '@/lib/eyes';
 import { useFeature } from '@/lib/features';
@@ -11,7 +13,7 @@ import { useLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
 import { formatAperture, formatBytes, formatCaptured, formatResolution, formatShutter } from '@/lib/exif';
 
-export function InfoPanel({ photo }: { photo: Photo }) {
+export function InfoPanel({ photo, showNavigator = true }: { photo: Photo; showNavigator?: boolean }) {
   const viewport = useLoupeNav((s) => s.viewport);
   const scale = useLoupeNav((s) => s.scale);
   const panTo = useLoupeNav((s) => s.panTo);
@@ -28,11 +30,13 @@ export function InfoPanel({ photo }: { photo: Photo }) {
         <Histogram photo={photo} height={120} className="" />
       </Section>
 
-      <Section title="Navigator" aside={`${Math.round(scale * 100)}%`}>
-        <div className="overflow-hidden rounded-lg border bg-inset">
-          <NavigatorMap photo={photo} viewport={viewport} onPan={panTo ?? undefined} />
-        </div>
-      </Section>
+      {showNavigator && (
+        <Section title="Navigator" aside={`${Math.round(scale * 100)}%`}>
+          <div className="overflow-hidden rounded-lg border bg-inset">
+            <NavigatorMap photo={photo} viewport={viewport} onPan={panTo ?? undefined} />
+          </div>
+        </Section>
+      )}
 
       <Section title="Info">
         <dl className="flex flex-col gap-1.5">
