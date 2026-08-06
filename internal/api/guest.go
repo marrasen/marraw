@@ -42,6 +42,48 @@ type GuestCaps struct {
 	Downloads bool `json:"downloads"`
 }
 
+// ShareReach is who a link is minted for. It decides which address the URL
+// names, and since the URL is the credential it cannot be changed afterwards —
+// a link that has been sent somewhere cannot be quietly narrowed.
+//
+// Public raises a Tailscale Funnel and hands out a name the whole internet
+// resolves: the client, the band, a phone. Tailnet serves the same page to the
+// tailnet only, which is the right answer for your own laptop and no use at
+// all for someone who has never heard of Tailscale.
+type ShareReach string
+
+const (
+	ReachPublic  ShareReach = "public"
+	ReachTailnet ShareReach = "tailnet"
+)
+
+func ShareReachValues() []ShareReach { return []ShareReach{ReachPublic, ReachTailnet} }
+
+// NormalizeReach resolves an absent or unrecognised value to public. Links
+// minted before the choice existed carry no reach at all, and public is what
+// they have always been — reading them as tailnet-only would silently break
+// links that are out in the world working.
+func NormalizeReach(r ShareReach) ShareReach {
+	if r == ReachTailnet {
+		return ReachTailnet
+	}
+	return ReachPublic
+}
+
+// PublicLinkCount is how many of these links are meant to be reachable from
+// the internet, which is the only thing the funnel exists for. Withdrawing the
+// last public share takes the tunnel down; the tailnet-only ones never raised
+// it and must not hold it up.
+func PublicLinkCount(links []GuestLink) int {
+	n := 0
+	for _, g := range links {
+		if NormalizeReach(g.Reach) == ReachPublic {
+			n++
+		}
+	}
+	return n
+}
+
 // ShareExport is how a guest's downloads are rendered: the owner's chosen
 // export preset, resolved to its settings when the link was minted.
 //
@@ -85,6 +127,9 @@ type GuestLink struct {
 	// minted before shares could carry a preset unmarshal to nil, which is
 	// exactly the behaviour they already had.
 	Export *ShareExport `json:"export,omitempty"`
+	// Reach is how far this link is served. Empty on links minted before the
+	// choice existed; read it through NormalizeReach, never bare.
+	Reach ShareReach `json:"reach,omitempty"`
 }
 
 // Expired reports whether the link has passed its expiry.
@@ -478,7 +523,7 @@ func SaveGuestLinks(ctx context.Context, db *store.DB, links []GuestLink) error 
 // NewGuestLink mints a share of one folder. The token is 128 bits from
 // crypto/rand: it is a bearer credential on a public URL, so it has to survive
 // being guessed at by anyone who knows the funnel hostname.
-func NewGuestLink(folderID int64, path, name string, caps GuestCaps, expiresAt int64, export *ShareExport) (GuestLink, error) {
+func NewGuestLink(folderID int64, path, name string, caps GuestCaps, expiresAt int64, export *ShareExport, reach ShareReach) (GuestLink, error) {
 	id, err := GeneratePairingToken()
 	if err != nil {
 		return GuestLink{}, err
@@ -497,6 +542,7 @@ func NewGuestLink(folderID int64, path, name string, caps GuestCaps, expiresAt i
 		ExpiresAt: expiresAt,
 		CreatedAt: time.Now().UnixMilli(),
 		Export:    export,
+		Reach:     NormalizeReach(reach),
 	}, nil
 }
 

@@ -17,7 +17,7 @@ import {
   setDeviceName,
   setPairingOpen,
 } from '@/api/system';
-import { revokeLink, useListLinks } from '@/api/share';
+import { ShareReach, revokeLink, useListLinks } from '@/api/share';
 import { expiryLabel, relativeTime } from '@/lib/relativeTime';
 import { backend, canUseHostFs } from '@/lib/backend';
 import type { RemoteAccessPrefs, RemoteConnection, RemoteProbe } from '@/lib/electron';
@@ -1965,8 +1965,13 @@ function SharedAlbums() {
                   />
                 )}
               </div>
+              {/* Reach ahead of the photo count: "who did I hand this to" is
+                  the thing worth reading, and it is the one property of a
+                  share that cannot be changed after the fact. */}
               <div className="truncate font-mono text-[10.5px] text-faint">
                 {l.expired ? 'expired' : expiryLabel(l.expiresAt)}
+                {' · '}
+                {l.reach === ShareReach.Tailnet ? 'my devices' : 'anyone with the link'}
                 {' · '}
                 {l.photoCount} photo{l.photoCount === 1 ? '' : 's'}
                 {l.caps.downloads && ` · ${l.exportName || 'full size'}`}

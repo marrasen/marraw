@@ -8,6 +8,12 @@ import type {
     UseQueryResult,
 } from './client';
 
+export const ShareReach = {
+    Public: "public",
+    Tailnet: "tailnet",
+} as const;
+export type ShareReachType = typeof ShareReach[keyof typeof ShareReach];
+
 export interface GuestCaps {
     cull: boolean;
     edits: boolean;
@@ -34,6 +40,7 @@ export interface ShareLink {
     url: string;
     online: boolean;
     exportName: string;
+    reach: ShareReachType;
 }
 
 export interface ShareStatus {
@@ -43,19 +50,20 @@ export interface ShareStatus {
     err: string;
     linkCount: number;
     base: string;
+    tailnetBase: string;
 }
 
 
-export function createLink(client: ApiClient, path: string, caps: GuestCaps, expiresInHours: number, exportPresetID: string, options?: RequestOptions): Promise<ShareLink> {
-    return client.request<ShareLink>('Share.CreateLink', [path, caps, expiresInHours, exportPresetID], options);
+export function createLink(client: ApiClient, path: string, caps: GuestCaps, expiresInHours: number, exportPresetID: string, reach: ShareReachType, options?: RequestOptions): Promise<ShareLink> {
+    return client.request<ShareLink>('Share.CreateLink', [path, caps, expiresInHours, exportPresetID, reach], options);
 }
 // Wire-method tag consumed by useQuerySuspense to key the promise cache and
 // open the matching server subscription. Stable identifier across builds
 // (unaffected by minification, unlike Function.name).
 createLink.method = 'Share.CreateLink' as const;
 
-export function subscribeCreateLink(client: ApiClient, path: string, caps: GuestCaps, expiresInHours: number, exportPresetID: string, callback: (data: ShareLink) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
-    return client.subscribe<ShareLink>('Share.CreateLink', [path, caps, expiresInHours, exportPresetID], callback, onError, options);
+export function subscribeCreateLink(client: ApiClient, path: string, caps: GuestCaps, expiresInHours: number, exportPresetID: string, reach: ShareReachType, callback: (data: ShareLink) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<ShareLink>('Share.CreateLink', [path, caps, expiresInHours, exportPresetID, reach], callback, onError, options);
 }
 
 
@@ -119,12 +127,12 @@ export function subscribeStatus(client: ApiClient, callback: (data: ShareStatus)
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useCreateLink(path: string, caps: GuestCaps, expiresInHours: number, exportPresetID: string, options?: UseQueryOptions<ShareLink>): UseQueryResult<ShareLink> {
+export function useCreateLink(path: string, caps: GuestCaps, expiresInHours: number, exportPresetID: string, reach: ShareReachType, options?: UseQueryOptions<ShareLink>): UseQueryResult<ShareLink> {
     const wrappedFn = useCallback(
-        (client: ApiClient, signal: AbortSignal, path: string, caps: GuestCaps, expiresInHours: number, exportPresetID: string) => createLink(client, path, caps, expiresInHours, exportPresetID, { signal }),
+        (client: ApiClient, signal: AbortSignal, path: string, caps: GuestCaps, expiresInHours: number, exportPresetID: string, reach: ShareReachType) => createLink(client, path, caps, expiresInHours, exportPresetID, reach, { signal }),
         [],
     );
-    return useQuery(wrappedFn, { ...options, params: [path, caps, expiresInHours, exportPresetID], _subscribe: { method: 'Share.CreateLink', params: [path, caps, expiresInHours, exportPresetID] } });
+    return useQuery(wrappedFn, { ...options, params: [path, caps, expiresInHours, exportPresetID, reach], _subscribe: { method: 'Share.CreateLink', params: [path, caps, expiresInHours, exportPresetID, reach] } });
 }
 
 /**

@@ -75,6 +75,11 @@ type Deps struct {
 	// machines. Surfaced to the Settings UI via System.GetRemoteAccess.
 	ListenAddr   string
 	LoopbackOnly bool
+	// GuestTailnetPort is the port of the share-only listener bound to this
+	// node's tailnet addresses, 0 when there is none. It is what lets a
+	// tailnet-only share work without opening the daemon to the local network
+	// — the same reduced surface the funnel publishes, unpublished.
+	GuestTailnetPort int
 
 	mu     sync.RWMutex
 	server *aprot.Server
@@ -375,9 +380,11 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.Register(export)
 	registry.Register(&System{deps: deps})
 	registry.Register(settings)
-	registry.Register(&Share{deps: deps, lib: library})
+	share := &Share{deps: deps, lib: library}
+	registry.Register(share)
 
 	registry.RegisterEnumFor(library, FlagValues())
+	registry.RegisterEnumFor(share, ShareReachValues())
 	registry.RegisterEnumFor(settings, ThemeValues())
 	registry.RegisterEnumFor(settings, ThumbFitValues())
 	registry.RegisterEnumFor(settings, LibrarySortValues())

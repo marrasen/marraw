@@ -507,6 +507,23 @@ func main() {
 		log.Printf("share: funnel listener on 127.0.0.1:%d (share routes only)", guestPort)
 	}
 
+	// The same reduced mux again, on this node's tailnet addresses, for shares
+	// minted "my devices only". Bound to the Tailscale addresses specifically
+	// rather than to 0.0.0.0: a tailnet-only share must not become a LAN-wide
+	// one because the two happen to be the same room. Its absence is not
+	// fatal — Tailscale may simply not be up yet, and Share.tailnetBase then
+	// falls back to the daemon's own port.
+	if !isDev {
+		lns, tailnetPort := listenTailnet(funnel.TailnetIPs(context.Background()), guestMux)
+		for _, ln := range lns {
+			defer ln.Close()
+		}
+		deps.GuestTailnetPort = tailnetPort
+		if tailnetPort != 0 {
+			log.Printf("share: tailnet listener on port %d (share routes only)", tailnetPort)
+		}
+	}
+
 	// Announce on the local network, now that the real port is known.
 	deps.StartAdvertising(context.Background())
 
@@ -519,8 +536,11 @@ func main() {
 	// port is the only thing the CLI does, so the port it publishes has to be
 	// one where every route is meant to be public. Without that listener there
 	// is nothing safe to publish, so the funnel stays down.
+	//
+	// Public shares only: a library whose only shares are tailnet-only must
+	// not publish this machine to the internet on every launch.
 	funnel.SetPort(guestPort)
-	if len(tokens.Guests()) > 0 {
+	if api.PublicLinkCount(tokens.Guests()) > 0 {
 		go func() {
 			if err := funnel.Enable(context.Background()); err != nil {
 				log.Printf("funnel: share links are not reachable from the internet: %v", err)
@@ -614,6 +634,40 @@ func newGuestMux(ws http.Handler, img *imghttp.Handler, dl *imghttp.Downloads, p
 	mux.HandleFunc("GET /s/{token}", guestui.Redirect)
 	mux.Handle("GET /s/{token}/{path...}", page)
 	return mux
+}
+
+// listenTailnet serves handler on every one of this node's tailnet addresses,
+// all on a single port, and returns the listeners and that port.
+//
+// One port across the addresses because the share URL names the node once, by
+// its tailnet name, and that name resolves to both families — a peer that
+// preferred the address we had not bound would time out on a link the owner
+// was told was working. The first bind picks the port and the rest have to
+// take it; any that cannot are skipped rather than dropping the whole thing,
+// since one family reachable beats none.
+//
+// Returns 0 when there is no tailnet, or when nothing bound.
+func listenTailnet(ips []string, handler http.Handler) ([]net.Listener, int) {
+	var lns []net.Listener
+	port := 0
+	for _, ip := range ips {
+		ln, err := net.Listen("tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+		if err != nil {
+			log.Printf("share: no tailnet listener on %s: %v", ip, err)
+			continue
+		}
+		if port == 0 {
+			port = ln.Addr().(*net.TCPAddr).Port
+		}
+		srv := &http.Server{Handler: handler}
+		go func() {
+			if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+				log.Printf("share: tailnet listener stopped: %v", err)
+			}
+		}()
+		lns = append(lns, ln)
+	}
+	return lns, port
 }
 
 // isLoopback reports whether host is unreachable from other machines.

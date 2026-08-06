@@ -56,6 +56,10 @@ type ShareLink struct {
 	// ExportName is the export preset downloads are rendered with, as it was
 	// named when the link was minted; empty means the defaults.
 	ExportName string `json:"exportName"`
+	// Reach is who this link was minted for, normalized — the list says so
+	// per row, because "who can open this" is the one thing about a share the
+	// owner cannot change afterwards.
+	Reach ShareReach `json:"reach"`
 }
 
 // ShareStatus describes the tunnel the links are served over.
@@ -73,12 +77,14 @@ type ShareStatus struct {
 	// LinkCount is how many shares are live, so the UI can warn before the
 	// tunnel comes down.
 	LinkCount int `json:"linkCount"`
-	// Base is the origin a link minted right now would be served on, empty
-	// when this machine has no address anyone else could reach. The share
-	// dialog asks before it offers to mint: a link is only discovered to be
-	// unreachable by the person it was sent to, so the owner has to learn it
-	// here instead.
-	Base string `json:"base"`
+	// Base is the origin a public link minted right now would be served on,
+	// empty when this machine has no address anyone else could reach.
+	// TailnetBase is the same for a tailnet-only link, empty when this machine
+	// is not on a tailnet. The share dialog asks before it offers to mint: a
+	// link is only discovered to be unreachable by the person it was sent to,
+	// so the owner has to learn it here instead.
+	Base        string `json:"base"`
+	TailnetBase string `json:"tailnetBase"`
 }
 
 // GuestSession is what the shared page needs to know about itself. It is the
@@ -107,7 +113,7 @@ func (s *Share) Status(ctx context.Context) (*ShareStatus, error) {
 		return nil, aprot.ErrAuthFailed("local windows only")
 	}
 	aprot.RegisterRefreshTrigger(ctx, shareKey)
-	out := &ShareStatus{Base: s.shareBase(ctx)}
+	out := &ShareStatus{Base: s.shareBase(ctx, ReachPublic), TailnetBase: s.tailnetBase(ctx)}
 	if s.deps.Tokens != nil {
 		out.LinkCount = len(s.deps.Tokens.Guests())
 	}
@@ -129,10 +135,15 @@ func (s *Share) ListLinks(ctx context.Context) ([]ShareLink, error) {
 	if s.deps.Tokens == nil {
 		return out, nil
 	}
-	base := s.shareBase(ctx)
+	// Two bases, resolved once: the guest list is read on every refresh, and
+	// each of these can cost a tailscale subprocess on a cold cache.
+	bases := map[ShareReach]string{
+		ReachPublic:  s.shareBase(ctx, ReachPublic),
+		ReachTailnet: s.shareBase(ctx, ReachTailnet),
+	}
 	now := time.Now()
 	for _, g := range s.deps.Tokens.Guests() {
-		out = append(out, s.toShareLink(ctx, g, base, now))
+		out = append(out, s.toShareLink(ctx, g, bases[NormalizeReach(g.Reach)], now))
 	}
 	return out, nil
 }
@@ -147,7 +158,11 @@ func (s *Share) ListLinks(ctx context.Context) ([]ShareLink, error) {
 //
 // exportPresetID names one of the owner's saved export presets to render
 // downloads with; empty renders at the endpoint's defaults.
-func (s *Share) CreateLink(ctx context.Context, path string, caps GuestCaps, expiresInHours int, exportPresetID string) (*ShareLink, error) {
+//
+// reach picks who the link is for — see ShareReach. It is fixed at mint time,
+// and an empty value means public, which is what every link was before the
+// choice existed.
+func (s *Share) CreateLink(ctx context.Context, path string, caps GuestCaps, expiresInHours int, exportPresetID string, reach ShareReach) (*ShareLink, error) {
 	if !s.deps.ConnIsLocal(ctx) {
 		return nil, aprot.ErrAuthFailed("local windows only")
 	}
@@ -175,7 +190,7 @@ func (s *Share) CreateLink(ctx context.Context, path string, caps GuestCaps, exp
 	if expiresInHours > 0 {
 		expiresAt = time.Now().Add(time.Duration(expiresInHours) * time.Hour).UnixMilli()
 	}
-	link, err := NewGuestLink(folderID, abs, filepath.Base(abs), caps, expiresAt, s.resolveExport(ctx, exportPresetID))
+	link, err := NewGuestLink(folderID, abs, filepath.Base(abs), caps, expiresAt, s.resolveExport(ctx, exportPresetID), reach)
 	if err != nil {
 		return nil, err
 	}
@@ -195,13 +210,16 @@ func (s *Share) CreateLink(ctx context.Context, path string, caps GuestCaps, exp
 	// later reads as a broken link. A funnel that cannot be raised is not
 	// fatal — the link still works over the tailnet or the LAN — so the error
 	// is reported through Status, not returned here.
-	if s.deps.Funnel != nil {
+	//
+	// Only for a public link. Choosing "my devices only" and having the app
+	// publish the machine to the internet anyway would make the switch a lie.
+	if s.deps.Funnel != nil && link.Reach == ReachPublic {
 		if err := s.deps.Funnel.Enable(context.WithoutCancel(ctx)); err != nil {
 			log.Printf("share: funnel unavailable: %v", err)
 		}
 	}
 	aprot.TriggerRefresh(ctx, shareKey)
-	out := s.toShareLink(ctx, link, s.shareBase(ctx), time.Now())
+	out := s.toShareLink(ctx, link, s.shareBase(ctx, link.Reach), time.Now())
 	out.PhotoCount = count
 	return &out, nil
 }
@@ -227,14 +245,16 @@ func (s *Share) RevokeLink(ctx context.Context, id string) error {
 	if err == nil {
 		s.deps.Tokens.SetGuests(next)
 	}
-	remaining := len(next)
+	remaining := PublicLinkCount(next)
 	s.deps.guestMu.Unlock()
 	if err != nil {
 		return err
 	}
 	s.deps.DisconnectGuest(id)
-	// Nothing left to serve: take the tunnel down rather than leaving the
+	// No public share left: take the tunnel down rather than leaving the
 	// machine published to the internet for a share that no longer exists.
+	// Counted over public links only — tailnet-only shares are served off the
+	// tailnet listener and never wanted the tunnel in the first place.
 	if remaining == 0 && s.deps.Funnel != nil {
 		if err := s.deps.Funnel.Disable(context.WithoutCancel(ctx)); err != nil {
 			log.Printf("share: withdrawing funnel: %v", err)
@@ -292,35 +312,37 @@ func ExportCredit(ctx context.Context, db *store.DB) (artist, copyright string) 
 	return opts.Artist, opts.Copyright
 }
 
-// shareBase is the origin share URLs are built on. Three cases, in descending
-// order of reach — and the URL always names something that actually answers,
-// because a link is discovered to be broken by the person you sent it to.
+// shareBase is the origin a link of this reach is served on, in descending
+// order of preference — and the URL always names something that actually
+// answers, because a link is discovered to be broken by the person you sent
+// it to.
 //
 // Computed per read rather than stored on the link: a share minted while
 // Tailscale was down starts working the moment it comes back, without the
 // owner having to notice and mint another.
-func (s *Share) shareBase(ctx context.Context) string {
+func (s *Share) shareBase(ctx context.Context, reach ShareReach) string {
+	// Tailnet-only was an explicit choice, so it has no fallbacks. Widening it
+	// to the LAN because the tailnet is unreachable would hand out a link that
+	// answers to a room the owner did not choose.
+	if NormalizeReach(reach) == ReachTailnet {
+		return s.tailnetBase(ctx)
+	}
+	// Published: reachable by anyone, which is the point of the feature.
 	if s.deps.Funnel != nil {
-		// Published: reachable by anyone, which is the point of the feature.
 		if base := s.deps.Funnel.BaseURL(ctx); base != "" {
 			return base
 		}
-		// Not published (no Tailscale, or a tailnet that does not permit
-		// Funnel) but on a tailnet, and reachable from off this machine: a
-		// peer can still open the link by the node's tailnet name. Good enough
-		// to share with your own laptop, not with a client.
-		if !s.deps.LoopbackOnly {
-			if host := s.deps.Funnel.Hostname(ctx); host != "" {
-				if port := s.listenPort(); port != 0 {
-					return "http://" + net.JoinHostPort(host, strconv.Itoa(port))
-				}
-			}
-		}
 	}
-	// No tunnel and no tailnet, but the daemon is bound wide: the local
-	// network. Built from an interface address rather than from ListenAddr,
-	// which is the *bind* — "0.0.0.0:8482" is a perfectly good thing to listen
-	// on and a URL that resolves nowhere.
+	// Asked for public, but there is no tunnel — no Tailscale, or a tailnet
+	// that does not permit Funnel. Fall back rather than go dark: a link that
+	// reaches less far than asked is still a link between the owner's own
+	// machines, and the dialog says which one this is.
+	if base := s.tailnetBase(ctx); base != "" {
+		return base
+	}
+	// The local network. Built from an interface address rather than from
+	// ListenAddr, which is the *bind* — "0.0.0.0:8482" is a perfectly good
+	// thing to listen on and a URL that resolves nowhere.
 	if !s.deps.LoopbackOnly {
 		if port := s.listenPort(); port != 0 {
 			if addrs := discovery.ReachableAddresses(port); len(addrs) > 0 {
@@ -332,6 +354,33 @@ func (s *Share) shareBase(ctx context.Context) string {
 	// to hand out, and the honest answer is none: a URL on 127.0.0.1 opens
 	// perfectly in the owner's own browser, which is exactly what makes it
 	// such a bad thing to put on the clipboard.
+	return ""
+}
+
+// tailnetBase is the origin a share is served on to tailnet peers: the node's
+// own name, and the guest listener bound to its tailnet addresses.
+//
+// The dedicated listener is what lets a tailnet-only share work without the
+// owner turning remote access on — it carries the share routes and nothing
+// else. Without one (Tailscale arrived after the daemon started, or the bind
+// failed) this falls back to the daemon's own port, which only answers off
+// this machine when remote access is on.
+func (s *Share) tailnetBase(ctx context.Context) string {
+	if s.deps.Funnel == nil {
+		return ""
+	}
+	host := s.deps.Funnel.Hostname(ctx)
+	if host == "" {
+		return ""
+	}
+	if s.deps.GuestTailnetPort != 0 {
+		return "http://" + net.JoinHostPort(host, strconv.Itoa(s.deps.GuestTailnetPort))
+	}
+	if !s.deps.LoopbackOnly {
+		if port := s.listenPort(); port != 0 {
+			return "http://" + net.JoinHostPort(host, strconv.Itoa(port))
+		}
+	}
 	return ""
 }
 
@@ -354,6 +403,7 @@ func (s *Share) toShareLink(ctx context.Context, g GuestLink, base string, now t
 		Caps: g.Caps, ExpiresAt: g.ExpiresAt, CreatedAt: g.CreatedAt,
 		LastSeen: g.LastSeen, Expired: g.Expired(now),
 		Online: s.deps.GuestOnline(g.ID),
+		Reach:  NormalizeReach(g.Reach),
 	}
 	if g.Export != nil {
 		out.ExportName = g.Export.Name

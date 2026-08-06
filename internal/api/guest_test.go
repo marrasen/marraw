@@ -9,6 +9,7 @@ import (
 
 	"github.com/marrasen/aprot"
 
+	"github.com/marrasen/marraw/internal/discovery"
 	"github.com/marrasen/marraw/internal/store"
 )
 
@@ -96,7 +97,7 @@ func TestGuestGateDeniesUnknownMethod(t *testing.T) {
 // path and reached the entire registry with the owner's rights.
 func TestGuestGateRefusesAConnectionWhoseLinkHasLapsed(t *testing.T) {
 	tokens := NewAuthTokens("launch", "pairing")
-	live, err := NewGuestLink(7, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+	live, err := NewGuestLink(7, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil, ReachPublic)
 	if err != nil {
 		t.Fatalf("NewGuestLink: %v", err)
 	}
@@ -199,11 +200,11 @@ func TestSweepGuestsDropsLapsedConnections(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	live, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+	live, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil, ReachPublic)
 	if err != nil {
 		t.Fatalf("NewGuestLink: %v", err)
 	}
-	lapsed, err := NewGuestLink(2, "/photos/wedding", "wedding", GuestCaps{Cull: true}, 0, nil)
+	lapsed, err := NewGuestLink(2, "/photos/wedding", "wedding", GuestCaps{Cull: true}, 0, nil, ReachPublic)
 	if err != nil {
 		t.Fatalf("NewGuestLink: %v", err)
 	}
@@ -422,7 +423,7 @@ func TestConcurrentRevokeRemovesEveryLink(t *testing.T) {
 
 	links := make([]GuestLink, 4)
 	for i := range links {
-		l, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+		l, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil, ReachPublic)
 		if err != nil {
 			t.Fatalf("NewGuestLink: %v", err)
 		}
@@ -468,7 +469,7 @@ func TestGuestPresenceTracksConnections(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	link, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+	link, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil, ReachPublic)
 	if err != nil {
 		t.Fatalf("NewGuestLink: %v", err)
 	}
@@ -518,11 +519,11 @@ func TestGuestPresenceFollowsAConnectionThatReauthenticates(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	first, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+	first, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil, ReachPublic)
 	if err != nil {
 		t.Fatalf("NewGuestLink: %v", err)
 	}
-	second, err := NewGuestLink(2, "/photos/wedding", "wedding", GuestCaps{Cull: true}, 0, nil)
+	second, err := NewGuestLink(2, "/photos/wedding", "wedding", GuestCaps{Cull: true}, 0, nil, ReachPublic)
 	if err != nil {
 		t.Fatalf("NewGuestLink: %v", err)
 	}
@@ -558,7 +559,7 @@ func TestGuestConnectStampsLastSeen(t *testing.T) {
 	defer db.Close()
 	ctx := context.Background()
 
-	link, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil)
+	link, err := NewGuestLink(1, "/photos/band", "band", GuestCaps{Cull: true}, 0, nil, ReachPublic)
 	if err != nil {
 		t.Fatalf("NewGuestLink: %v", err)
 	}
@@ -620,7 +621,7 @@ func TestSetFocusIgnoresGuestsButHonoursTheOwner(t *testing.T) {
 		t.Fatalf("ListPhotos: %v", err)
 	}
 
-	link, err := NewGuestLink(folderID, "/photos/band-shoot", "band-shoot", GuestCaps{Cull: true}, 0, nil)
+	link, err := NewGuestLink(folderID, "/photos/band-shoot", "band-shoot", GuestCaps{Cull: true}, 0, nil, ReachPublic)
 	if err != nil {
 		t.Fatalf("NewGuestLink: %v", err)
 	}
@@ -662,5 +663,61 @@ func TestGuestLinkExpired(t *testing.T) {
 	}
 	if (GuestLink{ExpiresAt: now.Add(time.Hour).UnixMilli()}).Expired(now) {
 		t.Error("a future expiry must not read as expired")
+	}
+}
+
+// Links minted before the reach choice existed carry no value at all, and
+// every one of them was funnelled. Reading those as tailnet-only would take
+// the tunnel down under a link that is out in the world working.
+func TestLinksWithoutReachReadAsPublic(t *testing.T) {
+	if got := NormalizeReach(""); got != ReachPublic {
+		t.Errorf(`NormalizeReach("") = %q, want %q`, got, ReachPublic)
+	}
+	if got := NormalizeReach("nonsense"); got != ReachPublic {
+		t.Errorf(`NormalizeReach("nonsense") = %q, want %q`, got, ReachPublic)
+	}
+	links := []GuestLink{
+		{ID: "minted-before-the-choice"},
+		{ID: "my-devices", Reach: ReachTailnet},
+		{ID: "anyone", Reach: ReachPublic},
+	}
+	// Two, not three: the tailnet-only share never raised the funnel and must
+	// not be what keeps it up.
+	if got := PublicLinkCount(links); got != 2 {
+		t.Errorf("PublicLinkCount = %d, want 2", got)
+	}
+}
+
+// A tailnet-only share has no fallbacks. The LAN tier a public link drops to
+// would hand out a URL answering to a room the owner did not choose — and the
+// owner would have no way to tell, because the link they copied still works
+// from their own desk.
+func TestTailnetShareDoesNotFallBackToTheLAN(t *testing.T) {
+	ctx := context.Background()
+	// A daemon bound wide, with no Tailscale at all.
+	s := &Share{deps: &Deps{ListenAddr: "0.0.0.0:8482"}}
+	if base := s.shareBase(ctx, ReachTailnet); base != "" {
+		t.Errorf("tailnet share fell back to %q, want no base at all", base)
+	}
+	// The same daemon minting a public link may use the LAN, which is the
+	// whole point of the fallback. Only assertable where this machine has a
+	// routable address — on a loopback-only box there is nothing to fall back
+	// to either, which the next test covers.
+	if addrs := discovery.ReachableAddresses(8482); len(addrs) > 0 {
+		if got, want := s.shareBase(ctx, ReachPublic), "http://"+addrs[0]; got != want {
+			t.Errorf("public share base = %q, want %q", got, want)
+		}
+	}
+}
+
+// The URL is never built from the bind address. "127.0.0.1:8483" opens
+// perfectly in the owner's own browser, and "0.0.0.0:8482" opens nowhere —
+// both would be discovered by the person the link was sent to.
+func TestLoopbackOnlyDaemonHasNoShareBase(t *testing.T) {
+	s := &Share{deps: &Deps{ListenAddr: "127.0.0.1:8483", LoopbackOnly: true}}
+	for _, reach := range ShareReachValues() {
+		if base := s.shareBase(context.Background(), reach); base != "" {
+			t.Errorf("%s share base = %q, want none", reach, base)
+		}
 	}
 }

@@ -4,8 +4,8 @@ import { toast } from 'sonner';
 
 import { useApiClient } from '@/api/client';
 import type { ExportPreset } from '@/api/settings';
-import { createLink, useStatus } from '@/api/share';
-import type { GuestCaps, ShareLink } from '@/api/share';
+import { ShareReach, createLink, useStatus } from '@/api/share';
+import type { GuestCaps, ShareLink, ShareReachType } from '@/api/share';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import {
@@ -35,6 +35,15 @@ const EXPIRY_OPTIONS = [
   { value: '0', label: 'Never' },
 ];
 
+// Who the link is for. Two genuinely different audiences, not a plumbing
+// toggle: "anyone" is a client or a band, who have never heard of Tailscale
+// and are the reason Funnel exists; "my devices" is your own laptop, and
+// never publishes this machine to the internet at all.
+const REACH_OPTIONS = [
+  { value: ShareReach.Public, label: 'Anyone with the link' },
+  { value: ShareReach.Tailnet, label: 'Only my devices' },
+];
+
 interface Props {
   path: string;
   name: string;
@@ -61,6 +70,9 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
   // One day by default: long enough for someone to get to it, short
   // enough that a forwarded link stops mattering quickly.
   const [expiry, setExpiry] = useState('24');
+  // Public by default: it is what sharing a shoot means, and it is what every
+  // link minted before this control existed was.
+  const [reach, setReach] = useState<ShareReachType>(ShareReach.Public);
   const [creating, setCreating] = useState(false);
   const [link, setLink] = useState<ShareLink | null>(null);
   const [copied, setCopied] = useState(false);
@@ -82,6 +94,7 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
         caps,
         Number(expiry),
         caps.downloads ? presetID : '',
+        reach,
       );
       setLink(created);
       // Copy on creation: the reason anyone opened this dialog was to send the
@@ -100,7 +113,7 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
       <div className="border-b px-5 py-4">
         <h2 className="text-base font-semibold">Share “{name}”</h2>
         <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-          Anyone with the link can open this album in a browser.
+          Send a link that opens this album in a browser.
         </p>
       </div>
 
@@ -108,6 +121,31 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
         <Created link={link} copied={copied} onCopy={() => copy(link.url)} />
       ) : (
         <div className="flex flex-col gap-1 px-5 py-4">
+          {/* First, and its own block rather than a right-aligned control:
+              who can open the link is the one thing about a share that cannot
+              be changed afterwards, since the URL is the credential. */}
+          <div className="mb-2 flex flex-col gap-1.5">
+            <span className="text-[13px]">Who can open it</span>
+            <Segmented
+              value={reach}
+              onValueChange={setReach}
+              items={REACH_OPTIONS.map((o) => ({
+                ...o,
+                disabled: o.value === ShareReach.Tailnet && !status.data?.tailnetBase,
+                title:
+                  o.value === ShareReach.Tailnet && !status.data?.tailnetBase
+                    ? 'This computer is not on a Tailscale network'
+                    : undefined,
+              }))}
+              size="sm"
+              aria-label="Who can open it"
+            />
+            <span className="text-[11.5px] text-muted-foreground">
+              {reach === ShareReach.Tailnet
+                ? 'Devices signed in to your Tailscale network. This computer is never published to the internet.'
+                : 'Published over Tailscale Funnel, so anyone you send it to can open it — no account, no app.'}
+            </span>
+          </div>
           <Capability
             label="Rate and pick"
             hint="They can star and pick photos. Their choices appear in your library."
@@ -134,7 +172,7 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
         </div>
       )}
 
-      <Reachability status={status.data} />
+      <Reachability status={status.data} reach={reach} />
 
       <div className="flex justify-end gap-2 border-t px-5 py-3">
         <Button variant="ghost" onClick={onClose}>
@@ -144,7 +182,10 @@ function ShareForm({ path, name, onClose }: { path: string; name: string; onClos
           // Nothing to mint against: the daemon would hand back a link with no
           // URL on it. Better to refuse here, where the note beside the button
           // says which of the two switches to go and turn on.
-          <Button onClick={() => void create()} disabled={creating || !status.data?.base}>
+          <Button
+            onClick={() => void create()}
+            disabled={creating || !reachBase(status.data, reach)}
+          >
             {creating && <Loader2 className="size-3.5 animate-spin" />}
             Create link
           </Button>
@@ -250,11 +291,42 @@ function Created({ link, copied, onCopy }: { link: ShareLink; copied: boolean; o
   );
 }
 
+/** The origin a link of this reach would be minted on, empty when there is none. */
+function reachBase(status: ReturnType<typeof useStatus>['data'], reach: ShareReachType): string {
+  if (!status) return '';
+  return reach === ShareReach.Tailnet ? status.tailnetBase : status.base;
+}
+
 // What the visitor will actually be able to reach. A link that only works on
 // the tailnet is a perfectly good link between two of your own machines, and a
 // useless one to send a band — so say which one this is.
-function Reachability({ status }: { status: ReturnType<typeof useStatus>['data'] }) {
+function Reachability({
+  status,
+  reach,
+}: {
+  status: ReturnType<typeof useStatus>['data'];
+  reach: ShareReachType;
+}) {
   if (!status) return null;
+  // Asked for the tailnet, so the funnel's state is beside the point — this
+  // link was never going to be published, and saying so is the reassurance
+  // the option was picked for.
+  if (reach === ShareReach.Tailnet) {
+    if (!status.tailnetBase) {
+      return (
+        <Note tone="warn">
+          This computer is not on a Tailscale network, so there is nothing to serve a devices-only
+          link from. Start Tailscale, or share it with anyone instead.
+        </Note>
+      );
+    }
+    return (
+      <Note tone="info">
+        Served on your tailnet at <span className="font-mono">{baseHost(status.tailnetBase)}</span>,
+        and not published to the internet.
+      </Note>
+    );
+  }
   // Nowhere to serve from. Said first and said plainly: whatever Tailscale's
   // trouble is, the outcome is that there is no link to hand out, and the two
   // ways out of it are the only useful thing to read here.

@@ -44,9 +44,10 @@ type Manager struct {
 	port    int
 	started bool
 	lastErr string
-	// host caches the node's DNS name, which does not change while the daemon
-	// runs and costs a subprocess to read.
+	// host and ips cache the node's identity on the tailnet, which does not
+	// change while the daemon runs and costs a subprocess to read.
 	host string
+	ips  []string
 }
 
 func New(port int) *Manager { return &Manager{port: port} }
@@ -71,35 +72,54 @@ func run(ctx context.Context, timeout time.Duration, args ...string) (string, er
 	return strings.TrimSpace(string(out)), err
 }
 
-// selfDNSName reads the node's public hostname. Empty when Tailscale is not
-// installed, not running, or not logged in.
-func (m *Manager) selfDNSName(ctx context.Context) string {
+// self reads the node's public hostname and its own addresses on the tailnet.
+// Both empty when Tailscale is not installed, not running, or not logged in.
+func (m *Manager) self(ctx context.Context) (string, []string) {
 	m.mu.Lock()
-	cached := m.host
+	cachedHost, cachedIPs := m.host, m.ips
 	m.mu.Unlock()
-	if cached != "" {
-		return cached
+	if cachedHost != "" {
+		return cachedHost, cachedIPs
 	}
 	out, err := run(ctx, 3*time.Second, "status", "--json")
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	var status struct {
 		BackendState string
-		Self         struct{ DNSName string }
+		Self         struct {
+			DNSName      string
+			TailscaleIPs []string
+		}
 	}
 	if err := json.Unmarshal([]byte(out), &status); err != nil {
-		return ""
+		return "", nil
 	}
 	if status.BackendState != "Running" {
-		return ""
+		return "", nil
 	}
 	// DNSName comes back fully qualified with a trailing dot.
 	name := strings.TrimSuffix(status.Self.DNSName, ".")
+	ips := status.Self.TailscaleIPs
 	m.mu.Lock()
-	m.host = name
+	m.host, m.ips = name, ips
 	m.mu.Unlock()
+	return name, ips
+}
+
+// selfDNSName reads the node's public hostname. Empty when Tailscale is not
+// installed, not running, or not logged in.
+func (m *Manager) selfDNSName(ctx context.Context) string {
+	name, _ := m.self(ctx)
 	return name
+}
+
+// TailnetIPs are this node's own addresses on the tailnet — the ones a peer
+// dials, and the only ones a listener can bind to reach the tailnet without
+// also answering on the local network.
+func (m *Manager) TailnetIPs(ctx context.Context) []string {
+	_, ips := m.self(ctx)
+	return ips
 }
 
 // Status reports what the share UI should show.
