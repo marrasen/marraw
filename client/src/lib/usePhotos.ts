@@ -9,7 +9,7 @@ import { useUIStore, type LibrarySort } from '@/stores/uiStore';
 // PatchSubscription — O(patch) on the wire) into the shared query snapshot.
 // Nil patch fields mean "unchanged", so mergeByKey's blind shallow merge
 // does not fit; merge non-null fields by hand.
-function photoPatchReducer(data: Photo[], patch: unknown): Photo[] {
+export function photoPatchReducer(data: Photo[], patch: unknown): Photo[] {
   const ev = patch as PhotoPatchEvent;
   if (!ev || !Array.isArray(ev.patches)) return data;
   const byId = new Map(ev.patches.map((p) => [p.id, p]));

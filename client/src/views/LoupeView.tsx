@@ -339,9 +339,14 @@ export function CinemaImage({
   // is on this photo, else the last-known crop from the memo (so a return
   // doesn't flash uncropped while the draft refetches). While cropping, the
   // loupe shows the full (uncropped) frame so the overlay can reach the image.
+  // The photo row itself is the last fallback: it mirrors the SAVED
+  // rotate/cropW/cropH (AspectGeometry, lib/crop.ts), which is exactly what
+  // /img has baked into the pixels being served. Without it a surface that never
+  // runs an edit session — the pop-out viewer always, Cull until a draft loads
+  // — sizes a full-frame box around a cropped rendition and stretches it.
   const liveCrop = esPhotoId === photo.id ? draft : null;
   if (liveCrop) cropMemo.set(photo.id, liveCrop);
-  const activeCrop = liveCrop ?? cropMemo.get(photo.id) ?? null;
+  const activeCrop = liveCrop ?? cropMemo.get(photo.id) ?? photo;
   const [aspectKey, setAspectKey] = useState('free');
   // Crop-mode GEOMETRY (full-frame box, CSS rotation, overlay) is only valid
   // over the flat crop-stripped render — anything else (the committed

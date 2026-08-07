@@ -107,6 +107,7 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 //                 Library/Cull (falling back to edit history when empty)
 //   Ctrl+0        reset all develop settings
 //   Ctrl+E        export dialog
+//   Ctrl+N        pop the photo out into its own window (again to close)
 //   Ctrl+⇧+C      copy the focused photo to the clipboard as an image
 //                 (renders with the last-used export settings)
 //   Ctrl+U        auto dynamics (+Shift = auto colours, +Alt = auto everything)
@@ -263,6 +264,13 @@ export function useKeyboard() {
           case 'k':
             e.preventDefault();
             s.setPaletteOpen(!s.paletteOpen);
+            return;
+          // Pop the photo out into its own always-on-top window (and close it
+          // again). The viewer answers the same key itself — a keydown only
+          // reaches the focused window.
+          case 'n':
+            e.preventDefault();
+            window.win?.toggleViewer?.();
             return;
           case 'u': {
             if (!es.draft) return;

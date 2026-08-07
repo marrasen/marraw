@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import './index.css';
 import App from './App.tsx';
+import ViewerApp from '@/views/ViewerApp';
 import { ThemeProvider } from '@/components/theme-provider.tsx';
 import { ApiClient, ApiClientProvider } from '@/api/client';
 import { onAIMapsGeneratedEvent } from '@/api/edits';
@@ -34,11 +35,17 @@ client.connect();
 // global (localStorage) state.
 onAIMapsGeneratedEvent(client, (ev) => bumpImgBust(ev.photoId));
 
+// ?view=viewer is the pop-out photo window (Ctrl+N): the same bundle and the
+// same daemon connection, rendering only the photo surface. Everything below
+// is the main window's business — the settings migration writes to the server,
+// and the test hooks drive an app this window doesn't run.
+const isViewer = new URLSearchParams(window.location.search).get('view') === 'viewer';
+
 // One-time import of pre-server-settings localStorage into the daemon DB.
-void migrateLocalSettings(client);
+if (!isViewer) void migrateLocalSettings(client);
 
 // Dev-only test hooks for the scripted UI verification (scripts/ui-verify.mjs).
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV && !isViewer) {
   void Promise.all([
     import('@/stores/uiStore'),
     import('@/lib/editSession'),
@@ -121,9 +128,7 @@ if (import.meta.env.DEV) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ApiClientProvider value={client}>
-      <ThemeProvider>
-        <App />
-      </ThemeProvider>
+      <ThemeProvider>{isViewer ? <ViewerApp /> : <App />}</ThemeProvider>
     </ApiClientProvider>
   </StrictMode>,
 );

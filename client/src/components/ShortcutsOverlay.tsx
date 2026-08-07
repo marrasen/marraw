@@ -31,6 +31,7 @@ const CARDS: { title: string; rows: [string, string][]; cols?: 2 | 3 }[] = [
       ['Contact sheet', 'G'],
       ['Zoom 1:1 / fit', 'Z · Space'],
       ['Pan (loupe)', '⇧+arrows'],
+      ['Pop-out photo window', 'Ctrl+N'],
     ],
   },
   {

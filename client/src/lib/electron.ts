@@ -59,6 +59,19 @@ export interface UpdateState {
   currentVersion?: string;
 }
 
+/**
+ * Which photo the pop-out viewer should show, pushed by whichever window is
+ * driving it. The folder comes along because the viewer subscribes to the
+ * folder's photo list itself — it shares no store with the main window.
+ */
+export interface ViewerPhoto {
+  folderId: number;
+  photoId: number;
+}
+
+/** getViewerPhoto's reply: nulls when nothing has been focused yet. */
+export type ViewerPhotoState = { open: boolean } & (ViewerPhoto | { folderId: null; photoId: null });
+
 declare global {
   interface Window {
     marraw?: {
@@ -109,6 +122,12 @@ declare global {
       openNewWindow: (folderPath?: string) => void;
       onMaxChange: (cb: (max: boolean) => void) => void;
       onFullScreenChange: (cb: (fs: boolean) => void) => void;
+      // Pop-out photo window — absent on builds predating it; feature-check.
+      toggleViewer?: () => void;
+      setViewerPhoto?: (state: ViewerPhoto) => void;
+      getViewerPhoto?: () => Promise<ViewerPhotoState>;
+      /** Subscribes to photo pushes; returns its own unsubscribe. */
+      onViewerPhoto?: (cb: (state: ViewerPhoto) => void) => () => void;
     };
   }
 }

@@ -57,6 +57,19 @@ function buildCommands(
           ui().setContactSheet(true);
         } },
       { id: 'export', label: 'Export…', group: 'Actions', hint: 'Ctrl+E', run: () => ui().setExportOpen(true) },
+      // Second window showing the focused photo, for a spare monitor. Absent
+      // in a browser tab, and on shell builds predating it.
+      ...(window.win?.toggleViewer
+        ? [
+            {
+              id: 'viewer',
+              label: 'Pop-out photo window',
+              group: 'Modes',
+              hint: 'Ctrl+N',
+              run: () => window.win?.toggleViewer?.(),
+            } satisfies Command,
+          ]
+        : []),
       // Renders the single targeted photo with the last-used export settings
       // and puts the image on the system clipboard (mirrors Ctrl+Shift+C).
       { id: 'copy-image', label: 'Copy image to clipboard', group: 'Actions', hint: 'Ctrl+⇧+C', run: (client) => {

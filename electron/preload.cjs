@@ -68,6 +68,18 @@ contextBridge.exposeInMainWorld('win', {
   isMax: () => ipcRenderer.invoke('win:isMax'),
   // Opens another window in this instance; folderPath auto-opens there.
   openNewWindow: (folderPath) => ipcRenderer.send('win:openNew', folderPath ?? null),
+  // The pop-out photo window (Ctrl+N): one per instance, opened and closed by
+  // the same call. Driving windows push their focused photo to it;
+  // getViewerPhoto is the pull the viewer itself does on boot, and
+  // onViewerPhoto returns its own unsubscribe.
+  toggleViewer: () => ipcRenderer.send('win:toggleViewer'),
+  setViewerPhoto: (state) => ipcRenderer.send('win:viewerPhoto', state),
+  getViewerPhoto: () => ipcRenderer.invoke('win:getViewerPhoto'),
+  onViewerPhoto: (cb) => {
+    const handler = (_e, state) => cb(state);
+    ipcRenderer.on('win:viewerPhoto', handler);
+    return () => ipcRenderer.off('win:viewerPhoto', handler);
+  },
   onMaxChange: (cb) => ipcRenderer.on('win:maxChanged', (_e, v) => cb(v)),
   onFullScreenChange: (cb) => ipcRenderer.on('win:fullscreenChanged', (_e, v) => cb(v)),
 });

@@ -361,13 +361,115 @@ function ensureDaemon() {
   return backendPromise;
 }
 
+// Every ordinary window. The pop-out viewer is deliberately NOT in here — it
+// must never be the window that keeps the app alive (see the 'closed' handler
+// in createWindow).
 const windows = new Set();
 
+// ---- Pop-out photo window (Ctrl+N) ----
+// A chromeless always-on-top window showing the same photo as the window that
+// drives it, with its own zoom and pan. One per app instance: a second Ctrl+N
+// from any window closes the one that is up rather than stacking another.
+let viewerWin = null;
+// Which daemon the open viewer is showing photos from. Photo ids only mean
+// something inside one library, so a window talking to a different daemon must
+// not steer it.
+let viewerBackendKey = null;
+// Last {folderId, photoId} pushed by each backend's windows. A freshly opened
+// viewer pulls from here: the focus change that preceded it happened long
+// before its page existed to receive a push.
+const lastViewerPhoto = new Map();
+
+// The viewer is a bare photo surface — it may legitimately sit small in the
+// corner of a second monitor, so the main window's minimum does not apply.
+const VIEWER_MIN_W = 480;
+const VIEWER_MIN_H = 320;
+
+// The backend params a window was loaded with, read back off its own URL — the
+// shell doesn't otherwise remember which daemon each window talks to. Covers
+// both load paths: loadURL's query string in dev, loadFile's { query } (which
+// lands in the file:// URL just the same) when packaged. Inheriting them from
+// the opener is what makes a viewer popped out of a remote window show that
+// machine's photos instead of the local daemon's.
+function backendParamsOf(win) {
+  try {
+    const p = new URL(win.webContents.getURL()).searchParams;
+    if (p.get('apiHost')) {
+      return {
+        apiHost: p.get('apiHost'),
+        token: p.get('token') ?? '',
+        remote: '1',
+        remoteName: p.get('remoteName') ?? '',
+      };
+    }
+    if (p.get('apiPort')) return { apiPort: p.get('apiPort'), token: p.get('token') ?? '' };
+  } catch {
+    // A window still loading (or already gone) has no usable URL.
+  }
+  return null;
+}
+const backendKeyOf = (win) => {
+  const b = win ? backendParamsOf(win) : null;
+  if (!b) return null;
+  return b.apiHost ? `remote:${b.apiHost}` : `local:${b.apiPort}`;
+};
+
+// Viewer geometry lives in the shell's prefs, not the daemon's uiSettings: the
+// window has to be placed before any renderer — or any daemon — exists.
+function viewerBoundsPrefs() {
+  const b = readPrefs().viewerBounds;
+  if (!b || typeof b !== 'object') return null;
+  if (![b.x, b.y, b.width, b.height].every((n) => Number.isFinite(n))) return null;
+  if (b.width < VIEWER_MIN_W || b.height < VIEWER_MIN_H) return null;
+  return {
+    x: Math.round(b.x),
+    y: Math.round(b.y),
+    width: Math.round(b.width),
+    height: Math.round(b.height),
+    maximized: b.maximized === true,
+  };
+}
+function saveViewerBounds(win) {
+  if (!win || win.isDestroyed()) return;
+  const prefs = readPrefs();
+  // getNormalBounds, not getBounds: a maximized window must remember the
+  // rectangle it will be restored to, not the screen-filling one.
+  prefs.viewerBounds = { ...win.getNormalBounds(), maximized: win.isMaximized() };
+  writePrefs(prefs);
+}
+// Where to open the viewer: its remembered rectangle when enough of it still
+// lands on a display, else centred on the primary one. A monitor unplugged (or
+// a resolution change) since last time would otherwise put it off-screen — and
+// being frameless, with no controls of its own, it could not be dragged back.
+function viewerPlacement(saved) {
+  const { screen } = require('electron');
+  const width = saved?.width ?? 1100;
+  const height = saved?.height ?? 750;
+  if (saved) {
+    const area = screen.getDisplayMatching(saved).workArea;
+    const onX = Math.min(saved.x + width, area.x + area.width) - Math.max(saved.x, area.x);
+    const onY = Math.min(saved.y + height, area.y + area.height) - Math.max(saved.y, area.y);
+    // A sliver is not grabbable; require a usable corner on both axes.
+    if (onX >= 100 && onY >= 100) return { x: saved.x, y: saved.y, width, height };
+  }
+  const area = screen.getPrimaryDisplay().workArea;
+  const w = Math.min(width, area.width);
+  const h = Math.min(height, area.height);
+  return {
+    x: Math.round(area.x + (area.width - w) / 2),
+    y: Math.round(area.y + (area.height - h) / 2),
+    width: w,
+    height: h,
+  };
+}
+
 async function createWindow(opts = {}) {
-  // { initial?, openFolder?, remote? } — remote {name, host, token} windows
-  // talk to another machine's daemon and never touch the local one.
+  // { initial?, openFolder?, remote?, viewer? } — remote {name, host, token}
+  // windows talk to another machine's daemon and never touch the local one;
+  // viewer {backend} is the pop-out photo window, which inherits its opener's
+  // daemon rather than resolving one of its own.
   let backend;
-  if (!opts.remote) {
+  if (!opts.remote && !opts.viewer) {
     try {
       backend = await ensureDaemon();
     } catch (err) {
@@ -380,12 +482,21 @@ async function createWindow(opts = {}) {
     }
   }
 
+  // The viewer reopens where it was left; ordinary windows open at 3:2,
+  // matching the photos — full-bleed frames fill the window cleanly (and
+  // screenshots of the app read like photographs).
+  const savedViewer = opts.viewer ? viewerBoundsPrefs() : null;
+  const geometry = opts.viewer ? viewerPlacement(savedViewer) : { width: 1500, height: 1000 };
+
   const win = new BrowserWindow({
-    // 3:2, matching the photos — full-bleed frames fill the window cleanly
-    // (and screenshots of the app read like photographs).
-    width: 1500,
-    height: 1000,
-    minWidth: 1280, // the handoff's "minimum comfortable window"
+    ...geometry,
+    minWidth: opts.viewer ? VIEWER_MIN_W : 1280, // the handoff's "minimum comfortable window"
+    minHeight: opts.viewer ? VIEWER_MIN_H : undefined,
+    // The viewer floats over every app, not just marraw's own windows: the
+    // whole point of popping a photo onto a second monitor is that it stays
+    // visible while you work elsewhere. Electron has no "above my own windows
+    // only" level.
+    alwaysOnTop: !!opts.viewer,
     frame: false, // no native title bar — marraw draws its own controls
     backgroundColor: '#0c0d0f',
     icon: WINDOW_ICON,
@@ -401,8 +512,41 @@ async function createWindow(opts = {}) {
       backgroundThrottling: !UITEST,
     },
   });
-  windows.add(win);
-  win.on('closed', () => windows.delete(win));
+  // Set from the viewer's own close handler: a load that is still in flight
+  // when the window goes away rejects, and that is not a failure worth
+  // reporting (see the load below).
+  let viewerClosing = false;
+  if (opts.viewer) {
+    viewerWin = win;
+    win.on('closed', () => {
+      if (viewerWin === win) viewerWin = null;
+    });
+    if (savedViewer?.maximized) win.once('ready-to-show', () => win.maximize());
+    // Geometry is written as it changes, not only on close: a crash — or a quit
+    // that tears the window down without a 'close' — would otherwise forget
+    // wherever it had been dragged this session.
+    let saveTimer = null;
+    const remember = () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => saveViewerBounds(win), 400);
+    };
+    win.on('move', remember);
+    win.on('resize', remember);
+    win.on('close', () => {
+      viewerClosing = true;
+      clearTimeout(saveTimer);
+      saveViewerBounds(win);
+    });
+  } else {
+    windows.add(win);
+    win.on('closed', () => {
+      windows.delete(win);
+      // A lone viewer would strand the app: it is chromeless, has no library
+      // behind it, and window-all-closed never fires while it is up. It
+      // follows the last real window out.
+      if (windows.size === 0 && viewerWin && !viewerWin.isDestroyed()) viewerWin.close();
+    });
+  }
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -414,9 +558,11 @@ async function createWindow(opts = {}) {
   win.on('enter-full-screen', () => win.webContents.send('win:fullscreenChanged', true));
   win.on('leave-full-screen', () => win.webContents.send('win:fullscreenChanged', false));
 
-  const query = opts.remote
-    ? { apiHost: opts.remote.host, token: opts.remote.token, remote: '1', remoteName: opts.remote.name }
-    : { apiPort: String(backend.port), token: backend.token };
+  const query = opts.viewer
+    ? { ...opts.viewer.backend, view: 'viewer' }
+    : opts.remote
+      ? { apiHost: opts.remote.host, token: opts.remote.token, remote: '1', remoteName: opts.remote.name }
+      : { apiPort: String(backend.port), token: backend.token };
   if (opts.openFolder) query.openFolder = opts.openFolder;
   if (opts.initial) {
     // Env-derived params apply only to the first window (harness/dev hooks).
@@ -440,19 +586,36 @@ async function createWindow(opts = {}) {
     if (process.env.MARRAW_ALT_FOLDER) query.altFolder = process.env.MARRAW_ALT_FOLDER;
   }
 
+  // The viewer never stops fetching renditions and tiles, so its page can
+  // still count as loading when it is closed — which rejects the load with
+  // ERR_FAILED. A window on its way out has nothing to report; a viewer that
+  // is still up genuinely failed to show anything, and says so.
+  const settle = (p) =>
+    opts.viewer
+      ? p.catch((err) => {
+          if (!viewerClosing) console.error(`[viewer] load failed: ${err.message}`);
+        })
+      : p;
+
   if (DEV && !PREVIEW) {
     const qs = new URLSearchParams(query).toString();
     // Vite auto-increments its port when 5173 is taken by another project;
     // MARRAW_VITE_PORT points dev Electron at the right instance.
     const vitePort = process.env.MARRAW_VITE_PORT || '5173';
-    await win.loadURL(`http://localhost:${vitePort}/?${qs}`);
+    await settle(win.loadURL(`http://localhost:${vitePort}/?${qs}`));
     // The detached DevTools window opens right on top of the app window —
     // in harness runs that occlusion is what used to stall rAF (see UITEST).
     // Only the initial window auto-opens it (Ctrl+Shift+I elsewhere).
     if (!UITEST && opts.initial) win.webContents.openDevTools({ mode: 'detach' });
   } else {
-    await win.loadFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'), { query });
+    await settle(win.loadFile(path.join(__dirname, '..', 'client', 'dist', 'index.html'), { query }));
   }
+
+  // A viewer can be closed while it is still loading (a quick second Ctrl+N,
+  // or the last library window going away). Its webContents is torn down
+  // first, so isDestroyed() on the window alone is not enough to tell — go by
+  // the close handler's own flag.
+  if (viewerClosing || win.isDestroyed()) return;
 
   // Chromium persists per-host zoom (a stray Ctrl+wheel/pinch in a dev window
   // lands in the profile's Preferences) and re-applies it to every later
@@ -523,6 +686,39 @@ ipcMain.handle('win:isMax', (e) => senderWin(e)?.isMaximized() ?? false);
 ipcMain.on('win:openNew', (_e, folderPath) => {
   void createWindow({ openFolder: typeof folderPath === 'string' && folderPath ? folderPath : undefined });
 });
+
+// ---- Pop-out photo window ----
+// Ctrl+N from any window toggles it. The viewer closes itself through the
+// ordinary win:close above, so there is only ever one way in and one way out.
+ipcMain.on('win:toggleViewer', (e) => {
+  if (viewerWin && !viewerWin.isDestroyed()) {
+    viewerWin.close();
+    return;
+  }
+  const opener = senderWin(e);
+  const params = opener ? backendParamsOf(opener) : null;
+  if (!params) return;
+  viewerBackendKey = backendKeyOf(opener);
+  void createWindow({ viewer: { backend: params } });
+});
+// The driving window's current photo. Cached per backend even when no viewer
+// is up, so opening one lands on the right frame immediately instead of
+// waiting for the next navigation.
+ipcMain.on('win:viewerPhoto', (e, state) => {
+  if (!Number.isInteger(state?.folderId) || !Number.isInteger(state?.photoId)) return;
+  const key = backendKeyOf(senderWin(e));
+  if (!key) return;
+  const next = { folderId: state.folderId, photoId: state.photoId };
+  lastViewerPhoto.set(key, next);
+  if (key !== viewerBackendKey) return; // another library's id space
+  if (viewerWin && !viewerWin.isDestroyed()) viewerWin.webContents.send('win:viewerPhoto', next);
+});
+// Pull path for a viewer that has just booted: its page loads well after the
+// push that opened it. Also what the verify harness probes.
+ipcMain.handle('win:getViewerPhoto', (e) => ({
+  open: !!viewerWin && !viewerWin.isDestroyed(),
+  ...(lastViewerPhoto.get(backendKeyOf(senderWin(e))) ?? { folderId: null, photoId: null }),
+}));
 
 ipcMain.handle('marraw:pick-directory', async () => {
   const res = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });

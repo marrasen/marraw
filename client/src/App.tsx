@@ -347,10 +347,20 @@ function Workspace({ folderId }: { folderId: number }) {
   // pre-render pass warms the loupe-ready rendition outward from here first.
   // Fire-and-forget; the pass re-reads focus on every claim, so this only needs
   // to keep the hint current as the user navigates.
+  //
+  // The same pair drives the pop-out viewer window (Ctrl+N), which shares no
+  // store with this one. Nothing is pushed for a cleared focus (a folder
+  // switch, a deselect in the grid): the viewer keeps showing its last photo
+  // rather than going blank. Refocusing this window re-pushes, so with two
+  // main windows open the one being used is the one driving the viewer.
   const focusId = useUIStore((s) => s.focusId);
   useEffect(() => {
     if (focusId == null) return;
     setFocus(client, folderId, focusId).catch(() => {});
+    const push = () => window.win?.setViewerPhoto?.({ folderId, photoId: focusId });
+    push();
+    window.addEventListener('focus', push);
+    return () => window.removeEventListener('focus', push);
   }, [client, folderId, focusId]);
 
   // ?loupe=1 jumps straight into loupe on the first photo (UI smoke test).
