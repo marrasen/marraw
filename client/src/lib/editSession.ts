@@ -626,6 +626,27 @@ useUIStore.subscribe((s, prev) => {
   }
 });
 
+// The Local tab's tools own the loupe pointer: the AI region pick, the heal
+// tool and brush paint all read a click on the image as an edit. Unlike crop
+// and WB pick they leave the drawer up, so the tab strip stays clickable while
+// one is armed — and leaving the tab takes the tool's own controls (and the
+// button showing it is armed) off screen while the image still answers to it.
+// Entering these tools switches TO the Local tab, so leaving it exits them.
+// uiStore cannot call in here, so the invariant is enforced from this side.
+useUIStore.subscribe((s, prev) => {
+  if (s.developTab === 'masks' || prev.developTab !== 'masks') return;
+  const es = useEditSession.getState();
+  if (!es.maskPaint && !es.healing && es.aiPickArmed == null) return;
+  setState({
+    maskPaint: false,
+    healing: false,
+    activeSpot: null,
+    spotVisualize: false,
+    aiPickArmed: null,
+    aiHover: null,
+  });
+});
+
 // esSetWBPicking opens/closes the WB eyedropper. Opening snapshots the current
 // draft as the revert target (wbPickBase) for Reset/Cancel; closing here is a
 // plain dismiss — use esWBPickDone / esWBPickCancel to keep or discard the
@@ -753,11 +774,12 @@ export function esSetAIDetect(kind: AIPickKind, result: EditSessionState['aiDete
 }
 
 // esArmAIPick enters/exits the image-pick tool for one kind (null = disarm).
-// Arming slides the develop drawer away like the other loupe tools and drops
-// the heal/paint tools it shares the Local tab with; it needs a detection for
-// that kind. Crop and WB can't race it: their overlays hide the panel button
-// and they disarm on entry regardless. Disarming leaves the chips (aiDetect)
-// in place — only a photo switch clears those.
+// Arming keeps the develop drawer up (the chips stay reachable) and drops the
+// heal/paint tools it shares the Local tab with; it needs a detection for that
+// kind. Crop and WB can't race it: their overlays hide the panel button and
+// they disarm on entry regardless. Leaving the Local tab disarms it (see the
+// uiStore subscription above). Disarming leaves the chips (aiDetect) in place
+// — only a photo switch clears those.
 export function esArmAIPick(kind: AIPickKind | null) {
   const s = useEditSession.getState();
   if (kind && (!s.draft || !s.aiDetect[kind])) return;
