@@ -78,6 +78,14 @@ export function PresetsPanel({
   // SuggestEdits calls at all.
   const suggestionsEnabled = useFeature('suggestions');
 
+  // A hover preview is only ever ended by the card's own mouseleave — which
+  // never fires when the card is taken away under a parked pointer (Tab to
+  // another tab, the drawer closing, the selection turning into a batch).
+  // Without this the loupe would keep showing a look nothing on screen still
+  // claims. Every hover call site lives under this panel, so its unmount is
+  // the one place that catches them all.
+  useEffect(() => () => esHoverEnd(client), [client]);
+
   return (
     <div className="flex flex-col gap-5 px-4 pt-3 pb-4 text-sm">
       {targetCount > 1 && (
@@ -319,6 +327,10 @@ function UserPresetsSection({
   };
 
   const remove = (p: UserPreset) => {
+    // The delete button only exists while the card is hovered, so the card
+    // being deleted is the one previewing — and its mouseleave will never
+    // fire, because the card goes away under a still pointer.
+    esHoverEnd(client);
     updateUserPresets(client, presets.filter((x) => x.id !== p.id));
     toast.success(`Removed preset “${p.name}”`);
   };
