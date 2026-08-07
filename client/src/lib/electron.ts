@@ -128,6 +128,8 @@ declare global {
       getViewerPhoto?: () => Promise<ViewerPhotoState>;
       /** Subscribes to photo pushes; returns its own unsubscribe. */
       onViewerPhoto?: (cb: (state: ViewerPhoto) => void) => () => void;
+      /** Subscribes to open/closed pushes; returns its own unsubscribe. */
+      onViewerOpen?: (cb: (open: boolean) => void) => () => void;
     };
   }
 }

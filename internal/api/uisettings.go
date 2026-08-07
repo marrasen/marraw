@@ -285,6 +285,10 @@ type UISettings struct {
 	RailGroups map[string]bool `json:"railGroups"`
 	// RailWidth is the library rail width in px (drag its right edge).
 	RailWidth int `json:"railWidth"`
+	// RailHidden collapses the library rail out of the Library view (its
+	// toolbar toggle). Separate from RailWidth so bringing it back restores
+	// the width it was dragged to.
+	RailHidden bool `json:"railHidden"`
 	// PrerenderFullres pre-renders 1:1 full-resolution tiles for a folder
 	// after the calibrate and pre-render passes. Off by default — full-res
 	// tiles are large, so it can push the preview cache past its cap.
@@ -329,34 +333,35 @@ const (
 	// UI settings change.
 	burstSettingsKey = "burstSettings"
 
-	settingUITheme         = "ui:theme"
-	settingUIGapMinutes    = "ui:gapMinutes"
-	settingUIBurstHamming  = "ui:burstHamming"
-	settingUIBurstGap      = "ui:burstGapSeconds"
-	settingUICullDials     = "ui:cullDials"
-	settingUIQuickDials    = "ui:quickDials"
-	settingUIAutoPresets   = "ui:autoPresets"
-	settingUIUserPresets   = "ui:userPresets"
+	settingUITheme        = "ui:theme"
+	settingUIGapMinutes   = "ui:gapMinutes"
+	settingUIBurstHamming = "ui:burstHamming"
+	settingUIBurstGap     = "ui:burstGapSeconds"
+	settingUICullDials    = "ui:cullDials"
+	settingUIQuickDials   = "ui:quickDials"
+	settingUIAutoPresets  = "ui:autoPresets"
+	settingUIUserPresets  = "ui:userPresets"
 	// settingUIDefaultPresets maps a camera ("Make Model", or "*" for any)
 	// to the user-preset id the calibrate pass seeds onto new photos.
 	settingUIDefaultPresets = "ui:defaultPresets"
-	settingUIWatermarks    = "ui:watermarks"
-	settingUIExportDir     = "ui:exportDir"
-	settingUIExportOptions = "ui:exportOptions"
-	settingUIExportPresets = "ui:exportPresets"
-	settingUIDevelopPinned = "ui:developPinned"
-	settingUIEditGroups    = "ui:editGroups"
-	settingUIGroupAliases  = "ui:groupAliases"
-	settingUIRailGroups    = "ui:railGroups"
-	settingUIRailWidth     = "ui:railWidth"
-	settingUIPrerenderFull = "ui:prerenderFullres"
-	settingUIThumbFit      = "ui:thumbFit"
-	settingUILibrarySort   = "ui:librarySort"
-	settingUIShootSort     = "ui:shootSort"
-	settingUIShootGroup    = "ui:shootGroup"
-	settingUILastSeen      = "ui:lastSeenVersion"
-	settingUIFolderViews   = "ui:folderViews"
-	settingUIFeatures      = "ui:features"
+	settingUIWatermarks     = "ui:watermarks"
+	settingUIExportDir      = "ui:exportDir"
+	settingUIExportOptions  = "ui:exportOptions"
+	settingUIExportPresets  = "ui:exportPresets"
+	settingUIDevelopPinned  = "ui:developPinned"
+	settingUIEditGroups     = "ui:editGroups"
+	settingUIGroupAliases   = "ui:groupAliases"
+	settingUIRailGroups     = "ui:railGroups"
+	settingUIRailWidth      = "ui:railWidth"
+	settingUIRailHidden     = "ui:railHidden"
+	settingUIPrerenderFull  = "ui:prerenderFullres"
+	settingUIThumbFit       = "ui:thumbFit"
+	settingUILibrarySort    = "ui:librarySort"
+	settingUIShootSort      = "ui:shootSort"
+	settingUIShootGroup     = "ui:shootGroup"
+	settingUILastSeen       = "ui:lastSeenVersion"
+	settingUIFolderViews    = "ui:folderViews"
+	settingUIFeatures       = "ui:features"
 )
 
 // Library rail width bounds; the default matches the design handoff.
@@ -400,6 +405,9 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 
 	// Off unless explicitly enabled.
 	prerenderFullRaw, _ := db.GetSetting(ctx, settingUIPrerenderFull)
+
+	// Shown unless explicitly hidden.
+	railHiddenRaw, _ := db.GetSetting(ctx, settingUIRailHidden)
 
 	// Pinned by default; only an explicit "false" unpins (SidecarWrites style).
 	pinnedRaw, _ := db.GetSetting(ctx, settingUIDevelopPinned)
@@ -456,6 +464,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		GroupAliases:     jsonSetting(ctx, db, settingUIGroupAliases, map[string]string{}),
 		RailGroups:       jsonSetting(ctx, db, settingUIRailGroups, map[string]bool{}),
 		RailWidth:        railWidth,
+		RailHidden:       railHiddenRaw == "true",
 		PrerenderFullres: prerenderFullRaw == "true",
 		ThumbFit:         thumbFit,
 		LibrarySort:      librarySort,
@@ -802,6 +811,17 @@ func (u *Settings) SetRailWidth(ctx context.Context, px int) error {
 		return aprot.ErrInvalidParams(fmt.Sprintf("rail width must be %d..%d", railWidthMin, railWidthMax))
 	}
 	return u.save(ctx, settingUIRailWidth, strconv.Itoa(px))
+}
+
+// SetRailHidden persists whether the library rail is collapsed out of the
+// Library view. The width it was dragged to is kept separately, so showing it
+// again brings back the same rail.
+func (u *Settings) SetRailHidden(ctx context.Context, hidden bool) error {
+	v := "false"
+	if hidden {
+		v = "true"
+	}
+	return u.save(ctx, settingUIRailHidden, v)
 }
 
 // SetPrerenderFullres persists whether opened folders auto-render 1:1

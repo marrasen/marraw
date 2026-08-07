@@ -23,6 +23,7 @@ import {
   setPrerenderFullres,
   setQuickDials,
   setRailGroupOpen,
+  setRailHidden,
   setRailWidth,
   setShootGroup,
   setShootSort,
@@ -235,6 +236,13 @@ export function updateRailGroupOpen(client: ApiClient, parentPath: string, open:
 export function updateLastSeenVersion(client: ApiClient, version: string) {
   useUIStore.setState({ lastSeenVersion: version });
   setLastSeenVersion(client, version).catch(swallow);
+}
+
+// Collapse or restore the library rail. The width is left alone, so the rail
+// comes back exactly as wide as it was.
+export function updateRailHidden(client: ApiClient, hidden: boolean) {
+  useUIStore.setState({ railHidden: hidden });
+  setRailHidden(client, hidden).catch(swallow);
 }
 
 export function updateRailWidth(client: ApiClient, px: number) {

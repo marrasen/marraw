@@ -153,6 +153,7 @@ export interface UISettings {
     groupAliases: Record<string, string>;
     railGroups: Record<string, boolean>;
     railWidth: number;
+    railHidden: boolean;
     prerenderFullres: boolean;
     thumbFit: ThumbFitType;
     librarySort: LibrarySortType;
@@ -485,6 +486,19 @@ setRailGroupOpen.method = 'Settings.SetRailGroupOpen' as const;
 
 export function subscribeSetRailGroupOpen(client: ApiClient, parentPath: string, open: boolean, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetRailGroupOpen', [parentPath, open], callback, onError, options);
+}
+
+
+export function setRailHidden(client: ApiClient, hidden: boolean, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetRailHidden', [hidden], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setRailHidden.method = 'Settings.SetRailHidden' as const;
+
+export function subscribeSetRailHidden(client: ApiClient, hidden: boolean, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetRailHidden', [hidden], callback, onError, options);
 }
 
 
@@ -892,6 +906,21 @@ export function useSetRailGroupOpen(parentPath: string, open: boolean, options?:
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [parentPath, open], _subscribe: { method: 'Settings.SetRailGroupOpen', params: [parentPath, open] } });
+}
+
+/**
+ * Subscribes to `Settings.SetRailHidden` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetRailHidden(hidden: boolean, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, hidden: boolean) => setRailHidden(client, hidden, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [hidden], _subscribe: { method: 'Settings.SetRailHidden', params: [hidden] } });
 }
 
 /**

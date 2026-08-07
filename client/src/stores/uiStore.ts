@@ -207,6 +207,9 @@ interface UIState {
   railGroups: Record<string, boolean>;
   // Library rail width in px (drag its right edge; RAIL_WIDTH_* bounds).
   railWidth: number;
+  // Library rail collapsed out of view (its toolbar toggle). Kept apart from
+  // railWidth so showing it again restores the width it was dragged to.
+  railHidden: boolean;
   // Feature id -> explicit enable/disable override (absent = the default in
   // lib/features.ts; resolve through useFeature/featureEnabled, not directly).
   features: Record<string, boolean>;
@@ -380,6 +383,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   groupAliases: {},
   railGroups: {},
   railWidth: RAIL_WIDTH_DEFAULT,
+  railHidden: false,
   features: {},
   lastSeenVersion: '',
   settingsLoaded: false,
@@ -463,6 +467,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       groupAliases: s.groupAliases,
       railGroups: s.railGroups,
       railWidth: clampRailWidth(s.railWidth),
+      railHidden: s.railHidden === true,
       // No sanitizer: unknown ids are inert, resolution goes through the
       // lib/features.ts registry.
       features: s.features ?? {},

@@ -142,6 +142,7 @@ export default function App() {
   const folderId = useUIStore((s) => s.folderId);
   const mode = useUIStore((s) => s.mode);
   const view = useUIStore((s) => s.view);
+  const railHidden = useUIStore((s) => s.railHidden);
   const { roots, isLoading } = useLibraryRoots();
   const empty = roots.length === 0 && folderId == null;
   const structured = folderId == null || (mode === 'library' && view === 'grid');
@@ -153,7 +154,7 @@ export default function App() {
       {/* Cinema modes are edge-to-edge; their floating HUD replaces the bar. */}
       {structured && <TopBar />}
       <div className="flex min-h-0 flex-1">
-        {structured && <ResizableLibraryRail />}
+        {structured && !railHidden && <ResizableLibraryRail />}
         {folderId != null ? (
           <Workspace folderId={folderId} />
         ) : isLoading ? null : empty ? (

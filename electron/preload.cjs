@@ -80,6 +80,13 @@ contextBridge.exposeInMainWorld('win', {
     ipcRenderer.on('win:viewerPhoto', handler);
     return () => ipcRenderer.off('win:viewerPhoto', handler);
   },
+  // Open/closed pushes, so a toolbar toggle tracks a window that can also be
+  // closed from its own keymap.
+  onViewerOpen: (cb) => {
+    const handler = (_e, open) => cb(open);
+    ipcRenderer.on('win:viewerOpen', handler);
+    return () => ipcRenderer.off('win:viewerOpen', handler);
+  },
   onMaxChange: (cb) => ipcRenderer.on('win:maxChanged', (_e, v) => cb(v)),
   onFullScreenChange: (cb) => ipcRenderer.on('win:fullscreenChanged', (_e, v) => cb(v)),
 });

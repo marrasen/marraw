@@ -1,9 +1,14 @@
+import { PanelLeft, PictureInPicture2 } from 'lucide-react';
 import { Segmented } from '@/components/ui/segmented';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { TaskTray } from '@/components/TaskTray';
 import { WindowControls } from '@/components/WindowControls';
-import { modK } from '@/lib/platform';
+import { mod, modK } from '@/lib/platform';
 import { useUIStore, type Mode } from '@/stores/uiStore';
+import { useApiClient } from '@/api/client';
+import { updateRailHidden } from '@/lib/uiSettings';
+import { toggleViewer, useViewerOpen, viewerSupported } from '@/lib/viewerWindow';
 import { baseName, rootName, samePath, useLibraryRoots } from '@/lib/library';
 import '@/lib/electron';
 
@@ -25,6 +30,9 @@ export function TopBar() {
   const setExportOpen = useUIStore((s) => s.setExportOpen);
   const setPaletteOpen = useUIStore((s) => s.setPaletteOpen);
   const folderPath = useUIStore((s) => s.folderPath);
+  const railHidden = useUIStore((s) => s.railHidden);
+  const viewerOpen = useViewerOpen();
+  const client = useApiClient();
   const { roots } = useLibraryRoots();
 
   const current = folderPath ? roots.find((r) => samePath(r.path, folderPath)) : undefined;
@@ -39,6 +47,19 @@ export function TopBar() {
       {/* Both side clusters get equal flexible shares (flex-1 basis-0) so
           the mode control sits at the true window center at any width. */}
       <div className="flex min-w-0 flex-1 basis-0 items-center gap-2">
+        {/* Collapses the rail out of the way for a wider grid. Left of the
+            mark, over the rail it controls. */}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-pressed={railHidden}
+          className="shrink-0 text-muted-foreground hover:text-foreground [-webkit-app-region:no-drag]"
+          onClick={() => updateRailHidden(client, !railHidden)}
+          title={railHidden ? 'Show the library rail' : 'Hide the library rail'}
+        >
+          <PanelLeft />
+          <span className="sr-only">{railHidden ? 'Show the library rail' : 'Hide the library rail'}</span>
+        </Button>
         <img src="./icon.svg" alt="" className="size-6 shrink-0" />
         <span className="truncate text-[13px] font-semibold" title={folderPath ?? undefined}>
           {shootName}
@@ -69,6 +90,25 @@ export function TopBar() {
           <span className="max-[860px]:hidden">Jump to anything</span>
           <span className="rounded bg-black/10 px-1.5 py-px font-mono dark:bg-white/10">{modK}</span>
         </button>
+        {/* The pop-out photo window, for people who don't reach for Ctrl+N.
+            Lit while it is up, and closes it again — including a window
+            opened from another marraw window, or closed by its own key. */}
+        {viewerSupported() && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-pressed={viewerOpen}
+            className={cn(
+              'shrink-0 [-webkit-app-region:no-drag]',
+              viewerOpen ? 'bg-primary/15 text-primary hover:bg-primary/20' : 'text-muted-foreground hover:text-foreground',
+            )}
+            onClick={toggleViewer}
+            title={viewerOpen ? `Close the photo window (${mod}+N)` : `Pop the photo out into its own window (${mod}+N)`}
+          >
+            <PictureInPicture2 />
+            <span className="sr-only">{viewerOpen ? 'Close the photo window' : 'Pop out the photo window'}</span>
+          </Button>
+        )}
         <div data-testid="task-tray">
           <TaskTray />
         </div>

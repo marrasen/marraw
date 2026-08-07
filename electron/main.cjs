@@ -117,6 +117,15 @@ let updateState = {
   checkedAt: 0,
 };
 
+// Whether the pop-out viewer is up, pushed to every window so their toolbar
+// toggles read true — the window can also be closed from its own Ctrl+N, or
+// by the last library window going away, neither of which the opener sees.
+function pushViewerOpen(open) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('win:viewerOpen', open);
+  }
+}
+
 function pushUpdateState(patch) {
   updateState = { ...updateState, ...patch };
   for (const w of BrowserWindow.getAllWindows()) {
@@ -518,8 +527,10 @@ async function createWindow(opts = {}) {
   let viewerClosing = false;
   if (opts.viewer) {
     viewerWin = win;
+    pushViewerOpen(true);
     win.on('closed', () => {
       if (viewerWin === win) viewerWin = null;
+      pushViewerOpen(false);
     });
     if (savedViewer?.maximized) win.once('ready-to-show', () => win.maximize());
     // Geometry is written as it changes, not only on close: a crash — or a quit
