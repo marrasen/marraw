@@ -1626,6 +1626,9 @@ function SharpImage({
   // embedded camera JPEG (base-look provisional, no-store) in tens of ms.
   const fastUrl = imgUrl(photo, level, { editHash, fast: true });
   const cacheOnly = !previewUrl && !renderAllowed;
+  // Whose pixels are on screen right now. Read (never rendered) by the miss
+  // path below, which must not re-run the effect on every swap.
+  const shownPhoto = useRef<number | null>(null);
 
   // Depends on onShown too: the caller may attach it after mount, and shown may
   // never change again after that.
@@ -1642,16 +1645,21 @@ function SharpImage({
     // usually decodes first, but on a slow thumb extraction it could land
     // AFTER the render and must not replace real pixels with base-look ones.
     let realShown = false;
+    // Every swap records whose photo is up, for the same-photo test below.
+    const show = (url: string) => {
+      shownPhoto.current = photo.id;
+      setShown(url);
+    };
     const img = new Image();
     img.src = target;
     img
       .decode()
-      .then(() => alive && setShown(target))
+      .then(() => alive && show(target))
       .catch(() => {
         if (!alive) return;
         // decode() can reject spuriously on a fully-loaded image — swap anyway.
         if (img.naturalWidth > 0) {
-          setShown(target);
+          show(target);
           return;
         }
         // Genuine miss. A render-allowed (plain) miss is a superseded/aborted
@@ -1663,12 +1671,22 @@ function SharpImage({
         // this effect and clears the timer before it fires, so no RAW decode
         // ever STARTS while skimming (not even the uncancellable unpack).
         if (!cacheOnly) return;
-        fast = new Image();
-        fast.src = fastUrl;
-        fast
-          .decode()
-          .then(() => alive && !realShown && setShown(fastUrl))
-          .catch(() => {});
+        // The base-look provisional is only ever a gain over a frame of a
+        // DIFFERENT photo. When THIS photo is already up — an edit commit just
+        // moved its hash, a level upgrade, a preview clearing — swapping to
+        // the camera's JPEG throws away the lens correction and every local
+        // adjustment for the second the real render takes, which reads as the
+        // photo breaking and healing. Hold what is up; the kick fills it in.
+        // (Invisible in a Develop window, where the live preview blob covers
+        // this path — but the pop-out viewer and Cull have no edit session.)
+        if (shownPhoto.current !== photo.id) {
+          fast = new Image();
+          fast.src = fastUrl;
+          fast
+            .decode()
+            .then(() => alive && !realShown && show(fastUrl))
+            .catch(() => {});
+        }
         dwell = window.setTimeout(() => {
           kick = new Image();
           kick.src = renderUrl; // render-allowed: one render for this photo
@@ -1677,7 +1695,7 @@ function SharpImage({
             .then(() => {
               if (!alive) return;
               realShown = true;
-              setShown(renderUrl);
+              show(renderUrl);
             })
             .catch(() => {});
         }, 350);
@@ -1691,7 +1709,9 @@ function SharpImage({
       if (kick && !kick.complete) kick.src = '';
       if (fast && !fast.complete) fast.src = '';
     };
-  }, [target, renderUrl, fastUrl, cacheOnly]);
+    // photo.id is already baked into every URL above; it is listed for the
+    // same-photo test, which reads it directly.
+  }, [target, renderUrl, fastUrl, cacheOnly, photo.id]);
 
   // Only the very first mount, before anything has decoded, has no frame to
   // hold; the always-warm 512 underlay behind shows through until then.
