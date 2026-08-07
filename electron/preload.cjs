@@ -80,6 +80,10 @@ contextBridge.exposeInMainWorld('win', {
     ipcRenderer.on('win:viewerPhoto', handler);
     return () => ipcRenderer.off('win:viewerPhoto', handler);
   },
+  // The viewer's always-on-top toggle (its own right-click menu), remembered
+  // in the shell's prefs for the next window.
+  getViewerAlwaysOnTop: () => ipcRenderer.invoke('win:getViewerAlwaysOnTop'),
+  setViewerAlwaysOnTop: (on) => ipcRenderer.send('win:setViewerAlwaysOnTop', on),
   // Open/closed pushes, so a toolbar toggle tracks a window that can also be
   // closed from its own keymap.
   onViewerOpen: (cb) => {

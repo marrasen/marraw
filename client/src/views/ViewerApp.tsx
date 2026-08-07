@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Check, PictureInPicture2, X } from 'lucide-react';
 
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { cn } from '@/lib/utils';
+import { mod } from '@/lib/platform';
 import { useListPhotos, type Photo } from '@/api/library';
 import { photoPatchReducer } from '@/lib/usePhotos';
 import { useUIStore } from '@/stores/uiStore';
@@ -27,8 +37,18 @@ function ViewerSurface({ folderId, photoId }: ViewerPhoto) {
   const photo = found ?? lastGood;
   if (!photo) return null;
   // No navigator inset and a low badge: nothing may sit over the photo, and
-  // there is no control bar here for the rendering badge to clear.
-  return <CinemaImage photo={photo} photos={photos} showNavigator={false} renderingBadgeBottom={24} />;
+  // there is no control bar here for the rendering badge to clear. The right
+  // button is given up so it can open this window's menu — none of the tool
+  // overlays it pans for exist here, and the left button pans the same.
+  return (
+    <CinemaImage
+      photo={photo}
+      photos={photos}
+      showNavigator={false}
+      renderingBadgeBottom={24}
+      rightDragPans={false}
+    />
+  );
 }
 
 /**
@@ -46,6 +66,17 @@ function ViewerSurface({ folderId, photoId }: ViewerPhoto) {
  */
 export default function ViewerApp() {
   const [target, setTarget] = useState<ViewerPhoto | null>(null);
+  // Always-on-top belongs to the shell, which opened this window floating or
+  // not from its own prefs — so read the answer from there rather than assume
+  // it, and write changes straight back for the next window.
+  const [alwaysOnTop, setAlwaysOnTopState] = useState(true);
+  useEffect(() => {
+    void window.win?.getViewerAlwaysOnTop?.().then(setAlwaysOnTopState);
+  }, []);
+  const setAlwaysOnTop = (on: boolean) => {
+    setAlwaysOnTopState(on);
+    window.win?.setViewerAlwaysOnTop?.(on);
+  };
 
   useEffect(() => {
     let pushed = false;
@@ -137,7 +168,30 @@ export default function ViewerApp() {
 
   return (
     <div className="relative flex h-screen flex-col bg-background text-foreground">
-      {target ? <ViewerSurface folderId={target.folderId} photoId={target.photoId} /> : null}
+      <ContextMenu>
+        {/* The window's only chrome, and only on demand. It wraps the whole
+            surface (not just the photo) so a right-click anywhere reaches it —
+            including the letterboxed backdrop around a fitted frame. */}
+        <ContextMenuTrigger className="flex min-h-0 flex-1 flex-col">
+          {target ? <ViewerSurface folderId={target.folderId} photoId={target.photoId} /> : null}
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onClick={() => setAlwaysOnTop(!alwaysOnTop)}>
+            {/* The check keeps its slot when off so the labels stay aligned. */}
+            <Check className={cn(!alwaysOnTop && 'invisible')} />
+            Always on top
+          </ContextMenuItem>
+          <ContextMenuItem onClick={() => window.win?.toggleMax()}>
+            <PictureInPicture2 />
+            Maximize / restore
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => window.win?.close()} hint={`${mod}+N`}>
+            <X />
+            Close this window
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
       {/* The frameless window's move handle (the CinemaHUD pattern). With no
           chrome at all there would be nothing to drag the window to another
           monitor by. Thin, so it barely eats into drag-panning the photo. */}

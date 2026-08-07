@@ -423,6 +423,11 @@ const backendKeyOf = (win) => {
   return b.apiHost ? `remote:${b.apiHost}` : `local:${b.apiPort}`;
 };
 
+// Floating over other apps is the viewer's default — that is what a second
+// monitor is for — but it is the window's own right-click toggle, and like its
+// geometry the answer is needed before the window exists.
+const viewerAlwaysOnTop = () => readPrefs().viewerAlwaysOnTop !== false;
+
 // Viewer geometry lives in the shell's prefs, not the daemon's uiSettings: the
 // window has to be placed before any renderer — or any daemon — exists.
 function viewerBoundsPrefs() {
@@ -504,8 +509,8 @@ async function createWindow(opts = {}) {
     // The viewer floats over every app, not just marraw's own windows: the
     // whole point of popping a photo onto a second monitor is that it stays
     // visible while you work elsewhere. Electron has no "above my own windows
-    // only" level.
-    alwaysOnTop: !!opts.viewer,
+    // only" level, so its right-click menu can turn this off entirely.
+    alwaysOnTop: !!opts.viewer && viewerAlwaysOnTop(),
     frame: false, // no native title bar — marraw draws its own controls
     backgroundColor: '#0c0d0f',
     icon: WINDOW_ICON,
@@ -723,6 +728,19 @@ ipcMain.on('win:viewerPhoto', (e, state) => {
   lastViewerPhoto.set(key, next);
   if (key !== viewerBackendKey) return; // another library's id space
   if (viewerWin && !viewerWin.isDestroyed()) viewerWin.webContents.send('win:viewerPhoto', next);
+});
+// The viewer's own always-on-top toggle (its right-click menu). Kept in the
+// shell's prefs beside the geometry: the next window has to open floating —
+// or not — before any renderer could tell it which.
+ipcMain.handle('win:getViewerAlwaysOnTop', () => viewerAlwaysOnTop());
+ipcMain.on('win:setViewerAlwaysOnTop', (e, on) => {
+  const prefs = readPrefs();
+  prefs.viewerAlwaysOnTop = on === true;
+  writePrefs(prefs);
+  // The sender IS the viewer, but resolve the window we track: this must never
+  // strand some other window on top.
+  const w = viewerWin && !viewerWin.isDestroyed() ? viewerWin : senderWin(e);
+  w?.setAlwaysOnTop(on === true);
 });
 // Pull path for a viewer that has just booted: its page loads well after the
 // push that opened it. Also what the verify harness probes.

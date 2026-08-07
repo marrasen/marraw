@@ -130,6 +130,8 @@ declare global {
       onViewerPhoto?: (cb: (state: ViewerPhoto) => void) => () => void;
       /** Subscribes to open/closed pushes; returns its own unsubscribe. */
       onViewerOpen?: (cb: (open: boolean) => void) => () => void;
+      getViewerAlwaysOnTop?: () => Promise<boolean>;
+      setViewerAlwaysOnTop?: (on: boolean) => void;
     };
   }
 }
