@@ -172,20 +172,20 @@ export function EditPanel({ photos, variant }: { photos: Photo[]; variant: 'libr
     return <BatchPanel client={client} ids={ids} photo={photo} />;
   }
   if (variant === 'library') {
-    return <LibraryInfoPanel photo={photo} />;
+    return <LibraryInfoPanel photo={photo} photos={photos} />;
   }
-  return <SinglePhotoPanel client={client} photo={photo} targetCount={ids.length} />;
+  return <SinglePhotoPanel client={client} photo={photo} photos={photos} targetCount={ids.length} />;
 }
 
 // LibraryInfoPanel: the Library aside for a single photo — the identity/cull
 // header over the read-only info stack. No tabs and no navigator: the grid has
 // no loupe image to navigate, and the edit controls live in Develop.
-function LibraryInfoPanel({ photo }: { photo?: Photo }) {
+function LibraryInfoPanel({ photo, photos }: { photo?: Photo; photos: Photo[] }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {photo && <PhotoHeader photo={photo} />}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {photo && <InfoPanel photo={photo} showNavigator={false} />}
+        {photo && <InfoPanel photo={photo} photos={photos} showNavigator={false} />}
       </div>
     </div>
   );
@@ -210,10 +210,12 @@ const TAB_ITEMS = [
 function SinglePhotoPanel({
   client,
   photo,
+  photos,
   targetCount,
 }: {
   client: ApiClient;
   photo?: Photo;
+  photos: Photo[];
   targetCount: number;
 }) {
   const tab = useUIStore((s) => s.developTab);
@@ -263,7 +265,7 @@ function SinglePhotoPanel({
           </>
         )}
         {tab === 'presets' && <PresetsPanel client={client} photo={photo} targetCount={targetCount} />}
-        {tab === 'info' && photo && <InfoPanel photo={photo} />}
+        {tab === 'info' && photo && <InfoPanel photo={photo} photos={photos} />}
       </div>
     </div>
   );

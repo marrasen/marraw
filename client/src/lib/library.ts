@@ -17,6 +17,16 @@ export function baseName(path: string) {
   return i >= 0 && i < trimmed.length - 1 ? trimmed.slice(i + 1) : trimmed || path;
 }
 
+/**
+ * Joins a folder path with a file name (which may itself carry a relative
+ * subpath, as recursive scans store it) in the folder's own separator style —
+ * the daemon may run on a machine whose paths look nothing like this one's.
+ */
+export function joinPath(folder: string, name: string) {
+  const sep = folder.includes('\\') ? '\\' : '/';
+  return `${folder.replace(/[\\/]+$/, '')}${sep}${name.replace(/^[\\/]+/, '')}`;
+}
+
 export function parentPath(path: string) {
   const trimmed = path.replace(/[\\/]+$/, '');
   const i = Math.max(trimmed.lastIndexOf('\\'), trimmed.lastIndexOf('/'));

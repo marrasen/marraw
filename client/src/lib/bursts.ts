@@ -35,6 +35,31 @@ export function isSoft(p: Photo, softBelow: number): boolean {
   return score != null && score < softBelow;
 }
 
+// focusRank places one score inside its shoot: the fraction of the folder's
+// other measured frames it beats (0 = the softest frame, 1 = the sharpest).
+// Raw Laplacian variance is scene-dependent and says little on its own, so
+// the Info panel shows this rather than asking anyone to read the number.
+//
+// The population must be ONE metric — all whole-frame scores or all subject
+// scores. Subject-region variance runs systematically lower, so a mixed
+// population would rank every masked frame near the bottom. null when the
+// folder holds too few measurements for a rank to mean anything (the same
+// floor softThreshold uses).
+//
+// Ties split the difference (the mid-rank): frames that scored identically —
+// duplicates of one file, or a static tripod run — all sit mid-scale rather
+// than each reading as the softest of the shoot.
+export function focusRank(population: number[], score: number): number | null {
+  if (population.length < 4) return null;
+  let below = 0;
+  let equal = 0;
+  for (const v of population) {
+    if (v < score) below++;
+    else if (v === score) equal++;
+  }
+  return Math.min(1, (below + Math.max(0, equal - 1) / 2) / (population.length - 1));
+}
+
 export interface BurstInfo {
   count: number;
   // bestId is the group's sharpest member by focusScore; null until at least

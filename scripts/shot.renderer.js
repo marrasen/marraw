@@ -1536,6 +1536,96 @@ if (shot === 'cull') {
     await sleep(700);
   }
   window.__libPanelProbe = { single: singleProbe, develop: developProbe, batch: batchProbe, bar: barProbe };
+} else if (shot === 'info') {
+  // The Info tab: the metadata list, the focus scores' shoot-relative meters
+  // (they need the calibrate pass to have measured the folder, so wait for a
+  // caption rather than a fixed sleep), and the identity actions.
+  ui().setMode('develop');
+  await sleep(800);
+  mw.useUIStore.getState().setDevelopTab('info');
+  const drawer = await until(() => [...document.querySelectorAll('.glass')].find((n) => /Resolution/.test(n.textContent ?? '')));
+  const text = () => drawer.textContent ?? '';
+  const btn = (label) => [...drawer.querySelectorAll('button')].some((b) => b.textContent?.trim() === label);
+  await until(() => /sharper than|soft for this shoot/.test(text()), 60000).catch(() => null);
+  // The histogram and navigator push the info list under the fold — scroll to
+  // it so the capture shows the rows and the actions.
+  const scroller = [...drawer.querySelectorAll('div')].find((n) => n.scrollHeight > n.clientHeight + 20);
+  if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  await sleep(400);
+  const rows = [...drawer.querySelectorAll('dt')].map((n) => n.textContent?.trim());
+
+  // What each action actually hands off: stub the two sinks (the clipboard
+  // and the Explorer bridge) and read back the argument, so a button that
+  // fires with the wrong path can't pass as "it clicked".
+  const copied = [];
+  navigator.clipboard.writeText = (t) => {
+    copied.push(t);
+    return Promise.resolve();
+  };
+  // The preload bridge is frozen, so swap the whole object rather than
+  // assigning onto it (a silent no-op that would run the real Explorer call).
+  // The preload bridge is frozen AND non-configurable, so the reveal argument
+  // cannot be intercepted from here — check the path the button hands it,
+  // which is the only part of that call this panel owns.
+  const { joinPath } = await import('/src/lib/library.ts');
+  const revealed = joinPath(ui().folderPath, drawer.querySelector('dd')?.getAttribute('title') ?? '');
+  const click = (label) => {
+    const b = [...drawer.querySelectorAll('button')].find((n) => n.textContent?.trim() === label);
+    b?.click();
+    return !!b;
+  };
+  const clicked = {
+    locate: click('Locate on disk'),
+    copy: click('Copy'),
+    copyFolder: click('Copy folder path'),
+    copyName: click('Copy filename'),
+  };
+  await sleep(200);
+
+  // Every frame's caption: the rank spans the shoot, and a soft frame must say
+  // so rather than quoting a percentile.
+  const captions = [];
+  for (const id of ui().visibleIds) {
+    ui().focus(id);
+    await sleep(250);
+    captions.push((text().match(/sharper than \d+%|soft for this shoot/) ?? ['none'])[0]);
+  }
+
+  // The two states this shoot has no example of: a frame under its own soft
+  // cutoff, and a subject-aware score (nothing here has an AI matte). Forced
+  // through the local-override map, then put back so the capture shows the
+  // folder's real numbers.
+  const focusId = ui().focusId;
+  const realScore = Number(
+    [...drawer.querySelectorAll('dd')].find((n) => /^\d+$/.test(n.textContent?.trim() ?? ''))?.textContent,
+  );
+  ui().applyLocal([focusId], { sharpness: 1, subjectSharpness: 2 });
+  await sleep(400);
+  const forced = {
+    rows: [...drawer.querySelectorAll('dt')].map((n) => n.textContent?.trim()),
+    captions: [...drawer.querySelectorAll('span')]
+      .filter((n) => /sharper than|soft for this shoot/.test(n.textContent ?? ''))
+      .map((n) => ({ text: n.textContent, amber: /amber/.test(n.className) })),
+  };
+  ui().applyLocal([focusId], { sharpness: realScore, subjectSharpness: undefined });
+  await sleep(400);
+
+  window.__infoProbe = {
+    forced,
+    rows,
+    focusMeter: (text().match(/sharper than \d+%|soft for this shoot/) ?? [null])[0],
+    // The focus labels must carry the "what does this number mean" tooltip.
+    focusHint: [...drawer.querySelectorAll('dt')]
+      .find((n) => n.textContent?.trim() === 'Focus score')
+      ?.getAttribute('title')
+      ?.slice(0, 60),
+    clicked,
+    revealed,
+    copiedInfo: copied[0]?.split('\n').slice(0, 3),
+    copiedFolder: copied[1],
+    copiedName: copied[2],
+    captions,
+  };
 } else if (shot === 'render-progress') {
   // 1:1 on a photo whose tile grid is cold → the decoding indicator must
   // upgrade from indeterminate to a live percent (RenderProgressEvent), and
@@ -2338,5 +2428,6 @@ const probe =
   window.__exportPresetsProbe ??
   window.__shareProbe ??
   window.__libPanelProbe ??
+  window.__infoProbe ??
   window.__tilesProbe;
 return probe ? { shot, ...probe } : shot;
