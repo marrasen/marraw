@@ -371,6 +371,91 @@ if (shot === 'cull') {
     tabAfterDevelop,
     escCleared: es.getState().activeMask == null && es.getState().activeMaskControl == null,
   };
+} else if (shot === 'maskorder') {
+  // Mask reordering: masks composite in list order, so the stack has to be
+  // rearrangeable. Driven through the DOM (grip dragstart → row drop) rather
+  // than by calling esMoveMask, because the wiring between them is the part
+  // that can break.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200); // initial preview settles
+  // Idempotence: a previous run's masks persisted to the fixture photo (the
+  // `masks` surface precedent).
+  mw.esUpdate({ masks: [] });
+  mw.esCommit();
+  await until(() => mw.esPreviewSettled(), 30000);
+  ui().setDevelopTab('masks');
+  mw.esAddMask('radial'); // index 0
+  await sleep(200);
+  mw.esUpdateMask(0, { adjust: { expEV: 1.5 } });
+  mw.esCommit();
+  await sleep(200);
+  // A one-mask stack has nothing to reorder, so that row carries no grip.
+  const gripCountOne = document.querySelectorAll('[data-testid="mask-grip"]').length;
+  mw.esAddMask('linear'); // index 1
+  await sleep(200);
+  mw.esUpdateMask(1, { adjust: { expEV: -1 } });
+  mw.esCommit();
+  // Select the radial (index 0) — the selection names a mask by position, so
+  // it has to follow the mask across the move, not stay on slot 0.
+  mw.esSetActiveMask(0);
+  await until(() => mw.esPreviewSettled(), 30000);
+  await sleep(300);
+
+  const types = () => (es.getState().draft.masks ?? []).map((m) => m.type);
+  const label = () => {
+    const h = es.getState().history[es.getState().photoId];
+    return h ? h.stack[h.index].label : null;
+  };
+  const rows = () => [...document.querySelectorAll('[data-testid="mask-row"]')];
+  const grips = () => [...document.querySelectorAll('[data-testid="mask-grip"]')];
+  const dragRowOnto = (from, to) => {
+    const dt = new DataTransfer();
+    const opts = { bubbles: true, cancelable: true, dataTransfer: dt };
+    grips()[from].dispatchEvent(new DragEvent('dragstart', opts));
+    rows()[to].dispatchEvent(new DragEvent('dragover', opts));
+    rows()[to].dispatchEvent(new DragEvent('drop', opts));
+    grips()[from].dispatchEvent(new DragEvent('dragend', opts));
+  };
+
+  const orderBefore = types();
+  const gripCount = grips().length;
+  dragRowOnto(0, 1); // radial moves under the linear
+  await sleep(400);
+  const orderAfter = types();
+  const movedLabel = label();
+  const selectionFollowed =
+    es.getState().activeMask === 1 && es.getState().draft.masks[1].type === 'radial';
+  // The move is a pixel change, so it commits and re-renders like a slider.
+  await until(() => mw.esPreviewSettled(), 30000);
+
+  // Ctrl+Z is the whole point of committing through history rather than
+  // patching the draft: one undo puts the stack back.
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+  await sleep(600);
+  const orderUndone = types();
+  await until(() => mw.esPreviewSettled(), 30000);
+
+  // Dropping onto the last row is the only way to reach the bottom slot, so
+  // it must not be a no-op. Restores the flipped order for the screenshot.
+  dragRowOnto(0, 1);
+  await sleep(400);
+  mw.esSetActiveMask(1);
+  await until(() => mw.esPreviewSettled(), 30000);
+
+  window.__maskOrderProbe = {
+    gripCountOne,
+    gripCount,
+    orderBefore,
+    orderAfter,
+    reordered: orderBefore.join() === 'radial,linear' && orderAfter.join() === 'linear,radial',
+    selectionFollowed,
+    movedLabel,
+    orderUndone,
+    undone: orderUndone.join() === 'radial,linear',
+    adjustKept: (es.getState().draft.masks[1].adjust ?? {}).expEV === 1.5,
+  };
 } else if (shot === 'maskfx') {
   // Mask FX: the one-click Background button — a background-kind AI mask
   // pre-loaded with glow, light streaks and a prism fringe. The probe is the
@@ -2583,6 +2668,7 @@ const probe =
   window.__remoteProbe ??
   window.__updatesProbe ??
   window.__maskProbe ??
+  window.__maskOrderProbe ??
   window.__maskRemoveProbe ??
   window.__lensProbe ??
   window.__presetsProbe ??

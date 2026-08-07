@@ -449,6 +449,11 @@ function maskDiffLabel(prev: Mask[] | undefined, next: Mask[] | undefined): stri
     return MASK_TYPE_LABELS[type] ? `Add ${type} mask` : 'Add mask';
   }
   if (b.length < a.length) return 'Remove mask';
+  // The same masks in a different order (esMoveMask). Named before the
+  // per-slot walk below, which would otherwise read the shifted rows as an
+  // edit to whichever mask landed in slot i.
+  const sorted = (ms: Mask[]) => JSON.stringify(ms.map((m) => JSON.stringify(m)).sort());
+  if (JSON.stringify(a) !== JSON.stringify(b) && sorted(a) === sorted(b)) return 'Reorder masks';
   for (let i = 0; i < b.length; i++) {
     if (JSON.stringify(a[i]) === JSON.stringify(b[i])) continue;
     if (!a[i]?.disabled !== !b[i]?.disabled) return b[i]?.disabled ? 'Hide mask' : 'Show mask';
@@ -1100,6 +1105,40 @@ export function esUpdateMask(client: ApiClient, index: number, patch: Partial<Ma
   const next = masks.slice();
   next[index] = { ...next[index], ...patch };
   esUpdate(client, { masks: next });
+}
+
+// esMoveMask moves one mask to another slot in the stack and commits. Order is
+// composite order — a later mask sees the earlier ones' output (pyramid.
+// ApplyMasks) — so this is a pixel change like any slider move, not a display
+// nicety, and it goes through the same commit/settle path.
+//
+// Session state that names masks by position has to follow the mask it named:
+// the selection (its overlay handles are on the loupe) and the pending removal
+// consent (declining it clears that mask's Remove flag). maskFillBusy is left
+// alone on purpose — a generation in flight clears the index it set, so
+// remapping it would strand a spinner that never gets cleared; parking one on a
+// neighbour until it settles is the documented best-effort behaviour.
+export function esMoveMask(client: ApiClient, from: number, to: number) {
+  esFlushDraft();
+  const s = useEditSession.getState();
+  const masks = s.draft?.masks;
+  if (!masks || !masks[from] || to < 0 || to >= masks.length || from === to) return;
+  const next = masks.slice();
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  setState({
+    activeMask: s.activeMask == null ? null : movedIndex(s.activeMask, from, to),
+    maskFillConsent: s.maskFillConsent == null ? null : movedIndex(s.maskFillConsent, from, to),
+  });
+  esCommit(client, { masks: next });
+}
+
+// movedIndex maps an index through the same move: where whatever sat at i ends
+// up once the entry at `from` is pulled out and re-inserted at `to`.
+function movedIndex(i: number, from: number, to: number): number {
+  if (i === from) return to;
+  const j = i > from ? i - 1 : i; // after the removal
+  return j >= to ? j + 1 : j; //     after the insertion
 }
 
 // esRemoveMask deletes a mask and commits.

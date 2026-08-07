@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   Pipette, Undo2, Redo2, Crop, ChevronRight, RotateCcw, ClipboardPaste,
   Image as ImageIcon, Plus, Trash2, Paintbrush, Circle, Eraser,
-  Eye, EyeOff, Focus, Layers, Loader2, Shapes, ScanSearch, Users, Check, Blend, Aperture,
+  Eye, EyeOff, Focus, GripVertical, Layers, Loader2, Shapes, ScanSearch, Users, Check, Blend, Aperture,
 } from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { Photo } from '@/api/library';
@@ -63,6 +63,7 @@ import {
   esClearAIMapRestore,
   esCommit,
   esLoad,
+  esMoveMask,
   esRedo,
   esRemoveMask,
   esReset,
@@ -1293,9 +1294,11 @@ function LocalPanel({ client, targetCount }: { client: ApiClient; targetCount: n
       <MasksSection client={client} draft={draft} />
       <p className="mt-4 mb-1 text-xs text-muted-foreground">
         A mask is a local adjustment: a gradient, ellipse, brushed region or
-        AI-detected area carrying its own exposure, tone and color. Subject
-        and Depth run a local model once per photo; masks stay anchored to
-        image content through crops and straightens.
+        AI-detected area carrying its own exposure, tone and color. They apply
+        top to bottom, each over the result of the ones above it — drag a mask
+        by its grip to move it in the stack. Subject and Depth run a local
+        model once per photo; masks stay anchored to image content through
+        crops and straightens.
       </p>
       <Group id="retouch" title="Retouch" changed={(draft.spots?.length ?? 0) > 0}>
         <RetouchSection client={client} draft={draft} />
@@ -1606,6 +1609,7 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
           client={client}
           mask={m}
           index={i}
+          reorderable={masks.length > 1}
           selected={activeMask === i}
           onSelect={() => {
             setMode('develop');
@@ -1637,16 +1641,23 @@ function MasksSection({ client, draft }: { client: ApiClient; draft: Params }) {
   );
 }
 
+// Drag payload for a mask row: the index it started at. Custom types must be
+// lowercase or dataTransfer.types won't match them (the marraw/preset and
+// marraw/block precedent).
+const MASK_DRAG_TYPE = 'marraw/mask';
+
 function MaskRow({
   client,
   mask,
   index,
+  reorderable,
   selected,
   onSelect,
 }: {
   client: ApiClient;
   mask: Mask;
   index: number;
+  reorderable: boolean;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -1660,6 +1671,10 @@ function MaskRow({
   // BrushToolRow precedent. Opens on its own when the mask already carries an
   // effect (a preset, a pasted look, the Background button).
   const [fxExpanded, setFxExpanded] = useState(fxChanged);
+  // Lit while another mask is dragged over this row: the drop lands the dragged
+  // mask in THIS slot and pushes this one aside, so the highlight has to name
+  // the destination, not a gap between rows.
+  const [dropHere, setDropHere] = useState(false);
   // Also forced open while the keyboard walk is inside the group, so ↑/↓ can
   // never park the focus ring on a slider hidden behind a collapsed header.
   const fxOpen =
@@ -1708,7 +1723,34 @@ function MaskRow({
     );
   };
   return (
-    <div className={cn('flex flex-col rounded-md border', selected ? 'border-primary/45' : 'border-border')}>
+    <div
+      className={cn(
+        'flex flex-col rounded-md border',
+        dropHere ? 'border-primary' : selected ? 'border-primary/45' : 'border-border',
+      )}
+      data-testid="mask-row"
+      // Every row is a drop target, including the dragged one's own neighbours
+      // — dropping onto the last row is how a mask gets moved to the bottom.
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(MASK_DRAG_TYPE)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDropHere(true);
+      }}
+      onDragLeave={() => setDropHere(false)}
+      onDrop={(e) => {
+        setDropHere(false);
+        if (!e.dataTransfer.types.includes(MASK_DRAG_TYPE)) return;
+        const from = Number(e.dataTransfer.getData(MASK_DRAG_TYPE));
+        // getData returns '' for a payload that isn't ours, and Number('') is
+        // 0 — a valid mask index — so the empty string has to be rejected
+        // before the number is believed.
+        if (!Number.isInteger(from) || from === index) return;
+        e.preventDefault();
+        e.stopPropagation();
+        esMoveMask(client, from, index);
+      }}
+    >
       {/* Hovering the row header shows this mask's red weight tint on the
           loupe (the only way to SEE an AI mask's detected region); it fades
           out on leave. */}
@@ -1717,6 +1759,25 @@ function MaskRow({
         onMouseEnter={() => esSetTintMask(index)}
         onMouseLeave={() => esSetTintMask(null)}
       >
+        {/* Drag by the grip, never by the row: the header's own click selects
+            the mask and the body below it is full of sliders. */}
+        {reorderable && (
+          <span
+            draggable
+            className="-ml-1 cursor-grab text-faint active:cursor-grabbing hover:text-foreground"
+            title="Drag onto another mask to reorder — a mask applies over the ones above it"
+            data-testid="mask-grip"
+            onDragStart={(e) => {
+              e.dataTransfer.setData(MASK_DRAG_TYPE, String(index));
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+            // The pointer stays put while the rows move under it, so no
+            // mouseleave arrives to take the hover tint down.
+            onDragEnd={() => esSetTintMask(null)}
+          >
+            <GripVertical className="size-3" aria-hidden="true" />
+          </span>
+        )}
         <button
           type="button"
           className={cn('flex flex-1 items-center gap-1.5 text-left', mask.disabled && 'opacity-45')}
