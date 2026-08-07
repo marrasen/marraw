@@ -486,7 +486,18 @@ export const useUIStore = create<UIState>((set, get) => ({
       // Close a folder-scoped scan dialog left open on the old folder.
       subjectScanOpen: false,
       eyeScanOpen: false,
+      // Land in the new folder's grid — and say so in `mode` as well. `mode`
+      // and `view` only ever move as a pair (setMode is the other writer):
+      // opening a folder from Cull or Develop used to leave `mode` behind on
+      // the cinema with `view` on 'grid'. The surface still rendered (it is
+      // keyed off `mode` alone) but every loupe-gated key branch went quietly
+      // dead — the ↑/↓ control walk, Shift+arrow pan, the zoom keys — and
+      // nothing on screen said why. There is nothing to develop here anyway:
+      // the focus is cleared two lines down.
+      mode: 'library',
       view: 'grid',
+      contactSheet: false,
+      showOriginal: false,
       focusId: null,
       anchorId: null,
       selection: new Set(),
