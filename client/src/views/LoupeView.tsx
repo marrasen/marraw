@@ -297,7 +297,6 @@ export function CinemaImage({
   renderingBadgeBottom = 180,
   navigatorBottom = 18,
   showNavigator = true,
-  rightDragPans = true,
 }: {
   photo: Photo;
   photos: Photo[];
@@ -312,12 +311,6 @@ export function CinemaImage({
    * live navigator fed from the shared loupeNav store instead.
    */
   showNavigator?: boolean;
-  /**
-   * Whether the right button is a second pan grip. It exists for the tool
-   * overlays (crop, WB, masks), where the left button is busy — a surface with
-   * none of them can give the button back to a context menu instead.
-   */
-  rightDragPans?: boolean;
 }) {
   const client = useApiClient();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -838,7 +831,7 @@ export function CinemaImage({
   // zooms the frame past fit; then the box overflows and the drag scrolls it.
   // Cancel a mode with Esc, not right-click.
   const onPointerDown = (e: React.PointerEvent) => {
-    const right = e.button === 2 && rightDragPans;
+    const right = e.button === 2;
     if (!right && e.button !== 0) return; // only left / right pan
     if (right ? !haveDims : wbPicking || rangePicking || !pannable) return;
     try {
@@ -1076,9 +1069,7 @@ export function CinemaImage({
         onPointerCancel={onPointerEnd}
         onContextMenu={(e) => {
           // Right button pans everywhere; keep the browser menu off the photo.
-          // Where it does NOT pan the event is left alone, so a host that put
-          // a context menu on the button still gets it.
-          if (haveDims && rightDragPans) e.preventDefault();
+          if (haveDims) e.preventDefault();
         }}
         onDoubleClick={() => !wbPicking && !aiPicking && setZoom(zoom === 'fit' ? 1 : 'fit')}
       >

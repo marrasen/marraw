@@ -1,15 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, PictureInPicture2, X } from 'lucide-react';
 
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
+import { WindowControls } from '@/components/WindowControls';
+import { useHoverKeep, useIdle } from '@/lib/useIdle';
 import { cn } from '@/lib/utils';
-import { mod } from '@/lib/platform';
 import { useListPhotos, type Photo } from '@/api/library';
 import { photoPatchReducer } from '@/lib/usePhotos';
 import { useUIStore } from '@/stores/uiStore';
@@ -37,18 +30,8 @@ function ViewerSurface({ folderId, photoId }: ViewerPhoto) {
   const photo = found ?? lastGood;
   if (!photo) return null;
   // No navigator inset and a low badge: nothing may sit over the photo, and
-  // there is no control bar here for the rendering badge to clear. The right
-  // button is given up so it can open this window's menu — none of the tool
-  // overlays it pans for exist here, and the left button pans the same.
-  return (
-    <CinemaImage
-      photo={photo}
-      photos={photos}
-      showNavigator={false}
-      renderingBadgeBottom={24}
-      rightDragPans={false}
-    />
-  );
+  // there is no control bar here for the rendering badge to clear.
+  return <CinemaImage photo={photo} photos={photos} showNavigator={false} renderingBadgeBottom={24} />;
 }
 
 /**
@@ -168,37 +151,45 @@ export default function ViewerApp() {
 
   return (
     <div className="relative flex h-screen flex-col bg-background text-foreground">
-      <ContextMenu>
-        {/* The window's only chrome, and only on demand. It wraps the whole
-            surface (not just the photo) so a right-click anywhere reaches it —
-            including the letterboxed backdrop around a fitted frame. */}
-        <ContextMenuTrigger className="flex min-h-0 flex-1 flex-col">
-          {target ? <ViewerSurface folderId={target.folderId} photoId={target.photoId} /> : null}
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuItem onClick={() => setAlwaysOnTop(!alwaysOnTop)}>
-            {/* The check keeps its slot when off so the labels stay aligned. */}
-            <Check className={cn(!alwaysOnTop && 'invisible')} />
-            Always on top
-          </ContextMenuItem>
-          <ContextMenuItem onClick={() => window.win?.toggleMax()}>
-            <PictureInPicture2 />
-            Maximize / restore
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => window.win?.close()} hint={`${mod}+N`}>
-            <X />
-            Close this window
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
-      {/* The frameless window's move handle (the CinemaHUD pattern). With no
-          chrome at all there would be nothing to drag the window to another
-          monitor by. Thin, so it barely eats into drag-panning the photo. */}
+      {target ? <ViewerSurface folderId={target.folderId} photoId={target.photoId} /> : null}
+      <ViewerHUD pinned={alwaysOnTop} onTogglePin={setAlwaysOnTop} />
+    </div>
+  );
+}
+
+/**
+ * The cinema HUD's top band, reduced to its right island: the window controls
+ * as a glass pill, led by the pin that decides whether this window floats over
+ * other apps.
+ *
+ * It is the whole reason the window reads as a window rather than a picture
+ * stuck to the screen — and being chrome, it stays out of the way: shown on
+ * any pointer move, faded after a few idle seconds, and never faded out from
+ * under a cursor that is resting on it. The band behind it is the move handle,
+ * exactly as in Cull and Develop.
+ */
+function ViewerHUD({ pinned, onTogglePin }: { pinned: boolean; onTogglePin: (next: boolean) => void }) {
+  const idle = useIdle();
+  const { hovered, bind } = useHoverKeep();
+  const conceal = idle && !hovered;
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-30">
+      {/* Without a drag handle a frameless window cannot be moved to the
+          monitor it exists for. Double-click maximizes, which Chromium already
+          does for app-region drags on Windows and macOS but not on Linux. */}
       <div
-        className="absolute inset-x-0 top-0 z-40 h-8 [-webkit-app-region:drag]"
+        className="pointer-events-auto absolute inset-x-0 top-0 h-12 [-webkit-app-region:drag]"
         onDoubleClick={maximizeOnDoubleClick}
       />
+      <div
+        {...bind}
+        className={cn(
+          'absolute top-4 right-[18px] transition-opacity duration-300 [-webkit-app-region:no-drag]',
+          conceal ? 'opacity-0' : 'pointer-events-auto',
+        )}
+      >
+        <WindowControls variant="glass" pinned={pinned} onTogglePin={onTogglePin} />
+      </div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Minus, Square, X } from 'lucide-react';
+import { Minus, Pin, PinOff, Square, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import '@/lib/electron';
 
@@ -19,7 +19,20 @@ function RestoreGlyph() {
  * sits in the structured 48px top bar; `variant="glass"` is the floating
  * pill of the cinema HUD. Renders nothing outside Electron.
  */
-export function WindowControls({ variant = 'bar' }: { variant?: 'bar' | 'glass' }) {
+export function WindowControls({
+  variant = 'bar',
+  pinned,
+  onTogglePin,
+}: {
+  variant?: 'bar' | 'glass';
+  /**
+   * Always-on-top state. Passing onTogglePin leads the cluster with a pin —
+   * the pop-out photo window's, where floating over other apps is a choice
+   * and this is the only chrome there is to put it in.
+   */
+  pinned?: boolean;
+  onTogglePin?: (next: boolean) => void;
+}) {
   const [max, setMax] = useState(false);
   useEffect(() => {
     if (!window.win) return;
@@ -42,6 +55,17 @@ export function WindowControls({ variant = 'bar' }: { variant?: 'bar' | 'glass' 
 
   const cluster = (
     <div className="flex items-center gap-0.5 [-webkit-app-region:no-drag]">
+      {onTogglePin && (
+        <button
+          aria-label={pinned ? 'Unpin from the front' : 'Keep in front'}
+          aria-pressed={pinned}
+          title={pinned ? 'Stop floating over other apps' : 'Keep this window over other apps'}
+          className={cn(btn, pinned && 'text-primary')}
+          onClick={() => onTogglePin(!pinned)}
+        >
+          {pinned ? <Pin className="size-[12px]" strokeWidth={1.5} /> : <PinOff className="size-[12px]" strokeWidth={1.5} />}
+        </button>
+      )}
       <button aria-label="Minimize" title="Minimize" className={btn} onClick={() => window.win!.minimize()}>
         <Minus className="size-[11px]" strokeWidth={1.3} />
       </button>
