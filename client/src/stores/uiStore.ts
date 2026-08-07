@@ -293,6 +293,11 @@ interface UIState {
   // The loupe's actual fit scale, mirrored out so keyboard zoom steps can
   // start from it while loupeZoom is 'fit'.
   loupeFitScale: number;
+  // "View original", held rather than toggled: while true the develop canvas
+  // shows the photo's BASE rendition — the RAW before any edit — over the
+  // developed one. Transient and never persisted; a hold that never sees its
+  // release (mode switch, window blur) is cleared by whoever set it.
+  showOriginal: boolean;
   // Keyboard pan (Shift+arrows): cumulative nudge in viewport fractions.
   // Cumulative (not per-press delta) because React batches back-to-back
   // keydowns into one render — the loupe applies the difference it hasn't
@@ -332,6 +337,7 @@ interface UIState {
   setEyeScanOpen: (open: boolean) => void;
   setCellSize: (px: number) => void;
   setLoupeZoom: (z: 'fit' | number) => void;
+  setShowOriginal: (on: boolean) => void;
   setLoupeFitScale: (scale: number) => void;
   nudgeLoupePan: (dx: number, dy: number) => void;
 }
@@ -404,12 +410,15 @@ export const useUIStore = create<UIState>((set, get) => ({
   loupeCenterTick: 0,
   loupeFitScale: 1,
   loupePan: [0, 0],
+  showOriginal: false,
 
+  // Leaving the mode drops the original hold: only Develop offers it, and a
+  // key release that lands after the switch would have nothing to clear it.
   setMode: (m) =>
     set(
       m === 'library'
-        ? { mode: m, view: 'grid', contactSheet: false }
-        : { mode: m, view: 'loupe' },
+        ? { mode: m, view: 'grid', contactSheet: false, showOriginal: false }
+        : { mode: m, view: 'loupe', showOriginal: false },
     ),
   setAddFolderOpen: (open) => set({ addFolderOpen: open }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
@@ -579,6 +588,7 @@ export const useUIStore = create<UIState>((set, get) => ({
         ? { loupeZoom: 'fit', loupeCenterTick: s.loupeCenterTick + 1 }
         : { loupeZoom: Math.min(4, Math.max(0.05, z)) },
     ),
+  setShowOriginal: (on) => set({ showOriginal: on }),
   setLoupeFitScale: (scale) => set({ loupeFitScale: scale }),
   nudgeLoupePan: (dx, dy) =>
     set((s) => ({ loupePan: [s.loupePan[0] + dx, s.loupePan[1] + dy] })),

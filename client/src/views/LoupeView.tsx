@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Crop as CropIcon, FlipHorizontal2, FlipVertical2, Pipette, RotateCcwSquare, RotateCwSquare, Sparkles } from 'lucide-react';
+import { Crop as CropIcon, Eye, FlipHorizontal2, FlipVertical2, Pipette, RotateCcwSquare, RotateCwSquare, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { onRenderProgressEvent, type Photo } from '@/api/library';
 import { aIModelStatus, subjectBounds } from '@/api/edits';
@@ -332,6 +332,7 @@ export function CinemaImage({
   const aiPicking = useEditSession((s) => s.aiPickArmed != null);
   const activeMask = useEditSession((s) => s.activeMask);
   const uiMode = useUIStore((s) => s.mode);
+  const showOriginal = useUIStore((s) => s.showOriginal);
   const draft = useEditSession((s) => s.draft);
   const esPhotoId = useEditSession((s) => s.photoId);
   // The crop that applies to the shown pixels: the draft when the edit session
@@ -396,6 +397,11 @@ export function CinemaImage({
   // panel hover tint above, minus the armed gate.
   const aiTintUI =
     uiMode === 'develop' && !cropping && !wbPicking && !healing && esPhotoId === photo.id && !!draft;
+  // Hold-to-compare (the dock's Original button, or Backspace held). Off during crop
+  // and WB picking: crop shows the flat frame in full-frame geometry, where an
+  // original laid over it means nothing, and the pipette samples the pixels
+  // under the cursor — which must stay the developed ones.
+  const originalUI = showOriginal && !cropping && !wbPicking;
 
   useEffect(() => {
     const el = containerRef.current;
@@ -1183,6 +1189,9 @@ export function CinemaImage({
             {wbPicking && cursor && (
               <Magnifier src={pickSrc} boxW={boxW} boxH={boxH} cursor={cursor} rgb={sampledRGB} />
             )}
+            {/* Keyed on the photo so a hold that outlives an arrow-key step
+                starts clean instead of holding the previous photo's original. */}
+            {originalUI && <OriginalLayer key={photo.id} photo={photo} level={fitLevel} />}
           </div>
           </div>
         ) : (
@@ -1249,6 +1258,17 @@ export function CinemaImage({
           </div>
         </div>
       </div>
+
+      {/* Hold-to-compare chip. Directly UNDER the HUD status cluster rather
+          than in the crop chip's place: unlike crop, a hold leaves the whole
+          HUD up, so top-left is taken and top-center is the mode control. */}
+      {originalUI && (
+        <div className="glass pointer-events-none absolute top-[58px] left-[18px] z-40 flex items-center gap-2.5 rounded-[9px] px-3 py-[7px]">
+          <Eye className="size-[13px] text-accent-text" strokeWidth={1.5} />
+          <span className="text-[12.5px] font-semibold">Original</span>
+          <span className="font-mono text-[11px] text-muted-foreground">before any edit</span>
+        </div>
+      )}
 
       {/* Crop mode chip (top left, replaces the HUD status cluster). */}
       {cropping && (
@@ -1569,11 +1589,14 @@ export function DecodedImage({
 // deliberate 1:1 browse pays for an on-demand render; a live `previewUrl` blob
 // is shown as-is. onShown reports every committed swap so the caller keeps the
 // tile layer and pixel sampler in lockstep with what is actually displayed.
+// `editHash` overrides which edit state is fetched — the hold-to-compare
+// original layer asks for 'base'; everything else takes the photo's own.
 function SharpImage({
   photo,
   level,
   previewUrl,
   renderAllowed,
+  editHash,
   onShown,
   className,
   style,
@@ -1582,6 +1605,7 @@ function SharpImage({
   level: Level;
   previewUrl: string | null;
   renderAllowed: boolean;
+  editHash?: string;
   onShown?: (src: string) => void;
   className?: string;
   style?: React.CSSProperties;
@@ -1590,12 +1614,12 @@ function SharpImage({
   // The rendition we want up now: a live preview blob wins; otherwise the
   // pre-rendered file — plain (render-allowed) past pyramid depth, cacheOnly
   // while browsing so a cold frame never blocks on a decode.
-  const target = previewUrl ?? imgUrl(photo, level, renderAllowed ? undefined : { cacheOnly: true });
+  const target = previewUrl ?? imgUrl(photo, level, { editHash, cacheOnly: !renderAllowed });
   // Render-allowed URL for the dwell-kick that fills a missing cacheOnly file.
-  const renderUrl = previewUrl ?? imgUrl(photo, level);
+  const renderUrl = previewUrl ?? imgUrl(photo, level, { editHash });
   // Decode-free fallback for a cacheOnly miss: the server answers from the
   // embedded camera JPEG (base-look provisional, no-store) in tens of ms.
-  const fastUrl = imgUrl(photo, level, { fast: true });
+  const fastUrl = imgUrl(photo, level, { editHash, fast: true });
   const cacheOnly = !previewUrl && !renderAllowed;
 
   // Depends on onShown too: the caller may attach it after mount, and shown may
@@ -1668,4 +1692,41 @@ function SharpImage({
   // hold; the always-warm 512 underlay behind shows through until then.
   if (!shown) return null;
   return <img src={shown} draggable={false} alt="" className={className} style={style} />;
+}
+
+// OriginalLayer is the hold-to-compare view: the photo's BASE rendition — the
+// RAW as the camera shot it, before any develop edit — over the developed
+// frame, on top of every tool overlay so what's on screen is unambiguously
+// the original.
+//
+// The base render is a different SHAPE whenever the photo is cropped or
+// rotated, so it is CONTAINED in the developed frame's box rather than
+// stretched into it: with no crop it covers the box exactly (nothing moves as
+// the hold starts), and with one the whole original letterboxes inside — the
+// honest answer to "what did this look like before". The opaque backing only
+// appears once a frame has actually decoded, so the moment before that shows
+// the developed photo rather than an empty rectangle.
+//
+// Never render-allowed: the base 512/1024 is written at scan time and the fast
+// path derives the rest from the camera's embedded JPEG, so a hold paints in
+// tens of milliseconds and only one that dwells pays for a decode — the same
+// no-stall rule the browse follows.
+function OriginalLayer({ photo, level }: { photo: Photo; level: Level }) {
+  const [shown, setShown] = useState('');
+  return (
+    <div
+      className={cn('absolute inset-0 z-20', shown && 'bg-background')}
+      data-testid="original-layer"
+    >
+      <SharpImage
+        photo={photo}
+        level={level}
+        previewUrl={null}
+        renderAllowed={false}
+        editHash="base"
+        onShown={setShown}
+        className="size-full object-contain"
+      />
+    </div>
+  );
 }

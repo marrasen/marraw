@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Eye } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
 import { burstFor, type BurstInfo } from '@/lib/bursts';
@@ -120,7 +121,12 @@ export function DevelopView({
       </div>
       {!overlayActive && (
         <>
-          <QuickDock hidden={chromeHidden} shifted zoom={<ZoomCluster scale={scale} />} />
+          <QuickDock
+            hidden={chromeHidden}
+            shifted
+            original={<OriginalButton />}
+            zoom={<ZoomCluster scale={scale} />}
+          />
           <ScrubberDeck groups={groups} focusId={photo.id} hidden={chromeHidden} shifted bursts={bursts} />
           {adjusting && <SliderHUD />}
         </>
@@ -129,18 +135,60 @@ export function DevelopView({
   );
 }
 
+// OriginalButton: hold to see the photo before any develop edit. Deliberately
+// press-and-hold rather than a toggle — the comparison is a glance, and a
+// toggle leaves a state the user can walk away from and mistake for the real
+// render. Pointer capture means the release is caught even if the pointer
+// slides off the button mid-hold.
+function OriginalButton() {
+  const on = useUIStore((s) => s.showOriginal);
+  const setOn = useUIStore((s) => s.setShowOriginal);
+  return (
+    <button
+      className={cn(
+        'flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] border border-input bg-white/5 px-2.5 text-[11px] leading-none whitespace-nowrap transition-colors hover:border-ring',
+        on && 'border-ring bg-primary/25 text-accent-text',
+      )}
+      aria-label="View the original — hold to show the photo before any edit"
+      aria-pressed={on}
+      title="Hold to view the original (Backspace)"
+      onPointerDown={(e) => {
+        setOn(true);
+        // Capture retargets the release here even if the pointer slid off the
+        // button mid-hold. It is refused for a pointer id the browser isn't
+        // tracking (a synthesized event), so it must not be what turns the
+        // hold on — onPointerLeave covers the uncaptured case.
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch {
+          // no capture: the leave handler below ends the hold instead
+        }
+      }}
+      onPointerUp={() => setOn(false)}
+      onPointerCancel={() => setOn(false)}
+      onPointerLeave={() => setOn(false)}
+      onLostPointerCapture={() => setOn(false)}
+    >
+      <Eye className="size-[13px]" strokeWidth={1.5} />
+      Original
+    </button>
+  );
+}
+
 // QuickDock: the user-picked dials floating over the canvas, plus the
-// embedded zoom cluster. With no dials picked (the default) it collapses to
-// just the zoom cluster. Stays rendered while the next photo's edit session
-// loads — the last draft keeps the dials in place (input disabled) so
-// arrowing through a take doesn't blink the dock.
+// hold-to-compare Original button and the embedded zoom cluster. With no dials
+// picked (the default) it collapses to those two. Stays rendered while the
+// next photo's edit session loads — the last draft keeps the dials in place
+// (input disabled) so arrowing through a take doesn't blink the dock.
 function QuickDock({
   hidden,
   shifted,
+  original,
   zoom,
 }: {
   hidden?: boolean;
   shifted?: boolean;
+  original?: React.ReactNode;
   zoom?: React.ReactNode;
 }) {
   const client = useApiClient();
@@ -207,9 +255,10 @@ function QuickDock({
               ),
             )}
           </div>
-          {zoom && <div className="h-9 w-px bg-white/15" />}
+          {(original || zoom) && <div className="h-9 w-px bg-white/15" />}
         </>
       )}
+      {original}
       {zoom}
     </div>
     </div>

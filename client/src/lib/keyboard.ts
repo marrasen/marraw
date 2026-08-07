@@ -92,6 +92,8 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 //   Enter · Esc   forward / back a mode: Library ⇄ Cull ⇄ Develop
 //   E B T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
 //   W             toggle the white-balance eyedropper (Enter keep · Esc cancel)
+//   Backspace     HELD, show the original (Develop): the photo before any edit
+//                 (deletes the selected retouch spot instead while healing)
 //   Q             toggle the heal / spot-removal tool; while it's up A toggles
 //                 the visualize-spots dust view, and with a spot selected the
 //                 digits set its opacity (1-9 → 10-90%, 0 → 100%)
@@ -301,6 +303,22 @@ export function useKeyboard() {
         return;
       }
 
+      // Backspace HELD shows the original — the photo before any develop edit
+      // — like the dock's Original button. Backspace rather than Lightroom's
+      // \: that key needs AltGr on a Swedish layout (and others), where a
+      // press-and-hold gesture is unusable. It owns the key outright; removing
+      // a retouch spot moved to Delete alone (see the switch below) rather than
+      // sharing it. Hold, not toggle: the keyup below puts the developed frame
+      // back, so there is no state to get stuck in. Key repeat re-fires this
+      // while held, hence the already-on guard.
+      if (e.key === 'Backspace') {
+        if (s.mode === 'develop' && !es.cropping && !es.wbPicking) {
+          e.preventDefault();
+          if (!s.showOriginal) s.setShowOriginal(true);
+        }
+        return;
+      }
+
       // Q toggles the heal / spot-removal tool (like R for crop): its overlay
       // lives on the cinema surface, so entering from Library switches to
       // Develop for real. esSetHealing reveals the Local tab (where the
@@ -448,8 +466,9 @@ export function useKeyboard() {
           applyRating(Number(e.key));
           break;
         case 'Delete':
-        case 'Backspace':
           // Delete the selected retouch spot while the heal tool is active.
+          // Delete only — Backspace is the hold-to-view-original key, and one
+          // key meaning two things on the same surface is worth no keystroke.
           if (es.healing && es.activeSpot != null) {
             e.preventDefault();
             esRemoveSpot(client, es.activeSpot);
@@ -529,7 +548,23 @@ export function useKeyboard() {
           break;
       }
     };
+    // Releasing \ ends the original hold. Unconditional — no mode or
+    // typing-target guard: whatever set the hold, this must be able to clear
+    // it. Same for blur: a release that lands in another window (alt-tab
+    // mid-hold) never reaches us, and the canvas would keep showing the
+    // original with nothing on screen explaining why.
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Backspace') useUIStore.getState().setShowOriginal(false);
+    };
+    const onBlur = () => useUIStore.getState().setShowOriginal(false);
+
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
+    };
   }, [client]);
 }

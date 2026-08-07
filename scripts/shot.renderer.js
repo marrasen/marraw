@@ -36,6 +36,176 @@ if (shot === 'cull') {
   ui().setContactSheet(true);
 } else if (shot === 'develop') {
   ui().setMode('develop');
+} else if (shot === 'original' || shot === 'original-released') {
+  // Hold-to-compare: the dock's Original button and \ both show the photo's
+  // BASE rendition over the developed one, and BOTH must let go. A crop is
+  // part of the edit so the layer's letterboxing (the original is a different
+  // shape than the developed frame) is exercised, not just its pixels.
+  // `original` captures mid-hold; `original-released` captures after the
+  // release, where the same edit must be back on screen.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(1200); // initial preview settles
+
+  const btn = [...document.querySelectorAll('button')].find(
+    (b) => b.textContent.trim() === 'Original',
+  );
+  const press = (key, type = 'keydown') =>
+    window.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true }));
+  const point = (type) =>
+    btn?.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, isPrimary: true }));
+  const layer = () => document.querySelector('[data-testid="original-layer"] img');
+  const lumaOf = async (src) => {
+    const blob = typeof src === 'string' ? await (await fetch(src)).blob() : src;
+    // Both axes pinned: the two frames come from different pyramid levels, and
+    // a width-only resize leaves them different heights (uncomparable arrays).
+    const bmp = await createImageBitmap(blob, { resizeWidth: 64, resizeHeight: 64 });
+    const c = document.createElement('canvas');
+    c.width = bmp.width;
+    c.height = bmp.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bmp, 0, 0);
+    const d = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    return d;
+  };
+  const meanLuma = (d) => {
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+    return Math.round(sum / (d.length / 4));
+  };
+  // Mean absolute difference over the same field of view. Sturdier than
+  // comparing means: the fixture's seeded base exposure can leave the edited
+  // frame no brighter overall even though every pixel moved.
+  const meanDiff = (a, b) => {
+    if (a.length !== b.length) return null;
+    let sum = 0;
+    for (let i = 0; i < a.length; i += 4) {
+      sum += (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2])) / 3;
+    }
+    return Math.round(sum / (a.length / 4));
+  };
+
+  // Pass 0 — the key handoff. Backspace used to also delete the selected
+  // retouch spot; that moved to Delete alone so the hold owns the key. With
+  // the heal tool up and a spot chosen, Backspace must leave the spot standing
+  // (and still hold) while Delete removes it.
+  mw.esUpdate({ spots: [] }); // idempotence: drop any spots a previous run left
+  mw.esCommit();
+  await sleep(300);
+  mw.esSetHealing(true);
+  const spot = mw.esBeginSpot({ cx: 0.5, cy: 0.5, radius: 0.035, sx: 0.62, sy: 0.55, feather: 0.5 });
+  await mw.esFinishSpot(spot);
+  mw.esSetActiveSpot(spot);
+  await sleep(300);
+  const spotsBefore = es.getState().draft.spots?.length ?? 0;
+  press('Backspace');
+  await sleep(200);
+  const spotsAfterBackspace = es.getState().draft.spots?.length ?? 0;
+  const heldWhileHealing = ui().showOriginal;
+  press('Backspace', 'keyup');
+  press('Delete');
+  await sleep(400);
+  const spotsAfterDelete = es.getState().draft.spots?.length ?? 0;
+  mw.esSetHealing(false);
+  await sleep(300);
+
+  // Pass 1 — PIXELS, uncropped so both frames show the same field of view and
+  // a luma comparison means something: a hard tone edit, then hold and read
+  // what the layer actually painted. expEV is set well clear of the fixture's
+  // seeded base_exp_ev (~1.9 — untouched photos are not neutral), so the
+  // developed frame comes out unmistakably brighter than the original.
+  mw.esUpdate({ expEV: 3.5, saturation: -0.9, contrast: 0.5, cropX: 0, cropY: 0, cropW: 1, cropH: 1 });
+  mw.esCommit();
+  await until(() => mw.esPreviewSettled(), 30000);
+  await sleep(1500); // the committed rendition lands under the new hash
+  point('pointerdown');
+  await until(() => layer()?.naturalWidth > 0, 20000);
+  const pxOriginal = await lumaOf(layer().src);
+  const pxDeveloped = await lumaOf(es.getState().preview?.blob ?? layer().src);
+  point('pointerup');
+
+  // Keyboard: Backspace down holds, Backspace up releases.
+  press('Backspace');
+  await sleep(500);
+  const onAfterKeyDown = ui().showOriginal;
+  press('Backspace', 'keyup');
+  const offAfterKeyUp = ui().showOriginal;
+  // A release that lands in another window never reaches us — blur clears it.
+  press('Backspace');
+  window.dispatchEvent(new Event('blur'));
+  const offAfterBlur = ui().showOriginal;
+
+  // Pass 2 — GEOMETRY. A wide crop of a portrait frame: the original's own
+  // aspect is nothing like the developed box's, so the containment (rather
+  // than a stretch into the cropped box) is unmistakable in the capture.
+  mw.esUpdate({ cropX: 0.05, cropY: 0.3, cropW: 0.9, cropH: 0.34 });
+  mw.esCommit();
+  await until(() => mw.esPreviewSettled(), 30000);
+  await sleep(1500);
+  point('pointerdown');
+  const onAfterPointerDown = ui().showOriginal;
+  point('pointerup');
+  const offAfterPointerUp = ui().showOriginal;
+  point('pointerdown'); // left held for the capture
+  await until(() => layer()?.naturalWidth > 0, 20000);
+
+  const img = layer();
+  const draft = es.getState().draft;
+  const box = document.querySelector('[data-testid="original-layer"]').parentElement;
+  const boxRect = box.getBoundingClientRect();
+  const imgRect = img.getBoundingClientRect();
+  const originalUrl = img.src;
+  window.__originalProbe = {
+    hasButton: !!btn,
+    // Backspace holds instead of deleting the spot; Delete still deletes.
+    spotsBefore,
+    spotsAfterBackspace,
+    heldWhileHealing,
+    spotsAfterDelete,
+    spotSurvivedBackspace: spotsAfterBackspace === spotsBefore,
+    deleteRemovedSpot: spotsAfterDelete === spotsBefore - 1,
+    onAfterKeyDown,
+    offAfterKeyUp,
+    offAfterBlur,
+    onAfterPointerDown,
+    offAfterPointerUp,
+    // The layer asks for the base state — no e= is the base hash.
+    layerSrcIsBase: /\/img\/\d+\/\d+\?/.test(originalUrl) && !/[?&]e=/.test(originalUrl),
+    // Same framing, a hard tone+colour edit apart: the layer really is
+    // different pixels, not the developed frame under a different URL.
+    baseExpEV: es.getState().baseExpEV,
+    lumaOriginal: meanLuma(pxOriginal),
+    lumaDeveloped: meanLuma(pxDeveloped),
+    meanDiff: meanDiff(pxDeveloped, pxOriginal),
+    pixelsDiffer: meanDiff(pxDeveloped, pxOriginal) > 10,
+    // Cropped to 0.9×0.34 of the frame: the original keeps the full frame's
+    // aspect, so it letterboxes inside the developed box instead of stretching.
+    cropped: draft.cropW > 0 && draft.cropW < 1,
+    boxAspect: Math.round((boxRect.width / boxRect.height) * 100) / 100,
+    // object-contain: the painted image's own aspect, not the box's.
+    naturalAspect: Math.round((img.naturalWidth / img.naturalHeight) * 100) / 100,
+    fitsInBox: imgRect.width <= boxRect.width + 1 && imgRect.height <= boxRect.height + 1,
+  };
+  // Released variant: let go only after the measurements above (the layer's
+  // nodes are gone the moment React re-renders).
+  if (shot === 'original-released') point('pointerup');
+  // The capture fires ~4s after this branch returns; re-measure just before it
+  // so the probe describes the geometry actually in the PNG, not an earlier one.
+  setTimeout(() => {
+    const b = document.querySelector('[data-testid="original-layer"]')?.parentElement;
+    const i = layer();
+    const d = es.getState().draft;
+    window.__originalProbe.atCapture = {
+      held: ui().showOriginal,
+      zoom: ui().loupeZoom,
+      crop: d ? [d.cropX, d.cropY, d.cropW, d.cropH] : null,
+      boxRect: b ? [Math.round(b.getBoundingClientRect().width), Math.round(b.getBoundingClientRect().height)] : null,
+      imgRect: i ? [Math.round(i.getBoundingClientRect().width), Math.round(i.getBoundingClientRect().height)] : null,
+      natural: i ? [i.naturalWidth, i.naturalHeight] : null,
+      src: i ? i.src.replace(/[?&]t=[^&]*/, '') : null,
+    };
+  }, 3800);
 } else if (shot === 'crop' || shot === 'crop-exit') {
   ui().setMode('develop');
   await until(() => mw.useEditSession.getState().draft != null);
@@ -2399,6 +2569,7 @@ if (!params.get('shotNoWake')) {
 }
 await sleep(400);
 const probe =
+  window.__originalProbe ??
   window.__autoCropProbe ??
   window.__blinksProbe ??
   window.__scanLabelsProbe ??
