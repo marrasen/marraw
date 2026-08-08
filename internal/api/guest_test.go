@@ -729,3 +729,26 @@ func TestLoopbackOnlyDaemonHasNoShareBase(t *testing.T) {
 		}
 	}
 }
+
+// One wedged mount must not cost a goroutine per poll. The stat that hangs is
+// unavoidable; a second one queued behind it every few seconds, for the life
+// of the daemon, is not.
+func TestStatGateAllowsOneCheckPerPathAtATime(t *testing.T) {
+	g := statGate{pending: map[string]bool{}}
+
+	if !g.enter("/mnt/share") {
+		t.Fatal("the first check was refused")
+	}
+	if g.enter("/mnt/share") {
+		t.Error("a second check started while the first was still running")
+	}
+	// A different path is unaffected — one dead share must not make the others
+	// look dead too.
+	if !g.enter("/mnt/other") {
+		t.Error("an unrelated path was refused")
+	}
+	g.leave("/mnt/share")
+	if !g.enter("/mnt/share") {
+		t.Error("the path stayed blocked after its check finished")
+	}
+}

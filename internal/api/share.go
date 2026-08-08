@@ -411,8 +411,8 @@ func (s *Share) toShareLink(ctx context.Context, g GuestLink, base string, now t
 	if base != "" {
 		out.URL = base + "/s/" + g.Token + "/"
 	}
-	if photos, err := s.deps.DB.ListPhotos(ctx, g.FolderID); err == nil {
-		out.PhotoCount = len(photos)
+	if n, err := s.deps.DB.CountPhotos(ctx, g.FolderID); err == nil {
+		out.PhotoCount = n
 	}
 	return out
 }

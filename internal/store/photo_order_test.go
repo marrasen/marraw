@@ -119,3 +119,59 @@ func TestListPhotosTiesBreakOnFileName(t *testing.T) {
 		}
 	}
 }
+
+// CountPhotos replaced a ListPhotos whose only use was len(): the share list
+// refreshes on every guest connect and disconnect, and materialising a whole
+// shoot to count it made a guest on a flaky connection expensive to have
+// around. It has to agree with the list it stopped building.
+func TestCountPhotosAgreesWithListPhotos(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	shared, err := db.UpsertFolder(ctx, `/photos/shared`)
+	if err != nil {
+		t.Fatalf("UpsertFolder: %v", err)
+	}
+	other, err := db.UpsertFolder(ctx, `/photos/other`)
+	if err != nil {
+		t.Fatalf("UpsertFolder: %v", err)
+	}
+	if _, err := db.SyncFolder(ctx, shared, `/photos/shared`, []FileEntry{
+		{Name: "a.arw", Size: 1, MtimeNs: 1},
+		{Name: "b.arw", Size: 1, MtimeNs: 1},
+		{Name: "c.arw", Size: 1, MtimeNs: 1},
+	}); err != nil {
+		t.Fatalf("SyncFolder: %v", err)
+	}
+	// A second folder must not be counted into the first.
+	if _, err := db.SyncFolder(ctx, other, `/photos/other`, []FileEntry{
+		{Name: "d.arw", Size: 1, MtimeNs: 1},
+	}); err != nil {
+		t.Fatalf("SyncFolder: %v", err)
+	}
+
+	photos, err := db.ListPhotos(ctx, shared)
+	if err != nil {
+		t.Fatalf("ListPhotos: %v", err)
+	}
+	n, err := db.CountPhotos(ctx, shared)
+	if err != nil {
+		t.Fatalf("CountPhotos: %v", err)
+	}
+	if n != len(photos) || n != 3 {
+		t.Errorf("CountPhotos = %d, ListPhotos = %d, want 3", n, len(photos))
+	}
+
+	// An empty folder counts zero rather than erroring on no rows.
+	empty, err := db.UpsertFolder(ctx, `/photos/empty`)
+	if err != nil {
+		t.Fatalf("UpsertFolder: %v", err)
+	}
+	if n, err := db.CountPhotos(ctx, empty); err != nil || n != 0 {
+		t.Errorf("CountPhotos(empty) = (%d, %v), want (0, nil)", n, err)
+	}
+}

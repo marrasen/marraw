@@ -123,10 +123,18 @@ func (hc *HandleCache) evictLocked() {
 	}
 }
 
+// Close releases every idle handle. Handles still held are left to their
+// holder: closing a LibRaw processor another goroutine is inside a C call with
+// frees memory that call is still reading, and a use-after-free in native code
+// at shutdown reads as a crash on exit rather than the clean stop it was.
+// Whatever is still in use goes away with the process moments later anyway.
 func (hc *HandleCache) Close() {
 	hc.mu.Lock()
 	defer hc.mu.Unlock()
 	for id, e := range hc.entries {
+		if e.refs > 0 {
+			continue
+		}
 		delete(hc.entries, id)
 		if e.proc != nil {
 			e.proc.Close()

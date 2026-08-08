@@ -346,6 +346,18 @@ func (db *DB) SetPHash(ctx context.Context, id int64, hash uint64) error {
 // into capture order as the backfill lands. Untimed photos (no EXIF date) sort
 // last, among themselves by name; file_name breaks ties so the order is total
 // and stable across queries.
+// CountPhotos returns how many photos a folder holds. For a caller that wants
+// only the number, this is worth having on its own: the share list refreshes
+// on every guest connect and disconnect, and materialising every row of a
+// shoot to call len() on it made a guest on a flaky connection expensive to
+// have around.
+func (db *DB) CountPhotos(ctx context.Context, folderID int64) (int, error) {
+	var n int
+	err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM photos WHERE folder_id = ?`, folderID).Scan(&n)
+	return n, err
+}
+
 func (db *DB) ListPhotos(ctx context.Context, folderID int64) ([]Photo, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT `+photoCols+` FROM photos p JOIN folders f ON f.id = p.folder_id

@@ -84,3 +84,24 @@ func TestAcquireDoesNotStallOtherPhotosWhileOpening(t *testing.T) {
 		t.Error("a failed open left an entry in the cache")
 	}
 }
+
+// Close used to take every handle regardless of who was holding it, so a
+// shutdown landing mid-decode freed a LibRaw processor out from under a live
+// C call. What is still in use is left alone; the process takes it moments
+// later anyway.
+func TestCloseLeavesHeldHandlesAlone(t *testing.T) {
+	hc := NewHandleCache(4)
+	held := &handleEntry{refs: 1}
+	idle := &handleEntry{}
+	hc.entries[1] = held
+	hc.entries[2] = idle
+
+	hc.Close()
+
+	if _, ok := hc.entries[1]; !ok {
+		t.Error("Close removed a handle that was still held")
+	}
+	if _, ok := hc.entries[2]; ok {
+		t.Error("Close left an idle handle behind")
+	}
+}

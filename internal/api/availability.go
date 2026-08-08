@@ -26,6 +26,38 @@ const pollAvailability = 3 * time.Second
 // status of every other root.
 const statTimeout = 2 * time.Second
 
+// statGate keeps at most one outstanding stat per path.
+//
+// A stat that outlives its timeout is still running: it ends when the kernel
+// finally answers, which on a hard-hung NFS or SMB mount can be minutes, or
+// never. The poller comes back every few seconds regardless, so without this
+// one wedged share added a permanently blocked goroutine — and the OS thread
+// it sits in, since it is parked in a syscall — on every tick, for the life of
+// the daemon. That is roughly a thousand an hour for one unplugged drive.
+type statGate struct {
+	mu      sync.Mutex
+	pending map[string]bool
+}
+
+var statsInFlight = statGate{pending: map[string]bool{}}
+
+// enter reports whether the caller may start a stat for path.
+func (g *statGate) enter(path string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending[path] {
+		return false
+	}
+	g.pending[path] = true
+	return true
+}
+
+func (g *statGate) leave(path string) {
+	g.mu.Lock()
+	delete(g.pending, path)
+	g.mu.Unlock()
+}
+
 // reachable reports whether path is an existing directory right now.
 //
 // The stat runs on its own goroutine so a wedged filesystem cannot hold the
@@ -33,15 +65,25 @@ const statTimeout = 2 * time.Second
 // answers — which is why the result channel is buffered: nobody may be left to
 // receive it.
 func reachable(path string) bool {
+	if !statsInFlight.enter(path) {
+		// The previous check for this path is still stuck in the kernel. What
+		// it is stuck on is the path not answering, so that is the answer —
+		// and piling a second goroutine onto it would not learn anything the
+		// first one will not.
+		return false
+	}
 	done := make(chan bool, 1)
 	go func() {
+		defer statsInFlight.leave(path)
 		fi, err := os.Stat(path)
 		done <- err == nil && fi.IsDir()
 	}()
+	timer := time.NewTimer(statTimeout)
+	defer timer.Stop()
 	select {
 	case ok := <-done:
 		return ok
-	case <-time.After(statTimeout):
+	case <-timer.C:
 		return false
 	}
 }

@@ -469,9 +469,16 @@ func main() {
 	deps.ListenAddr = net.JoinHostPort(*listen, strconv.Itoa(actualPort))
 
 	httpServer := &http.Server{Handler: cors(isDev, mux)}
+	// A dead listener leaves the daemon useless, but log.Fatalf is the wrong
+	// way to say so: it exits from inside this goroutine, skipping every
+	// deferred close and — the part that matters — the funnel withdrawal
+	// below. The machine would stay published on the public internet for a
+	// daemon that answers nothing, until Tailscale eventually noticed. Fold it
+	// into the ordinary shutdown instead.
 	go func() {
 		if err := httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("serve: %v", err)
+			log.Printf("serve: %v", err)
+			stop()
 		}
 	}()
 

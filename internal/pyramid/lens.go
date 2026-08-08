@@ -233,6 +233,11 @@ func (p *plane) sample1(x, y float64, c int) uint8 {
 // render of every level — hence the memo. The answer depends only on the
 // photo's EXIF, never on the edit, so one entry per cache key is enough; a
 // photo with no matching profile memoizes the nil.
+// maxLensMemo caps the memo at far more photos than any one editing session
+// works through, so the bound is a backstop rather than something the hot path
+// ever notices.
+const maxLensMemo = 4096
+
 type LensProfiles struct {
 	mu    sync.Mutex
 	byKey map[string]*lens.Correction
@@ -257,6 +262,14 @@ func (p *LensProfiles) For(photo store.Photo) *lens.Correction {
 		return c
 	}
 	c := lens.Resolve(photo.Make, photo.Model, photo.Lens, photo.FocalLen, photo.Aperture)
+	// Bound it. One entry per photo is small, but nothing ever removed one, so
+	// a long session across a large library grew this for the life of the
+	// process — the only per-photo cache here without a cap. A miss costs one
+	// database scan, not a stall, so dropping the lot on overflow is enough:
+	// the working set is a folder at a time and refills immediately.
+	if len(p.byKey) >= maxLensMemo {
+		clear(p.byKey)
+	}
 	p.byKey[photo.CacheKey] = c
 	return c
 }
