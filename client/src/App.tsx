@@ -116,7 +116,7 @@ export default function App() {
   useDropFolder();
   // Mirror the OS fullscreen state (F11) so Esc can exit it first.
   useEffect(() => {
-    window.win?.onFullScreenChange((fs) => useUIStore.setState({ fullscreen: fs }));
+    return window.win?.onFullScreenChange((fs) => useUIStore.setState({ fullscreen: fs }));
   }, []);
   // Trackpad pinch arrives as ctrl+wheel. The loupe consumes it for image zoom;
   // everywhere else it must NOT trigger Chromium's page/visual-viewport zoom.

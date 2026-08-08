@@ -36,8 +36,13 @@ export function WindowControls({
   const [max, setMax] = useState(false);
   useEffect(() => {
     if (!window.win) return;
-    window.win.onMaxChange(setMax);
+    // This cluster rides in chrome that remounts on every view switch, so the
+    // unsubscribe matters: without it each switch would strand a listener
+    // holding this setMax. Older shells return nothing — then there is
+    // nothing to clean up either.
+    const off = window.win.onMaxChange(setMax);
     void window.win.isMax().then(setMax);
+    return off;
   }, []);
   if (!window.win) return null;
 

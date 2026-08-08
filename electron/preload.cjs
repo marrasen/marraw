@@ -91,6 +91,18 @@ contextBridge.exposeInMainWorld('win', {
     ipcRenderer.on('win:viewerOpen', handler);
     return () => ipcRenderer.off('win:viewerOpen', handler);
   },
-  onMaxChange: (cb) => ipcRenderer.on('win:maxChanged', (_e, v) => cb(v)),
-  onFullScreenChange: (cb) => ipcRenderer.on('win:fullscreenChanged', (_e, v) => cb(v)),
+  // Like the viewer pushes above, these hand back their own unsubscribe:
+  // WindowControls rides along with chrome that mounts and unmounts on every
+  // view switch, so a subscription with no way off the bus would leak a
+  // listener — and a dead component's setState — on each one.
+  onMaxChange: (cb) => {
+    const handler = (_e, v) => cb(v);
+    ipcRenderer.on('win:maxChanged', handler);
+    return () => ipcRenderer.off('win:maxChanged', handler);
+  },
+  onFullScreenChange: (cb) => {
+    const handler = (_e, v) => cb(v);
+    ipcRenderer.on('win:fullscreenChanged', handler);
+    return () => ipcRenderer.off('win:fullscreenChanged', handler);
+  },
 });

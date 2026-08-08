@@ -120,8 +120,14 @@ declare global {
       toggleFullScreen: () => void;
       isMax: () => Promise<boolean>;
       openNewWindow: (folderPath?: string) => void;
-      onMaxChange: (cb: (max: boolean) => void) => void;
-      onFullScreenChange: (cb: (fs: boolean) => void) => void;
+      /**
+       * Subscribes to maximize/restore pushes; returns its own unsubscribe.
+       * Optional only because an older shell returns undefined — callers must
+       * feature-check before calling the result (see WindowControls).
+       */
+      onMaxChange: (cb: (max: boolean) => void) => (() => void) | void;
+      /** Subscribes to fullscreen pushes; returns its own unsubscribe. */
+      onFullScreenChange: (cb: (fs: boolean) => void) => (() => void) | void;
       // Pop-out photo window — absent on builds predating it; feature-check.
       toggleViewer?: () => void;
       setViewerPhoto?: (state: ViewerPhoto) => void;

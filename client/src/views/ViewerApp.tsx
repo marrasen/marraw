@@ -97,7 +97,7 @@ export default function ViewerApp() {
   // looking at it.
   useEffect(() => {
     let fullscreen = false;
-    window.win?.onFullScreenChange((fs) => {
+    const offFullScreen = window.win?.onFullScreenChange((fs) => {
       fullscreen = fs;
     });
     // Stepping from 'fit' starts at the actual fit scale (mirrored out by the
@@ -146,7 +146,10 @@ export default function ViewerApp() {
       }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      offFullScreen?.();
+    };
   }, []);
 
   return (
