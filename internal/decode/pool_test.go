@@ -123,3 +123,58 @@ func TestPoolSharedJobSurvivesOneWaiterLeaving(t *testing.T) {
 		t.Fatalf("remaining waiter: got %v, want nil (job ctx must stay live)", err)
 	}
 }
+
+// A worker that cannot create its LibRaw processor used to return silently,
+// leaving a queue nobody would ever serve. Callers on a context that cannot be
+// canceled — prerenders, post-save warms — then waited for the life of the
+// process, and nothing was logged to say why.
+func TestPoolFailsJobsOnceEveryWorkerIsGone(t *testing.T) {
+	p := NewPool(1)
+	defer p.Close()
+
+	// Occupy the only worker so the next job stays queued.
+	block := make(chan struct{})
+	started := make(chan struct{})
+	go p.Do(context.Background(), "running", PriorityVisible, func(ctx context.Context, _ *libraw.Processor) error {
+		close(started)
+		<-block
+		return nil
+	})
+	<-started
+
+	queued := make(chan error, 1)
+	go func() {
+		queued <- p.Do(context.Background(), "queued", PriorityVisible,
+			func(ctx context.Context, _ *libraw.Processor) error { return nil })
+	}()
+	time.Sleep(50 * time.Millisecond) // let it enqueue
+
+	// The unmockable part is libraw.New() failing; this is the state it leaves.
+	p.workerGone(errors.New("simulated libraw failure"))
+
+	select {
+	case err := <-queued:
+		if !errors.Is(err, errNoWorkers) {
+			t.Errorf("queued job returned %v, want errNoWorkers", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a job queued when the pool lost its workers never returned")
+	}
+
+	// And nothing new may be accepted, rather than blocking on a worker that
+	// is not coming back.
+	done := make(chan error, 1)
+	go func() {
+		done <- p.Do(context.Background(), "later", PriorityVisible,
+			func(ctx context.Context, _ *libraw.Processor) error { return nil })
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errNoWorkers) {
+			t.Errorf("later Do returned %v, want errNoWorkers", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Do blocked on a pool with no workers")
+	}
+	close(block)
+}

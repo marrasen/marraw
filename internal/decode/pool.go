@@ -5,10 +5,17 @@ package decode
 import (
 	"container/heap"
 	"context"
+	"errors"
+	"fmt"
+	"log"
 	"sync"
 
 	"github.com/marrasen/marraw/internal/libraw"
 )
+
+// errNoWorkers is what Do reports once the pool has no worker goroutines left.
+// Callers get an error they can surface instead of a wait that never ends.
+var errNoWorkers = errors.New("decode: no LibRaw workers available")
 
 type Priority int
 
@@ -40,11 +47,16 @@ type Pool struct {
 	inflight map[string]*job // queued or running, by dedup key
 	seq      uint64
 	closed   bool
+	live     int   // worker goroutines still running
+	dead     error // set once live hits 0 without a Close; fails every later Do
 	wg       sync.WaitGroup
 }
 
 func NewPool(workers int) *Pool {
-	p := &Pool{inflight: make(map[string]*job)}
+	if workers < 1 {
+		workers = 1
+	}
+	p := &Pool{inflight: make(map[string]*job), live: workers}
 	p.cond = sync.NewCond(&p.mu)
 	for range workers {
 		p.wg.Add(1)
@@ -66,6 +78,11 @@ retry:
 	if p.closed {
 		p.mu.Unlock()
 		return context.Canceled
+	}
+	if p.dead != nil {
+		err := p.dead
+		p.mu.Unlock()
+		return err
 	}
 	j, ok := p.inflight[key]
 	if ok && j.abandoned {
@@ -135,6 +152,11 @@ func (p *Pool) worker() {
 	defer p.wg.Done()
 	proc, err := libraw.New()
 	if err != nil {
+		// Silently returning here left the pool with a queue and nobody to
+		// serve it: every Do blocked on a job that would never be picked up,
+		// forever for the callers on an uncancellable context.
+		log.Printf("decode: worker could not create a LibRaw processor: %v", err)
+		p.workerGone(err)
 		return
 	}
 	defer proc.Close()
@@ -145,6 +167,7 @@ func (p *Pool) worker() {
 		}
 		if p.closed {
 			p.mu.Unlock()
+			p.workerGone(nil)
 			return
 		}
 		j := heap.Pop(&p.queue).(*job)
@@ -157,6 +180,36 @@ func (p *Pool) worker() {
 		p.mu.Lock()
 		delete(p.inflight, j.key)
 		p.mu.Unlock()
+		close(j.done)
+	}
+}
+
+// workerGone records that a worker goroutine has stopped. Losing the last one
+// outside of Close means nothing will ever run again, so the queue is failed
+// rather than left to wait on a worker that is not coming: a caller blocked on
+// a context that cannot be canceled — a prerender, a post-save warm — would
+// otherwise wait for the life of the process, with nothing logged anywhere.
+func (p *Pool) workerGone(cause error) {
+	p.mu.Lock()
+	p.live--
+	if p.live > 0 || p.closed {
+		p.mu.Unlock()
+		return
+	}
+	p.dead = errNoWorkers
+	if cause != nil {
+		p.dead = fmt.Errorf("%w: %w", errNoWorkers, cause)
+	}
+	orphaned := p.queue
+	p.queue = nil
+	for _, j := range orphaned {
+		j.index = -1
+		delete(p.inflight, j.key)
+		j.err = p.dead
+	}
+	p.mu.Unlock()
+	for _, j := range orphaned {
+		j.cancel()
 		close(j.done)
 	}
 }
