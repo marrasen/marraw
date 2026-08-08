@@ -84,7 +84,7 @@ describe('labelForDiff', () => {
       expect(labelForDiff(a, withParams({ masks: [mask({ disabled: true })] }))).toBe('Hide mask');
       expect(labelForDiff(withParams({ masks: [mask({ disabled: true })] }), a)).toBe('Show mask');
       expect(
-        labelForDiff(a, withParams({ masks: [mask({ strokes: [{ x: 0.1, y: 0.1, r: 0.05 }] })] })),
+        labelForDiff(a, withParams({ masks: [mask({ strokes: [{ radius: 0.05, pts: [0.1, 0.1] }] })] })),
       ).toBe('Brush stroke');
       expect(labelForDiff(a, withParams({ masks: [mask({ adjust: { expEV: 0.5 } })] }))).toBe(
         'Adjust mask',
