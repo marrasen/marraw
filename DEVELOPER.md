@@ -165,13 +165,21 @@ Go tests (the libraw wrapper tests need real RAW files; set
 
 ```powershell
 go test ./internal/...
-npm run typecheck   # tsc -b: the same program the build compiles
+npm run typecheck            # tsc -b: the same program the build compiles
 npm --prefix client run lint
+npm --prefix client test     # vitest, client/src/**/*.test.ts
 ```
 
 Every push to `main` runs all of this on Linux in CI (`.github/workflows/ci.yml`),
 along with a check that the committed `client/src/api` still matches what the
 pinned `aprot` generates.
+
+Client tests are vitest, configured in `client/vitest.config.ts` and run in a
+node environment: what is worth testing here is the pure logic — geometry,
+navigation, formatting, the curve math that mirrors the backend's — rather
+than rendered components. A test needing a DOM opts in per file with
+`// @vitest-environment jsdom`. Put the test beside what it tests
+(`src/lib/crop.ts` → `src/lib/crop.test.ts`).
 
 Backend smoke test (needs a folder of RAW files and a running dev server):
 

@@ -87,6 +87,9 @@ jobs:
       - name: Lint
         run: npm --prefix client run lint
 
+      - name: Client tests
+        run: npm --prefix client test
+
       - name: Vet daemon
         run: go build ./...
 
