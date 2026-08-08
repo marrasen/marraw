@@ -1,0 +1,114 @@
+name: ci
+
+# Everything here used to run for the first time when a release tag was cut,
+# which made every tag a gamble on work that had been sitting on main for days.
+# This is the same set of checks, on every push instead.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push supersedes an older one: only the tip of a branch is worth
+# proving. Release builds deliberately do NOT do this.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LIBRAW_VERSION: '0.22.1'
+  ORT_VERSION: '1.27.1'
+  NODE_VERSION: '24'
+
+jobs:
+  # One Linux job: the platform CI can actually test on. The release workflow
+  # still proves Windows and macOS compile and package.
+  check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Cache LibRaw
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/libraw
+            third_party/LibRaw-${{ env.LIBRAW_VERSION }}.tar.gz
+          key: libraw-${{ runner.os }}-${{ env.LIBRAW_VERSION }}-${{ hashFiles('scripts/setup-libraw.sh') }}
+
+      - name: Build LibRaw
+        run: bash scripts/setup-libraw.sh
+
+      - name: Cache ONNX Runtime
+        uses: actions/cache@v4
+        with:
+          path: third_party/onnxruntime
+          key: ort-${{ runner.os }}-${{ env.ORT_VERSION }}-${{ hashFiles('scripts/setup-ort.sh') }}
+
+      - name: Fetch ONNX Runtime
+        run: bash scripts/setup-ort.sh
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix client ci
+
+      - name: Generate API client
+        run: npm run gen
+
+      # The generated client is committed, so a diff here means the tree was
+      # generated against a different aprot than go.mod pins — the divergence
+      # that used to surface only at tag time, when the release regenerated
+      # from the pin and built something nobody had run.
+      - name: Generated client is in sync with the pinned aprot
+        run: |
+          if ! git diff --exit-code --stat client/src/api; then
+            echo '::error::client/src/api differs from what the pinned aprot generates. Run `npm run gen` and commit, or bump the aprot pin.'
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm --prefix client run lint
+
+      - name: Vet daemon
+        run: go build ./...
+
+      # A CC0 sample RAW (raw.pixls.us) so the libraw tests exercise the real
+      # decode pipeline instead of skipping. Same file and size class as the
+      # release workflow uses — the cancel/progress/fold-WB tests are
+      # calibrated to real-world sensor sizes.
+      - name: Cache sample RAW
+        id: sample
+        uses: actions/cache@v4
+        with:
+          path: /tmp/marraw-raw
+          key: sample-raw-ilce7m3-v1
+
+      - name: Fetch sample RAW
+        if: steps.sample.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/marraw-raw
+          curl -fsSL --retry 3 -o /tmp/marraw-raw/sample.arw 'https://raw.pixls.us/getfile.php/2414/nice/Sony%20-%20ILCE-7M3%20-%2014bit%2014bit%20compressed%20(3:2).ARW'
+          echo '250784580ea527442c09004417bb0eead484f2bf3ee8f9121a776ac65bb50d0f  /tmp/marraw-raw/sample.arw' | shasum -a 256 -c -
+
+      - name: Test daemon
+        env:
+          MARRAW_TEST_RAW_DIR: /tmp/marraw-raw
+        run: go test ./...

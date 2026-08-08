@@ -165,8 +165,13 @@ Go tests (the libraw wrapper tests need real RAW files; set
 
 ```powershell
 go test ./internal/...
-npm run typecheck
+npm run typecheck   # tsc -b: the same program the build compiles
+npm --prefix client run lint
 ```
+
+Every push to `main` runs all of this on Linux in CI (`.github/workflows/ci.yml`),
+along with a check that the committed `client/src/api` still matches what the
+pinned `aprot` generates.
 
 Backend smoke test (needs a folder of RAW files and a running dev server):
 
