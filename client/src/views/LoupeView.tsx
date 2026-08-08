@@ -41,6 +41,7 @@ import { MaskHoverTint } from '@/components/MaskHoverTint';
 import { AIPickOverlay } from '@/components/AIPickOverlay';
 import { AIKind, type Params } from '@/api/edit';
 
+import { ZOOM_DURATION_MS, snapReason, zoomAt } from '@/lib/zoomTween';
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
 // fraction space (crop-width-fraction / crop-height-fraction), accounting for
 // the frame's own aspect: a 1:1 pixel crop of a 3:2 frame is not 1:1 in
@@ -468,28 +469,33 @@ export function CinemaImage({
   // instead of easing for continuous input.
   const snapZoomRef = useRef(false);
   useEffect(() => {
-    const snap = prevSnapKey.current !== snapKey;
+    const frameChanged = prevSnapKey.current !== snapKey;
     prevSnapKey.current = snapKey;
     const zoomChanged = prevZoom.current !== zoom;
     prevZoom.current = zoom;
-    // Wheel/pinch zoom snaps: it's continuous input, and easing a moving target
-    // both lags visibly and (because onWheel anchors off the mid-tween shownScale)
-    // makes the cursor-anchor math wobble the faster you scroll. Only deliberate
-    // keyboard/button/double-click steps tween.
-    const wheelSnap = snapZoomRef.current;
+    const continuousInput = snapZoomRef.current;
     snapZoomRef.current = false;
-    if (wheelSnap || snap || !zoomChanged || !haveDims || Math.abs(scale - shownRef.current) < 1e-4) {
+    // Whether this eases at all is the part that has gone wrong before, so it
+    // is decided by a function that says why (lib/zoomTween.ts).
+    if (
+      snapReason({
+        target: scale,
+        shown: shownRef.current,
+        zoomChanged,
+        frameChanged,
+        continuousInput,
+        haveDims,
+      })
+    ) {
       setShownScale(scale);
       return;
     }
     const from = shownRef.current;
     const start = performance.now();
-    const DURATION = 160;
     let raf = requestAnimationFrame(function tick(t) {
-      const p = Math.min(1, (t - start) / DURATION);
-      const eased = 1 - Math.pow(1 - p, 3);
-      setShownScale(from + (scale - from) * eased);
-      if (p < 1) raf = requestAnimationFrame(tick);
+      const elapsed = t - start;
+      setShownScale(zoomAt(from, scale, elapsed));
+      if (elapsed < ZOOM_DURATION_MS) raf = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(raf);
   }, [scale, snapKey, haveDims, zoom]);
