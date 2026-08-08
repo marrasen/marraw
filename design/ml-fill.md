@@ -131,9 +131,9 @@ Mirror `aimasks.go`:
   `GenerateAIMap`.
 - `Edits.FillModelStatus(ctx) (*AIModelInfo, error)` — `AIModelStatus`
   shape (aimasks.go:256), for the consent dialog's byte count.
-- Regenerate the client bindings with `npm run gen` — **needs the go.work
-  overlay to ~/src/aprot on this box** (see memory: aprot-codegen-overlay);
-  never hand-edit client/src/api.
+- Regenerate the client bindings with `npm run gen`; never hand-edit
+  client/src/api. (This once needed a `go.work` overlay to an unreleased
+  aprot; the pin in go.mod is current again, so plain `npm run gen` is right.)
 
 Staleness loop: the client calls `GenerateFill` for each fill spot on every
 commit (`esCommit` path) — the `Has` fast path makes it free when nothing

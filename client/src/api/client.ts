@@ -274,22 +274,60 @@ export interface ApiClientOptions {
     reconnectMaxInterval?: number;
     /** Maximum reconnect attempts. 0 = unlimited. Default: 0 */
     reconnectMaxAttempts?: number;
-    /** Called when the server rejects the connection (e.g. invalid session). Connection will not auto-reconnect. */
+    /**
+     * Called when the server rejects the connection (e.g. invalid session).
+     * The connection will not auto-reconnect unless reconnectOnRejected is set.
+     */
     onConnectionRejected?: (error: ApiError) => void;
+    /**
+     * Retry after the server rejects the connection, instead of treating the
+     * rejection as terminal. Default: false — a rejection stops auto-reconnect,
+     * which is the right response to a real sign-out. Enable it for short-lived
+     * credentials, where a rejection is usually a stale token, propagation delay
+     * just after sign-in, or clock skew: pair it with getConnectParams /
+     * getAuthToken so every retry carries a freshly minted token.
+     *
+     * `true` uses the defaults below. onConnectionRejected still fires on every
+     * rejection. A retry that fails at the network level falls through to the
+     * normal reconnect backoff. Unlike the reconnect settings, this is never
+     * overridden by the server's config frame.
+     */
+    reconnectOnRejected?: boolean | {
+        /** Delay before each retry in ms. Default: 2000 */
+        delayMs?: number;
+        /** Max consecutive rejection retries; 0 = unlimited. Reset by a successful connect. Default: 0 */
+        maxAttempts?: number;
+    };
+    /**
+     * Returns query parameters to append to the connection URL, resolved fresh
+     * on every connection attempt — the initial connect, every auto-reconnect,
+     * every rejection retry, and page-wake reconnects. This is the intended way
+     * to carry a short-lived credential in the query string while keeping the
+     * base URL static:
+     *
+     *     new ApiClient(getWebSocketUrl(), {
+     *         getConnectParams: async () => ({ token: await getToken() }),
+     *     })
+     *
+     * Values are URL-encoded by the client and override same-named parameters
+     * already present in the URL. A thrown error (or rejected promise) fails the
+     * attempt like a transport error, so the normal reconnect path applies.
+     */
+    getConnectParams?: () => Record<string, string> | Promise<Record<string, string>>;
     /**
      * Returns an auth token for first-message authentication. Called on the
      * initial connect and on every reconnect. When set, the client sends the
      * token as its first message ({type:'auth'}) and waits for the server's
      * auth_ok before flushing requests/subscriptions. An auth_error is treated
-     * as a connection rejection (no auto-reconnect). Use refreshAuth() to update
-     * the token mid-session without reconnecting.
+     * as a connection rejection (terminal unless reconnectOnRejected is set).
+     * Use refreshAuth() to update the token mid-session without reconnecting.
      */
     getAuthToken?: () => string | Promise<string>;
 }
 
 type ResolvedOptions =
-    Required<Omit<ApiClientOptions, 'onConnectionRejected' | 'getAuthToken'>>
-    & Pick<ApiClientOptions, 'onConnectionRejected' | 'getAuthToken'>;
+    Required<Omit<ApiClientOptions, 'onConnectionRejected' | 'getAuthToken' | 'getConnectParams'>>
+    & Pick<ApiClientOptions, 'onConnectionRejected' | 'getAuthToken' | 'getConnectParams'>;
 
 const defaultOptions: ResolvedOptions = {
     transport: 'websocket',
@@ -297,7 +335,30 @@ const defaultOptions: ResolvedOptions = {
     reconnectInterval: 1000,
     reconnectMaxInterval: 30000,
     reconnectMaxAttempts: 0,
+    reconnectOnRejected: false,
 };
+
+/**
+ * Appends query parameters to a URL, overriding same-named ones already
+ * present and preserving any fragment. String-based rather than URL-based so
+ * non-HTTP transport URLs (custom bridges) survive unchanged.
+ */
+function appendQueryParams(url: string, params: Record<string, string>): string {
+    const keys = Object.keys(params);
+    if (keys.length === 0) return url;
+
+    const hashAt = url.indexOf('#');
+    const fragment = hashAt === -1 ? '' : url.slice(hashAt);
+    const withoutFragment = hashAt === -1 ? url : url.slice(0, hashAt);
+
+    const queryAt = withoutFragment.indexOf('?');
+    const base = queryAt === -1 ? withoutFragment : withoutFragment.slice(0, queryAt);
+    const search = new URLSearchParams(queryAt === -1 ? '' : withoutFragment.slice(queryAt + 1));
+    for (const key of keys) search.set(key, params[key]);
+
+    const query = search.toString();
+    return query ? `${base}?${query}${fragment}` : `${base}${fragment}`;
+}
 
 
 
@@ -558,7 +619,13 @@ export type ApiClientUrl = string | (() => string | Promise<string>);
  * requests issued while connecting are buffered and flushed once the
  * connection is ready. Requests issued while fully disconnected reject with
  * a ConnectionError. After the first successful connect(), auto-reconnect
- * (when enabled) handles drops — connect() never needs to be called again.
+ * (when enabled) handles drops, so connect() does not have to be called
+ * again — but calling it again is cheap and idempotent: a no-op while
+ * connected or connecting, and an immediate attempt otherwise, including
+ * while a reconnect backoff is pending. Call it whenever the connection
+ * needs to be live (after signing in, on resume) rather than caching an
+ * "already connected" flag — such a flag skips the call exactly when the
+ * socket has since dropped, and nothing opens a new one.
  */
 export class ApiClient {
     private transport: ClientTransport;
@@ -598,6 +665,9 @@ export class ApiClient {
     private state: ConnectionState = 'disconnected';
     private reconnectAttempts = 0;
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    // connectInFlight is the attempt doConnect() is currently running, so a
+    // second caller joins it instead of opening a competing socket.
+    private connectInFlight: Promise<void> | null = null;
     private manualDisconnect = false;
     // authWaiter resolves/rejects the in-flight auth handshake (initial connect
     // or refreshAuth) when the server's auth_ok / auth_error arrives.
@@ -608,10 +678,24 @@ export class ApiClient {
     // (with the original ApiError as cause) rather than the default
     // 'manual' reading triggered by transport.disconnect().
     private pendingRejection: ApiError | null = null;
+    // lastRejection outlives pendingRejection: it keeps the ApiError from the
+    // most recent rejection until the next successful connect, so a UI can tell
+    // "session expired, sign in again" from "server unreachable" even after
+    // later transport failures overwrite lastConnectionError.
+    private lastRejection: ApiError | null = null;
+    // Which connection attempt produced lastRejection. A rejection frame can be
+    // delivered in the same event batch that opens the transport, so "clear on
+    // success" must not clear a rejection belonging to the very attempt that is
+    // completing — compare attempt ids rather than relying on ordering.
+    private connectAttemptId = 0;
+    private lastRejectionAttemptId = -1;
     // lastConnectionError is the most recently observed ConnectionError,
     // exposed via getLastConnectionError() so a UI can render an offline
     // banner / "server unreachable" message after the fact.
     private lastConnectionError: ConnectionError | null = null;
+    // Normalized reconnectOnRejected policy; null when rejection is terminal.
+    private rejectionRetry: { delayMs: number; maxAttempts: number } | null = null;
+    private rejectionRetryAttempts = 0;
     private visibilityHandler: (() => void) | null = null;
     private onlineHandler: (() => void) | null = null;
 
@@ -623,28 +707,111 @@ export class ApiClient {
             : this.options.transport === 'sse'
                 ? new SSETransport()
                 : new WebSocketTransport();
+
+        const retry = this.options.reconnectOnRejected;
+        if (retry) {
+            const cfg = retry === true ? {} : retry;
+            this.rejectionRetry = {
+                delayMs: cfg.delayMs ?? 2000,
+                maxAttempts: cfg.maxAttempts ?? 0,
+            };
+        }
     }
 
     /**
      * Opens the connection to the server. This is a required manual step:
      * it is never called automatically — not by the constructor, not by
-     * <ApiClientProvider>, not by the generated hooks/functions. Call it
-     * once after constructing the client. No-op when already connected or
-     * connecting; auto-reconnect takes over after the first successful call.
+     * <ApiClientProvider>, not by the generated hooks/functions.
+     *
+     * It is cheap and idempotent, so call it whenever the connection needs to
+     * be live (after signing in, on resume) rather than remembering that it
+     * was called: it is a no-op while connected or connecting, and otherwise
+     * attempts a connection immediately — including while a reconnect backoff
+     * is pending, in which case the backoff is abandoned rather than waited
+     * out. Auto-reconnect takes over after the first successful call.
      */
     connect(): Promise<void> {
         if (this.state === 'connected' || this.state === 'connecting') {
             return Promise.resolve();
         }
+        return this.startConnect();
+    }
+
+    /**
+     * Abandons any pending reconnect backoff and attempts a connection now,
+     * keeping subscriptions and in-flight requests — unlike disconnect() +
+     * connect(), which clears both.
+     *
+     * connect() already does this, so reach for reconnectNow() only when the
+     * client may be in a state connect() reads as "nothing to do": a socket
+     * the runtime left half-open still reports 'connected' until its close
+     * event lands. Resolves when the attempt finishes, connected or not, and
+     * joins an attempt already in flight rather than starting a second one.
+     */
+    reconnectNow(): Promise<void> {
+        return this.startConnect();
+    }
+
+    // startConnect is the manual-connect path behind connect() and
+    // reconnectNow(): a fresh start followed by an immediate attempt.
+    private startConnect(): Promise<void> {
         this.manualDisconnect = false;
+        // A manual connect is a fresh start: un-park a client that exhausted
+        // its rejection retries, and restart the backoff schedule.
+        this.rejectionRetryAttempts = 0;
+        this.reconnectAttempts = 0;
+        // Drop a pending backoff. The caller wants a connection now, and a
+        // timer left armed would fire a second doConnect() on top of the
+        // connection this call is about to establish.
+        this.clearReconnectTimer();
         this.setupPageListeners();
         return this.doConnect();
     }
 
-    private async doConnect(): Promise<void> {
+    // doConnect serializes connection attempts: at most one runs at a time,
+    // and a live socket is never replaced. Both matter because the transports
+    // detach the previous socket's handlers before opening a new one, so the
+    // replaced socket's close is never reported and anything waiting on it
+    // would hang forever.
+    private doConnect(): Promise<void> {
+        if (this.state === 'connected' && this.transport.isConnected()) {
+            return Promise.resolve();
+        }
+        if (this.connectInFlight) return this.connectInFlight;
+        const attempt = this.runConnect().finally(() => {
+            if (this.connectInFlight === attempt) this.connectInFlight = null;
+        });
+        this.connectInFlight = attempt;
+        return attempt;
+    }
+
+    private async runConnect(): Promise<void> {
+        // Reached with state 'connected' only when the transport disagrees:
+        // the socket is half-open or already torn down (mobile wake). It is
+        // about to be replaced, and its handlers are detached in the process,
+        // so handleClose() will never run for it — settle whatever is bound to
+        // it here, or those promises never settle at all.
+        if (this.state === 'connected') {
+            this.abandonInFlight();
+        }
+        const attemptId = ++this.connectAttemptId;
         this.setState(this.reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
 
-        const url = typeof this.url === 'function' ? await this.url() : this.url;
+        // The URL function and getConnectParams are both resolved per attempt,
+        // so every reconnect can carry a freshly minted short-lived token. A
+        // failure here is treated like a transport failure rather than left to
+        // reject doConnect()'s promise, which callers ignore — that would
+        // silently halt reconnection.
+        let url: string;
+        try {
+            url = typeof this.url === 'function' ? await this.url() : this.url;
+            if (this.options.getConnectParams) {
+                url = appendQueryParams(url, await this.options.getConnectParams());
+            }
+        } catch {
+            this.handleClose({ wasClean: false });
+            return;
+        }
 
         return this.transport.connect(
             url,
@@ -666,10 +833,20 @@ export class ApiClient {
                         : new ApiError(ErrorCode.AuthFailed, 'authentication failed');
                     this.manualDisconnect = true;
                     this.pendingRejection = apiError;
+                    this.lastRejection = apiError;
+                    this.lastRejectionAttemptId = attemptId;
                     this.options.onConnectionRejected?.(apiError);
                     this.transport.disconnect();
                     return;
                 }
+            }
+            // The connection is usable: forget why the *previous* one ended,
+            // unless this very attempt was already rejected in the same event
+            // batch. The retry streak is deliberately not reset here — an
+            // in-band rejection also passes through this point, so resetting
+            // would clear the streak on every attempt; handleClose() does it.
+            if (this.lastRejectionAttemptId !== attemptId) {
+                this.lastRejection = null;
             }
             this.setState('connected');
         }).catch(() => {
@@ -817,7 +994,28 @@ export class ApiClient {
         this.notifyLoadingChange();
         this.notifyConnectionError(error);
 
+        // reconnectOnRejected bounds *consecutive* rejections: any other kind
+        // of close ends the streak, so a session that dropped for unrelated
+        // reasons starts its retry budget fresh.
+        if (reason !== 'server-rejected') {
+            this.rejectionRetryAttempts = 0;
+        }
+
         if (this.manualDisconnect) {
+            // A rejection sets manualDisconnect to stop auto-reconnect. With
+            // reconnectOnRejected the rejection is retryable instead: clear the
+            // flag so the next attempt is classified normally, and retry until
+            // maxAttempts is reached (then park as before).
+            if (
+                reason === 'server-rejected' && this.rejectionRetry && (
+                    this.rejectionRetry.maxAttempts === 0 ||
+                    this.rejectionRetryAttempts < this.rejectionRetry.maxAttempts
+                )
+            ) {
+                this.manualDisconnect = false;
+                this.scheduleRejectionRetry();
+                return;
+            }
             this.setState('disconnected');
             return;
         }
@@ -830,6 +1028,37 @@ export class ApiClient {
             this.scheduleReconnect();
         } else {
             this.setState('disconnected');
+        }
+    }
+
+    // abandonInFlight settles everything bound to a socket that is being
+    // replaced rather than closed. Subscription entries are kept: they are
+    // re-established on the new connection, exactly as after handleClose().
+    private abandonInFlight(): void {
+        if (this.pending.size === 0 && this.streams.size === 0) return;
+        const info: TransportCloseInfo = { wasClean: false };
+        const error = this.buildConnectionError(this.classifyClose(info), info);
+        const subIds = new Set(this.subscriptions.keys());
+        for (const [id, p] of this.pending) {
+            if (!subIds.has(id)) {
+                p.onSettle?.();
+                p.reject(error);
+            }
+            this.pending.delete(id);
+        }
+        const streams = Array.from(this.streams.values());
+        this.streams.clear();
+        for (const s of streams) {
+            s.end(error);
+        }
+        this.notifyLoadingChange();
+        this.notifyConnectionError(error);
+    }
+
+    private clearReconnectTimer(): void {
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
         }
     }
 
@@ -851,14 +1080,31 @@ export class ApiClient {
         }, delay);
     }
 
+    // scheduleRejectionRetry re-attempts a connection the server rejected, when
+    // reconnectOnRejected is enabled. The delay is fixed rather than backed off:
+    // a rejection means the server is reachable and answered, so this is not
+    // congestion — it is a credential that should be fresh on the next attempt.
+    // It deliberately shares reconnectTimer, so disconnect() and page-wake
+    // already cancel a pending retry.
+    private scheduleRejectionRetry(): void {
+        if (this.reconnectTimer) return;
+
+        this.rejectionRetryAttempts++;
+        this.setState('reconnecting');
+
+        this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            this.doConnect().catch(() => {
+                // Error handled in handleClose
+            });
+        }, this.rejectionRetry!.delayMs);
+    }
+
     disconnect(): void {
         if (this.manualDisconnect) return;
         this.manualDisconnect = true;
         this.teardownPageListeners();
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = null;
-        }
+        this.clearReconnectTimer();
         this.subscriptions.clear();
 
         // Reject in-flight requests/streams synchronously: the server may
@@ -943,6 +1189,20 @@ export class ApiClient {
         return this.lastConnectionError;
     }
 
+    /**
+     * getLastRejection returns the ApiError from the most recent connection
+     * rejection — a server rejection (e.g. invalid session) or a failed
+     * first-message auth — or null if none has occurred since the last
+     * successful connect. Use it to tell "signed out / session expired" from
+     * "server unreachable": unlike getLastConnectionError(), it is not
+     * overwritten by later transport failures, so it survives retries and
+     * still explains why the session ended. Cleared on the next successful
+     * connect.
+     */
+    getLastRejection(): ApiError | null {
+        return this.lastRejection;
+    }
+
     getLoadingCount(): number {
         let count = this.buffer.length + this.streams.size;
         for (const id of this.pending.keys()) {
@@ -985,10 +1245,7 @@ export class ApiClient {
         if (this.state === 'connected' && this.transport.isConnected()) return;
         if (this.state === 'connecting') return;
 
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = null;
-        }
+        this.clearReconnectTimer();
         this.reconnectAttempts = 0;
         this.doConnect().catch(() => {});
     }
@@ -1076,6 +1333,8 @@ export class ApiClient {
                     // default 'manual' that manualDisconnect=true would
                     // otherwise produce. handleClose() consumes it.
                     this.pendingRejection = apiError;
+                    this.lastRejection = apiError;
+                    this.lastRejectionAttemptId = this.connectAttemptId;
                     this.options.onConnectionRejected?.(apiError);
                     this.transport.disconnect();
                 } else {
@@ -1659,34 +1918,83 @@ export function useApiClientError(): ApiClientErrorState {
     return ctx;
 }
 
-// Connection state hook
+// Connection state hook.
+//
+// useSyncExternalStore rather than useState + useEffect: the client is normally
+// created and connected outside React, so the connection can reach 'connected'
+// between the first render and the effect that subscribes. A useState snapshot
+// would miss that transition and stay stale forever, because connection state
+// is sticky — nothing later would correct it.
 export function useConnectionState(): ConnectionState {
     const client = useApiClient();
-    const [state, setState] = useState<ConnectionState>(client.getState());
+    return useSyncExternalStore(
+        useCallback((onStoreChange: () => void) => client.onStateChange(onStoreChange), [client]),
+        () => client.getState(),
+        () => client.getState(),
+    );
+}
 
-    useEffect(() => {
-        return client.onStateChange(setState);
-    }, [client]);
+/**
+ * useConnectionError subscribes to connection failures and returns the most
+ * recent ConnectionError, or null before any failure. Re-renders on every new
+ * failure and on state changes, so a banner can clear itself once the client
+ * reconnects (check useConnectionState() alongside it).
+ */
+export function useConnectionError(): ConnectionError | null {
+    const client = useApiClient();
+    return useSyncExternalStore(
+        useCallback((onStoreChange: () => void) => {
+            const offError = client.onConnectionError(onStoreChange);
+            const offState = client.onStateChange(onStoreChange);
+            return () => { offError(); offState(); };
+        }, [client]),
+        () => client.getLastConnectionError(),
+        () => null,
+    );
+}
 
-    return state;
+/**
+ * useConnectionRejection returns the ApiError from the most recent connection
+ * rejection (server rejection or failed first-message auth), or null since the
+ * last successful connect. Use it to render "session expired, sign in again"
+ * differently from "server unreachable".
+ */
+export function useConnectionRejection(): ApiError | null {
+    const client = useApiClient();
+    return useSyncExternalStore(
+        useCallback((onStoreChange: () => void) => {
+            const offError = client.onConnectionError(onStoreChange);
+            const offState = client.onStateChange(onStoreChange);
+            return () => { offError(); offState(); };
+        }, [client]),
+        () => client.getLastRejection(),
+        () => null,
+    );
 }
 
 // Connection hook (convenience wrapper)
-export function useConnection(): { isConnected: boolean; state: ConnectionState } {
+export function useConnection(): {
+    isConnected: boolean;
+    state: ConnectionState;
+    error: ConnectionError | null;
+    rejection: ApiError | null;
+} {
     const state = useConnectionState();
-    return { isConnected: state === 'connected', state };
+    const error = useConnectionError();
+    const rejection = useConnectionRejection();
+    return { isConnected: state === 'connected', state, error, rejection };
 }
 
-// Loading state hook
+// Loading state hook. Same subscribe-after-render race as useConnectionState:
+// a request that settles before the effect runs would otherwise leave a
+// spinner up with nothing to take it down.
 export function useIsLoading(): boolean {
     const client = useApiClient();
-    const [loading, setLoading] = useState<boolean>(client.getLoadingCount() > 0);
-
-    useEffect(() => {
-        return client.onLoadingChange((count) => setLoading(count > 0));
-    }, [client]);
-
-    return loading;
+    return useSyncExternalStore(
+        useCallback((onStoreChange: () => void) => client.onLoadingChange(onStoreChange), [client]),
+        () => client.getLoadingCount() > 0,
+        () => false,
+    );
 }
 
 

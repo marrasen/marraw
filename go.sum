@@ -30,6 +30,8 @@ github.com/libp2p/zeroconf/v2 v2.2.0 h1:Cup06Jv6u81HLhIj1KasuNM/RHHrJ8T7wOTS4+Tv
 github.com/libp2p/zeroconf/v2 v2.2.0/go.mod h1:fuJqLnUwZTshS3U/bMRJ3+ow/v9oid1n0DmyYyNO1Xs=
 github.com/marrasen/aprot v0.52.0 h1:TnPDOUewRVGM49Bg8XeNABaDXAmXg7ZYZc/VrvgtQXM=
 github.com/marrasen/aprot v0.52.0/go.mod h1:484gh5Ci1xXqcjak9LKcGsew9tmoJqs2bmjgrsDqO2E=
+github.com/marrasen/aprot v0.53.0 h1:TavuLKB9kpniYZCXTy0rb3z5UcdYgUGT53FZ5aq0NSU=
+github.com/marrasen/aprot v0.53.0/go.mod h1:484gh5Ci1xXqcjak9LKcGsew9tmoJqs2bmjgrsDqO2E=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/miekg/dns v1.1.43 h1:JKfpVSCB84vrAmHzyrsxB5NAr5kLoMXZArPSw7Qlgyg=
