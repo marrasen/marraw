@@ -31,10 +31,23 @@ func toySpec(t *testing.T, dir string) ModelSpec {
 	return ModelSpec{ID: "toy", Version: "1"}
 }
 
+// requireRuntime skips when the ONNX Runtime is not installed, and fails when
+// it is installed but will not initialize.
+//
+// The distinction is the point. Skipping on any error at all meant a shared
+// library that could not be used — the shape a mismatch between this binding
+// and the installed runtime takes, reported as "Error setting ORT API base" —
+// silently skipped every inference test. CI runs these precisely to prove the
+// runtime works on each platform we ship, so it would have gone green over an
+// ML stack that could not start.
 func requireRuntime(t *testing.T) {
 	t.Helper()
+	if _, err := locateRuntime(); err != nil {
+		t.Skipf("ONNX Runtime not installed (run `npm run setup:ort`): %v", err)
+	}
 	if err := EnsureRuntime(); err != nil {
-		t.Skipf("ONNX Runtime unavailable (run `npm run setup:ort`): %v", err)
+		t.Fatalf("the ONNX Runtime is installed but did not initialize; "+
+			"a version mismatch between onnxruntime_go and the shared library reads like this: %v", err)
 	}
 }
 
