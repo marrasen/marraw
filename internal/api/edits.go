@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"log"
@@ -1209,9 +1210,16 @@ func (e *Edits) ApplyBatchEdit(ctx context.Context, ids []int64, delta edit.Delt
 		}
 		var params edit.Params
 		if p.EditParams.Valid {
-			if ep, err := edit.Parse(p.EditParams.String); err == nil {
-				params = *ep
+			ep, err := edit.Parse(p.EditParams.String)
+			if err != nil {
+				// Carrying on with neutral params would apply the delta to
+				// nothing and then persist that, replacing settings that are
+				// unreadable — not gone — with delta-only values. The photo is
+				// left exactly as it was, and the batch stops rather than
+				// reporting a success it did not deliver.
+				return fmt.Errorf("%s: its stored edit could not be read, so the batch stopped here: %w", p.FileName, err)
 			}
+			params = *ep
 		} else if seeded := seededParams(p); seeded != nil {
 			// Relative adjustments on untouched photos start from the seeded
 			// compensation, not from zero — "+0.5 EV" means half a stop

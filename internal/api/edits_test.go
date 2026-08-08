@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"image"
 	"math"
 	"testing"
 
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/store"
 )
 
 // TestClampPickedWB pins the guard that keeps a pick on a narrow-band-lit spot
@@ -199,5 +201,54 @@ func TestApproxDecodeExposureReuse(t *testing.T) {
 	e.storeDecode(7, key, noExpKey, expEV, 0, rgba)
 	if _, baked, _, ok := e.approxDecode(7, &edit.Params{ExpEV: 2, WBTemp: 10}); !ok || baked != edit.LibrawMaxExpEV {
 		t.Errorf("reuse of a clamped-bake decode reported %v, want %v", baked, edit.LibrawMaxExpEV)
+	}
+}
+
+// A batch adjustment reads each photo's stored edit, applies the delta, and
+// writes the result back. That read is the dangerous step: treating an
+// unreadable edit as neutral would apply "+0.5 EV" to nothing and then persist
+// it, so one corrupt row plus a batch across the shoot would quietly replace a
+// photograph's whole develop state with the delta alone.
+func TestApplyBatchEditLeavesAnUnreadableEditAlone(t *testing.T) {
+	db, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	folderID, err := db.UpsertFolder(ctx, "/photos/shoot")
+	if err != nil {
+		t.Fatalf("UpsertFolder: %v", err)
+	}
+	if _, err := db.SyncFolder(ctx, folderID, "/photos/shoot",
+		[]store.FileEntry{{Name: "a.arw", Size: 1, MtimeNs: 1}}); err != nil {
+		t.Fatalf("SyncFolder: %v", err)
+	}
+	photos, err := db.ListPhotos(ctx, folderID)
+	if err != nil {
+		t.Fatalf("ListPhotos: %v", err)
+	}
+	id := photos[0].ID
+
+	corrupt := `{"expEV": not-json`
+	if err := db.SetEdit(ctx, id, &corrupt, "somehash", 1); err != nil {
+		t.Fatalf("SetEdit: %v", err)
+	}
+
+	halfStop := 0.5
+	e := &Edits{deps: &Deps{DB: db}}
+	if err := e.ApplyBatchEdit(ctx, []int64{id}, edit.Delta{ExpEV: &halfStop}); err == nil {
+		t.Error("ApplyBatchEdit over an unreadable edit = nil, want an error")
+	}
+
+	// The point of the error: the row is still exactly what it was, so the
+	// settings can be recovered by hand rather than being gone.
+	p, err := db.GetPhoto(ctx, id)
+	if err != nil {
+		t.Fatalf("GetPhoto: %v", err)
+	}
+	if !p.EditParams.Valid || p.EditParams.String != corrupt {
+		t.Errorf("stored edit = %q (valid=%v), want it untouched", p.EditParams.String, p.EditParams.Valid)
 	}
 }
