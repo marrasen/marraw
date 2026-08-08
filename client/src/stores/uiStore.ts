@@ -252,8 +252,11 @@ interface UIState {
   eyeScanOpen: boolean;
 
   // Optimistic patches applied on top of the subscribed photo list, so a
-  // rating keystroke shows before the server round trip settles. Server
-  // truth arrives through subscription patches into the query cache.
+  // rating keystroke shows before the server round trip settles. Server truth
+  // arrives through subscription patches into the query cache, and each patch
+  // retires the guesses it supersedes (see retireOverrides) — an override
+  // outranks the cache in the merge, so one left behind would mask every later
+  // change to that field, including changes made from another window.
   overrides: Map<number, Partial<Photo>>;
 
   // Row model of the mounted grid, for keyboard navigation. navRowStarts is
@@ -321,7 +324,7 @@ interface UIState {
   focus: (id: number | null, opts?: { extend?: boolean; toggle?: boolean }) => void;
   selectAll: (ids: number[]) => void;
   clearSelection: () => void;
-  applyPatches: (patches: PhotoPatch[]) => void;
+  retireOverrides: (patches: PhotoPatch[]) => void;
   applyLocal: (ids: number[], patch: Partial<Photo>) => void;
   setNavRowModel: (rowStarts: number[], colCenters?: number[] | null) => void;
   setVisibleIds: (ids: number[], takenAt: number[]) => void;
@@ -539,18 +542,37 @@ export const useUIStore = create<UIState>((set, get) => ({
   selectAll: (ids) => set({ selection: new Set(ids) }),
   clearSelection: () => set({ selection: new Set() }),
 
-  applyPatches: (patches) =>
+  // retireOverrides drops the optimistic guesses a server patch has now
+  // spoken for. An override exists to cover the gap between the keystroke and
+  // the round trip; once the server has an opinion about that field, the guess
+  // has done its job and has to get out of the way — it wins the merge in
+  // usePhotos, so leaving it there means it outranks server truth forever.
+  //
+  // Fields are retired by whatever the patch carries rather than by a list
+  // kept in step with the reducer by hand. A patch that arrives while our own
+  // change is still in flight — because someone else touched the same photo —
+  // briefly shows their value until ours lands, which is what the server
+  // actually knows at that moment.
+  retireOverrides: (patches) => {
+    if (get().overrides.size === 0) return;
     set((s) => {
-      const overrides = new Map(s.overrides);
+      let overrides: Map<number, Partial<Photo>> | null = null;
       for (const p of patches) {
-        const cur = { ...(overrides.get(p.id) ?? {}) };
-        if (p.rating != null) cur.rating = p.rating;
-        if (p.flag != null) cur.flag = p.flag;
-        if (p.editHash != null) cur.editHash = p.editHash;
-        overrides.set(p.id, cur);
+        const cur = s.overrides.get(p.id);
+        if (!cur) continue;
+        const next = { ...cur };
+        const spoken = p as unknown as Record<string, unknown>;
+        for (const key of Object.keys(next) as (keyof Photo)[]) {
+          if (spoken[key] != null) delete next[key];
+        }
+        if (Object.keys(next).length === Object.keys(cur).length) continue;
+        overrides ??= new Map(s.overrides);
+        if (Object.keys(next).length === 0) overrides.delete(p.id);
+        else overrides.set(p.id, next);
       }
-      return { overrides };
-    }),
+      return overrides ? { overrides } : {};
+    });
+  },
 
   applyLocal: (ids, patch) =>
     set((s) => {

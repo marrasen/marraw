@@ -79,8 +79,22 @@ function sortPhotos(photos: Photo[], sort: LibrarySort): Photo[] {
 // usePhotos merges the subscribed folder list (kept fresh through
 // subscription patches) with optimistic local overrides and applies the
 // cull filters, entirely client-side.
+// foldPatch is the single place a server patch lands: into the query snapshot,
+// and against the optimistic overrides it supersedes. Module-level so its
+// identity is stable across renders, and separate from photoPatchReducer so
+// that stays a pure function of (data, patch).
+//
+// Both of the client's entry points for this — a live patch, and the replay of
+// patches that raced a (re)load — run outside render, so touching the store
+// here is an ordinary event-handler update.
+export function foldPatch(data: Photo[], patch: unknown): Photo[] {
+  const ev = patch as PhotoPatchEvent;
+  if (ev && Array.isArray(ev.patches)) useUIStore.getState().retireOverrides(ev.patches);
+  return photoPatchReducer(data, patch);
+}
+
 export function usePhotos(folderId: number): PhotoLists {
-  const { data, isLoading } = useListPhotos(folderId, { applyPatch: photoPatchReducer });
+  const { data, isLoading } = useListPhotos(folderId, { applyPatch: foldPatch });
   const overrides = useUIStore((s) => s.overrides);
   const minRating = useUIStore((s) => s.minRating);
   const flagFilter = useUIStore((s) => s.flagFilter);
