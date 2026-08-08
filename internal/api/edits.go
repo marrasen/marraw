@@ -18,6 +18,7 @@ import (
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
 )
@@ -324,28 +325,8 @@ func (e *Edits) decodePreview(ctx context.Context, photoID int64, photo store.Ph
 	// WB into pre_mul in place, and camMulOf falls back to pre_mul, so after a
 	// decode this would read normalized values instead of the as-shot ones.
 	wbComp := ep.WBCompEV(proc.CamMul(), proc.CamXYZ())
-	// Real ctx: LibRaw aborts at its next progress checkpoint, so a photo
-	// the user has already browsed away from stops burning its core mid-
-	// demosaic instead of blocking the handle for the full decode. The cancel
-	// path must then restore the HandleCache invariant — a cancelled Process
-	// leaves the handle recycled (stream closed, unpacked data freed) — by
-	// re-Opening the file (metadata-only, ~150 ms, paid only on abandonment).
-	// Same-photo drags never cancel: the client coalesces them to one render
-	// in flight, so a cancelled ctx here means a photo switch.
-	img, err := proc.Process(ctx, ep.LibrawParams(true))
+	img, err := e.processKeepingHandleUsable(ctx, photoID, proc, photo.Path(), ep.LibrawParams(true), release)
 	if err != nil {
-		healthy := true
-		if ctx.Err() != nil {
-			healthy = proc.Open(photo.Path()) == nil
-			err = ctx.Err()
-		}
-		release()
-		if !healthy {
-			// Reopen failed (file gone/unreadable): drop the poisoned entry so
-			// the next acquire starts from a fresh handle instead of a recycled
-			// one that fails every Process.
-			e.deps.Handles.Invalidate(photoID)
-		}
 		return nil, 0, err
 	}
 	release()
@@ -456,18 +437,8 @@ func (e *Edits) linearMaster(ctx context.Context, photoID int64, photo store.Pho
 	refMul := proc.CamMul()
 	camXYZ := proc.CamXYZ()
 	rgbCam := proc.RgbCam()
-	// Real ctx with reopen-on-cancel, exactly as previewDecode.
-	img, err := proc.Process(ctx, ep.LinearRefLibrawParams())
+	img, err := e.processKeepingHandleUsable(ctx, photoID, proc, photo.Path(), ep.LinearRefLibrawParams(), release)
 	if err != nil {
-		healthy := true
-		if ctx.Err() != nil {
-			healthy = proc.Open(photo.Path()) == nil
-			err = ctx.Err()
-		}
-		release()
-		if !healthy {
-			e.deps.Handles.Invalidate(photoID)
-		}
 		return nil, err
 	}
 	release()
@@ -756,17 +727,8 @@ func (e *Edits) wbPickFrame(ctx context.Context, photoID int64, photo store.Phot
 	// pre_mul it falls back to, RgbCam because the pick is computed through it.
 	wbComp := ep.WBCompEV(proc.CamMul(), proc.CamXYZ())
 	rgbCam := proc.RgbCam()
-	img, err := proc.Process(ctx, ep.LibrawParams(true))
+	img, err := e.processKeepingHandleUsable(ctx, photoID, proc, photo.Path(), ep.LibrawParams(true), release)
 	if err != nil {
-		healthy := true
-		if ctx.Err() != nil {
-			healthy = proc.Open(photo.Path()) == nil
-			err = ctx.Err()
-		}
-		release()
-		if !healthy {
-			e.deps.Handles.Invalidate(photoID)
-		}
 		return nil, err
 	}
 	mul := proc.EffectiveMul() // resolved WB, auto included — valid until the next Process
@@ -1234,6 +1196,51 @@ func (e *Edits) ApplyBatchEdit(ctx context.Context, ids []int64, delta edit.Delt
 		aprot.Progress(ctx).Update(i+1, len(ids), p.FileName)
 	}
 	return nil
+}
+
+// processKeepingHandleUsable runs one Process and leaves the handle cache in a
+// state the next acquire can use. On success the handle is still held: the
+// caller releases it once it has taken what it needs from proc (EffectiveMul
+// is only valid until the next Process). On failure it is released here.
+//
+// Passing the real ctx is the point — LibRaw aborts at its next progress
+// checkpoint, so a photo the user has already browsed away from stops burning
+// its core mid-demosaic instead of blocking the handle for a full decode. What
+// that costs is an invariant to restore: a cancelled Process leaves the handle
+// recycled, its stream closed and unpacked data freed, so the file is re-Opened
+// (metadata only, ~150 ms, paid only on abandonment). If that reopen fails —
+// the file was moved or the drive went away — the entry is poisoned and every
+// later Process on it would fail, so it is dropped instead.
+//
+// Same-photo drags never cancel: the client coalesces them to one render in
+// flight, so a cancelled ctx here means a photo switch.
+//
+// This lived as three identical copies, in the preview, linear-master and
+// white-balance-pick paths. They agreed, but nothing made them: a fix applied
+// to one would have left the others recycling a handle that fails every
+// subsequent decode for that photo.
+func (e *Edits) processKeepingHandleUsable(
+	ctx context.Context,
+	photoID int64,
+	proc *libraw.Processor,
+	path string,
+	params libraw.Params,
+	release func(),
+) (*libraw.Image, error) {
+	img, err := proc.Process(ctx, params)
+	if err == nil {
+		return img, nil
+	}
+	healthy := true
+	if ctx.Err() != nil {
+		healthy = proc.Open(path) == nil
+		err = ctx.Err()
+	}
+	release()
+	if !healthy {
+		e.deps.Handles.Invalidate(photoID)
+	}
+	return nil, err
 }
 
 // saveEdit persists params (nil or neutral clears), pushes the patch to
