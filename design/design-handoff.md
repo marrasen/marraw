@@ -1,6 +1,13 @@
 # marraw — design handoff
 
-> A single-file brief describing marraw's current UI so it can be designed/redesigned in Claude Design.
+> **Describes the app as of 2026-07-07, and has not been kept up since. Reread
+> it against the running app before handing it to anything.** Known to be out
+> of date already: it says Windows-only (macOS and Linux ship too), one window
+> (there is a pop-out viewer, and remote/multi-window), Grid and Loupe as the
+> only views (cull and cinema exist, plus the guest share pages and the library
+> rail), and it gives fixed panel widths the responsive toolbar work replaced.
+
+> A single-file brief describing marraw's UI so it can be designed/redesigned in Claude Design.
 > Attach this file to a Claude Design project, then tell it which screen(s) you want to work on.
 > **Edit the "What I want to work on" section at the bottom before uploading** so the design work is aimed at your goal.
 
