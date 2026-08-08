@@ -12,6 +12,13 @@ export const viewerSupported = () => typeof window.win?.toggleViewer === 'functi
 export const toggleViewer = () => window.win?.toggleViewer?.();
 
 /**
+ * True in the pop-out window itself (main.tsx's ?view=viewer), which shares
+ * this preload and so would otherwise offer to pop itself out.
+ */
+export const isViewerWindow = () =>
+  new URLSearchParams(window.location.search).get('view') === 'viewer';
+
+/**
  * Whether the pop-out window is open right now. Read once on mount (it may
  * have been opened before this window mounted, or by another window) and then
  * kept current by pushes from the shell — it can be closed from its own

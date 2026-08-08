@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Minus, Pin, PinOff, Square, X } from 'lucide-react';
+import { Minus, PictureInPicture2, Pin, PinOff, Square, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { mod } from '@/lib/platform';
+import { isViewerWindow, toggleViewer, useViewerOpen, viewerSupported } from '@/lib/viewerWindow';
 import '@/lib/electron';
 
 // RestoreGlyph: two overlapping rounded squares (window is maximized).
@@ -15,7 +17,9 @@ function RestoreGlyph() {
 
 /**
  * The frameless window's own minimize / maximize-restore / close cluster
- * (diff handoff "frameless window + baked-in controls"). `variant="bar"`
+ * (diff handoff "frameless window + baked-in controls"), led by the pop-out
+ * photo window's toggle — an app affordance, but one that belongs wherever
+ * there is window chrome rather than only in Library's top bar. `variant="bar"`
  * sits in the structured 48px top bar; `variant="glass"` is the floating
  * pill of the cinema HUD. Renders nothing outside Electron.
  */
@@ -34,6 +38,7 @@ export function WindowControls({
   onTogglePin?: (next: boolean) => void;
 }) {
   const [max, setMax] = useState(false);
+  const viewerOpen = useViewerOpen();
   useEffect(() => {
     if (!window.win) return;
     // This cluster rides in chrome that remounts on every view switch, so the
@@ -69,6 +74,23 @@ export function WindowControls({
           onClick={() => onTogglePin(!pinned)}
         >
           {pinned ? <Pin className="size-[12px]" strokeWidth={1.5} /> : <PinOff className="size-[12px]" strokeWidth={1.5} />}
+        </button>
+      )}
+      {/* The pop-out photo window, for people who don't reach for Ctrl+N. It
+          rides here rather than in the top bar so it is at hand in Cull and
+          Develop too, where this cluster is the only chrome. Lit while the
+          window is up, and closes it again — including one opened from another
+          marraw window, or closed by its own key. Never in the pop-out itself,
+          which has nothing to pop out. */}
+      {viewerSupported() && !isViewerWindow() && (
+        <button
+          aria-label={viewerOpen ? 'Close the photo window' : 'Pop out the photo window'}
+          aria-pressed={viewerOpen}
+          title={viewerOpen ? `Close the photo window (${mod}+N)` : `Pop the photo out into its own window (${mod}+N)`}
+          className={cn(btn, viewerOpen && 'text-primary')}
+          onClick={toggleViewer}
+        >
+          <PictureInPicture2 className="size-[13px]" strokeWidth={1.5} />
         </button>
       )}
       <button aria-label="Minimize" title="Minimize" className={btn} onClick={() => window.win!.minimize()}>

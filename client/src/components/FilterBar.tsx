@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowUpDown, Contrast, Eye, EyeOff, Focus, Layers, LayoutGrid, PanelRight, Star, Trash2, Wand2 } from 'lucide-react';
+import { ArrowUpDown, Contrast, Eye, EyeOff, Focus, Layers, LayoutGrid, PanelLeft, PanelRight, Star, Trash2, Wand2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { deletePhotos } from '@/api/library';
 import { useApiClient } from '@/api/client';
@@ -26,7 +26,7 @@ import { cn } from '@/lib/utils';
 import { applyFlag, applyRating, judgeAllBursts } from '@/lib/actions';
 import type { BurstInfo } from '@/lib/bursts';
 import { useFeature } from '@/lib/features';
-import { updateFolderFilters, updateLibrarySort } from '@/lib/uiSettings';
+import { updateFolderFilters, updateLibrarySort, updateRailHidden } from '@/lib/uiSettings';
 import { useUIStore, type FlagFilter, type LibrarySort } from '@/stores/uiStore';
 
 const FLAG_ITEMS: { value: FlagFilter; label: string }[] = [
@@ -42,6 +42,29 @@ const SORT_ITEMS: { value: LibrarySort; label: string }[] = [
   { value: 'nameAsc', label: 'File name · A to Z' },
   { value: 'nameDesc', label: 'File name · Z to A' },
 ];
+
+// Collapses the library rail out of the way for a wider grid. It lives at the
+// head of the filter row — above the rail it controls, and mirroring the
+// develop-panel toggle at the row's other end. Repeated in the SelectionBar so
+// it doesn't vanish under a multi-photo selection.
+function RailToggle() {
+  const client = useApiClient();
+  const railHidden = useUIStore((s) => s.railHidden);
+  return (
+    <button
+      onClick={() => updateRailHidden(client, !railHidden)}
+      className={cn(
+        'flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-secondary hover:text-foreground',
+        railHidden ? 'text-muted-foreground' : 'text-foreground',
+      )}
+      title={railHidden ? 'Show the library rail' : 'Hide the library rail'}
+      aria-label={railHidden ? 'Show the library rail' : 'Hide the library rail'}
+      aria-pressed={!railHidden}
+    >
+      <PanelLeft className="size-[15px]" strokeWidth={1.5} />
+    </button>
+  );
+}
 
 export function FilterBar({
   softBelow,
@@ -98,6 +121,10 @@ export function FilterBar({
     // <1440 button labels → icons, <1120 gap label, <1040 slider → icon,
     // <900 gap control gone, <780 slider gone + tighter gaps.
     <div className="@container flex h-[47px] shrink-0 items-center gap-3 overflow-hidden border-b px-[18px] @max-[780px]:gap-2">
+      <RailToggle />
+
+      <div className="h-5 w-px bg-border" />
+
       <div className="flex items-center gap-2" role="group" aria-label="Minimum rating filter">
         <span className="text-[11.5px] text-muted-foreground @max-[1440px]:hidden">Rating</span>
         <div className="flex gap-px">
@@ -447,6 +474,7 @@ function SelectionBar() {
 
   return (
     <div className="flex h-[47px] shrink-0 items-center gap-3.5 border-b border-primary/28 bg-primary/10 px-[18px]">
+      <RailToggle />
       <span className="flex items-center gap-2 text-[13px] text-foreground">
         <span className="rounded-[5px] bg-primary px-[7px] py-0.5 font-mono font-semibold text-primary-foreground">
           {selection.size}
