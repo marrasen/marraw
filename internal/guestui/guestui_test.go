@@ -107,3 +107,31 @@ func TestRedirectValidatesTheTokenShape(t *testing.T) {
 		}
 	}
 }
+
+// The share page's CSP names the host the page came from, and that name
+// arrives in a request header. A policy assembled out of request data is worth
+// not writing, so a host that is not one is dropped rather than interpolated.
+func TestSafeHost(t *testing.T) {
+	for _, ok := range []string{
+		"marraw.tail1234.ts.net",
+		"127.0.0.1:8484",
+		"[::1]:8484",
+		"host-with-dashes.example:443",
+	} {
+		if safeHost(ok) != ok {
+			t.Errorf("safeHost(%q) = %q, want it kept", ok, safeHost(ok))
+		}
+	}
+	for _, bad := range []string{
+		"",
+		"evil.example; script-src *",
+		"evil.example' 'unsafe-inline",
+		"host with spaces",
+		"host\nX-Injected: 1",
+		strings.Repeat("a", 300),
+	} {
+		if got := safeHost(bad); got != "" {
+			t.Errorf("safeHost(%q) = %q, want it dropped", bad, got)
+		}
+	}
+}

@@ -105,6 +105,10 @@ func (h *Handler) photoFor(w http.ResponseWriter, r *http.Request) (photo store.
 	if editHash == "" {
 		editHash = edit.BaseHash
 	}
+	if !validEditHash(editHash) {
+		http.Error(w, "bad edit hash", http.StatusBadRequest)
+		return
+	}
 	// A share without the edits capability asks for the current hash like any
 	// client — the photo record it read carries one — and is answered with the
 	// base rendition regardless.
@@ -127,6 +131,32 @@ func (h *Handler) photoFor(w http.ResponseWriter, r *http.Request) (photo store.
 		return
 	}
 	return photo, editHash, acc, true
+}
+
+// editHashLen is the width of the hex digest Params.Hash returns.
+const editHashLen = 12
+
+// validEditHash reports whether s has the shape of a hash this server could
+// have minted: the base sentinel, or Params.Hash's 12 hex characters.
+//
+// The value is chosen by the caller — a guest holding a share link with the
+// edits capability included — and is composed straight into a cache file name,
+// so it is constrained on the way in rather than trusted to be harmless once
+// filepath.Join has had it. A rendition already on disk is served before the
+// generatable() check runs, so that check is not the guard here.
+func validEditHash(s string) bool {
+	if s == edit.BaseHash {
+		return true
+	}
+	if len(s) != editHashLen {
+		return false
+	}
+	for i := range len(s) {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // generatable reports whether the edit state can be rendered on demand: only

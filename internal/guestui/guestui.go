@@ -101,6 +101,27 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/s/"+token+"/", http.StatusFound)
 }
 
+// safeHost returns host when it is a plain host[:port] and "" otherwise, so a
+// caller-supplied Host header can be composed into a header value. Bracketed
+// IPv6 literals pass; anything carrying a quote, space, semicolon or control
+// character does not.
+func safeHost(host string) string {
+	const maxHost = 253 + len(":65535")
+	if host == "" || len(host) > maxHost {
+		return ""
+	}
+	for i := range len(host) {
+		c := host[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.', c == '-', c == ':', c == '[', c == ']':
+		default:
+			return ""
+		}
+	}
+	return host
+}
+
 // harden sets the response headers the share page is served with. Everything
 // under /s/ is reachable by anyone who has the URL — and, once the funnel is
 // up, by anyone who guesses the hostname — so it gets the treatment a public
@@ -113,14 +134,22 @@ func Redirect(w http.ResponseWriter, r *http.Request) {
 // script is allowed, which is the half that matters.
 func harden(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
+	// Named as well as 'self': Safari historically refused a WebSocket under
+	// connect-src 'self', and a phone is the whole point of this page. The
+	// name comes from the request, though, so it is checked before it goes
+	// into a policy header — a header assembled out of request data is worth
+	// not writing. A host that does not look like one costs Safari the
+	// workaround and nothing else.
+	connect := "connect-src 'self'"
+	if host := safeHost(r.Host); host != "" {
+		connect += " wss://" + host + " ws://" + host
+	}
 	h.Set("Content-Security-Policy", "default-src 'none'; "+
 		"script-src 'self'; "+
 		"style-src 'self' 'unsafe-inline'; "+
 		"img-src 'self'; "+
 		"font-src 'self'; "+
-		// Named as well as 'self': Safari historically refused a WebSocket
-		// under connect-src 'self', and a phone is the whole point of this page.
-		"connect-src 'self' wss://"+r.Host+" ws://"+r.Host+"; "+
+		connect+"; "+
 		"base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 	h.Set("X-Content-Type-Options", "nosniff")
 	// The URL *is* the credential, so it must not ride along in a Referer to

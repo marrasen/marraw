@@ -103,3 +103,29 @@ func TestServeFastCaching(t *testing.T) {
 		t.Error("real response carries X-Marraw-Provisional")
 	}
 }
+
+// The edit hash is caller-chosen and is composed into a cache file name, so
+// only the shapes this server mints may get that far. A rendition already on
+// disk is served before generatable() runs, so that check is not the guard.
+func TestValidEditHash(t *testing.T) {
+	for _, ok := range []string{"base", "0123456789ab", "abcdef012345"} {
+		if !validEditHash(ok) {
+			t.Errorf("validEditHash(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{
+		"",                    // absent is substituted earlier, never validated
+		"../../../etc/passwd", // the shape the constraint exists for
+		"..",                  //
+		"0123456789AB",        // Hash() is lower-case hex
+		"0123456789ab0",       // too long
+		"0123456789a",         // too short
+		"0123456789a/",        // a separator of any kind
+		"base ",               //
+		"g123456789ab",        // out of the hex alphabet
+	} {
+		if validEditHash(bad) {
+			t.Errorf("validEditHash(%q) = true, want false", bad)
+		}
+	}
+}
