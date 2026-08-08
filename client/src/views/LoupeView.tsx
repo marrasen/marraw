@@ -41,6 +41,7 @@ import { MaskHoverTint } from '@/components/MaskHoverTint';
 import { AIPickOverlay } from '@/components/AIPickOverlay';
 import { AIKind, type Params } from '@/api/edit';
 
+import { renditionPlan, tilesEngaged } from '@/lib/rendition';
 import { ZOOM_DURATION_MS, snapReason, zoomAt } from '@/lib/zoomTween';
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
 // fraction space (crop-width-fraction / crop-height-fraction), accounting for
@@ -550,41 +551,28 @@ export function CinemaImage({
     }
   }, [cropping, zoom, rfw, rfh, container, setZoom]);
 
-  // While an edit preview is active, show the JPEG the backend just pushed
-  // over the WebSocket instead of a cache URL — but only when its geometry
-  // matches the mode: flat frames belong to crop mode, cropped renders to
-  // normal viewing. A flat blob kept after Done (or one landing late from an
-  // in-flight render) is gated out and src falls back to the committed
-  // rendition, whose crop is already baked in.
-  const previewUrl =
-    preview && preview.photoId === photo.id && preview.flat === cropping ? preview.url : null;
-  // Rendition level from the TARGET scale, not the animating one, so a zoom
-  // tween never requests the pyramid levels it passes through.
-  const level = levelForPx(Math.max(dw, dh) * scale * window.devicePixelRatio);
-  // Past pyramid depth the 2048 rendition stays on as an instantly-available
-  // underlay stretched into the box, and TileLayer sharpens the visible
-  // region with full-resolution tiles on top; neighbors are warmed so
-  // stepping through a burst stays instant.
-  const tileDepth = !previewUrl && level === 'tiles' && !cropping;
-  // Tile depth must NEVER block browsing, at ANY zoom — on a high-DPI
-  // display even the fit box crosses it, and a numeric zoom (wheel, slider,
-  // 1:1) is one keypress away. Tiles engage only when the set is already on
-  // disk; a cold photo shows the warm 2048 immediately and one skim-safe
-  // render kicks after a 350ms dwell, surfaced through the progress chip.
-  // (The first fit-only version of this gate missed numeric zoom states —
-  // on 4K that left the old render-on-demand path live almost everywhere.)
-  // In CULL at fit the kick is off entirely: culling dwell (1-3s per frame)
-  // sails past 350ms on every frame, so on a 4K display the kick fired the
-  // full-resolution render — the daemon's most expensive op — per photo
-  // looked at, saturating the pool and starving the cheap requests. The
-  // upscaled 2048 from the dwell-kick below is plenty for a cull decision;
-  // a deliberate zoom (atFit false) still kicks for focus checks.
+  // What to show and whether tiles engage: one decision, in lib/rendition.ts
+  // where the cases are named and tested. The level comes from the TARGET
+  // scale, not the animating one, so a zoom tween never requests the pyramid
+  // levels it passes through.
   const atFit = zoom === 'fit';
-  const tilesWarm = useTilesWarm(photo, tileDepth, uiMode !== 'cull' || !atFit);
-  const wantTiles = tileDepth && tilesWarm;
-  const src = previewUrl ?? imgUrl(photo, level === 'tiles' ? '2048' : level);
+  // 'tiles' here means "past pyramid depth" — kept raw because the
+  // preview-eviction effects below ask exactly that question.
+  const level = levelForPx(Math.max(dw, dh) * scale * window.devicePixelRatio);
+  const plan = renditionPlan({ preview, photoId: photo.id, cropping, level, atFit, uiMode });
+  const previewUrl = plan.usePreview ? preview!.url : null;
+  const tileDepth = plan.tileDepth;
+  // Warmth is asked about only once tile depth is known, so it follows the
+  // plan rather than feeding it.
+  const tilesWarm = useTilesWarm(photo, tileDepth, plan.allowDwellKick);
+  const wantTiles = tilesEngaged(tileDepth, tilesWarm);
+  const src = previewUrl ?? imgUrl(photo, plan.srcLevel);
   // The pyramid level fit displays (never 'tiles' in the fit branch below).
-  const fitLevel: Level = level === 'tiles' ? '2048' : level;
+  const fitLevel: Level = plan.srcLevel;
+  // Warm neighbours whenever the loupe is showing committed renditions (fit
+  // included — that path has no tile layer to bridge a cold 2048).
+  useTilePrefetch(photos, photo, !previewUrl && !cropping && haveDims, plan.prefetchTiles, fitLevel);
+
   const [shownSrc, setShownSrc] = useState('');
   // Warm neighbours whenever the loupe is showing committed renditions (fit
   // included — that path has no tile layer to bridge a cold 2048); fire the
