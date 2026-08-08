@@ -16,19 +16,6 @@ export function formatAperture(a: number): string {
   return String(Math.round(a * 10) / 10);
 }
 
-// Human-readable byte size: MB for anything camera-sized, one decimal.
-export function formatBytes(bytes: number): string {
-  if (bytes <= 0) return '—';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let v = bytes;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  const digits = v >= 100 || i === 0 ? 0 : 1;
-  return `${v.toFixed(digits)} ${units[i]}`;
-}
 
 // "6000 × 4000 · 24.0 MP" — dimensions plus megapixels, or a dash if unknown.
 export function formatResolution(width: number, height: number): string {

@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { formatBytes } from '@/lib/exif';
+import { formatBytes } from '@/lib/bytes';
 
 // A photo needs analysis until its subject matte has been measured. This keys
 // off subjectAnalyzed, NOT the score: a frame with no detectable subject scores

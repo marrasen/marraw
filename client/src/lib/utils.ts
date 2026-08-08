@@ -17,3 +17,11 @@ export function uniqueName(base: string, taken: { name: string }[], keepBase = f
     if (!names.has(candidate)) return candidate;
   }
 }
+
+// clamp/clamp01 lived under six names across the client — `clamp`,
+// `clamp01`, `clampUnit`, and inline Math.min(Math.max(…)) — which is
+// harmless individually and means nobody finds the one that exists.
+export const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+
+/** Clamp to 0..1, the range normalized image coordinates and amounts live in. */
+export const clamp01 = (n: number) => clamp(n, 0, 1);

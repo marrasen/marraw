@@ -5,6 +5,7 @@ import { useApiClient, type ApiClient } from '@/api/client';
 import { toast } from 'sonner';
 import { applyRating as doRating, applyFlag as doFlag, applyFlagOps } from '@/lib/actions';
 import { copyTargetPhotoToClipboard } from '@/lib/clipboardExport';
+import { isEditableTarget } from '@/lib/editable';
 import { chRedo, chRedoSeq, chUndo, chUndoSeq } from '@/lib/cullHistory';
 import { featureEnabled } from '@/lib/features';
 import { rowNeighbor } from '@/lib/gridNav';
@@ -113,13 +114,19 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 //   Ctrl+U        auto dynamics (+Shift = auto colours, +Alt = auto everything)
 //   Ctrl+1..9     creative auto presets (Settings → Auto presets)
 //   Ctrl+⇧+1..9   saved "My presets" looks (Develop → Presets tab)
+//
+// TAKEN ELSEWHERE — do not bind here:
+//   d             light/dark theme, handled by ThemeProvider's own window
+//                 listener (components/theme-provider.tsx). It cannot move
+//                 into this dispatcher because the pop-out viewer window
+//                 mounts the provider but not this hook. Binding d below
+//                 would fire both, silently.
 export function useKeyboard() {
   const client = useApiClient();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t.isContentEditable) return;
+      if (isEditableTarget(e.target)) return;
       const s = useUIStore.getState();
       if (s.exportOpen) return;
       const es = useEditSession.getState();

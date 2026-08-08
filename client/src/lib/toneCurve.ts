@@ -7,6 +7,7 @@
 //
 // A leaf module: import only the generated type, nothing that pulls the panel
 // back in.
+import { clamp01 } from '@/lib/utils';
 import type { CurvePoint, Params } from '@/api/edit';
 
 // The identity curve: the two pinned endpoints. Stored as `undefined` on
@@ -79,18 +80,15 @@ function tangents(pts: CurvePoint[]): number[] {
   return m;
 }
 
-function clampUnit(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
 
 // evalCurve samples the monotone-cubic curve at input x in 0..1, returning the
 // output in 0..1. Flat past the endpoints (clamped endpoints), matching the
 // backend LUT.
 export function evalCurve(pts: CurvePoint[], x: number): number {
   const n = pts.length;
-  if (n === 0) return clampUnit(x);
-  if (x <= pts[0].x) return clampUnit(pts[0].y);
-  if (x >= pts[n - 1].x) return clampUnit(pts[n - 1].y);
+  if (n === 0) return clamp01(x);
+  if (x <= pts[0].x) return clamp01(pts[0].y);
+  if (x >= pts[n - 1].x) return clamp01(pts[n - 1].y);
   const m = tangents(pts);
   let i = 0;
   while (i < n - 1 && x > pts[i + 1].x) i++;
@@ -102,7 +100,7 @@ export function evalCurve(pts: CurvePoint[], x: number): number {
   const h10 = t3 - 2 * t2 + t;
   const h01 = -2 * t3 + 3 * t2;
   const h11 = t3 - t2;
-  return clampUnit(h00 * pts[i].y + h10 * h * m[i] + h01 * pts[i + 1].y + h11 * h * m[i + 1]);
+  return clamp01(h00 * pts[i].y + h10 * h * m[i] + h01 * pts[i + 1].y + h11 * h * m[i + 1]);
 }
 
 // curvePolyline samples the curve into `steps`+1 points in unit space, for

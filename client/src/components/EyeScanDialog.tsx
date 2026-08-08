@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { formatBytes } from '@/lib/exif';
+import { formatBytes } from '@/lib/bytes';
 
 // A photo needs the scan until detection has run, whether or not it found a
 // face (the no-face sentinel is invisible in eyesClosed, so keying off the

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Params } from '@/api/edit';
-import { cn } from '@/lib/utils';
+import { clamp01, cn } from '@/lib/utils';
 import { fitCropToRotation, maxCoveredT, rectCornersCovered, slideMoveRect } from '@/lib/crop';
 
 // Which edges a drag moves. Corner/edge handles set one or both; an interior
@@ -15,7 +15,6 @@ interface Rect {
 }
 
 const MIN = 0.05; // smallest crop as a fraction of a side
-const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 // currentRect reads the draft's crop, defaulting to the full frame when
 // no crop is set (cropW/H === 0).

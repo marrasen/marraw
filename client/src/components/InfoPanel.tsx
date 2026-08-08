@@ -20,7 +20,8 @@ import { Histogram } from '@/components/Histogram';
 import { NavigatorMap } from '@/views/LoupeView';
 import { useLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
-import { formatAperture, formatBytes, formatCaptured, formatResolution, formatShutter } from '@/lib/exif';
+import { formatBytes } from '@/lib/bytes';
+import { formatAperture, formatCaptured, formatResolution, formatShutter } from '@/lib/exif';
 
 // What the focus numbers actually are, in the tooltip that carries them —
 // a bare Laplacian variance is unreadable without this.

@@ -147,9 +147,6 @@ function remapMasks(p: Params, map: PointMap, quarterTurn: boolean): Mask[] | un
   });
 }
 
-// A neutral (full-frame, unrotated) crop rectangle.
-export const FULL_CROP = { cropX: 0, cropY: 0, cropW: 1, cropH: 1, cropAngle: 0 } as const;
-
 export interface CropRect {
   x: number;
   y: number;

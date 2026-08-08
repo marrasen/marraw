@@ -82,22 +82,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { formatBytes as formatSize } from '@/lib/bytes';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import '@/lib/electron';
 
-// formatBytes renders a byte count as a compact human-readable size.
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
-}
+// Sizes in this dialog are cache stats and download progress, where zero is a
+// real measurement rather than an unknown, so it reads as such.
+const formatBytes = (n: number) => formatSize(n, '0 B');
 
 const SECTIONS = ['General', 'Features', 'Toolbars', 'Auto presets', 'Default presets', 'Cache', 'Models', 'Sidecars', 'Remote', 'Updates'] as const;
 type Section = (typeof SECTIONS)[number];

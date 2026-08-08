@@ -389,12 +389,6 @@ export function isMaskShapeControl(c: MaskPanelControlId): c is MaskShapeControl
   return c in MASK_SHAPE_SPECS;
 }
 
-export const NEUTRAL_MASK_ADJUST: Required<MaskAdjust> = {
-  expEV: 0, contrast: 0, toneHighlights: 0, toneShadows: 0,
-  whites: 0, blacks: 0, temp: 0, tint: 0, saturation: 0,
-  blur: 0, motionBlur: 0, zoomBlur: 0, glow: 0, streaks: 0, prism: 0, mosaic: 0, fxAngle: 0,
-};
-
 // Must walk MASK_ALL_CONTROLS, not just the tone block: a blur-only mask is a
 // real edit and would otherwise report as neutral (no changed dot, and the
 // server would still render it — a mismatch the compiler can't catch).

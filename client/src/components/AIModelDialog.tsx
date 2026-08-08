@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { formatBytes } from '@/lib/exif';
+import { formatBytes } from '@/lib/bytes';
 
 const AI_KIND_INFO: Record<string, { title: string; feature: string }> = {
   subject: {

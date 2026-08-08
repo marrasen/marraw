@@ -1,3 +1,4 @@
+import { clamp } from '@/lib/utils';
 /**
  * Vertical navigation for grids, driven by an explicit row model rather than a
  * fixed column count. `rowStarts` is the ascending list of flat photo indices
@@ -14,8 +15,6 @@
  * short justified row) intervenes, the frame visually above index i is no
  * longer i - cols. Resolve the move against the row the frame actually sits in.
  */
-
-const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 /**
  * uniformRowStarts builds the row model for a uniform `cols`-wide grid whose

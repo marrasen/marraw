@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
 
+import { isEditableTarget } from "@/lib/editable"
 import { useApiClient } from "@/api/client"
 import { updateTheme } from "@/lib/uiSettings"
 import { useUIStore, type Theme } from "@/stores/uiStore"
@@ -50,24 +51,6 @@ function disableTransitionsTemporarily() {
   }
 }
 
-function isEditableTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) {
-    return false
-  }
-
-  if (target.isContentEditable) {
-    return true
-  }
-
-  const editableParent = target.closest(
-    "input, textarea, select, [contenteditable='true']"
-  )
-  if (editableParent) {
-    return true
-  }
-
-  return false
-}
 
 // Theme is server-persisted (uiSettings) and mirrored in the uiStore by
 // <UISettingsSync/>; this provider applies it to the document and exposes
