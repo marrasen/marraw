@@ -15,8 +15,11 @@
 //
 //   * Blob-returning methods reply as BINARY frames, not JSON. A handler that
 //     only looks at string messages drops the reply and the call hangs
-//     forever, looking exactly like a server deadlock. `call` resolves those
-//     as a Uint8Array.
+//     forever, looking exactly like a server deadlock. The frame is a 4-byte
+//     big-endian header length, that many bytes of JSON header (carrying the
+//     request `id` and `contentType`), then the payload — so the id comes off
+//     the header rather than being guessed at. `call` resolves those as
+//     {blob, contentType}.
 //
 //   * The server sends a `config` frame first, and pushes reach a connection
 //     that has not authenticated yet. Filter for the frame you are asserting
@@ -34,6 +37,8 @@ const DEFAULT_TIMEOUT = 120_000;
  *
  * @returns {Promise<{
  *   call: (method: string, params?: unknown[], opts?: {timeoutMs?: number}) => Promise<any>,
+ *   send: (method: string, params?: unknown[], opts?: {timeoutMs?: number}) => {id: string, promise: Promise<any>},
+ *   cancel: (id: string) => void,
  *   waitTask: (taskId: string, opts?: {timeoutMs?: number}) => Promise<any>,
  *   waitPush: (event: string, match?: (data: any) => boolean, opts?: {timeoutMs?: number}) => Promise<any>,
  *   pushes: {event: string, data: any}[],
@@ -42,24 +47,22 @@ const DEFAULT_TIMEOUT = 120_000;
  */
 export async function connect({ url = DEFAULT_URL, token, timeoutMs = DEFAULT_TIMEOUT } = {}) {
   const ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
   const pending = new Map();
   const pushes = [];
   const pushWaiters = [];
   let nextId = 1;
 
   ws.onmessage = async (ev) => {
-    // Binary frame: the reply to whichever blob call is outstanding. Blob
-    // methods are one-at-a-time in practice, so the single pending binary
-    // waiter is unambiguous.
     if (typeof ev.data !== 'string') {
-      const bytes = new Uint8Array(
-        ev.data instanceof ArrayBuffer ? ev.data : await ev.data.arrayBuffer(),
-      );
-      const waiting = [...pending.values()].find((p) => p.wantsBinary);
-      if (waiting) {
-        waiting.resolve(bytes);
-        pending.delete(waiting.id);
-      }
+      const buf = ev.data instanceof ArrayBuffer ? ev.data : await ev.data.arrayBuffer();
+      const headerLen = new DataView(buf).getUint32(0, false);
+      const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, headerLen)));
+      pending.get(header.id)?.resolve({
+        blob: new Uint8Array(buf, 4 + headerLen),
+        contentType: header.contentType,
+      });
+      pending.delete(header.id);
       return;
     }
     const msg = JSON.parse(ev.data);
@@ -67,7 +70,12 @@ export async function connect({ url = DEFAULT_URL, token, timeoutMs = DEFAULT_TI
       pending.get(msg.id)?.resolve(msg.result);
       pending.delete(msg.id);
     } else if (msg.type === 'error') {
-      pending.get(msg.id)?.reject(new Error(`${msg.code}: ${msg.message}`));
+      // Keep the numeric code on the error: callers assert on specific ones
+      // (a cancel settles as -32800), and string-matching a message is the
+      // kind of thing that rots the next time the wording changes.
+      const err = new Error(`${msg.code}: ${msg.message}`);
+      err.code = msg.code;
+      pending.get(msg.id)?.reject(err);
       pending.delete(msg.id);
     } else if (msg.type === 'push') {
       const push = { event: msg.event, data: msg.data };
@@ -96,7 +104,9 @@ export async function connect({ url = DEFAULT_URL, token, timeoutMs = DEFAULT_TI
     ws.send(JSON.stringify({ type: 'auth', token }));
   }
 
-  function call(method, params = [], { timeoutMs: perCall = timeoutMs } = {}) {
+  // send exposes the request id, so a caller can cancel mid-flight — which is
+  // the contract the immediate-settle scheduler leans on.
+  function send(method, params = [], { timeoutMs: perCall = timeoutMs } = {}) {
     if (!Array.isArray(params)) {
       throw new TypeError(
         `${method}: params must be an ARRAY (positional). An object gives ` +
@@ -104,9 +114,8 @@ export async function connect({ url = DEFAULT_URL, token, timeoutMs = DEFAULT_TI
       );
     }
     const id = String(nextId++);
-    return new Promise((resolve, reject) => {
-      pending.set(id, { id, resolve, reject, wantsBinary: BLOB_METHODS.has(method) });
-      ws.send(JSON.stringify({ type: 'request', id, method, params }));
+    const promise = new Promise((resolve, reject) => {
+      pending.set(id, { id, resolve, reject });
       setTimeout(() => {
         if (pending.has(id)) {
           pending.delete(id);
@@ -114,7 +123,12 @@ export async function connect({ url = DEFAULT_URL, token, timeoutMs = DEFAULT_TI
         }
       }, perCall);
     });
+    ws.send(JSON.stringify({ type: 'request', id, method, params }));
+    return { id, promise };
   }
+
+  const call = (method, params = [], opts) => send(method, params, opts).promise;
+  const cancel = (id) => ws.send(JSON.stringify({ type: 'cancel', id }));
 
   function waitPush(event, match, { timeoutMs: wait = timeoutMs } = {}) {
     const already = pushes.find((p) => p.event === event && (!match || match(p.data)));
@@ -151,13 +165,8 @@ export async function connect({ url = DEFAULT_URL, token, timeoutMs = DEFAULT_TI
     throw new Error(`timeout waiting for task ${taskId}`);
   }
 
-  return { call, waitTask, waitPush, pushes, close: () => ws.close() };
+  return { call, send, cancel, waitTask, waitPush, pushes, close: () => ws.close() };
 }
-
-// Methods answering with a binary frame. Add to this rather than rediscovering
-// the hang: a blob reply never arrives as JSON, so a probe waiting on a string
-// message waits for the life of the process.
-const BLOB_METHODS = new Set(['Edits.MaskTintPreview']);
 
 /** A tiny pass/fail tally, so probes report the same way. */
 export function checker() {

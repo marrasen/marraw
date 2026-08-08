@@ -10,6 +10,8 @@
 // Point it at a DISPOSABLE copy of a shoot — edits write .marraw.json
 // sidecars next to the RAWs.
 
+import { connect } from './lib/rpc.mjs';
+
 const FOLDER = process.argv[2];
 if (!FOLDER) {
   console.error('usage: node scripts/settle-verify.mjs <disposable-raw-folder>');
@@ -18,62 +20,13 @@ if (!FOLDER) {
 
 const CANCELED = -32800;
 
-const ws = new WebSocket('ws://127.0.0.1:8483/ws');
-ws.binaryType = 'arraybuffer';
-let nextId = 1;
-const pending = new Map();
-
-ws.onmessage = (ev) => {
-  if (typeof ev.data !== 'string') {
-    // Binary frame: 4-byte BE header length + JSON header + payload.
-    const buf = ev.data;
-    const view = new DataView(buf);
-    const headerLen = view.getUint32(0, false);
-    const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, headerLen)));
-    const payload = new Uint8Array(buf, 4 + headerLen);
-    pending.get(header.id)?.resolve({ blob: payload, contentType: header.contentType });
-    pending.delete(header.id);
-    return;
-  }
-  const msg = JSON.parse(ev.data);
-  if (msg.type === 'response') {
-    pending.get(msg.id)?.resolve(msg.result);
-    pending.delete(msg.id);
-  } else if (msg.type === 'error') {
-    const err = new Error(msg.message);
-    err.code = msg.code;
-    pending.get(msg.id)?.reject(err);
-    pending.delete(msg.id);
-  }
-};
-
-function send(method, params) {
-  const id = String(nextId++);
-  const p = new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    setTimeout(() => {
-      if (pending.has(id)) {
-        pending.delete(id);
-        reject(new Error(`timeout: ${method}`));
-      }
-    }, 120_000);
-  });
-  ws.send(JSON.stringify({ type: 'request', id, method, params }));
-  return { id, promise: p };
-}
-const call = (method, params) => send(method, params).promise;
-const cancel = (id) => ws.send(JSON.stringify({ type: 'cancel', id }));
+const { call, send, cancel, close } = await connect();
 
 let failures = 0;
 const check = (cond, name) => {
   console.log(`  ${cond ? 'PASS' : 'FAIL'}  ${name}`);
   if (!cond) failures++;
 };
-
-await new Promise((resolve, reject) => {
-  ws.onopen = resolve;
-  ws.onerror = () => reject(new Error('ws connect failed'));
-});
 
 const info = await call('Library.OpenFolder', [FOLDER]);
 const photos = await call('Library.ListPhotos', [info.folderId]);
@@ -121,5 +74,5 @@ const settleAfter = await call('Edits.PreviewEdit', [p.id, edited2, 2048]);
 check(settleAfter.blob?.length > 5_000, `re-issued 2048 of the cancelled params renders (${Math.round(settleAfter.blob.length / 1024)} KB in ${Date.now() - t0}ms)`);
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECKS FAILED`);
-ws.close();
+close();
 process.exit(failures === 0 ? 0 : 1);

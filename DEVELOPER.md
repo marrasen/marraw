@@ -189,9 +189,18 @@ node scripts/smoke.mjs "D:\Photos\some-shoot"
 
 Backend probes in `scripts/` talk to the daemon through `scripts/lib/rpc.mjs`,
 which owns the wire protocol — positional params, binary frames for blob
-methods, task-status polling. Use it rather than opening a socket by hand: the
-copies that did drifted apart and failed as hangs, months after the change
-that broke them.
+methods, cancellation, task-status polling. Use it rather than opening a socket
+by hand: the copies that did drifted apart and failed as hangs, months after
+the change that broke them.
+
+A probe is written for a feature in progress and is expected to go once that
+feature is stable and covered elsewhere — the two kept below earn their keep by
+guarding contracts nothing else can reach:
+
+```powershell
+node scripts/settle-verify.mjs "<disposable-raw-folder>"   # PreviewEdit cancel contract
+node scripts/cancel-verify.mjs "<disposable-raw-folder>"   # 1:1 render cancel + progress
+```
 
 UI verification harnesses live in `scripts/` (`ui-verify.mjs`, `shot.mjs`,
 `auto-verify.mjs`, …). Kill any user-launched Electron first — the GPU cache
