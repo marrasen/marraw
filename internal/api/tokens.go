@@ -107,8 +107,16 @@ func (t *AuthTokens) Match(tok string) TokenMatch {
 	// Share links last: an expired one matches nothing at all, so a lapsed
 	// link is refused at the door rather than reaching a handler that would
 	// have to remember to check.
+	//
+	// Folder 0 is refused for the same reason, and it is the more dangerous of
+	// the two: 0 is the unconfined sentinel, so a link carrying it would widen
+	// to the whole library in imghttp rather than narrow to nothing. CreateLink
+	// never mints one, so it can only come from a corrupt or hand-edited
+	// settings blob — the same reasoning liveGuest applies on the RPC path.
+	// Both surfaces have to agree here: this is the door /img and /dl come
+	// through, and they never consult liveGuest.
 	guests, _ := t.guests.Load().([]GuestLink)
-	if g := matchGuest(guests, tok); g != nil && !g.Expired(time.Now()) {
+	if g := matchGuest(guests, tok); g != nil && g.FolderID != 0 && !g.Expired(time.Now()) {
 		return TokenMatch{OK: true, Guest: g}
 	}
 	return m

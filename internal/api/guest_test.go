@@ -238,6 +238,7 @@ func TestAuthTokensMatchGuest(t *testing.T) {
 		{ID: "live", Token: "tok-live", FolderID: 7, ExpiresAt: future},
 		{ID: "lapsed", Token: "tok-lapsed", FolderID: 8, ExpiresAt: past},
 		{ID: "forever", Token: "tok-forever", FolderID: 9},
+		{ID: "unconfined", Token: "tok-unconfined", ExpiresAt: future},
 	})
 
 	m := tokens.Match("tok-live")
@@ -254,6 +255,13 @@ func TestAuthTokensMatchGuest(t *testing.T) {
 	// check the expiry itself.
 	if m := tokens.Match("tok-lapsed"); m.OK || m.Guest != nil {
 		t.Errorf("Match(lapsed) = %+v, want no match", m)
+	}
+	// So is a link scoped to folder 0. It has to be refused here and not merely
+	// on the RPC path: /img and /dl authenticate through Match alone, and folder
+	// 0 reads as "the whole library" downstream in imghttp, so trusting one
+	// would hand a guest every photo the owner has.
+	if m := tokens.Match("tok-unconfined"); m.OK || m.Guest != nil {
+		t.Errorf("Match(unconfined) = %+v, want no match", m)
 	}
 	if m := tokens.Match("tok-nonexistent"); m.OK {
 		t.Errorf("Match(unknown) = %+v, want no match", m)
