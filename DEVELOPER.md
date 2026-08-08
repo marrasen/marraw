@@ -187,12 +187,11 @@ Backend smoke test (needs a folder of RAW files and a running dev server):
 node scripts/smoke.mjs "D:\Photos\some-shoot"
 ```
 
-Grid row navigation across time-gap groups is pure and has its own harness
-(no dev server, no RAW files):
-
-```powershell
-node scripts/gridnav-verify.mjs
-```
+Backend probes in `scripts/` talk to the daemon through `scripts/lib/rpc.mjs`,
+which owns the wire protocol — positional params, binary frames for blob
+methods, task-status polling. Use it rather than opening a socket by hand: the
+copies that did drifted apart and failed as hangs, months after the change
+that broke them.
 
 UI verification harnesses live in `scripts/` (`ui-verify.mjs`, `shot.mjs`,
 `auto-verify.mjs`, …). Kill any user-launched Electron first — the GPU cache

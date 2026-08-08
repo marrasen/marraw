@@ -9,6 +9,7 @@
 // Point it at a DISPOSABLE copy of a shoot — the same-folder pass writes
 // .xmp files next to the RAWs.
 
+import { connect } from './lib/rpc.mjs';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,51 +20,7 @@ if (!FOLDER) {
   process.exit(1);
 }
 
-const ws = new WebSocket('ws://127.0.0.1:8483/ws');
-let nextId = 1;
-const pending = new Map();
-const pushes = [];
-
-ws.onmessage = (ev) => {
-  if (typeof ev.data !== 'string') return;
-  const msg = JSON.parse(ev.data);
-  if (msg.type === 'response') {
-    pending.get(msg.id)?.resolve(msg.result);
-    pending.delete(msg.id);
-  } else if (msg.type === 'error') {
-    pending.get(msg.id)?.reject(new Error(`${msg.code}: ${msg.message}`));
-    pending.delete(msg.id);
-  } else if (msg.type === 'push') {
-    pushes.push(msg);
-  }
-};
-
-function call(method, params) {
-  const id = String(nextId++);
-  return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
-    ws.send(JSON.stringify({ type: 'request', id, method, params }));
-    setTimeout(() => {
-      if (pending.has(id)) {
-        pending.delete(id);
-        reject(new Error(`timeout: ${method}`));
-      }
-    }, 120_000);
-  });
-}
-
-async function waitTask(taskId, timeoutMs = 120_000) {
-  const t = Date.now();
-  while (Date.now() - t < timeoutMs) {
-    for (const m of pushes) {
-      if (m.event !== 'TaskStateEvent') continue;
-      const task = m.data.tasks?.find((x) => x.id === taskId);
-      if (task && (task.status === 'completed' || task.status === 'failed')) return task;
-    }
-    await new Promise((s) => setTimeout(s, 100));
-  }
-  throw new Error('timeout waiting for export task');
-}
+const { call, waitTask, close } = await connect();
 
 let failures = 0;
 const check = (cond, name) => {
@@ -71,11 +28,6 @@ const check = (cond, name) => {
   if (!cond) failures++;
 };
 const step = (name) => console.log(name);
-
-await new Promise((resolve, reject) => {
-  ws.onopen = resolve;
-  ws.onerror = () => reject(new Error('ws connect failed'));
-});
 
 const info = await call('Library.OpenFolder', [FOLDER]);
 const photos = await call('Library.ListPhotos', [info.folderId]);
@@ -169,5 +121,5 @@ const inPlaceXmp = readFileSync(join(FOLDER, p.fileName.replace(/\.[^.]+$/, '.xm
 check(inPlaceXmp.includes('crs:Exposure2012="+0.50"'), 'in-place sidecar carries the edit');
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECKS FAILED`);
-ws.close();
+close();
 process.exit(failures === 0 ? 0 : 1);
