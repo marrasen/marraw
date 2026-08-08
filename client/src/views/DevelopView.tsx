@@ -42,6 +42,7 @@ export function DevelopView({
   const wbPicking = useEditSession((s) => s.wbPicking);
   const keyAdjust = useEditSession((s) => s.keyAdjust);
   const activeControl = useEditSession((s) => s.activeControl);
+  const showOriginal = useUIStore((s) => s.showOriginal);
   const idle = useIdle();
   const [scale, setScale] = useState(1);
   const [panelHovered, setPanelHovered] = useState(false);
@@ -66,7 +67,14 @@ export function DevelopView({
   // A mouse resting still on the drawer emits no pointermove, so the idle timer
   // would fade the panel out from under the cursor. Suppress the idle fade
   // while the pointer is over the drawer (a +/- adjust still hides it).
-  const chromeHidden = (idle && !panelHovered) || adjusting;
+  //
+  // A hold-to-compare hides the chrome outright, whatever the idle timer says:
+  // the whole point of the gesture is an unobstructed look at the photograph,
+  // and Backspace's key repeat counts as activity — so without this the hold
+  // would summon the UI back rather than get it out of the way. Chrome the
+  // pointer rests on still keeps itself (useHoverKeep), so holding the dock's
+  // Original button never hides the button under the cursor.
+  const chromeHidden = (idle && !panelHovered) || adjusting || showOriginal;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
