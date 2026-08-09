@@ -8,6 +8,12 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
+## 0.10.0-beta.18 - 2026-08-09
+
+- Local: **tilt shift focuses itself on the subject**. If the subject-detection model is already on your machine, the Tilt shift button finds where the subject stands in the scene's depth and puts the sharp band right there — no extra download, no extra dialog; without it, the band lands at a sensible middle distance as before
+- Local: **gentler tilt shift by default** — the heavy blur is gone from the recipe, replaced by a touch of bokeh and glow with a prism fringe that grows with distance: defocused highlights become blooming discs, and the whole thing reads as a lens rather than a smear. All four dials are yours to push further
+- Cull: **hold Backspace to see the original** — the photo before any edit — the same hold that already worked in Develop. Release puts the developed frame back
+
 ## 0.10.0-beta.17 - 2026-08-09
 
 - Local: **tilt shift moved into the masks**, where it belongs. The Local tab's new Tilt shift button adds an inverted Depth mask with the blur pre-dialled: set the sharp band with **Focus distance** and **Focus depth** (every Depth mask now uses that pair instead of the two-thumb range — same stored window, friendlier handles), and everything a mask can do now grades with distance — darken and cool the far background, fringe it with prism, streak its highlights. Note for beta.16 testers: the short-lived Effects-panel version is gone, and an edit made with it loses the effect — re-add it from the Local tab
