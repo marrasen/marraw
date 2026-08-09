@@ -18,6 +18,7 @@ import {
   setFolderView,
   setGapMinutes,
   setGroupAlias,
+  setLastFolder,
   setLastSeenVersion,
   setLibrarySort,
   setPrerenderFullres,
@@ -236,6 +237,13 @@ export function updateRailGroupOpen(client: ApiClient, parentPath: string, open:
 export function updateLastSeenVersion(client: ApiClient, version: string) {
   useUIStore.setState({ lastSeenVersion: version });
   setLastSeenVersion(client, version).catch(swallow);
+}
+
+// Remembers the folder to reopen on the next launch; '' clears it. Written
+// from lib/lastFolder.ts as the open folder changes.
+export function updateLastFolder(client: ApiClient, path: string) {
+  useUIStore.setState({ lastFolder: path });
+  setLastFolder(client, path).catch(swallow);
 }
 
 // Collapse or restore the library rail. The width is left alone, so the rail

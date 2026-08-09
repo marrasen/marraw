@@ -24,6 +24,11 @@ delete env.ELECTRON_RUN_AS_NODE;
 env.MARRAW_DEV = '1';
 env.MARRAW_PORT = '8483';
 env.MARRAW_OPEN_FOLDER = FOLDER;
+// MARRAW_SHOT_NO_OPEN launches with no folder requested, which is the only
+// way to exercise startup itself — the `restore` surface reopens whatever
+// the daemon remembers. The folder argument is still what a preceding run
+// used to put that memory there.
+if (process.env.MARRAW_SHOT_NO_OPEN) delete env.MARRAW_OPEN_FOLDER;
 // The remote/pairing surfaces need a daemon that other machines could reach:
 // the shared `marrawd --dev` on 8483 is loopback-only and serves none of the
 // discovery or pairing routes. Dropping MARRAW_PORT makes the shell spawn its

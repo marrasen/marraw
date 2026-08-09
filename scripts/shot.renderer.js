@@ -14,7 +14,6 @@ const until = async (fn, ms = 30000) => {
 };
 const mw = await until(() => window.__marraw);
 const ui = () => mw.useUIStore.getState();
-await until(() => ui().visibleIds.length > 0);
 const shot = new URLSearchParams(location.search).get('shot') || 'cull';
 
 // ?shotFocus=<n> aims the capture at the n-th visible frame (capture order)
@@ -22,12 +21,26 @@ const shot = new URLSearchParams(location.search).get('shot') || 'cull';
 // ?shotGap=<min> overrides the time-gap grouping for the capture session.
 const params = new URLSearchParams(location.search);
 const focusIdx = Number(params.get('shotFocus') ?? 6);
-if (params.get('shotGap')) {
-  mw.setGapMinutes(Number(params.get('shotGap')));
-  await sleep(800); // server write + regroup round-trip
+// A dev profile whose stored lastSeenVersion is old raises the What's-new
+// dialog over whatever surface is being shot. Dismiss it everywhere except
+// the two surfaces that are about it.
+if (shot !== 'welcome' && shot !== 'restore') {
+  await sleep(400);
+  document.querySelector('[data-testid="whats-new-dismiss"]')?.click();
 }
-ui().focus(ui().visibleIds[focusIdx] ?? ui().visibleIds[6] ?? ui().visibleIds[0]);
-await sleep(300);
+
+// `restore` is launched with no folder requested (MARRAW_SHOT_NO_OPEN) — it
+// is startup itself under test, and one of its cases never opens a folder at
+// all, so it skips the preamble that waits for photos.
+if (shot !== 'restore') {
+  await until(() => ui().visibleIds.length > 0);
+  if (params.get('shotGap')) {
+    mw.setGapMinutes(Number(params.get('shotGap')));
+    await sleep(800); // server write + regroup round-trip
+  }
+  ui().focus(ui().visibleIds[focusIdx] ?? ui().visibleIds[6] ?? ui().visibleIds[0]);
+  await sleep(300);
+}
 if (shot === 'cull') {
   ui().setMode('cull');
 } else if (shot === 'sheet') {
@@ -2045,14 +2058,48 @@ if (shot === 'cull') {
     p2FramesKB: sizes,
     settled: mw.esPreviewSettled(),
   };
+} else if (shot === 'restore') {
+  // Startup with no folder requested: the app reopens the one the daemon
+  // remembers (ui:lastFolder). Run it after a normal shot has put a folder
+  // in that memory; point it at a folder that no longer exists to take the
+  // failure branch, which must land on the library, say so, and leave the
+  // rail on screen even if it was collapsed (its toggle lives in the folder
+  // toolbar, so a hidden rail there is a dead end).
+  await until(() => ui().settingsLoaded);
+  const remembered = ui().lastFolder;
+  // Toasts expire on their own, so sample rather than read once at the end —
+  // "no error was shown" and "the error came and went" look identical
+  // otherwise. 20s covers a cold scan of the folder that does open.
+  let toast = '';
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    const seen = [...document.querySelectorAll('[data-sonner-toast]')]
+      .map((t) => t.textContent)
+      .join(' | ');
+    if (seen) toast = seen;
+    if (ui().folderPath != null || toast) break;
+    await sleep(100);
+  }
+  await sleep(1500);
+  window.__restoreProbe = {
+    remembered,
+    folderPath: ui().folderPath,
+    reopened: remembered !== '' && ui().folderPath === remembered,
+    photos: ui().visibleIds.length,
+    railHidden: ui().railHidden,
+    railOnScreen: !!document.querySelector('[data-testid="library-rail"]'),
+    toast,
+    welcomeMounted: [...document.querySelectorAll('h2')].some((h) =>
+      /Welcome to marraw/.test(h.textContent ?? ''),
+    ),
+  };
 } else if (shot === 'welcome') {
-  // The landing page (library has shoots, none open). The harness's opened
-  // folder guarantees a root exists; stepping out of it lands on Welcome.
-  // Seed lastSeenVersion HERE, after the auto-open folder settled — a
-  // transient Welcome mount during startup (openFolder still in flight)
-  // consumes any earlier seed and marks the current version seen. Pass an
-  // old version via ?seedLastSeen= to show the "What's new" card, or skip
-  // the param to shoot whatever state the daemon holds.
+  // The landing page (library has shoots, none open) plus the What's-new
+  // dialog that an update raises over it. The harness's opened folder
+  // guarantees a root exists; stepping out of it lands on Welcome.
+  // Pass an old version via ?seedLastSeen= to raise the dialog, or skip the
+  // param to shoot whatever state the daemon holds. The dialog re-reads the
+  // stored version whenever it changes, so seeding works at any point.
   const seed = new URLSearchParams(location.search).get('seedLastSeen');
   let afterSeed = null;
   if (seed != null) {
@@ -2063,12 +2110,28 @@ if (shot === 'cull') {
   const beforeMount = ui().lastSeenVersion;
   mw.useUIStore.setState({ folderId: null, folderPath: null });
   await sleep(600);
-  const card = [...document.querySelectorAll('h3')].find((h) =>
-    /What's new/.test(h.textContent ?? ''),
-  );
+  // Portalled to the body, so this finds it whatever is behind it.
+  const dialogOf = () => document.querySelector('[data-testid="whats-new"]');
+  const dialog = dialogOf();
+  const bullets = dialog ? dialog.querySelectorAll('li').length : 0;
+  // Dismissing is what marks the version seen — quitting mid-read must bring
+  // the news back. Check that, then seed the old version again so the capture
+  // still shows the dialog (it re-reads the stored version when it changes).
+  let dismissed = null;
+  if (dialog && seed != null) {
+    document.querySelector('[data-testid="whats-new-dismiss"]').click();
+    await sleep(600);
+    dismissed = { gone: !dialogOf(), lastSeen: ui().lastSeenVersion };
+    mw.setLastSeenVersion(seed);
+    await until(() => dialogOf(), 5000).catch(() => null);
+  }
   window.__welcomeProbe = {
-    cardShown: !!card,
-    bullets: card ? card.parentElement.querySelectorAll('li').length : 0,
+    dialogShown: !!dialog,
+    bullets,
+    dismissed,
+    reraised: !!dialogOf(),
+    // The version is only marked seen by dismissing — until then it still
+    // reads as the seeded one.
     lastSeen: ui().lastSeenVersion,
     afterSeed,
     beforeMount,
@@ -2750,6 +2813,7 @@ const probe =
   window.__naturalGridProbe ??
   window.__renderProbe ??
   window.__settleProbe ??
+  window.__restoreProbe ??
   window.__welcomeProbe ??
   window.__folderViewProbe ??
   window.__exportCopyProbe ??

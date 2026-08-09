@@ -171,9 +171,12 @@ try {
   await until(() => thumbA()?.complete && thumbA().naturalWidth > 0, 25000, 'photo A thumbnail warm');
   const goodSrc = thumbA().src;
   // An unedited photo carries no e= param (the base hash is implicit).
+  // Well-formed but dead: 12 lowercase hex digits, the shape validEditHash
+  // demands (imghttp/handler.go). A malformed one is rejected as a bad request
+  // before it ever reaches the "can this be generated?" question under test.
   const deadUrl = /[?&]e=/.test(goodSrc)
-    ? goodSrc.replace(/([?&])e=[^&]+/, '$1e=deadbeefdeadbeef')
-    : `${goodSrc}&e=deadbeefdeadbeef`;
+    ? goodSrc.replace(/([?&])e=[^&]+/, '$1e=deadbeefdead')
+    : `${goodSrc}&e=deadbeefdead`;
   const deadRes = await fetch(deadUrl);
   R.deadHashRejected = deadRes.status === 404 ? true : `status=${deadRes.status}`;
   const overridesBefore = new Map(ui().overrides);

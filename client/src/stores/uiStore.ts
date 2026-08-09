@@ -213,8 +213,11 @@ interface UIState {
   // Feature id -> explicit enable/disable override (absent = the default in
   // lib/features.ts; resolve through useFeature/featureEnabled, not directly).
   features: Record<string, boolean>;
-  // App version whose changelog the Welcome page last showed ('' = never).
+  // App version whose changelog the What's-new dialog last showed ('' = never).
   lastSeenVersion: string;
+  // Folder open when the app last closed, reopened on the next launch
+  // ('' = none). Written by lib/lastFolder.ts, never set here.
+  lastFolder: string;
   // True once the first uiSettings snapshot has arrived.
   settingsLoaded: boolean;
   // ---- end server-persisted mirror
@@ -389,6 +392,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   railHidden: false,
   features: {},
   lastSeenVersion: '',
+  lastFolder: '',
   settingsLoaded: false,
   focusId: null,
   anchorId: null,
@@ -475,6 +479,7 @@ export const useUIStore = create<UIState>((set, get) => ({
       // lib/features.ts registry.
       features: s.features ?? {},
       lastSeenVersion: s.lastSeenVersion ?? '',
+      lastFolder: s.lastFolder ?? '',
       settingsLoaded: true,
     });
   },

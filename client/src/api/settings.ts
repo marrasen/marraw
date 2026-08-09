@@ -160,6 +160,7 @@ export interface UISettings {
     shootSort: ShootSortType;
     shootGroup: ShootGroupType;
     lastSeenVersion: string;
+    lastFolder: string;
     folderViews: Record<string, FolderView>;
     features: Record<string, boolean>;
 }
@@ -421,6 +422,19 @@ setGroupAlias.method = 'Settings.SetGroupAlias' as const;
 
 export function subscribeSetGroupAlias(client: ApiClient, parentPath: string, alias: string, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Settings.SetGroupAlias', [parentPath, alias], callback, onError, options);
+}
+
+
+export function setLastFolder(client: ApiClient, path: string, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Settings.SetLastFolder', [path], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+setLastFolder.method = 'Settings.SetLastFolder' as const;
+
+export function subscribeSetLastFolder(client: ApiClient, path: string, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Settings.SetLastFolder', [path], callback, onError, options);
 }
 
 
@@ -831,6 +845,21 @@ export function useSetGroupAlias(parentPath: string, alias: string, options?: Us
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [parentPath, alias], _subscribe: { method: 'Settings.SetGroupAlias', params: [parentPath, alias] } });
+}
+
+/**
+ * Subscribes to `Settings.SetLastFolder` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSetLastFolder(path: string, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, path: string) => setLastFolder(client, path, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Settings.SetLastFolder', params: [path] } });
 }
 
 /**

@@ -303,9 +303,13 @@ type UISettings struct {
 	ShootSort ShootSort `json:"shootSort"`
 	// ShootGroup is the rail's time bucketing of folders (default none).
 	ShootGroup ShootGroup `json:"shootGroup"`
-	// LastSeenVersion is the app version whose changelog the Welcome page
-	// last showed ("" = never — a fresh install baselines silently).
+	// LastSeenVersion is the app version whose changelog the What's-new
+	// dialog last showed ("" = never — a fresh install baselines silently).
 	LastSeenVersion string `json:"lastSeenVersion"`
+	// LastFolder is the folder that was open when the app last closed, so
+	// the next launch lands back in it ("" = none; a folder removed from the
+	// library clears it).
+	LastFolder string `json:"lastFolder"`
 	// FolderViews: lowercased folder path -> that folder's remembered
 	// filters / sort / gap grouping. LibrarySort and GapMinutes above stay
 	// the last-used fallback for folders with no entry.
@@ -360,6 +364,7 @@ const (
 	settingUIShootSort      = "ui:shootSort"
 	settingUIShootGroup     = "ui:shootGroup"
 	settingUILastSeen       = "ui:lastSeenVersion"
+	settingUILastFolder     = "ui:lastFolder"
 	settingUIFolderViews    = "ui:folderViews"
 	settingUIFeatures       = "ui:features"
 )
@@ -395,6 +400,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 
 	exportDir, _ := db.GetSetting(ctx, settingUIExportDir)
 	lastSeen, _ := db.GetSetting(ctx, settingUILastSeen)
+	lastFolder, _ := db.GetSetting(ctx, settingUILastFolder)
 
 	railWidth := railWidthDefault
 	if raw, _ := db.GetSetting(ctx, settingUIRailWidth); raw != "" {
@@ -471,6 +477,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		ShootSort:        shootSort,
 		ShootGroup:       shootGroup,
 		LastSeenVersion:  lastSeen,
+		LastFolder:       lastFolder,
 		FolderViews:      jsonSetting(ctx, db, settingUIFolderViews, map[string]FolderView{}),
 		Features:         jsonSetting(ctx, db, settingUIFeatures, map[string]bool{}),
 	}, nil
@@ -700,6 +707,18 @@ func (u *Settings) SetLastSeenVersion(ctx context.Context, version string) error
 		return aprot.ErrInvalidParams("version too long")
 	}
 	return u.save(ctx, settingUILastSeen, version)
+}
+
+// SetLastFolder persists the folder to reopen on the next launch. "" clears
+// it (no folder open, or the open one was removed from the library). The path
+// is stored verbatim — it is resolved against the library on the way back in,
+// and a stale one surfaces as an error there rather than being second-guessed
+// here.
+func (u *Settings) SetLastFolder(ctx context.Context, path string) error {
+	if len(path) > 4096 {
+		return aprot.ErrInvalidParams("path too long")
+	}
+	return u.save(ctx, settingUILastFolder, path)
 }
 
 // SetExportOptions persists the export dialog's last-used state.

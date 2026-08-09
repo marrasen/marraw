@@ -56,18 +56,20 @@ Where the flows differ is marked **[stable]** / **[beta]** below.
   (previous beta or last stable).
 - Write USER-FACING bullets — features, fixes, visible behavior; skip pure
   refactors, CI, docs, and test-harness work. Style: `Area: what changed`
-  (the Welcome card renders the prefix before the first ": " in bold).
+  (the What's-new dialog renders the prefix before the first ": " in bold).
+- **[beta]** Add a `## X.Y.Z-beta.N - YYYY-MM-DD` section (today's date) at
+  the TOP of `CHANGELOG.md`, covering the changes since the previous tag of
+  any kind. The parser (client/src/lib/changelog.ts) reads
+  `## X.Y.Z[-prerelease] - date` headers and `-` bullets; anything else is
+  ignored. Beta testers get the same What's-new dialog stable users do.
 - **[stable]** Add a `## X.Y.Z - YYYY-MM-DD` section (today's date) at the
-  TOP of `CHANGELOG.md`. The parser (client/src/lib/changelog.ts) only reads
-  `## X.Y.Z - date` headers and `-` bullets; anything else is ignored.
-- **[beta]** Do NOT touch `CHANGELOG.md`. The parser cannot represent
-  prerelease versions (`## X.Y.Z-beta.N` misparses: the version regex stops
-  at `X.Y.Z` and `compareVersions` drops the suffix), and CHANGELOG.md is the
-  stable-channel record. The bullets go only into the GitHub pre-release
-  notes in step 6. Consequence (accepted): beta installs show no Welcome
-  "What's new" card during the beta, and since `compareVersions` treats
-  `X.Y.Z-beta.N` as equal to `X.Y.Z` they won't see the final stable's card
-  either — the notes remain readable on the GitHub release.
+  TOP of `CHANGELOG.md`, covering the whole cycle — then DELETE this cycle's
+  `X.Y.Z-beta.N` sections, folding their bullets into it (rewritten as one
+  coherent story, not concatenated). One section per stable version is what
+  keeps a stable user from reading the same feature announced five times, and
+  a beta tester moving onto the stable release still sees it: `X.Y.Z-beta.N`
+  sorts below `X.Y.Z`, so the new section counts as news to them.
+  Older versions' sections are never touched.
 - **[stable]** README check: the README is written for the *released*
   product and drifts while on `main`. Verify user-facing claims (status
   line, feature list, install instructions, version references) match what
@@ -106,10 +108,10 @@ git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-(The changelog section must be in the tagged commit — the Welcome "What's
-new" card is bundled from the same tree the installer is built from.)
+(The changelog section must be in the tagged commit — the What's-new dialog
+is bundled from the same tree the installer is built from.)
 
-**[beta]** Same, but there is no CHANGELOG.md change to stage; commit message
+**[beta]** Same, with the beta section staged too; commit message
 `Release vX.Y.Z-beta.N`, tag `vX.Y.Z-beta.N`. The CI guard compares the tag
 against package.json verbatim, so both must carry the suffix.
 
@@ -153,8 +155,8 @@ gh release edit vX.Y.Z --draft=false --latest --notes-file <notes.md>
 
 (Write the new CHANGELOG section's bullets to a temp notes file; don't dump
 the whole changelog.) Publishing flips it live: installed apps auto-update on
-their next launch (download in background, install on quit) and the Welcome
-page shows the new section as "What's new".
+their next launch (download in background, install on quit) and raise the
+new section in the What's-new dialog the first time they start up on it.
 
 **[beta]** Publish as a pre-release — NEVER `--latest` on a beta:
 
@@ -162,8 +164,8 @@ page shows the new section as "What's new".
 gh release edit vX.Y.Z-beta.N --draft=false --prerelease --notes-file <notes.md>
 ```
 
-Notes come from the step-2 bullets (they exist nowhere else for a beta);
-lead them with a line like "Beta for 0.5.0 — changes since v<last>". The
+Notes come from the step-2 beta section; lead them with a line like
+"Beta for 0.5.0 — changes since v<last>". The
 `--prerelease` flag is what keeps stable users unaffected; double-check it
 took (`gh release view` shows `Pre-release: true`) before reporting done.
 

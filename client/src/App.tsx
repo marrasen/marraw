@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
 import { FolderPlus, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
@@ -15,6 +15,7 @@ import { SubjectScanDialog } from '@/components/SubjectScanDialog';
 import { EyeScanDialog } from '@/components/EyeScanDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { PairingApprovalDialog } from '@/components/PairingApprovalDialog';
+import { WhatsNewDialog } from '@/components/WhatsNewDialog';
 import { WatermarkDialog } from '@/components/WatermarkDialog';
 import { StatusBar } from '@/components/StatusBar';
 import { ConnectionBanner } from '@/components/ConnectionBanner';
@@ -38,7 +39,7 @@ import {
   useLibraryRoots,
 } from '@/lib/library';
 import { updateLastSeenVersion, updateRailWidth, UISettingsSync } from '@/lib/uiSettings';
-import { entriesSince, type ChangelogEntry } from '@/lib/changelog';
+import { useLastFolder } from '@/lib/lastFolder';
 import { openFolder, setFocus } from '@/api/library';
 import { canUseHostFs } from '@/lib/backend';
 import { useApiClient } from '@/api/client';
@@ -113,6 +114,7 @@ function useDropFolder() {
 export default function App() {
   useKeyboard();
   useAutoOpenFolder();
+  useLastFolder();
   useDropFolder();
   // Mirror the OS fullscreen state (F11) so Esc can exit it first.
   useEffect(() => {
@@ -165,6 +167,7 @@ export default function App() {
       </div>
       <AddFolderDialog />
       <SettingsDialog />
+      <WhatsNewDialog />
       <PairingApprovalDialog />
       <WatermarkDialog />
       <CommandPalette />
@@ -203,7 +206,11 @@ function ResizableLibraryRail() {
   };
 
   return (
-    <aside className="relative shrink-0 border-r" style={{ width: railWidth }}>
+    <aside
+      className="relative shrink-0 border-r"
+      style={{ width: railWidth }}
+      data-testid="library-rail"
+    >
       <LibraryRail />
       <div
         className="absolute inset-y-0 -right-[3px] z-10 w-[6px] cursor-col-resize touch-none hover:bg-primary/35 active:bg-primary/55"
@@ -247,25 +254,9 @@ function EmptyLibrary() {
 }
 
 // The library has shoots but none is open: the mark, the build you're running,
-// and where to click next. After an update, a "What's new" card lists every
-// release since the version this machine last saw.
+// and where to click next. Release news is not here — it lives in the
+// What's-new dialog, which is seen whether or not this page is.
 function Welcome() {
-  const client = useApiClient();
-  const settingsLoaded = useUIStore((s) => s.settingsLoaded);
-  // Captured once when settings arrive: marking the version seen right after
-  // must not blank the card mid-mount (the write is optimistic). The ref (not
-  // the state) guards the capture — StrictMode re-runs the effect before the
-  // setState lands, and the second run would re-read the already-bumped store.
-  const [whatsNew, setWhatsNew] = useState<ChangelogEntry[] | null>(null);
-  const captured = useRef(false);
-  useEffect(() => {
-    if (!settingsLoaded || captured.current) return;
-    captured.current = true;
-    const last = useUIStore.getState().lastSeenVersion;
-    setWhatsNew(last === '' ? [] : entriesSince(last, __APP_VERSION__));
-    if (last !== __APP_VERSION__) updateLastSeenVersion(client, __APP_VERSION__);
-  }, [settingsLoaded, client]);
-
   return (
     <main className="flex flex-1 items-center justify-center p-10">
       <div className="flex flex-col items-center gap-5 text-center">
@@ -277,48 +268,8 @@ function Welcome() {
           </h2>
           <p className="text-sm text-muted-foreground">Pick a shoot on the left to get started.</p>
         </div>
-        {whatsNew != null && whatsNew.length > 0 && (
-          <section className="mt-2 w-[480px] max-w-full rounded-xl border bg-card/50 text-left">
-            <h3 className="border-b px-5 py-3 text-sm font-semibold">
-              What's new in v{__APP_VERSION__}
-            </h3>
-            <div className="max-h-[40vh] overflow-y-auto px-5 py-4">
-              {whatsNew.map((e, ei) => (
-                <div key={e.version} className={ei > 0 ? 'mt-4' : undefined}>
-                  {whatsNew.length > 1 && (
-                    <div className="text-xs font-medium text-muted-foreground">
-                      v{e.version}
-                      {e.date && ` — ${e.date}`}
-                    </div>
-                  )}
-                  <ul className="mt-1.5 flex flex-col gap-1 text-sm text-secondary-foreground">
-                    {e.items.map((item, i) => (
-                      <li key={i} className="flex gap-2">
-                        <span className="text-faint">•</span>
-                        <ChangeItem text={item} />
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
       </div>
     </main>
-  );
-}
-
-// Changelog bullets follow the commit style "Area: what changed" — set the
-// area off in a stronger weight when present.
-function ChangeItem({ text }: { text: string }) {
-  const sep = text.indexOf(': ');
-  if (sep <= 0) return <span>{text}</span>;
-  return (
-    <span>
-      <span className="font-medium text-foreground">{text.slice(0, sep)}:</span>
-      {text.slice(sep + 1)}
-    </span>
   );
 }
 

@@ -1,9 +1,19 @@
 # Changelog
 
-This file feeds the "What's new" card on the Welcome page after an update.
+This file feeds the "What's new" dialog the app raises after an update.
 Only two constructs are parsed (client/src/lib/changelog.ts): `## X.Y.Z - YYYY-MM-DD`
-version headers and `-` bullets; everything else is ignored. Newest release first.
-When cutting a release: bump the version in package.json and add a section here.
+version headers and `-` bullets; everything else is ignored. The version may carry a
+prerelease suffix (`## X.Y.Z-beta.N - YYYY-MM-DD`), which sorts below its own stable
+release. Newest release first. When cutting a release: bump the version in
+package.json and add a section here — and when a beta cycle closes, fold its beta
+sections into the stable one so nobody reads the same news twice.
+
+## 0.10.0-beta.14 - 2026-08-09
+
+- Library: marraw **reopens the folder you had open** when you quit, so a launch lands you back in the shoot you were working on instead of on the welcome page. If that folder has since been deleted, renamed, or its drive unplugged, it says so and leaves you on the library — and it stays remembered, so plugging the drive back in lands you there again next time
+- Library: fixed — hiding the library rail and quitting left no way to bring it back. The rail's show/hide button lives in the folder toolbar, so a collapsed rail with no folder open was a dead end: no rail, no button, no way to open a library at all. The rail now comes back for good whenever nothing is open, and with the folder above reopening, a collapsed rail otherwise stays exactly as you left it
+- Updates: **what's new arrives as a dialog** — the mark, the version you just moved to, and every release since the one this machine last saw — rather than a card on a welcome page that reopening a folder means you never land on. It waits until you dismiss it, so quitting mid-read brings it back next launch, and the release notes' emphasis now renders instead of showing its asterisks
+- Updates: **beta builds carry their release notes in the app**. Betas get their own changelog sections, and a tester moving from the last beta onto the final stable release sees that release's notes as well — until now a beta showed neither
 
 ## 0.9.0 - 2026-08-03
 
