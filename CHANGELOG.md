@@ -8,6 +8,12 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
+## 0.10.0-beta.17 - 2026-08-09
+
+- Local: **tilt shift moved into the masks**, where it belongs. The Local tab's new Tilt shift button adds an inverted Depth mask with the blur pre-dialled: set the sharp band with **Focus distance** and **Focus depth** (every Depth mask now uses that pair instead of the two-thumb range — same stored window, friendlier handles), and everything a mask can do now grades with distance — darken and cool the far background, fringe it with prism, streak its highlights. Note for beta.16 testers: the short-lived Effects-panel version is gone, and an edit made with it loses the effect — re-add it from the Local tab
+- Local: **Bokeh** joins Blur in every mask's Effects block — defocus through a hard-edged aperture disc that favours the highlights, so a defocused point light becomes a bright disc instead of a soft smudge. Try it on the tilt-shift mask for night lights
+- Local: **mask blur is now graded**: through a feather (or a depth ramp) the blur radius grows with the mask's weight, instead of cross-fading between sharp and one fixed blur. Feathered blur masks read as real depth of field now — existing edits re-render once as previews rebuild
+
 ## 0.10.0-beta.16 - 2026-08-09
 
 - Develop: **tilt shift** in the Effects group — blur by distance, keeping a band of the scene sharp and defocusing everything in front of and behind it. Unlike reaching for a Depth mask and its blur, which gives you two zones and a seam, the blur here *grows* with how far a thing sits from the band you kept, the way depth of field actually falls off. One button switches it on (it runs the depth model on your machine, once per photo), then an amount and a two-thumb focus range. The sharp subject never smears into the background behind it, and the whole thing travels in presets and copy-paste
