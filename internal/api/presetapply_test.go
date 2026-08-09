@@ -39,6 +39,24 @@ func TestPresetLookSectionFilter(t *testing.T) {
 	}
 }
 
+// TestPresetLookCarriesBW: a B&W preset is worthless if the color section
+// drops the flag on the way through — presetLook copies field by field.
+func TestPresetLookCarriesBW(t *testing.T) {
+	p := UserPreset{
+		ID:       "noir",
+		Name:     "noir",
+		Params:   edit.Params{BW: true, Contrast: 0.3},
+		Sections: []string{"color"},
+	}
+	if out := presetLook(p, 0); !out.BW {
+		t.Errorf("color section must carry BW, got %+v", out)
+	}
+	p.Sections = []string{"tone"}
+	if out := presetLook(p, 0); out.BW {
+		t.Error("BW must not leak through a tone-only preset")
+	}
+}
+
 func TestPresetLookAllSectionsWhenEmpty(t *testing.T) {
 	p := UserPreset{
 		ID:     "x",

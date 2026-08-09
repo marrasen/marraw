@@ -416,6 +416,16 @@ type Params struct {
 	SplitHighlightHue float64 `json:"splitHighlightHue" validate:"gte=0,lt=360"`
 	SplitHighlightAmt float64 `json:"splitHighlightAmt" validate:"gte=0,lte=1"`
 
+	// BW converts to monochrome (pyramid.ApplyBW), weighting each pixel's
+	// gray by the hue it came from through the HSLLum bands — the digital
+	// colored filter, not a flat desaturation. Saturation, Vibrance, HSLHue
+	// and HSLSat go inert; split toning tints the gray instead of the color,
+	// so sepia is BW plus a warm highlight tint. Kept omitempty so existing
+	// edits hash unchanged, and deliberately NOT folded in Normalize: the
+	// inert sliders keep their values so toggling back to color restores the
+	// photo exactly.
+	BW bool `json:"bw,omitempty"`
+
 	// HSL color mixer, also in the look stage: per-band hue shift, chroma
 	// scale, and luminance scale, each ±1 with 0 neutral. Bands run red,
 	// orange, yellow, green, aqua, blue, purple, magenta (centers at
@@ -596,6 +606,11 @@ func (e *Params) HasHSL() bool {
 		}
 	}
 	return false
+}
+
+// IsBW reports whether the edit converts to monochrome.
+func (e *Params) IsBW() bool {
+	return e != nil && e.BW
 }
 
 // HasMasks reports whether any local adjustment mask is present.

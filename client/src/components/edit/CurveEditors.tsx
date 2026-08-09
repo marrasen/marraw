@@ -283,13 +283,17 @@ export function ColorMixer({
     return { [key]: next };
   };
   const val = (key: MixerKey) => draft[key][band] ?? 0;
+  // In B&W the hue and saturation rows are inert, so only the luminance
+  // band can put a dot on a chip.
   const bandChanged = (i: number) =>
-    draft.hslHue[i] !== 0 || draft.hslSat[i] !== 0 || draft.hslLum[i] !== 0;
+    draft.bw ? draft.hslLum[i] !== 0 : draft.hslHue[i] !== 0 || draft.hslSat[i] !== 0 || draft.hslLum[i] !== 0;
 
   return (
     <div className="flex flex-col">
       <div className="flex items-center gap-2 pt-2 pb-1" role="group" aria-label="Color mixer band">
-        <span className="text-[11px] text-muted-foreground">Mixer</span>
+        {/* Same eight bands either way — in B&W they pick which source hue
+            the luminance row lifts or drops, i.e. the colored filter. */}
+        <span className="text-[11px] text-muted-foreground">{draft.bw ? 'B&W mix' : 'Mixer'}</span>
         <div className="flex flex-1 items-center justify-end gap-[7px]">
           {MIXER_BANDS.map((b, i) => (
             <button
@@ -323,6 +327,7 @@ export function ColorMixer({
         max={100}
         step={2}
         neutral={0}
+        disabled={draft.bw}
         onChange={(v) => update(bandPatch('hslHue', v / 100))}
         onCommit={(v) => commit(bandPatch('hslHue', v / 100))}
         onClear={() => clear(bandPatch('hslHue', 0))}
@@ -335,6 +340,7 @@ export function ColorMixer({
         max={100}
         step={2}
         neutral={0}
+        disabled={draft.bw}
         onChange={(v) => update(bandPatch('hslSat', v / 100))}
         onCommit={(v) => commit(bandPatch('hslSat', v / 100))}
         onClear={() => clear(bandPatch('hslSat', 0))}

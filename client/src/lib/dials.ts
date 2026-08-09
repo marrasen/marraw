@@ -76,6 +76,7 @@ const META: Record<
   wbTemp: { label: 'Temp', group: 'White balance' },
   wbKelvin: { label: 'Kelvin', group: 'White balance', display: kelvin },
   wbTint: { label: 'Tint', group: 'White balance' },
+  bw: { label: 'B&W', group: 'Color', valueLabels: { 0: 'Color', 1: 'B&W' } },
   saturation: { label: 'Saturation', group: 'Color' },
   vibrance: { label: 'Vibrance', group: 'Color' },
   splitShadowHue: { label: 'Shadow hue', group: 'Color', display: hue },

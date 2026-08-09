@@ -706,6 +706,10 @@ func (e *Edits) WBPickFrame(ctx context.Context, photoID int64, base edit.Params
 // to. That decode is paid once per picking session.
 func (e *Edits) wbPickFrame(ctx context.Context, photoID int64, photo store.Photo, base edit.Params) (*pickCache, error) {
 	base.Masks = nil
+	// The pick has to read color: a BW frame would sample as neutral and
+	// every pick would come back as no correction at all. Dropping it here
+	// also keeps the satFactor back-out below matching what was rendered.
+	base.BW = false
 	base.Normalize()
 	key := base.Hash()
 	if c := e.cachedPick(photoID, key); c != nil {
@@ -862,6 +866,9 @@ func clampPickedWB(mul, eff [4]float64) [4]float64 {
 // what the user sees.
 func (e *Edits) developedBaseForMask(ctx context.Context, photoID int64, photo store.Photo, params edit.Params, longEdge int) (*image.RGBA, error) {
 	params.Masks = nil // select against the post-Look image, before any mask
+	// ...and before the B&W conversion, which runs after the masks: hue
+	// ranges and the eyedropper select on the color the mask stage sees.
+	params.BW = false
 	var ep *edit.Params
 	if !params.IsNeutral() {
 		ep = &params

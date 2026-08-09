@@ -59,6 +59,11 @@ import {
 import type { Params } from '@/api/edit';
 import type { LensProfileInfo } from '@/api/edits';
 import { lensProfile } from '@/api/edits';
+const TREATMENT_OPTIONS = [
+  { value: 0, label: 'Color' },
+  { value: 1, label: 'B&W' },
+];
+
 const HIGHLIGHT_OPTIONS = [
   { value: 0, label: 'Clip' },
   { value: 1, label: 'Unclip' },
@@ -363,7 +368,7 @@ function DevelopPanel({
     presence: groupChanged(draft, ['clarity', 'texture', 'dehaze']),
     wb: groupChanged(draft, ['wbMode', 'wbMul', 'wbTemp', 'wbTint', 'wbKelvin']),
     color: groupChanged(draft, [
-      'saturation', 'vibrance',
+      'bw', 'saturation', 'vibrance',
       'splitShadowHue', 'splitShadowAmt', 'splitHighlightHue', 'splitHighlightAmt',
       'hslHue', 'hslSat', 'hslLum',
     ]),
@@ -641,8 +646,22 @@ function DevelopPanel({
         changed={changed.color}
         action={<AutoButton client={client} sections={['wb', 'color']} title="Auto colours (Ctrl+Shift+U)" />}
       >
-        <PctSlider label="Saturation" hotkey="A" field="saturation" draft={draft} update={update} commit={commit} {...num('saturation')} />
-        <PctSlider label="Vibrance" hotkey="V" field="vibrance" draft={draft} update={update} commit={commit} {...num('vibrance')} />
+        {/* The treatment switch leads the group: everything below it reads
+            differently depending on which side it's on. */}
+        <ButtonRow
+          label="Treatment"
+          active={activeControl === 'bw'}
+          options={TREATMENT_OPTIONS}
+          value={draft.bw ? 1 : 0}
+          onChange={(v) => {
+            update({ bw: v === 1 });
+            commit({ bw: v === 1 });
+          }}
+        />
+        {/* Saturation and vibrance have nothing to act on once the frame is
+            gray; the tints below stay live — they're what makes sepia. */}
+        <PctSlider label="Saturation" hotkey="A" field="saturation" draft={draft} update={update} commit={commit} disabled={draft.bw} {...num('saturation')} />
+        <PctSlider label="Vibrance" hotkey="V" field="vibrance" draft={draft} update={update} commit={commit} disabled={draft.bw} {...num('vibrance')} />
         <HueSlider label="Shadow tint" field="splitShadowHue" draft={draft} update={update} commit={commit} {...num('splitShadowHue')} />
         <AmtSlider label="Shadow tint amount" field="splitShadowAmt" draft={draft} update={update} commit={commit} {...num('splitShadowAmt')} />
         <HueSlider label="Highlight tint" field="splitHighlightHue" draft={draft} update={update} commit={commit} {...num('splitHighlightHue')} />
@@ -770,6 +789,9 @@ function isDefault(draft: Params, key: keyof Params, seedExpEV = 0): boolean {
   if (key === 'expEV') return Math.abs(draft.expEV - seedExpEV) <= 1e-9;
   if (key === 'wbMode') return (v as string) === '' || v === 'camera';
   if (key === 'demosaic') return (v as string) === '';
+  // Color is the default, and the server omits the field entirely for it —
+  // so absent and false both have to read as unchanged.
+  if (key === 'bw') return !v;
   // A tone curve (master or per-channel) is default when it bends nothing.
   if (CURVE_KEYS.includes(key as CurveKey)) return !hasToneCurve(curveOf(draft, key as CurveKey));
   // Array-valued params (wbMul, the hsl mixer bands) default to all-zero.

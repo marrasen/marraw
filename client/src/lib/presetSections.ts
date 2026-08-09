@@ -82,6 +82,9 @@ export const PRESET_FIELDS = {
   wbTemp: { group: 'wb', mode: 'add' },
   wbTint: { group: 'wb', mode: 'add' },
   wbKelvin: { group: 'wb', mode: 'absolute' },
+  // A treatment switch, not a quantity: it lands whole or not at all, so the
+  // preset Amount scrubber can't render a half-converted frame.
+  bw: { group: 'color', mode: 'enum' },
   saturation: { group: 'color', mode: 'add' },
   vibrance: { group: 'color', mode: 'add' },
   splitShadowHue: { group: 'color', mode: 'absolute' },

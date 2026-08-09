@@ -82,7 +82,7 @@ const CONTROL_GROUP: Record<ControlId, GroupId> = {
   contrast: 'tone', whites: 'tone', blacks: 'tone', toneShadows: 'tone', toneHighlights: 'tone',
   clarity: 'presence', texture: 'presence', dehaze: 'presence',
   wbMode: 'wb', wbTemp: 'wb', wbKelvin: 'wb', wbTint: 'wb',
-  saturation: 'color', vibrance: 'color',
+  bw: 'color', saturation: 'color', vibrance: 'color',
   splitShadowHue: 'color', splitShadowAmt: 'color', splitHighlightHue: 'color', splitHighlightAmt: 'color',
   vignette: 'effects',
   sharpen: 'detail', highlight: 'detail', nrThreshold: 'detail', fbddNoiseRd: 'detail',
@@ -1324,7 +1324,7 @@ export async function esApplyAutoPreset(client: ApiClient, preset: AutoPreset) {
 // revert edits it doesn't speak for (WB, detail, texture, geometry, masks).
 const SUGGESTION_KEYS = [
   'expEV', 'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
-  'saturation', 'vibrance',
+  'bw', 'saturation', 'vibrance',
   'splitShadowHue', 'splitShadowAmt', 'splitHighlightHue', 'splitHighlightAmt',
   'clarity', 'dehaze', 'vignette',
 ] as const;

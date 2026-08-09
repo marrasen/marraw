@@ -165,6 +165,17 @@ func crsAttrs(a *attrs, n *edit.Params, total orient) {
 		a.add("crs:LuminanceAdjustment"+b, pct(n.HSLLum[i]))
 	}
 
+	// ACR's grayscale conversion is driven by its own mixer, and marraw's
+	// B&W reads the luminance bands as exactly that per-hue gray weighting —
+	// so they map straight onto the GrayMixer bands. Emitted only in B&W so a
+	// color edit's sidecar is unchanged.
+	if n.BW {
+		a.add("crs:ConvertToGrayscale", "True")
+		for i, b := range bands {
+			a.add("crs:GrayMixer"+b, pct(n.HSLLum[i]))
+		}
+	}
+
 	// Split-toning hues and saturations are unsigned in ACR (0..359 / 0..100).
 	a.add("crs:SplitToningShadowHue", fmt.Sprintf("%d", int(math.Round(n.SplitShadowHue))%360))
 	a.add("crs:SplitToningShadowSaturation", fmt.Sprintf("%d", int(math.Round(100*n.SplitShadowAmt))))

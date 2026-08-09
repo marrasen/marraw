@@ -149,6 +149,20 @@ func TestBuildConversions(t *testing.T) {
 			want:   []string{`crs:HueAdjustmentOrange="+30"`, `crs:HueAdjustmentBlue="-50"`, `crs:HueAdjustmentRed="0"`},
 		},
 		{
+			name:   "bw maps the luminance bands onto the gray mixer",
+			params: edit.Params{BW: true, HSLLum: [8]float64{-0.6, 0, 0, 0, 0, 0.4, 0, 0}},
+			want: []string{
+				`crs:ConvertToGrayscale="True"`,
+				`crs:GrayMixerRed="-60"`,
+				`crs:GrayMixerBlue="+40"`,
+			},
+		},
+		{
+			name:    "no grayscale block on a color edit",
+			params:  edit.Params{Saturation: 0.5},
+			notWant: []string{"ConvertToGrayscale", "GrayMixer"},
+		},
+		{
 			name:   "rating and pick flag",
 			meta:   Meta{Rating: 5, Flag: 1},
 			params: edit.Params{ExpEV: 0.1},

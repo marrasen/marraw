@@ -39,6 +39,7 @@ export function PctSlider({
   draft,
   update,
   commit,
+  disabled,
   active,
   onFocusControl,
 }: {
@@ -48,6 +49,7 @@ export function PctSlider({
   draft: Params;
   update: (patch: Partial<Params>) => void;
   commit: (patch?: Partial<Params>) => void;
+  disabled?: boolean;
   active?: boolean;
   onFocusControl?: () => void;
 }) {
@@ -61,6 +63,7 @@ export function PctSlider({
       max={100}
       step={2}
       neutral={0}
+      disabled={disabled}
       onChange={(v) => update({ [field]: v / 100 })}
       onCommit={(v) => commit({ [field]: v / 100 })}
       onClear={() => {

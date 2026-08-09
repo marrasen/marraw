@@ -191,7 +191,7 @@ var suggestRecipes = []recipe{
 			return 0
 		},
 		apply: func(p *edit.Params, d derived, pr SceneProfile) {
-			p.Saturation, p.Vibrance = -1, -1
+			p.BW = true
 			p.Contrast = adj(p.Contrast, 0.2)
 			p.Clarity = adj(p.Clarity, 0.15)
 			p.Blacks = adj(p.Blacks, -0.12)

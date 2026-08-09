@@ -84,6 +84,7 @@ func presetLook(p UserPreset, baseEV float64) edit.Params {
 		out.WBKelvin = src.WBKelvin
 	}
 	if s["color"] {
+		out.BW = src.BW
 		out.Saturation = src.Saturation
 		out.Vibrance = src.Vibrance
 		out.SplitShadowHue = src.SplitShadowHue

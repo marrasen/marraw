@@ -97,7 +97,9 @@ func MeanLuma(img *image.RGBA) float64 {
 // ApplyFinish runs the shared post-geometry stages in canonical order: the
 // retouch spots (a pixel transplant, before the look so healed pixels develop
 // like their source), the global look, then the local adjustment masks over
-// the developed color, then the detail pass on the final tones. Every render
+// the developed color, the B&W conversion (after the masks so their hue
+// ranges and color adjustments still have color to work on), then the detail
+// pass on the final tones. Every render
 // path (pyramid levels, tiles, interactive previews, export) must go through
 // this order — the one call site that can't use the helper (cache.generate's
 // full-res path, which interleaves progress reports) mirrors it stage for
@@ -108,6 +110,7 @@ func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fi
 	ApplyHeal(img, e, ai, fills)
 	ApplyLook(img, gamma, e)
 	suppress := ApplyMasks(img, e, ai)
+	ApplyBW(img, e)
 	ApplyDetail(img, e, suppress)
 }
 
@@ -123,6 +126,17 @@ func ApplyLook(img *image.RGBA, gamma float64, e *edit.Params) {
 	if e != nil {
 		satQ = int32(math.Round(115 * (1 + e.Saturation)))
 	}
+	if e.IsBW() {
+		// Under BW the chroma controls are inert and split toning belongs to
+		// the conversion, which tints the gray instead of the color beneath
+		// it. Keeping the base boost leaves masks and the collapse looking at
+		// the ordinary developed color. Vignette stays here: it's a scalar
+		// gain, so it commutes with the collapse.
+		satQ = 115
+		flat := *e
+		flat.Vibrance, flat.SplitShadowAmt, flat.SplitHighlightAmt = 0, 0, 0
+		e = &flat
+	}
 	// The plain LUT+saturation loop covers most edits; only vibrance, split
 	// toning and vignette need per-pixel position or chroma math.
 	if e == nil || (e.Vibrance == 0 && e.SplitShadowAmt == 0 && e.SplitHighlightAmt == 0 && e.Vignette == 0) {
@@ -131,8 +145,10 @@ func ApplyLook(img *image.RGBA, gamma float64, e *edit.Params) {
 		applyLookFull(img, &lutR, &lutG, &lutB, satQ, e)
 	}
 	// The HSL mixer runs last, over the developed color: gated so neutral
-	// mixers cost nothing and existing renders stay bit-identical.
-	if e.HasHSL() {
+	// mixers cost nothing and existing renders stay bit-identical. Under BW
+	// the hue and saturation bands have nothing to act on and the luminance
+	// bands are the conversion's own weighting, so ApplyBW reads them.
+	if e.HasHSL() && !e.IsBW() {
 		applyHSL(img, e)
 	}
 }

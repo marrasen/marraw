@@ -43,6 +43,7 @@ func TestIsNeutralNewFields(t *testing.T) {
 	}
 	for name, p := range map[string]Params{
 		"contrast":  {Contrast: 0.1},
+		"bw":        {BW: true},
 		"vignette":  {Vignette: -0.2},
 		"demosaic":  {Demosaic: DemosaicDHT},
 		"kelvin":    {WBMode: WBKelvin, WBKelvin: 5500},
@@ -549,6 +550,30 @@ func TestMasksOmittedFromNoMaskJSON(t *testing.T) {
 	b, _ := json.Marshal(&Params{Contrast: 0.5})
 	if bytes.Contains(b, []byte("masks")) {
 		t.Errorf("mask-free params must omit the masks key, got %s", b)
+	}
+}
+
+func TestBWOmittedFromColorJSON(t *testing.T) {
+	// Same load-bearing omitempty as the masks above: a color edit must
+	// marshal exactly as it did before B&W existed, or every stored hash
+	// moves and the whole pyramid cache re-keys.
+	b, _ := json.Marshal(&Params{Contrast: 0.5})
+	if bytes.Contains(b, []byte("bw")) {
+		t.Errorf("color params must omit the bw key, got %s", b)
+	}
+	if b, _ = json.Marshal(&Params{BW: true}); !bytes.Contains(b, []byte(`"bw":true`)) {
+		t.Errorf("a B&W edit must carry the bw key, got %s", b)
+	}
+}
+
+// TestBWKeepsInertColorSliders: BW leaves saturation, vibrance and the mixer
+// bands alone so toggling back to color restores the photo exactly.
+func TestBWKeepsInertColorSliders(t *testing.T) {
+	e := &Params{BW: true, Saturation: 0.4, Vibrance: -0.3}
+	e.HSLSat[2] = 0.5
+	e.Normalize()
+	if e.Saturation != 0.4 || e.Vibrance != -0.3 || e.HSLSat[2] != 0.5 {
+		t.Errorf("BW must not fold the inert color sliders, got %+v", e)
 	}
 }
 

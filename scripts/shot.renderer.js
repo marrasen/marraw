@@ -848,6 +848,107 @@ if (shot === 'cull') {
     cornerOff,
     modeAfterReset: es.getState().draft?.lensMode ?? '',
   };
+} else if (shot === 'bw') {
+  // B&W treatment: flip the Color/B&W row in the Color group and assert the
+  // developed preview actually goes neutral, that a mixer band still moves
+  // the gray (the colored-filter behaviour that makes this more than a
+  // desaturation), and that a split tone tints the result (sepia). Driven
+  // through the panel's own control so the wiring is under test, not just
+  // the render.
+  // Progress is recorded as it goes: the harness forwards only the returned
+  // probe, so a bare throw would say "timeout" and nothing about where.
+  const P = { stage: 'start' };
+  window.__bwProbe = P;
+  try {
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  ui().setDevelopTab('develop');
+  mw.setEditGroupOpen('color', true);
+  P.stage = 'panel-open';
+  // Idempotence: a previous run may have left the photo converted. The mixer
+  // bands reset to a zeroed array, not undefined — the panel indexes them.
+  mw.esUpdate({ bw: false, hslLum: Array(8).fill(0), splitHighlightAmt: 0, splitShadowAmt: 0 });
+  mw.esCommit();
+  await sleep(1500);
+
+  const stats = async () => {
+    const img = document.querySelector('[data-testid="loupe-image"]') ?? document.querySelector('main img');
+    if (!img || !img.complete || !img.naturalWidth) return null;
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = Math.max(1, Math.round((64 * img.naturalHeight) / img.naturalWidth));
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let chroma = 0, luma = 0, r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i + 3 < d.length; i += 4) {
+      chroma += Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]);
+      luma += (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+      r += d[i]; g += d[i + 1]; b += d[i + 2];
+      n++;
+    }
+    return { chroma: chroma / n, luma: luma / n, r: r / n, g: g / n, b: b / n };
+  };
+  const colorStats = await stats();
+  P.stage = 'color-measured';
+
+  // The treatment row itself: click the B&W segment.
+  const bwButton = () =>
+    [...document.querySelectorAll('button')].find((n) => n.textContent?.trim() === 'B&W');
+  await until(() => bwButton() != null, 20000);
+  P.stage = 'button-found';
+  bwButton().click();
+  await sleep(2500);
+  const bwStats = await stats();
+  const bwDraft = es.getState().draft?.bw ?? false;
+  P.stage = 'converted';
+
+  // Saturation must read as inert while the split-tone rows stay live.
+  const rowOf = (label) =>
+    [...document.querySelectorAll('span')]
+      .find((n) => n.textContent?.trim() === label)
+      ?.closest('div');
+  const disabledRow = (label) =>
+    rowOf(label)?.querySelector('[data-slot="slider"][data-disabled], [data-disabled] [data-slot="slider"]') != null ||
+    rowOf(label)?.className.includes('opacity-50');
+  const satInert = disabledRow('Saturation');
+  const tintLive = !disabledRow('Highlight tint amount');
+  const mixerLabel = [...document.querySelectorAll('span')].some((n) => n.textContent?.trim() === 'B&W mix');
+
+  // A band still steers the gray: drop the red band and the frame must move.
+  const band = Array(8).fill(0);
+  band[0] = -1;
+  mw.esUpdate({ hslLum: band });
+  mw.esCommit();
+  await sleep(2500);
+  const filtered = await stats();
+
+  // Sepia: warm both ends of the split tone over the conversion.
+  mw.esUpdate({
+    hslLum: Array(8).fill(0),
+    splitShadowHue: 40, splitShadowAmt: 0.8,
+    splitHighlightHue: 40, splitHighlightAmt: 0.8,
+  });
+  mw.esCommit();
+  await sleep(2500);
+  const sepia = await stats();
+
+  Object.assign(P, {
+    stage: 'done',
+    colorChroma: colorStats?.chroma,
+    bwChroma: bwStats?.chroma,
+    bwDraft,
+    satInert,
+    tintLive,
+    mixerLabel,
+    bwLuma: bwStats?.luma,
+    filteredLuma: filtered?.luma,
+    sepiaWarm: sepia ? sepia.r > sepia.g && sepia.g > sepia.b : false,
+  });
+  } catch (err) {
+    P.error = String(err);
+  }
 } else if (shot === 'tonecurve') {
   // Point tone curve: from a curve-free state, commit a midtone-lift curve
   // and assert (a) the developed preview brightens the mids while the
@@ -2805,6 +2906,7 @@ const probe =
   window.__maskOrderProbe ??
   window.__maskRemoveProbe ??
   window.__lensProbe ??
+  window.__bwProbe ??
   window.__presetsProbe ??
   window.__presetMasksProbe ??
   window.__suggestProbe ??

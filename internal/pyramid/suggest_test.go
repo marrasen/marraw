@@ -117,8 +117,8 @@ func TestSuggestMonoOnGrayScene(t *testing.T) {
 		t.Errorf("gray scene: no mono candidate (%v)", suggestIDs(cands))
 	}
 	for _, c := range cands {
-		if c.ID == "mono" && (c.Params.Saturation != -1 || c.Params.Vibrance != -1) {
-			t.Errorf("mono candidate not desaturated: sat %v vib %v", c.Params.Saturation, c.Params.Vibrance)
+		if c.ID == "mono" && !c.Params.BW {
+			t.Errorf("mono candidate is not in B&W mode: %+v", c.Params)
 		}
 	}
 }
@@ -249,6 +249,7 @@ func TestSuggestPreservesBase(t *testing.T) {
 		got.SplitShadowHue, got.SplitShadowAmt = base.SplitShadowHue, base.SplitShadowAmt
 		got.SplitHighlightHue, got.SplitHighlightAmt = base.SplitHighlightHue, base.SplitHighlightAmt
 		got.Vignette = base.Vignette
+		got.BW = base.BW
 		if !reflect.DeepEqual(got, base) {
 			t.Errorf("%s touched fields outside the look:\n got %+v\nwant %+v", c.ID, got, base)
 		}

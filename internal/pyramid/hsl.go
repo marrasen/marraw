@@ -22,13 +22,13 @@ var HSLBandCenters = [8]float64{0, 30, 60, 120, 180, 240, 280, 320}
 // hslMaxHueShift is the hue rotation at slider ±1, in degrees.
 const hslMaxHueShift = 30
 
-// applyHSL applies the mixer in place. Callers gate on edit.HasHSL so a
-// neutral mixer costs nothing and existing renders stay bit-identical.
-func applyHSL(img *image.RGBA, e *edit.Params) {
-	// The per-hue band blend depends only on the hue, so fold the eight
-	// bands into per-degree tables once per image.
-	var dhT, dsT, dlT [360]float64
-	for h := range dhT {
+// hueBandTable blends the eight band values into a per-degree table, with a
+// triangular falloff between neighboring HSLBandCenters and a segment that
+// wraps through red. Shared by the mixer and the B&W conversion, which reads
+// the luminance bands as its per-hue gray weighting.
+func hueBandTable(vals *[8]float64) [360]float64 {
+	var t [360]float64
+	for h := range t {
 		i0 := 7
 		for k := range HSLBandCenters {
 			if float64(h) >= HSLBandCenters[k] {
@@ -40,10 +40,22 @@ func applyHSL(img *image.RGBA, e *edit.Params) {
 		if i1 != 0 {
 			span = HSLBandCenters[i1] - HSLBandCenters[i0]
 		}
-		t := (float64(h) - HSLBandCenters[i0]) / span
-		dhT[h] = ((1-t)*e.HSLHue[i0] + t*e.HSLHue[i1]) * hslMaxHueShift
-		dsT[h] = (1-t)*e.HSLSat[i0] + t*e.HSLSat[i1]
-		dlT[h] = (1-t)*e.HSLLum[i0] + t*e.HSLLum[i1]
+		f := (float64(h) - HSLBandCenters[i0]) / span
+		t[h] = (1-f)*vals[i0] + f*vals[i1]
+	}
+	return t
+}
+
+// applyHSL applies the mixer in place. Callers gate on edit.HasHSL so a
+// neutral mixer costs nothing and existing renders stay bit-identical.
+func applyHSL(img *image.RGBA, e *edit.Params) {
+	// The per-hue band blend depends only on the hue, so fold the eight
+	// bands into per-degree tables once per image.
+	dhT := hueBandTable(&e.HSLHue)
+	dsT := hueBandTable(&e.HSLSat)
+	dlT := hueBandTable(&e.HSLLum)
+	for h := range dhT {
+		dhT[h] *= hslMaxHueShift
 	}
 
 	pix := img.Pix

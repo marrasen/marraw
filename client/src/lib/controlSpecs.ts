@@ -26,6 +26,9 @@ export const NEUTRAL: Params = {
   blacks: 0,
   toneShadows: 0,
   toneHighlights: 0,
+  // Omitted by the server when false, so treat absent as color everywhere
+  // (see isDefault in EditPanel) rather than comparing against this directly.
+  bw: false,
   saturation: 0,
   vibrance: 0,
   splitShadowHue: 0,
@@ -79,6 +82,7 @@ export type ControlId =
   | 'wbTint'
   | 'wbKelvin'
   | 'highlight'
+  | 'bw'
   | 'saturation'
   | 'vibrance'
   | 'splitShadowHue'
@@ -158,6 +162,13 @@ export const CONTROL_SPECS: Record<ControlId, ControlSpec> = {
     // Stepping the Kelvin control switches into kelvin mode.
     set: (v) => ({ wbMode: 'kelvin', wbKelvin: v }),
   },
+  // The treatment switch. Cycled as 0/1 because the spec values are numbers;
+  // absent reads as color, the server's spelling for false.
+  bw: {
+    kind: 'cycle', values: [0, 1],
+    get: (p) => (p.bw ? 1 : 0),
+    set: (v) => ({ bw: v === 1 }),
+  },
   saturation: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.saturation, set: (v) => ({ saturation: v }) },
   vibrance: { kind: 'numeric', min: -1, max: 1, step: 0.02, bigStep: 0.1, get: (p) => p.vibrance, set: (v) => ({ vibrance: v }) },
   splitShadowHue: { kind: 'numeric', min: 0, max: 359, step: 5, bigStep: 30, get: (p) => p.splitShadowHue, set: (v) => ({ splitShadowHue: v }) },
@@ -206,7 +217,7 @@ export const CONTROL_ORDER: ControlId[] = [
   'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights',
   'clarity', 'texture', 'dehaze',
   'wbMode', 'wbTemp', 'wbKelvin', 'wbTint',
-  'saturation', 'vibrance',
+  'bw', 'saturation', 'vibrance',
   'splitShadowHue', 'splitShadowAmt', 'splitHighlightHue', 'splitHighlightAmt',
   'vignette',
   'sharpen', 'highlight', 'nrThreshold', 'fbddNoiseRd', 'medPasses',
@@ -236,6 +247,7 @@ const PARAM_LABELS: Partial<Record<keyof Params, string>> = {
   wbTemp: 'Temperature',
   wbKelvin: 'Temperature',
   wbTint: 'Tint',
+  bw: 'Black & white',
   saturation: 'Saturation',
   vibrance: 'Vibrance',
   splitShadowHue: 'Split shadow',
