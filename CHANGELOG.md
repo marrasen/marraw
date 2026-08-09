@@ -8,6 +8,11 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
+## 0.10.0-beta.16 - 2026-08-09
+
+- Develop: **tilt shift** in the Effects group — blur by distance, keeping a band of the scene sharp and defocusing everything in front of and behind it. Unlike reaching for a Depth mask and its blur, which gives you two zones and a seam, the blur here *grows* with how far a thing sits from the band you kept, the way depth of field actually falls off. One button switches it on (it runs the depth model on your machine, once per photo), then an amount and a two-thumb focus range. The sharp subject never smears into the background behind it, and the whole thing travels in presets and copy-paste
+- Develop: a **Black & white treatment** switch at the top of the Color group. Not a saturation drag to −1, which collapses every pixel onto one fixed mapping and lands a blue sky and a green field on the same grey — this weights each pixel's grey by the hue it came from, through the eight bands the colour mixer already owns. Pull the red band down and red content darkens while blue sits still, the way screwing a coloured filter onto a black-and-white camera does. Split toning tints the grey rather than the colour underneath, so warm shadows and warm highlights are sepia. Saturation and the mixer's hue rows go inert while it's on, and keep their values, so switching back to colour restores the photo exactly
+
 ## 0.10.0-beta.15 - 2026-08-09
 
 - Windows: marraw **opens where you left it**. The library window comes back at the size and position it had when you quit, maximized if it was. If it was last on a screen that isn't there any more — a laptop undocked from the monitor on your desk — it comes back on a screen you do have, rather than somewhere off the edge you could never drag it from
