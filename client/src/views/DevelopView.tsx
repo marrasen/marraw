@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useState } from 'react';
 import { Eye } from 'lucide-react';
 import type { Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
@@ -16,7 +16,7 @@ import { EditPanel } from '@/components/EditPanel';
 import { DIALS } from '@/lib/dials';
 import { esCommit, esUpdate, useEditSession } from '@/lib/editSession';
 import { groupByGap } from '@/lib/timeGaps';
-import { useHoverKeep, useIdle } from '@/lib/useIdle';
+import { useHoverKeep, useIdleControls } from '@/lib/useIdle';
 import { cn } from '@/lib/utils';
 import { selectGapMinutes, useUIStore } from '@/stores/uiStore';
 
@@ -43,9 +43,20 @@ export function DevelopView({
   const keyAdjust = useEditSession((s) => s.keyAdjust);
   const activeControl = useEditSession((s) => s.activeControl);
   const showOriginal = useUIStore((s) => s.showOriginal);
-  const idle = useIdle();
+  const { idle, goIdle } = useIdleControls();
   const [scale, setScale] = useState(1);
   const [panelHovered, setPanelHovered] = useState(false);
+
+  // Releasing the hold must not summon the chrome back. The user asked for the
+  // bare photograph a moment ago and has not moved since; the key repeat that
+  // fed the idle timer during the hold was that same request, not a call for
+  // the UI. So the release lands straight in the idle state, and the next
+  // pointer move or keypress un-hides as usual. Layout, not passive: a plain
+  // effect runs after the paint that already put the chrome back, and the fade
+  // transition would flash it on screen before this hid it again.
+  useLayoutEffect(() => {
+    if (showOriginal) return goIdle;
+  }, [showOriginal, goIdle]);
 
   const groups = useMemo(() => groupByGap(photos, gapMinutes), [photos, gapMinutes]);
   const photo = photos.find((p) => p.id === focusId) ?? photos[0];

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 /**
  * useIdle reports whether the user has been inactive for `ms`. Cinema-mode
@@ -6,7 +6,21 @@ import { useEffect, useMemo, useState } from 'react';
  * pointer, wheel, or key activity brings it back.
  */
 export function useIdle(ms = 2800): boolean {
+  return useIdleControls(ms).idle;
+}
+
+/**
+ * useIdleControls is useIdle plus `goIdle`, which counts the user as idle
+ * *now* rather than waiting out the timer. For gestures that have already said
+ * "leave the photograph alone on screen" (hold-to-compare): the keystrokes
+ * driving such a gesture look like activity to the timer, so on release the
+ * chrome would swim back into view against the user's stated intent. Calling
+ * goIdle instead leaves it hidden until real activity — a pointer move, a
+ * keypress — asks for it back.
+ */
+export function useIdleControls(ms = 2800): { idle: boolean; goIdle: () => void } {
   const [idle, setIdle] = useState(false);
+  const goIdle = useCallback(() => setIdle(true), []);
   useEffect(() => {
     let t = 0;
     const reset = () => {
@@ -22,7 +36,7 @@ export function useIdle(ms = 2800): boolean {
       for (const ev of events) window.removeEventListener(ev, reset);
     };
   }, [ms]);
-  return idle;
+  return useMemo(() => ({ idle, goIdle }), [idle, goIdle]);
 }
 
 /**
