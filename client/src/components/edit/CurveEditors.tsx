@@ -90,39 +90,65 @@ export function ToneCurve({
   const persist = (next: CurvePoint[]) =>
     commit({ [chan]: hasToneCurve(next) ? next : undefined });
 
+  // beginDrag arms a drag on point `idx`. preventDefault is the load-bearing
+  // part: the widget sits between the "Curve" heading and the help paragraph,
+  // so without it the browser reads the same gesture as a text selection of
+  // the panel — the cursor turns into a drag ghost and the rest of the drag
+  // goes to the selection instead of to us. Capture keeps a pointer that
+  // wanders outside the square still moving the point.
+  const beginDrag = (e: React.PointerEvent, idx: number) => {
+    e.preventDefault();
+    try {
+      svgRef.current!.setPointerCapture(e.pointerId);
+    } catch {
+      // synthetic test pointers can't be captured; the drag still works
+    }
+    setDragIdx(idx);
+  };
+
   const onBackgroundDown = (e: React.PointerEvent) => {
-    if (pts.length >= CURVE_MAX_POINTS) return;
+    if (e.button !== 0) return; // let the other buttons through untouched
     const u = ptrUnit(e);
-    // Don't add on top of an existing point's x — that's an ambiguous drag.
-    if (pts.some((p) => Math.abs(p.x - u.x) < CURVE_MIN_GAP)) return;
+    // A press level with an existing point is a grab of that point, not an
+    // ambiguous new one stacked on its x.
+    const near = pts.findIndex((p) => Math.abs(p.x - u.x) < CURVE_MIN_GAP);
+    if (near !== -1) {
+      beginDrag(e, near);
+      return;
+    }
+    if (pts.length >= CURVE_MAX_POINTS) return;
     const next = [...pts.map((p) => ({ ...p })), { x: round4(u.x), y: round4(u.y) }].sort(
       (a, b) => a.x - b.x,
     );
-    const idx = next.findIndex((p) => p.x === round4(u.x));
-    svgRef.current!.setPointerCapture(e.pointerId);
-    setDragIdx(idx);
+    beginDrag(e, next.findIndex((p) => p.x === round4(u.x)));
     preview(next);
   };
 
   const onPointDown = (e: React.PointerEvent, idx: number) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
-    svgRef.current!.setPointerCapture(e.pointerId);
-    setDragIdx(idx);
+    beginDrag(e, idx);
+  };
+
+  // endDrag persists wherever the point landed. It runs on release, on cancel,
+  // and on a capture we lost to something else — a half-finished drag must
+  // never leave dragIdx set, or the point would follow the bare cursor around
+  // afterwards. The dragIdx guard makes the repeat calls (releasing capture
+  // here itself fires lostpointercapture) no-ops.
+  const endDrag = (e: React.PointerEvent) => {
+    if (dragIdx == null) return;
+    if (svgRef.current?.hasPointerCapture(e.pointerId)) {
+      svgRef.current.releasePointerCapture(e.pointerId);
+    }
+    setDragIdx(null);
+    persist(pts);
   };
 
   const onMove = (e: React.PointerEvent) => {
     if (dragIdx == null) return;
+    if (e.buttons === 0) return endDrag(e); // button released where we couldn't see it
     const u = ptrUnit(e);
     preview(withMoved(pts, dragIdx, u.x, u.y));
-  };
-
-  const onUp = (e: React.PointerEvent) => {
-    if (dragIdx == null) return;
-    if (svgRef.current!.hasPointerCapture(e.pointerId)) {
-      svgRef.current!.releasePointerCapture(e.pointerId);
-    }
-    setDragIdx(null);
-    persist(pts);
   };
 
   const removePoint = (idx: number) => {
@@ -181,14 +207,15 @@ export function ToneCurve({
       <svg
         ref={svgRef}
         viewBox="0 0 100 100"
-        className="aspect-square w-full touch-none rounded-md border border-border bg-muted/30"
+        className="aspect-square w-full touch-none rounded-md border border-border bg-muted/30 select-none"
         role="group"
         aria-label="Tone curve"
         data-channel={chan}
         onPointerDown={onBackgroundDown}
         onPointerMove={onMove}
-        onPointerUp={onUp}
-        onPointerCancel={onUp}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onLostPointerCapture={endDrag}
       >
         {[25, 50, 75].map((g) => (
           <g key={g}>
@@ -225,7 +252,7 @@ export function ToneCurve({
             stroke={channel.stroke === 'currentColor' ? undefined : channel.stroke}
             className={cn('fill-background', channel.stroke === 'currentColor' && 'stroke-primary')}
             strokeWidth={1.25}
-            style={{ cursor: 'grab' }}
+            style={{ cursor: dragIdx === i ? 'grabbing' : 'grab' }}
             onPointerDown={(e) => onPointDown(e, i)}
             onDoubleClick={(e) => {
               e.stopPropagation();

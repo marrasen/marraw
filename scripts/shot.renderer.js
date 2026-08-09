@@ -925,6 +925,64 @@ if (shot === 'cull') {
   const resetToNeutral =
     es.getState().draft.toneCurve == null && es.getState().draft.toneCurveR == null;
 
+  // Pointer path. Everything above drives state directly and never touches the
+  // widget's own drag handling, which is where a real curve edit comes from.
+  // Drive it with synthetic pointers instead. The press MUST come back
+  // defaultPrevented: the widget sits between the "Curve" heading and the help
+  // paragraph, so an un-prevented press is read as a text selection of the
+  // panel — the cursor turns into a drag ghost and the drag is lost.
+  const at = (fx, fy) => {
+    const r = svg.getBoundingClientRect();
+    return { clientX: r.left + r.width * fx, clientY: r.top + r.height * fy };
+  };
+  const ptr = (target, type, fx, fy, buttons = 1) => {
+    const e = new PointerEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 7,
+      isPrimary: true,
+      button: type === 'pointermove' ? -1 : 0,
+      buttons,
+      ...at(fx, fy),
+    });
+    target.dispatchEvent(e);
+    return e;
+  };
+  const midY = () => es.getState().draft.toneCurve?.[1]?.y;
+  // From neutral, a press on empty grid adds a point and drags it in the same
+  // gesture — the widget's primary interaction.
+  const pressPrevented = ptr(svg, 'pointerdown', 0.5, 0.5).defaultPrevented;
+  await sleep(80);
+  ptr(svg, 'pointermove', 0.5, 0.25);
+  await sleep(80);
+  const draggedTo = midY();
+  ptr(svg, 'pointerup', 0.5, 0.25, 0);
+  await sleep(200);
+  const committedTo = midY();
+  // Grab the point itself and drag it back down.
+  const dot = svg.querySelectorAll('circle')[1];
+  ptr(dot, 'pointerdown', 0.5, 0.25);
+  await sleep(80);
+  ptr(svg, 'pointermove', 0.5, 0.6);
+  await sleep(80);
+  const regrabbedTo = midY();
+  ptr(svg, 'pointerup', 0.5, 0.6, 0);
+  await sleep(200);
+  // A press that lands on the grid at an existing point's x — level with it but
+  // nowhere near it in y — grabs that point instead of doing nothing (it can't
+  // add one there: a second point on the same x is an ambiguous drag).
+  ptr(svg, 'pointerdown', 0.5, 0.95);
+  await sleep(80);
+  const pointsAfterDrags = svg.querySelectorAll('circle').length;
+  const beforeBare = midY();
+  // ...and a press whose release we never see (capture stolen, pointer lifted
+  // off-window) must not leave that point stuck to the bare cursor.
+  ptr(svg, 'pointermove', 0.5, 0.05, 0); // no button held
+  await sleep(80);
+  ptr(svg, 'pointermove', 0.5, 0.95, 0);
+  await sleep(150);
+  const afterBareMoves = midY();
+
   // Re-apply a master + red grade purely so the capture shows a real curve
   // (the idempotence step at the top clears all four, so repeat runs are
   // unaffected by what's left on screen here).
@@ -967,6 +1025,19 @@ if (shot === 'cull') {
     polylineCount,
     afterResetR,
     resetToNeutral,
+    // Drag handling, driven through the widget's own pointer path.
+    pressPrevented,
+    // Press at mid-height, drag to 3/4 up: the new point tracks the pointer
+    // and survives the release (0.75 in curve space, y counted upwards).
+    dragTracks: draggedTo != null && Math.abs(draggedTo - 0.75) < 0.03,
+    dragCommitted: committedTo != null && Math.abs(committedTo - 0.75) < 0.03,
+    // Pressing the point itself grabs it rather than stacking a new one.
+    regrabTracks: regrabbedTo != null && Math.abs(regrabbedTo - 0.4) < 0.03,
+    // Still the two endpoints plus the one point added at the top: neither
+    // grab stacked another one on its x.
+    pointsAfterDrags,
+    // A drag whose release went missing ends instead of following the cursor.
+    bareMoveIgnored: afterBareMoves === beforeBare,
   };
 } else if (shot.startsWith('browse')) {
   // Browse latency probe: arrow-step through the folder at a human culling
