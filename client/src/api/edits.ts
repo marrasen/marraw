@@ -77,6 +77,11 @@ export interface SubjectBoundsResult {
     h: number;
 }
 
+export interface SubjectFocus {
+    found: boolean;
+    depth: number;
+}
+
 export interface SuggestResult {
     suggestions: Suggestion[];
     needsClassMap: boolean;
@@ -346,6 +351,19 @@ subjectBounds.method = 'Edits.SubjectBounds' as const;
 
 export function subscribeSubjectBounds(client: ApiClient, photoID: number, params: Params, allowDownload: boolean, callback: (data: SubjectBoundsResult) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<SubjectBoundsResult>('Edits.SubjectBounds', [photoID, params, allowDownload], callback, onError, options);
+}
+
+
+export function subjectFocusDepth(client: ApiClient, photoID: number, options?: RequestOptions): Promise<SubjectFocus> {
+    return client.request<SubjectFocus>('Edits.SubjectFocusDepth', [photoID], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+subjectFocusDepth.method = 'Edits.SubjectFocusDepth' as const;
+
+export function subscribeSubjectFocusDepth(client: ApiClient, photoID: number, callback: (data: SubjectFocus) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<SubjectFocus>('Edits.SubjectFocusDepth', [photoID], callback, onError, options);
 }
 
 
@@ -690,6 +708,21 @@ export function useSubjectBounds(photoID: number, params: Params, allowDownload:
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, params, allowDownload], _subscribe: { method: 'Edits.SubjectBounds', params: [photoID, params, allowDownload] } });
+}
+
+/**
+ * Subscribes to `Edits.SubjectFocusDepth` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useSubjectFocusDepth(photoID: number, options?: UseQueryOptions<SubjectFocus>): UseQueryResult<SubjectFocus> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number) => subjectFocusDepth(client, photoID, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID], _subscribe: { method: 'Edits.SubjectFocusDepth', params: [photoID] } });
 }
 
 /**

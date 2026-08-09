@@ -11,7 +11,8 @@ import {
   Eye, EyeOff, Focus, GripVertical, Layers, Loader2, Shapes, Users, Check, Blend, Aperture,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { fillModelStatus } from '@/api/edits';
+// (aprot's camelCasing lowercases exactly one leading character: aIModelStatus.)
+import { aIModelStatus as aiModelStatus, fillModelStatus, generateAIMap, subjectFocusDepth } from '@/api/edits';
 import type { AIMapResult } from '@/api/edits';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import { useAIMapGate } from '@/components/edit/useAIMapGate';
@@ -150,13 +151,34 @@ export function MasksSection({ client, draft }: { client: ApiClient; draft: Para
           if ((res.instances ?? []).length > 0) esArmAIPick('person');
           else toast.info('No people detected in this photo.');
         }
+      } else if (kind === 'depth' && variant === 'tilt') {
+        setMode('develop');
+        void (async () => {
+          // Seed the focus band from where the subject stands — but only for
+          // free: if the subject model is already on disk, run it (the map
+          // fast-paths when it exists) and take the matte-weighted median
+          // depth. Never a download, never a second consent; any miss falls
+          // back to the static default.
+          let focus: number | undefined;
+          try {
+            if ((await aiModelStatus(client, 'subject')).downloaded) {
+              await generateAIMap(client, photoId, 'subject', false);
+              const f = await subjectFocusDepth(client, photoId);
+              if (f.found) focus = f.depth;
+            }
+          } catch {
+            // fall through to the default window
+          }
+          esAddMaskObject(client, tiltShiftMask(res.mapVer, focus));
+        })();
       } else {
         setMode('develop');
-        let m: Mask;
-        if (kind === 'subject' && variant === 'background') m = backgroundMask(res.mapVer);
-        else if (kind === 'depth' && variant === 'tilt') m = tiltShiftMask(res.mapVer);
-        else m = aiMask(kind as 'subject' | 'depth', res.mapVer);
-        esAddMaskObject(client, m);
+        esAddMaskObject(
+          client,
+          kind === 'subject' && variant === 'background'
+            ? backgroundMask(res.mapVer)
+            : aiMask(kind as 'subject' | 'depth', res.mapVer),
+        );
       }
     }
   };

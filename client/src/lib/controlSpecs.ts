@@ -481,13 +481,30 @@ export const DEPTH_WINDOW_DEFAULT = { depthLo: 0.6, depthHi: 1 } as const;
 // on a scene shot from above, as the miniature the name comes from). The
 // amount lands short of maximum — a full-strength defocus on first click
 // reads as a broken render, not as a lens.
-export const TILT_WINDOW_DEFAULT = { depthLo: 0.45, depthHi: 0.75 } as const;
+// Focus distance 40, focus depth 10: a NARROW band in the nearer middle
+// distance, which is where the subject of a photo with usable depth
+// separation usually stands. (Seeding it from the actual subject — sample
+// the depth map under the subject matte — needs the second model and a
+// second consent; noted in design/tilt-shift.md as the picker follow-up.)
+export const TILT_WINDOW_DEFAULT = { depthLo: 0.35, depthHi: 0.45 } as const;
 
-export function tiltShiftMask(mapVer: string): Mask {
+export function tiltShiftMask(mapVer: string, focusDepth?: number): Mask {
+  // A subject-seeded focus centres the default-width window on where the
+  // subject actually stands (Edits.SubjectFocusDepth); absent, the static
+  // default. Width wins at the edges, the DepthWindowRows contract.
+  let window: { depthLo: number; depthHi: number } = TILT_WINDOW_DEFAULT;
+  if (focusDepth != null) {
+    const half = (TILT_WINDOW_DEFAULT.depthHi - TILT_WINDOW_DEFAULT.depthLo) / 2;
+    const c = Math.min(Math.max(focusDepth, half), 1 - half);
+    window = { depthLo: c - half, depthHi: c + half };
+  }
   return {
     type: 'ai', aiKind: 'depth', mapVer, invert: true,
-    ...TILT_WINDOW_DEFAULT, feather: 1,
-    adjust: { blur: 0.6 },
+    ...window, feather: 1,
+    // Bokeh + glow, no plain blur: discs that bloom read as a lens where
+    // the old blur 0.6 read as a smear. Prism fringes grow with distance
+    // like the rest — all of it the photographer's to re-dial.
+    adjust: { bokeh: 0.2, glow: 0.2, prism: 0.4 },
   };
 }
 

@@ -323,3 +323,44 @@ func TestBokehHoldsItsBrightness(t *testing.T) {
 		t.Errorf("a disc must be flat, not centre-peaked: centre %d edge %d", c, e)
 	}
 }
+
+// TestSubjectMedianDepth: the focus seed lands on the subject's median depth,
+// is immune to a matte spilling onto some background, and refuses a matte
+// that covers nothing.
+func TestSubjectMedianDepth(t *testing.T) {
+	depth := &AIMap{Pix: make([]uint8, 100*50), W: 100, H: 50}
+	for y := range 50 {
+		for x := range 100 {
+			depth.Pix[y*100+x] = uint8(x * 255 / 99) // far → near, left → right
+		}
+	}
+	matte := &AIMap{Pix: make([]uint8, 100*50), W: 100, H: 50}
+	// Subject standing at x≈60 (depth ≈ 0.6), with a thin spill at the far left.
+	for y := range 50 {
+		for x := 55; x < 65; x++ {
+			matte.Pix[y*100+x] = 255
+		}
+		matte.Pix[y*100] = 255 // the spill
+	}
+	d, ok := SubjectMedianDepth(depth, matte)
+	if !ok || d < 0.55 || d > 0.65 {
+		t.Errorf("median depth = %v, %v — want ≈0.6 despite the spill", d, ok)
+	}
+	empty := &AIMap{Pix: make([]uint8, 100*50), W: 100, H: 50}
+	if _, ok := SubjectMedianDepth(depth, empty); ok {
+		t.Error("an empty matte must not seed a focus")
+	}
+	if _, ok := SubjectMedianDepth(nil, matte); ok {
+		t.Error("nil maps must not seed a focus")
+	}
+	// Mismatched map dims still register: matte at half resolution.
+	small := &AIMap{Pix: make([]uint8, 50*25), W: 50, H: 25}
+	for y := range 25 {
+		for x := 27; x < 33; x++ {
+			small.Pix[y*50+x] = 255
+		}
+	}
+	if d, ok := SubjectMedianDepth(depth, small); !ok || d < 0.5 || d > 0.7 {
+		t.Errorf("half-res matte: %v, %v — want ≈0.6", d, ok)
+	}
+}

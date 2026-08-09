@@ -286,6 +286,32 @@ func (e *Edits) AIModelStatus(ctx context.Context, kind edit.AIKind) (*AIModelIn
 	return &AIModelInfo{Downloaded: e.deps.Infer.HasModel(spec), Bytes: spec.Bytes}, nil
 }
 
+// SubjectFocus is SubjectFocusDepth's answer: where the subject stands in
+// the depth map's normalized space (1 = nearest), or found=false when either
+// map is missing or the matte covers too little to mean anything.
+type SubjectFocus struct {
+	Found bool    `json:"found"`
+	Depth float64 `json:"depth"`
+}
+
+// SubjectFocusDepth reads the photo's depth map and subject matte off the
+// store and returns the matte-weighted median depth — the tilt-shift
+// recipe's focus seed. Read-only on purpose: it never generates a map and
+// never downloads a model, so the caller decides (and pays for) inference
+// through GenerateAIMap first.
+func (e *Edits) SubjectFocusDepth(ctx context.Context, photoID int64) (*SubjectFocus, error) {
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	depthVer, _ := aimask.MapVerFor(edit.AIDepth)
+	subjVer, _ := aimask.MapVerFor(edit.AISubject)
+	d := e.deps.Cache.AIMaps.Load(photo.CacheKey, edit.AIDepth, depthVer)
+	m := e.deps.Cache.AIMaps.Load(photo.CacheKey, edit.AISubject, subjVer)
+	depth, ok := pyramid.SubjectMedianDepth(d, m)
+	return &SubjectFocus{Found: ok, Depth: depth}, nil
+}
+
 // aiModelNotDownloadedMsg is the sentinel the client matches to open its
 // download-consent dialog. Keep in sync with isModelNotDownloaded in
 // EditPanel.tsx.

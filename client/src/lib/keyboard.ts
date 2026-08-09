@@ -93,7 +93,7 @@ export const CONTROL_KEYS: Record<string, ControlId> = {
 //   Enter · Esc   forward / back a mode: Library ⇄ Cull ⇄ Develop
 //   E B T I K G S C A V O H N M D   focus an edit control, +/- adjusts (Shift = big steps)
 //   W             toggle the white-balance eyedropper (Enter keep · Esc cancel)
-//   Backspace     HELD, show the original (Develop): the photo before any edit
+//   Backspace     HELD, show the original (Develop/Cull): the photo before any edit
 //                 (deletes the selected retouch spot instead while healing)
 //   Q             toggle the heal / spot-removal tool; while it's up A toggles
 //                 the visualize-spots dust view, and with a spot selected the
@@ -327,7 +327,9 @@ export function useKeyboard() {
       // back, so there is no state to get stuck in. Key repeat re-fires this
       // while held, hence the already-on guard.
       if (e.key === 'Backspace') {
-        if (s.mode === 'develop' && !es.cropping && !es.wbPicking) {
+        // Cull shows the same developed frame, and "how far have I taken
+        // this?" is a culling question too — the hold works in both modes.
+        if ((s.mode === 'develop' || s.mode === 'cull') && !es.cropping && !es.wbPicking) {
           e.preventDefault();
           if (!s.showOriginal) s.setShowOriginal(true);
         }

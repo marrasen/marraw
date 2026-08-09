@@ -1002,7 +1002,7 @@ if (shot === 'cull') {
 
     document.querySelector('[data-testid="ai-mask-tilt"]')?.click();
     await until(() => (es.getState().draft?.masks ?? []).some(
-      (m) => m.aiKind === 'depth' && m.invert && (m.adjust?.blur ?? 0) > 0), 180000);
+      (m) => m.aiKind === 'depth' && m.invert && (m.adjust?.bokeh ?? 0) > 0), 180000);
     P.stage = 'mask-added';
     await sleep(3000);
     const defocused = await detail();
@@ -1036,7 +1036,7 @@ if (shot === 'cull') {
       sharpDetail: sharp,
       defocusedDetail: defocused,
       maskInverted: !!m0.invert,
-      maskBlur: m0.adjust?.blur ?? 0,
+      maskBokeh: m0.adjust?.bokeh ?? 0,
       mapVer: m0.mapVer ?? '',
       distRowFound: !!distRow,
       depthRowFound: !!depthRow,

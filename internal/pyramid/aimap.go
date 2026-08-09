@@ -417,3 +417,41 @@ func boxBlurU8(p []uint8, w, h, radius int) {
 		}
 	}
 }
+
+// SubjectMedianDepth is the weighted median of the depth map under the
+// subject matte — where the subject stands, in the depth map's own normalized
+// space (1 = nearest). This is what seeds the tilt-shift recipe's focus
+// distance when the subject model happens to be available: the sharp band
+// lands on the subject instead of on a guess. The median (not the mean) so a
+// matte that spills onto a bit of background cannot drag the focus off the
+// subject. False when either map is missing or the matte covers too little
+// of the frame to mean anything.
+func SubjectMedianDepth(depth, matte *AIMap) (float64, bool) {
+	if depth == nil || matte == nil || depth.W == 0 || depth.H == 0 || matte.W == 0 || matte.H == 0 {
+		return 0, false
+	}
+	var hist [256]uint64
+	var total uint64
+	for y := 0; y < depth.H; y++ {
+		my := y * matte.H / depth.H
+		drow := depth.Pix[y*depth.W : (y+1)*depth.W]
+		mrow := matte.Pix[my*matte.W : (my+1)*matte.W]
+		for x, d := range drow {
+			w := uint64(mrow[x*matte.W/depth.W])
+			hist[d] += w
+			total += w
+		}
+	}
+	// Coverage floor: mean matte weight under 2% of full means no subject.
+	if total < uint64(depth.W*depth.H)*255/50 {
+		return 0, false
+	}
+	var acc uint64
+	for v, w := range hist {
+		acc += w
+		if acc*2 >= total {
+			return float64(v) / 255, true
+		}
+	}
+	return 0, false
+}
