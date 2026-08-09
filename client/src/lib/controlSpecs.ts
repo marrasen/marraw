@@ -39,13 +39,6 @@ export const NEUTRAL: Params = {
   hslSat: [0, 0, 0, 0, 0, 0, 0, 0],
   hslLum: [0, 0, 0, 0, 0, 0, 0, 0],
   vignette: 0,
-  // Tilt shift. Like bw the server omits these when unset, so treat absent as
-  // off everywhere; tiltAmount 0 is the whole gate, and tiltMapVer is stamped
-  // by the generate flow rather than typed by anyone (see TILT_DEFAULT).
-  tiltAmount: 0,
-  tiltLo: 0,
-  tiltHi: 0,
-  tiltMapVer: '',
   texture: 0,
   clarity: 0,
   dehaze: 0,
@@ -265,13 +258,6 @@ const PARAM_LABELS: Partial<Record<keyof Params, string>> = {
   hslSat: 'Mixer saturation',
   hslLum: 'Mixer luminance',
   vignette: 'Vignette',
-  // All four under one label, the split-tone precedent: switching the effect
-  // on writes the amount, the window and the map version together, and an
-  // undo entry per field would read as "Adjust" instead of "Add tilt shift".
-  tiltAmount: 'Tilt shift',
-  tiltLo: 'Tilt shift',
-  tiltHi: 'Tilt shift',
-  tiltMapVer: 'Tilt shift',
   sharpen: 'Sharpen',
   highlight: 'Highlight recovery',
   nrThreshold: 'Noise reduction',
@@ -330,7 +316,7 @@ export const MASK_CONTROL_ORDER: MaskControlId[] = [
 // Grouped by what they do: the three defocus dials, then the two that add
 // light, then the two that give the region a character of its own.
 export const MASK_FX_ORDER: MaskControlId[] = [
-  'blur', 'motionBlur', 'zoomBlur', 'glow', 'streaks', 'prism', 'mosaic', 'fxAngle',
+  'blur', 'bokeh', 'motionBlur', 'zoomBlur', 'glow', 'streaks', 'prism', 'mosaic', 'fxAngle',
 ];
 
 // Every mask slider in panel order — what the keyboard walk steps through.
@@ -349,6 +335,7 @@ export const MASK_CONTROL_SPECS: Record<MaskControlId, MaskControlSpec> = {
   tint: { label: 'Tint', ...pm1 },
   saturation: { label: 'Saturation', ...pm1 },
   blur: { label: 'Blur', ...fx01 },
+  bokeh: { label: 'Bokeh', ...fx01 },
   motionBlur: { label: 'Motion blur', ...fx01 },
   zoomBlur: { label: 'Zoom blur', ...fx01 },
   glow: { label: 'Glow', ...fx01 },
@@ -485,19 +472,23 @@ export const AI_CATEGORY_NAMES = [
 // map's hard boundaries.
 export const DEPTH_WINDOW_DEFAULT = { depthLo: 0.6, depthHi: 1 } as const;
 
-// TILT_DEFAULT is the develop-panel tilt shift as it lands when switched on:
-// a BAND of sharpness in the middle distance, not the near-range window a
-// depth mask seeds. Blurring both the far background and the near foreground
-// is what makes the effect read as depth of field (and, on a scene shot from
-// above, as the miniature the name comes from); a window that runs to 1 would
-// only defocus behind the subject. The amount is deliberately short of the
-// maximum — a full-strength defocus on first click reads as a broken render
-// rather than as a lens. mapVer pins the model that produced the depth map,
-// exactly as an AI mask's does.
-export const TILT_DEFAULT = { tiltAmount: 0.6, tiltLo: 0.45, tiltHi: 0.75 } as const;
+// tiltShiftMask is the tilt-shift recipe: an INVERTED depth mask — it covers
+// everything OUTSIDE the focus band, weight growing with distance through the
+// feather — carrying Blur, which the render grades by that weight ramp so the
+// defocus grows with depth the way a lens's does. The band sits in the middle
+// distance rather than running to the near end: blurring both the far
+// background and the near foreground is what reads as depth of field (and,
+// on a scene shot from above, as the miniature the name comes from). The
+// amount lands short of maximum — a full-strength defocus on first click
+// reads as a broken render, not as a lens.
+export const TILT_WINDOW_DEFAULT = { depthLo: 0.45, depthHi: 0.75 } as const;
 
-export function tiltShift(mapVer: string): Partial<Params> {
-  return { ...TILT_DEFAULT, tiltMapVer: mapVer };
+export function tiltShiftMask(mapVer: string): Mask {
+  return {
+    type: 'ai', aiKind: 'depth', mapVer, invert: true,
+    ...TILT_WINDOW_DEFAULT, feather: 1,
+    adjust: { blur: 0.6 },
+  };
 }
 
 export function aiMask(kind: 'subject' | 'depth', mapVer: string): Mask {

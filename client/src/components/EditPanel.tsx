@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Pipette, Undo2, Redo2, Crop, ChevronRight, Aperture, Loader2,
+  Pipette, Undo2, Redo2, Crop, ChevronRight,
   Image as ImageIcon,
 } from 'lucide-react';
 import { useFolderScan } from '@/lib/useFolderScan';
@@ -19,13 +19,10 @@ import { Button } from '@/components/ui/button';
 import {
   AmtSlider,
   ButtonRow,
-  EditRangeSlider,
   EditSlider,
   HueSlider,
   PctSlider,
 } from '@/components/edit/controls';
-import { useAIMapGate } from '@/components/edit/useAIMapGate';
-import { TILT_DEFAULT, tiltShift } from '@/lib/controlSpecs';
 import { TEMP_GRADIENT, TINT_GRADIENT, pct, useActiveScroll } from '@/components/edit/controlUtils';
 import { MasksSection } from '@/components/edit/MasksSection';
 import { BatchPanel } from '@/components/edit/BatchPanel';
@@ -375,7 +372,7 @@ function DevelopPanel({
       'splitShadowHue', 'splitShadowAmt', 'splitHighlightHue', 'splitHighlightAmt',
       'hslHue', 'hslSat', 'hslLum',
     ]),
-    effects: groupChanged(draft, ['vignette', 'tiltAmount', 'tiltLo', 'tiltHi']),
+    effects: groupChanged(draft, ['vignette']),
     detail: groupChanged(draft, [
       'sharpen', 'highlight', 'nrThreshold', 'fbddNoiseRd', 'medPasses',
       'demosaic', 'caRed', 'caBlue',
@@ -674,7 +671,6 @@ function DevelopPanel({
 
       <Group id="effects" title="Effects" changed={changed.effects}>
         <PctSlider label="Vignette" hotkey="O" field="vignette" draft={draft} update={update} commit={commit} {...num('vignette')} />
-        <TiltShiftRows client={client} draft={draft} update={update} commit={commit} />
       </Group>
 
       <Group id="detail" title="Detail" changed={changed.detail}>
@@ -782,100 +778,6 @@ function DevelopPanel({
 // useActiveScroll keeps the keyboard-focused control visible: walking the
 // controls with Ctrl+↑/↓ (or a hotkey) scrolls the drawer to the ring.
 
-// The tilt-shift params, which stand or fall together on the amount.
-const TILT_KEYS = ['tiltAmount', 'tiltLo', 'tiltHi', 'tiltMapVer'] as const;
-
-// TiltShiftRows is the develop panel's depth-graded defocus: an amount and the
-// depth band that stays sharp. Unlike every other control in this panel it
-// cannot simply be dragged up from zero — the render needs a depth map for the
-// photo, so switching it on runs the model (behind the download-consent gate
-// every AI feature shares) and stamps the version it produced. Once on, the
-// two sliders are ordinary params; clearing the amount takes the window and the
-// stamp with it, so the panel reads the same as what the server stores.
-function TiltShiftRows({
-  client,
-  draft,
-  update,
-  commit,
-}: {
-  client: ApiClient;
-  draft: Params;
-  update: (patch: Partial<Params>) => void;
-  commit: (patch?: Partial<Params>) => void;
-}) {
-  const photoId = useEditSession((s) => s.photoId);
-  const gate = useAIMapGate(client, photoId);
-  const amount = draft.tiltAmount ?? 0;
-  const off = () => {
-    const cleared = { tiltAmount: 0, tiltLo: 0, tiltHi: 0, tiltMapVer: '' };
-    update(cleared);
-    commit(cleared);
-  };
-
-  if (amount === 0) {
-    return (
-      <>
-        <div className="flex items-center gap-2.5 rounded-md">
-          <span className="w-[96px] shrink-0 truncate text-[11.5px] text-secondary-foreground">
-            Tilt shift
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-w-0 flex-1 justify-start"
-            disabled={photoId == null || gate.generating != null}
-            data-testid="tilt-enable"
-            title="Blur by distance, keeping a depth band sharp (runs a local model)"
-            onClick={() => gate.request('depth', (res) => commit(tiltShift(res.mapVer)))}
-          >
-            {gate.generating === 'depth' ? (
-              <Loader2 data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <Aperture data-icon="inline-start" />
-            )}
-            Blur by distance
-          </Button>
-        </div>
-        {gate.dialog}
-      </>
-    );
-  }
-
-  const lo = draft.tiltLo ?? 0;
-  const hi = draft.tiltHi ?? 0;
-  return (
-    <>
-      <EditSlider
-        label="Tilt shift"
-        value={amount * 100}
-        display={String(Math.round(amount * 100))}
-        min={0}
-        max={100}
-        step={2}
-        neutral={0}
-        onChange={(v) => update({ tiltAmount: v / 100 })}
-        onCommit={(v) => (v === 0 ? off() : commit({ tiltAmount: v / 100 }))}
-        onClear={off}
-      />
-      {/* 1 is nearest, the depth map's own convention — so the window reads
-          left-to-right as far → near, like the depth mask's. */}
-      <EditRangeSlider
-        label="Focus range"
-        value={[lo * 100, hi * 100]}
-        display={`${Math.round(lo * 100)}–${Math.round(hi * 100)}`}
-        min={0}
-        max={100}
-        step={1}
-        neutral={[TILT_DEFAULT.tiltLo * 100, TILT_DEFAULT.tiltHi * 100]}
-        onChange={([l, h]) => update({ tiltLo: l / 100, tiltHi: h / 100 })}
-        onCommit={([l, h]) => commit({ tiltLo: l / 100, tiltHi: h / 100 })}
-        onClear={() => commit({ tiltLo: TILT_DEFAULT.tiltLo, tiltHi: TILT_DEFAULT.tiltHi })}
-      />
-      {gate.dialog}
-    </>
-  );
-}
-
 // isDefault reports whether one param still holds its stored default —
 // used for the per-group "has adjustments" dot and the per-slider clear
 // buttons. The WB mode and demosaic defaults are stored as "" (see the
@@ -890,10 +792,6 @@ function isDefault(draft: Params, key: keyof Params, seedExpEV = 0): boolean {
   // Color is the default, and the server omits the field entirely for it —
   // so absent and false both have to read as unchanged.
   if (key === 'bw') return !v;
-  // Tilt shift is omitted the same way when off, and its window and map
-  // version only mean anything while the amount is up — so an off effect is
-  // unchanged whatever they happen to hold.
-  if (TILT_KEYS.includes(key as (typeof TILT_KEYS)[number])) return !draft.tiltAmount;
   // A tone curve (master or per-channel) is default when it bends nothing.
   if (CURVE_KEYS.includes(key as CurveKey)) return !hasToneCurve(curveOf(draft, key as CurveKey));
   // Array-valued params (wbMul, the hsl mixer bands) default to all-zero.

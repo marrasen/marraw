@@ -637,11 +637,11 @@ type brushEval struct {
 	xMin, xMax int          // output-space bounds of the strokes (non-inverted culling)
 	yMin, yMax int
 	// clampEdge samples the plane with clamped addressing instead of letting
-	// reads past its border come back as zero. A mask WANTS the zero — its
-	// coverage genuinely ends — but the plane's outermost pixel centres sit
-	// half a plane-pixel inside the frame, so a consumer that reads the plane
-	// as a full-frame field (ApplyTilt's depth) would otherwise fade to
-	// nothing in a thin border all the way around the photo.
+	// reads past its border come back as zero. A brush mask WANTS the zero —
+	// its coverage genuinely ends — but an AI map is a frame-filling FIELD
+	// whose outermost pixel centres sit half a plane-pixel inside the frame,
+	// so the zero-outside read would fade it in a thin border all the way
+	// around the photo (set in newAIEval).
 	clampEdge bool
 }
 
@@ -732,7 +732,13 @@ func newAIEval(m *edit.Mask, f maskFrame, ai AIMapSet) *brushEval {
 	ev := &brushEval{
 		f: f, plane: coveragePlane(am, m), pw: am.W, ph: am.H,
 		invert: invert, covToW: covToWeight,
-		xMin: 0, xMax: 1 << 30, yMin: 0, yMax: 1 << 30,
+		// AI maps are frame-filling FIELDS, not strokes that end: the plane's
+		// outermost pixel centres sit half a plane-pixel inside the frame, so
+		// the zero-outside read brush masks want would fade every AI mask in a
+		// thin border all the way around the photo — visible as a blurred rim
+		// when an inverted depth mask carries defocus.
+		clampEdge: true,
+		xMin:      0, xMax: 1 << 30, yMin: 0, yMax: 1 << 30,
 	}
 	if !invert {
 		ev.coverageBounds()

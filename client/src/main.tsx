@@ -74,6 +74,7 @@ if (import.meta.env.DEV && !isViewer) {
       // Local adjustment masks (the `masks` shot surface).
       esAddMask: (type: unknown) => es.esAddMask(client, type as never),
       esUpdateMask: (i: number, patch: unknown) => es.esUpdateMask(client, i, patch as never),
+      esRemoveMask: (i: number) => es.esRemoveMask(client, i),
       esSetActiveMask: (i: number | null) => es.esSetActiveMask(i),
       // Mask removal (the `maskremove` shot surface).
       esToggleMaskRemove: (i: number, on: boolean) => es.esToggleMaskRemove(client, i, on),

@@ -22,7 +22,7 @@ export interface AIMapGate {
   request: (
     kind: AIKindType,
     then: (res: AIMapResult) => void,
-    opts?: { mode?: 'add' | 'restore'; variant?: 'subject' | 'background' },
+    opts?: { mode?: 'add' | 'restore'; variant?: PendingAIDownload['variant'] },
   ) => void;
   // The kind currently generating, for the button spinners; null when idle.
   generating: AIKindType | null;

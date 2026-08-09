@@ -259,19 +259,17 @@ are the controls you chose to keep at hand.</sup>
   eyedropper (`W`).
 - **Color** — saturation, vibrance, split toning (shadow + highlight tint),
   and an 8-band HSL color mixer (per-band hue / saturation / luminance).
-- **Effects** — creative vignette, and tilt shift: depth-graded defocus that
-  keeps a band of the scene sharp and blurs the rest by how far it sits from
-  that band. Runs the same on-device depth model the Depth mask uses, but as
-  a real depth-of-field ramp rather than one blur radius through a window.
+- **Effects** — creative vignette.
 - **Detail** — sharpen, highlight recovery (clip/unclip/blend/rebuild), noise
   reduction, FBDD denoise, median passes, demosaic algorithm (VNG/PPG/AHD/DHT),
   manual chromatic-aberration correction.
 
 ![Develop mode with the Local tab open: a red tint hugging the cockpit frame of an aerial photo, and a Depth mask row with a two-thumb depth-range slider in the panel](screenshots/marraw_masks.jpg)
 
-<sup>An AI Depth mask on the Local tab. The two-thumb slider windows the
-near-to-far range — here the cockpit and wing — and hovering the mask row
-tints its region on the photo.</sup>
+<sup>An AI Depth mask on the Local tab. Focus distance and Focus depth set
+the kept near-to-far band — here the cockpit and wing — and hovering the mask
+row tints its region on the photo. The one-click Tilt shift button builds the
+inverse: everything outside the band, defocused by distance.</sup>
 
 ![Develop mode with the heal brush active: a painted region over an aerial village, connected by a dashed line to its source region, with brush size and feather controls in the panel](screenshots/marraw_retouch.jpg)
 

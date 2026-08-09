@@ -47,10 +47,11 @@ export interface PendingAIDownload {
   // What confirmed consent should do: add a fresh mask ('add') or just
   // regenerate the maps an existing mask references ('restore').
   mode: 'add' | 'restore';
-  // Which mask the subject matte should become: the subject itself, or its
-  // inverse pre-loaded with the background-defocus recipe. Only meaningful
-  // for kind 'subject'.
-  variant?: 'subject' | 'background';
+  // Which mask the generated map should become: the subject matte's two
+  // faces (subject / background recipe), or the depth map's tilt-shift
+  // recipe. Only shapes what the caller adds after consent — the dialog's
+  // copy keys on kind alone.
+  variant?: 'subject' | 'background' | 'tilt';
 }
 
 export function AIModelDialog({

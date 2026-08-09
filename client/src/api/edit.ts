@@ -85,6 +85,7 @@ export interface MaskAdjust {
     mosaic?: number;
     prism?: number;
     fxAngle?: number;
+    bokeh?: number;
 }
 
 export interface Params {
@@ -142,10 +143,6 @@ export interface Params {
     toneCurveR?: CurvePoint[];
     toneCurveG?: CurvePoint[];
     toneCurveB?: CurvePoint[];
-    tiltAmount?: number;
-    tiltLo?: number;
-    tiltHi?: number;
-    tiltMapVer?: string;
 }
 
 export interface Spot {

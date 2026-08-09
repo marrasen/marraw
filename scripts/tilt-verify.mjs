@@ -1,6 +1,6 @@
-// End-to-end check of tilt shift — the depth-graded defocus — against a
-// running `marrawd --dev --port 8483`. Exercises: the params surviving
-// Normalize, the unrunnable states folding to neutral, the committed render
+// End-to-end check of tilt shift — the weight-graded defocus through an
+// inverted depth mask — against a running `marrawd --dev --port 8483`.
+// Exercises: the mask recipe surviving Normalize, the committed render
 // changing pixels at a downscaled level AND a 1:1 tile, the focus window
 // actually steering WHICH depths stay sharp, and a full-resolution export.
 //
@@ -110,24 +110,27 @@ const EDIT = { contrast: 0.05 };
 const ref = await render(EDIT);
 check(isJpeg(ref.img) && !ref.img.equals(base.img), 'reference render (RAW route, tilt-free)');
 
-// --- 1. Unrunnable states fold to neutral, so they can never fork the cache
-// or leave a live-looking edit that renders nothing. ---
-const noMap = await render({ tiltAmount: 0.7, tiltLo: 0.4, tiltHi: 0.8 });
-check(noMap.hash === base.hash, 'an amount with no map version hashes as neutral');
-const noAmount = await render({ tiltLo: 0.4, tiltHi: 0.8, tiltMapVer: 'depthany2s-1' });
-check(noAmount.hash === base.hash, 'a window with no amount hashes as neutral');
-
-// --- 2. The depth map, then the effect itself. ---
+// --- 1. The depth map, then the effect itself. ---
 step('generating the depth map (may download the model)…');
 const depth = await call('Edits.GenerateAIMap', [photo.id, 'depth', true], 300_000);
 step(`GenerateAIMap depth -> ${depth.mapVer}`);
 
-const near = { ...EDIT, tiltAmount: 0.8, tiltLo: 0.7, tiltHi: 1, tiltMapVer: depth.mapVer };
+// The tilt-shift recipe: an INVERTED depth mask (covers everything outside
+// the focus band, weight growing with distance through the feather) carrying
+// Blur, which the render grades by that ramp.
+const tiltMask = (blur, lo, hi, mapVer = depth.mapVer) => ({
+  type: 'ai', aiKind: 'depth', mapVer, invert: true,
+  depthLo: lo, depthHi: hi, feather: 1, adjust: { blur },
+});
+const withTilt = (m) => ({ ...EDIT, masks: [m] });
+const near = withTilt(tiltMask(0.8, 0.7, 1));
 const tilted = await render(near);
 const saved = await call('Edits.GetEditParams', [photo.id]);
+const sm = saved.masks?.[0];
 check(
-  saved.tiltAmount === 0.8 && saved.tiltLo === 0.7 && saved.tiltMapVer === depth.mapVer,
-  'the tilt params survive Normalize',
+  sm?.aiKind === 'depth' && sm?.invert === true && sm?.adjust?.blur === 0.8 &&
+    sm?.depthLo === 0.7 && sm?.mapVer === depth.mapVer,
+  'the tilt-shift mask survives Normalize',
 );
 check(tilted.hash !== ref.hash, 'tilt advances the edit hash');
 check(tilted.cacheKey === ref.cacheKey, 'cacheKey is unchanged (tilt is post-decode)');
@@ -140,30 +143,30 @@ const tile = await fetchImg(
 );
 check(isJpeg(tile), `tilted 1:1 tile (0,0) renders (${tile.length} B)`);
 
-// --- 3. The window steers WHICH depths stay sharp: keeping the near band and
+// --- 2. The window steers WHICH depths stay sharp: keeping the near band and
 // keeping the far band cannot produce the same photo. ---
-const far = await render({ ...near, tiltLo: 0, tiltHi: 0.3 });
+const far = await render(withTilt(tiltMask(0.8, 0, 0.3)));
 check(!far.img.equals(tilted.img), 'the focus window picks which depths stay sharp');
 
 // A band in the middle — the miniature look — differs from both ends.
-const band = await render({ ...near, tiltLo: 0.45, tiltHi: 0.75 });
+const band = await render(withTilt(tiltMask(0.8, 0.45, 0.75)));
 check(!band.img.equals(tilted.img) && !band.img.equals(far.img), 'a mid-depth band is its own look');
 
-// --- 4. The amount is a real ramp, not a switch. ---
-const gentle = await render({ ...near, tiltAmount: 0.25 });
+// --- 3. The amount is a real ramp, not a switch. ---
+const gentle = await render(withTilt(tiltMask(0.25, 0.7, 1)));
 check(!gentle.img.equals(tilted.img), 'the amount changes the strength');
 
-// --- 5. A window covering the whole depth range defocuses nothing: the stage
-// runs and finds every pixel in focus, so the render matches the baseline. ---
-const open = await render({ ...near, tiltLo: 0, tiltHi: 1 });
+// --- 4. An inverted window covering the whole depth range covers nothing:
+// every pixel is in focus, so the render matches the untilted photo. ---
+const open = await render(withTilt(tiltMask(0.8, 0, 1)));
 check(open.img.equals(ref.img), 'a fully-open focus window renders as the untilted photo');
 
-// --- 6. A stale map version renders WITHOUT the effect rather than failing —
+// --- 5. A stale map version renders WITHOUT the effect rather than failing —
 // the AI-mask contract for a sidecar that arrived from another machine. ---
-const stale = await render({ ...near, tiltMapVer: 'depthany2s-999' });
+const stale = await render(withTilt(tiltMask(0.8, 0.7, 1, 'depthany2s-999')));
 check(isJpeg(stale.img) && stale.img.equals(ref.img), 'an unknown map version degrades silently');
 
-// --- 7. Full-resolution export runs the same stages. ---
+// --- 6. Full-resolution export runs the same stages. ---
 const { mkdtempSync, rmSync, statSync } = await import('node:fs');
 const { tmpdir } = await import('node:os');
 const { join } = await import('node:path');

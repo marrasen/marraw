@@ -259,10 +259,46 @@ unit suites. A full-resolution export drops from 1.51 MB to 0.81 MB with the
 effect on — the defocus is real at export resolution, not just in the
 preview.
 
+## Superseded: re-made as a mask (same day)
+
+Marcus's call after using it: the effect belongs in Local, not Effects — and
+he wanted focus distance + focus depth instead of a lo/hi range, plus prism
+and light streaks graded by distance, not only blur. The re-make landed the
+same day and RETIRED the four global params before any stable release carried
+them (beta.16 was their only exposure; those edits lose the effect, nothing
+else).
+
+The general form shipped instead of a special depth effect:
+
+- **Gather FX follow the mask's weight ramp.** `applyGradedBlur` (the level
+  machinery from the global stage, in `gradedblur.go`) runs blur as its own
+  pass before the shared FX buffer, radius ∝ local weight; prism scales its
+  per-pixel split by the local weight; streaks/glow already grade in
+  intensity through the ramp. This fixes every feathered blur mask (radius
+  grading instead of the cross-fade), so `renderVersion` bumped r12 → r13.
+- **Tilt shift = a recipe** (`tiltShiftMask`): an INVERTED depth mask, window
+  = the focus band, feather = falloff, carrying Blur — one click in the
+  Local tab's AI row, sharing the consent gate. As a mask it composes with
+  tone (graded atmospheric perspective for free), travels in presets as an
+  AI-mask recipe (better than the params ever did — re-detected per photo),
+  and stacks.
+- **Focus distance + Focus depth** replace the two-thumb range in the depth
+  mask UI — a pure re-parameterization (centre/width ↔ lo/hi), stored form
+  unchanged, so sidecars and hashes don't move.
+- AI-mask evaluators now clamp at the plane edge (`brushEval.clampEdge` set
+  in `newAIEval`): the maps are frame-filling fields, and the zero-outside
+  read faded every AI mask in a thin border — visible once an inverted depth
+  mask carried defocus.
+
+`tilt-verify.mjs` and the `tiltshift`/`depthrange` shot surfaces now drive
+the mask form; `maskfx-verify.mjs` still passes over the reworked pipeline.
+
 ## Later, if wanted
 
-A focus *picker* (click the image → new RPC samples the depth map at that
-point, centers the window — the `PickWhiteBalance` precedent), a focus-band
-overlay while dragging (server tint à la `MaskTintPreview`), a falloff dial
-(bipolar-encoded), disc bokeh shared with the mask blur, and the scatter pass
-that would let a defocused foreground spill over the sharp subject behind it.
+A focus *picker* (click the image → sample the depth map at that point, set
+Focus distance — the `PickWhiteBalance` precedent), graded streak/motion
+LENGTH (per-pixel length breaks the fixed-offset gather; 2–3 length levels
+would do), and the scatter pass that would let a defocused foreground spill
+over the sharp subject behind it. Disc bokeh landed the same day as a Bokeh
+dial beside Blur — same graded machinery, disc kernel, highlight-weighted
+gather — so the tilt-shift recipe gets aperture discs by swapping one dial.

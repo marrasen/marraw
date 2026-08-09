@@ -61,8 +61,16 @@ func colVariance(img *image.RGBA, x0, x1 int) float64 {
 	return sum2/n - mean*mean
 }
 
+// tiltParams is the tilt-shift recipe in its mask form: an INVERTED depth
+// mask (covering everything outside the focus band, weight growing with
+// distance through the feather) carrying Blur. The graded pass turns that
+// weight ramp into a radius ramp.
 func tiltParams(amount, lo, hi float64) *edit.Params {
-	e := &edit.Params{TiltAmount: amount, TiltLo: lo, TiltHi: hi, TiltMapVer: tiltTestVer}
+	e := &edit.Params{Masks: []edit.Mask{{
+		Type: edit.MaskAI, AIKind: edit.AIDepth, MapVer: tiltTestVer,
+		DepthLo: lo, DepthHi: hi, Invert: true, Feather: 1,
+		Adjust: edit.MaskAdjust{Blur: amount},
+	}}}
 	e.Normalize()
 	return e
 }
@@ -77,7 +85,7 @@ func TestTiltKeepsTheFocusBandSharp(t *testing.T) {
 
 	before := noiseRGBA(w, h)
 	img := noiseRGBA(w, h)
-	suppress := ApplyTilt(img, e, ai)
+	suppress := ApplyMasks(img, e, ai)
 
 	// The rightmost columns sit at depth 1, inside the window: untouched.
 	for y := range h {
@@ -112,7 +120,7 @@ func TestTiltKeepsTheFocusBandSharp(t *testing.T) {
 func TestTiltGradesWithDepth(t *testing.T) {
 	const w, h = 320, 80
 	img := noiseRGBA(w, h)
-	ApplyTilt(img, tiltParams(1, 0.95, 1), depthRampMap(80, 20))
+	ApplyMasks(img, tiltParams(1, 0.95, 1), depthRampMap(80, 20))
 
 	// Sample bands walking away from the in-focus right edge.
 	bands := []float64{}
@@ -162,7 +170,7 @@ func TestTiltDoesNotBleedAcrossTheFocusEdge(t *testing.T) {
 			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = v, v, v, 255
 		}
 	}
-	ApplyTilt(img, tiltParams(1, 0.9, 1), ai)
+	ApplyMasks(img, tiltParams(1, 0.9, 1), ai)
 
 	// Well inside the far (blurred, black) half the gather has only black
 	// neighbours to average, so it must stay black. A naive blur-then-blend
@@ -186,7 +194,7 @@ func TestTiltNoopsWithoutAMap(t *testing.T) {
 	} {
 		before := noiseRGBA(64, 32)
 		img := noiseRGBA(64, 32)
-		if s := ApplyTilt(img, tiltParams(1, 0.4, 0.6), ai); s != nil {
+		if s := ApplyMasks(img, tiltParams(1, 0.4, 0.6), ai); s != nil {
 			t.Errorf("%s: expected no suppression plane", name)
 		}
 		for i := range img.Pix {
@@ -207,7 +215,7 @@ func TestTiltIsResolutionIndependent(t *testing.T) {
 	means := func(long int) []float64 {
 		w, h := long, long/2
 		img := noiseRGBA(w, h)
-		ApplyTilt(img, e, ai)
+		ApplyMasks(img, e, ai)
 		out := make([]float64, 8)
 		for b := range out {
 			x0, x1 := b*w/8, (b+1)*w/8
@@ -240,7 +248,7 @@ func TestTiltBelowOnePixelIsAFullNoop(t *testing.T) {
 	before := noiseRGBA(200, 100)
 	img := noiseRGBA(200, 100)
 	// 0.0001 × 0.06 × 200 ≪ 1 px.
-	if s := ApplyTilt(img, tiltParams(0.0001, 0.9, 1), depthRampMap(64, 32)); s != nil {
+	if s := ApplyMasks(img, tiltParams(0.0001, 0.9, 1), depthRampMap(64, 32)); s != nil {
 		t.Error("a sub-pixel radius must return no suppression plane")
 	}
 	for i := range img.Pix {
@@ -261,23 +269,57 @@ func BenchmarkTilt1024(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		copy(img.Pix, src)
-		ApplyTilt(img, e, ai)
+		ApplyMasks(img, e, ai)
 	}
 }
 
-// TestMergeSuppression: the mask stage and the tilt stage both suppress, and
-// ApplyDetail sees the stronger of the two per pixel.
-func TestMergeSuppression(t *testing.T) {
-	if got := mergeSuppression(nil, nil); got != nil {
-		t.Error("two absent planes must merge to nil")
+// TestBokehHoldsItsBrightness is the point of the disc pass: a defocused
+// point light must become a disc that stays bright — the highlight-weighted
+// gather — where the plain blur dilutes it into its dark surround. Also pins
+// the disc's flat profile against the gaussian-ish blur's centre-peaked one.
+func TestBokehHoldsItsBrightness(t *testing.T) {
+	const w, h = 160, 80
+	// A depth map that puts the whole frame far away, and a mask window at
+	// the near end, inverted: full weight everywhere — the defocus applies to
+	// the entire frame at its maximum radius.
+	pix := make([]uint8, 40*20)
+	ai := AIMapSet{aiSetKey(edit.AIDepth, tiltTestVer): {Pix: pix, W: 40, H: 20, Key: "test-far"}}
+	params := func(adjust edit.MaskAdjust) *edit.Params {
+		e := &edit.Params{Masks: []edit.Mask{{
+			Type: edit.MaskAI, AIKind: edit.AIDepth, MapVer: tiltTestVer,
+			DepthLo: 0.9, DepthHi: 1, Invert: true, Feather: 1, Adjust: adjust,
+		}}}
+		e.Normalize()
+		return e
 	}
-	b := []uint8{5, 9}
-	if got := mergeSuppression(nil, b); &got[0] != &b[0] {
-		t.Error("a single plane must pass through without copying")
+	frame := func() *image.RGBA {
+		img := image.NewRGBA(image.Rect(0, 0, w, h))
+		for i := 3; i < len(img.Pix); i += 4 {
+			img.Pix[i] = 255
+		}
+		for y := h/2 - 1; y <= h/2+1; y++ {
+			for x := w/2 - 1; x <= w/2+1; x++ {
+				i := y*img.Stride + x*4
+				img.Pix[i], img.Pix[i+1], img.Pix[i+2] = 255, 255, 255
+			}
+		}
+		return img
 	}
-	a := []uint8{7, 2}
-	got := mergeSuppression(a, []uint8{5, 9})
-	if got[0] != 7 || got[1] != 9 {
-		t.Errorf("expected the per-pixel max, got %v", got)
+
+	bokeh := frame()
+	ApplyMasks(bokeh, params(edit.MaskAdjust{Bokeh: 1}), ai)
+	blur := frame()
+	ApplyMasks(blur, params(edit.MaskAdjust{Blur: 1}), ai)
+
+	at := func(img *image.RGBA, dx int) int {
+		return int(img.Pix[(h/2)*img.Stride+(w/2+dx)*4])
+	}
+	// Inside the disc but well off the source point.
+	if b, g := at(bokeh, 5), at(blur, 5); b < g*2 {
+		t.Errorf("the disc must hold its brightness: bokeh %d vs blur %d", b, g)
+	}
+	// The disc profile is flat; the iterated box peaks at the centre.
+	if c, e := at(bokeh, 0), at(bokeh, 7); c > e*2 {
+		t.Errorf("a disc must be flat, not centre-peaked: centre %d edge %d", c, e)
 	}
 }

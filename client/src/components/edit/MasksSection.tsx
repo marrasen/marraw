@@ -27,6 +27,7 @@ import {
   aiMask,
   aiPersonMask,
   backgroundMask,
+  tiltShiftMask,
   isMaskShapeControl,
   maskAdjustIsNeutral,
   maskCanRemove,
@@ -121,7 +122,7 @@ export function MasksSection({ client, draft }: { client: ApiClient; draft: Para
     kind: AIKindType,
     res: AIMapResult,
     mode: 'add' | 'restore',
-    variant: 'subject' | 'background' = 'subject',
+    variant: 'subject' | 'background' | 'tilt' = 'subject',
   ) => {
     if (photoId == null) return;
     {
@@ -151,12 +152,11 @@ export function MasksSection({ client, draft }: { client: ApiClient; draft: Para
         }
       } else {
         setMode('develop');
-        esAddMaskObject(
-          client,
-          kind === 'subject' && variant === 'background'
-            ? backgroundMask(res.mapVer)
-            : aiMask(kind as 'subject' | 'depth', res.mapVer),
-        );
+        let m: Mask;
+        if (kind === 'subject' && variant === 'background') m = backgroundMask(res.mapVer);
+        else if (kind === 'depth' && variant === 'tilt') m = tiltShiftMask(res.mapVer);
+        else m = aiMask(kind as 'subject' | 'depth', res.mapVer);
+        esAddMaskObject(client, m);
       }
     }
   };
@@ -164,7 +164,7 @@ export function MasksSection({ client, draft }: { client: ApiClient; draft: Para
   // Button path: the gate handles the consent ask and the generation.
   const addAI = (
     kind: 'subject' | 'depth' | 'class' | 'person',
-    variant: 'subject' | 'background' = 'subject',
+    variant: 'subject' | 'background' | 'tilt' = 'subject',
   ) => {
     aiGate.request(kind, (res) => applyAIMap(kind, res, 'add', variant), { variant });
   };
@@ -250,6 +250,18 @@ export function MasksSection({ client, draft }: { client: ApiClient; draft: Para
         >
           {generating === 'depth' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Layers data-icon="inline-start" />}
           Depth
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="flex-1 basis-[30%]"
+          title="Blur by distance: keep a depth band sharp and defocus the rest, blur growing with distance — set the band with Focus distance and Focus depth (runs a local model)"
+          disabled={generating != null}
+          onClick={() => addAI('depth', 'tilt')}
+          data-testid="ai-mask-tilt"
+        >
+          {generating === 'depth' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Aperture data-icon="inline-start" />}
+          Tilt shift
         </Button>
         <Button
           size="sm"
@@ -661,21 +673,67 @@ function AIShapeRows({ client, mask, index }: { client: ApiClient; mask: Mask; i
           subject matte — the slider moves the boundary either way. */}
       {(mask.aiKind === 'subject' || mask.aiKind === 'background') &&
         shapeSlider('threshold', 'Threshold', mask.threshold ?? 0, 0.5, (v) => ({ threshold: v }), 0.02)}
-      {mask.aiKind === 'depth' && (
-        <EditRangeSlider
-          label="Depth range"
-          value={[(mask.depthLo ?? 0) * 100, (mask.depthHi ?? 0) * 100]}
-          display={`${Math.round((mask.depthLo ?? 0) * 100)}–${Math.round((mask.depthHi ?? 0) * 100)}`}
-          min={0}
-          max={100}
-          step={1}
-          neutral={[DEPTH_WINDOW_DEFAULT.depthLo * 100, DEPTH_WINDOW_DEFAULT.depthHi * 100]}
-          onChange={([lo, hi]) => patch({ depthLo: lo / 100, depthHi: hi / 100 })}
-          onCommit={([lo, hi]) => commit({ depthLo: lo / 100, depthHi: hi / 100 })}
-          onClear={() => commit({ ...DEPTH_WINDOW_DEFAULT })}
-        />
-      )}
+      {mask.aiKind === 'depth' && <DepthWindowRows mask={mask} patch={patch} commit={commit} />}
       {shapeSlider('feather', 'Edge feather', mask.feather ?? 0, 0, (v) => ({ feather: v }))}
+    </>
+  );
+}
+
+// DepthWindowRows presents the stored [depthLo, depthHi] window as the pair a
+// photographer thinks in: Focus distance (the window's centre, 100 = nearest)
+// and Focus depth (its width) — the focus ring and the aperture, rather than
+// two ends of a band. Pure re-parameterization: centre/width and lo/hi are
+// the same window, so the stored params, hashes and sidecars don't move, and
+// the pair round-trips exactly through the stored form. Width wins at the
+// edges — pushing the distance to an end with a wide window slides the window
+// against the edge rather than silently narrowing it.
+function DepthWindowRows({
+  mask,
+  patch,
+  commit,
+}: {
+  mask: Mask;
+  patch: (p: Partial<Mask>) => void;
+  commit: (p: Partial<Mask>) => void;
+}) {
+  const lo = mask.depthLo ?? 0;
+  const hi = mask.depthHi ?? 0;
+  const width = hi - lo;
+  const center = (lo + hi) / 2;
+  const window = (c: number, w: number): Partial<Mask> => {
+    const half = Math.min(w, 1) / 2;
+    const cc = Math.min(Math.max(c, half), 1 - half);
+    return { depthLo: cc - half, depthHi: cc + half };
+  };
+  const defC =
+    (DEPTH_WINDOW_DEFAULT.depthLo + DEPTH_WINDOW_DEFAULT.depthHi) / 2;
+  const defW = DEPTH_WINDOW_DEFAULT.depthHi - DEPTH_WINDOW_DEFAULT.depthLo;
+  return (
+    <>
+      <EditSlider
+        label="Focus distance"
+        value={center * 100}
+        display={String(Math.round(center * 100))}
+        min={0}
+        max={100}
+        step={1}
+        neutral={defC * 100}
+        onChange={(v) => patch(window(v / 100, width))}
+        onCommit={(v) => commit(window(v / 100, width))}
+        onClear={() => commit(window(defC, width))}
+      />
+      <EditSlider
+        label="Focus depth"
+        value={width * 100}
+        display={String(Math.round(width * 100))}
+        min={2}
+        max={100}
+        step={1}
+        neutral={defW * 100}
+        onChange={(v) => patch(window(center, v / 100))}
+        onCommit={(v) => commit(window(center, v / 100))}
+        onClear={() => commit(window(center, defW))}
+      />
     </>
   );
 }

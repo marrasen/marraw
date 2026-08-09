@@ -57,29 +57,6 @@ func TestPresetLookCarriesBW(t *testing.T) {
 	}
 }
 
-// TestPresetLookCarriesTilt: all four tilt fields have to travel together —
-// an amount without its map version is cleared by Normalize, so dropping one
-// on the way through silently disables the effect the preset is named for.
-func TestPresetLookCarriesTilt(t *testing.T) {
-	p := UserPreset{
-		ID:   "mini",
-		Name: "miniature",
-		Params: edit.Params{
-			TiltAmount: 0.7, TiltLo: 0.4, TiltHi: 0.7, TiltMapVer: "depthany2s-1",
-			Contrast: 0.3,
-		},
-		Sections: []string{"effects"},
-	}
-	out := presetLook(p, 0)
-	if !out.HasTilt() || out.TiltLo != 0.4 || out.TiltHi != 0.7 {
-		t.Errorf("effects section must carry the whole tilt set, got %+v", out)
-	}
-	p.Sections = []string{"tone"}
-	if out := presetLook(p, 0); out.HasTilt() {
-		t.Error("tilt must not leak through a tone-only preset")
-	}
-}
-
 func TestPresetLookAllSectionsWhenEmpty(t *testing.T) {
 	p := UserPreset{
 		ID:     "x",

@@ -183,22 +183,49 @@ func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) [
 	workLong := float64(max(ww, wh))
 
 	a := &m.Adjust
+
+	// Blur runs on its own, BEFORE the shared buffer is snapshotted: the
+	// radius follows the mask's weight ramp (applyGradedBlur), which needs
+	// per-level gathers the single shared buffer cannot express — and doing
+	// it first means the light passes below draw from already-defocused
+	// pixels, the anamorphic ordering the old intra-buffer order bought.
+	// The one casualty is mosaic-then-blur: blur no longer softens mosaic
+	// block edges, it defocuses the photo the mosaic then re-pixelates.
+	blurRan := false
+	if a.Blur > 0 {
+		blurRan = applyGradedBlur(img, plane, a.Blur, false)
+	}
+	// Bokeh after blur: a soft pre-blur under the discs reads as a dreamier
+	// aperture, and the light passes below still draw from the finished
+	// defocus either way.
+	if a.Bokeh > 0 && applyGradedBlur(img, plane, a.Bokeh, true) {
+		blurRan = true
+	}
+	if !a.HasFXBeyondBlur() {
+		// Blur was the whole request: skip the shared-buffer machinery, its
+		// snapshot of img and its composite entirely. A dial too low to reach
+		// a single working-buffer pixel ran nothing, and returning the plane
+		// anyway would let it suppress detail it never destroyed.
+		if !blurRan {
+			return nil
+		}
+		return plane
+	}
+
 	s := newFXSource(img, plane, ww, wh)
 
-	// Whether a pass actually threw the region's detail away. Tracked around
-	// the passes rather than read off the amounts, so a dial too low to round
-	// up to a single pixel of reach counts as what it is — nothing ran — and
-	// costs the render no sharpness. It picks the composite mode below.
+	// Whether a SHARED-BUFFER pass threw the region's detail away. Tracked
+	// around the passes rather than read off the amounts, so a dial too low to
+	// round up to a single pixel of reach counts as what it is — nothing ran —
+	// and costs the render no sharpness. It picks the composite mode below.
+	// The graded blur above deliberately does NOT count: img already carries
+	// it at full resolution (including the fine detail its low-weight fringe
+	// kept), so the light passes must composite as a difference over it, not
+	// replace it with the working buffer's downscale.
 	destroyed := false
 	if a.Mosaic > 0 {
 		fxMosaic(s, a.Mosaic*fxMosaicFrac)
 		destroyed = true
-	}
-	if a.Blur > 0 {
-		if r := int(math.Round(a.Blur * fxBlurFrac * workLong)); r >= 1 {
-			fxBlur(s, r)
-			destroyed = true
-		}
 	}
 	if a.MotionBlur > 0 {
 		if l := a.MotionBlur * fxMotionFrac * workLong; l >= 1 {
@@ -317,7 +344,7 @@ func (d *fxDelta) sample(x, y float64) (r, g, b int32) {
 // global detail stage must not re-amplify. Streaks add light rather than
 // destroying detail, so they do not contribute.
 func fxDetailSuppression(a *edit.MaskAdjust) float64 {
-	return max(a.Blur, a.MotionBlur, a.ZoomBlur, a.Mosaic)
+	return max(a.Blur, a.Bokeh, a.MotionBlur, a.ZoomBlur, a.Mosaic)
 }
 
 // fxDirection converts a smear angle in oriented-frame degrees into a unit
@@ -842,7 +869,7 @@ func fxAddLight(s *fxSource, hi [][]uint16, hw, hh int, gain float64) {
 // s must already be resolved.
 func fxPrism(s *fxSource, cx, cy, amount float64) {
 	w, h := s.w, s.h
-	k := amount * fxPrismScale
+	kMax := amount * fxPrismScale
 	or := make([]uint16, w*h)
 	ob := make([]uint16, w*h)
 	fxBands(h, func(y0, y1 int) {
@@ -850,14 +877,21 @@ func fxPrism(s *fxSource, cx, cy, amount float64) {
 			// This is a GATHER, so the signs are inverted against the effect:
 			// to throw red OUTWARD the red channel must sample INWARD.
 			fy := float64(y) - cy
-			ry := clampInt(int(math.Round(float64(y)-fy*k)), 0, h-1) * w
-			by := clampInt(int(math.Round(float64(y)+fy*k)), 0, h-1) * w
 			for x := range w {
 				j := y*w + x
 				if s.a[j] == 0 {
 					continue
 				}
+				// The split follows the mask's weight ramp, so through a
+				// feathered mask (or an inverted depth mask, where the ramp
+				// is distance from the focus band) the fringing GROWS with
+				// coverage instead of cross-fading — the way lateral CA grows
+				// off-axis and off-focus in a real lens. Full weight is the
+				// old constant, so a hard matte renders as before.
+				k := kMax * float64(s.a[j]) / 65535
 				fx := float64(x) - cx
+				ry := clampInt(int(math.Round(float64(y)-fy*k)), 0, h-1) * w
+				by := clampInt(int(math.Round(float64(y)+fy*k)), 0, h-1) * w
 				jr := ry + clampInt(int(math.Round(float64(x)-fx*k)), 0, w-1)
 				jb := by + clampInt(int(math.Round(float64(x)+fx*k)), 0, w-1)
 				// Outside the mask there is no colour to borrow — keeping the

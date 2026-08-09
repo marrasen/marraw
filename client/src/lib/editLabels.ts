@@ -12,7 +12,6 @@ import { MASK_TYPE_LABELS, NEUTRAL, paramLabel } from '@/lib/controlSpecs';
 const ADD_REMOVE_LABELS = new Set([
   'Vignette', 'Texture', 'Clarity', 'Dehaze',
   'Split shadow', 'Split highlight', 'Sharpen', 'Noise reduction',
-  'Tilt shift',
 ]);
 
 function paramIsDefault(p: Params, key: keyof Params): boolean {

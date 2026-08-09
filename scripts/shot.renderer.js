@@ -777,13 +777,19 @@ if (shot === 'cull') {
   mw.esUpdateMask(idx, { depthLo: 0.35, depthHi: 0.8 });
   mw.esCommit();
   await sleep(500);
-  const row = [...document.querySelectorAll('span')]
-    .find((s) => s.textContent === 'Depth range')?.parentElement;
+  // The window presents as Focus distance (centre) + Focus depth (width);
+  // the stored params stay the lo/hi pair.
+  const rowOf = (label) =>
+    [...document.querySelectorAll('span')].find((s) => s.textContent === label)?.parentElement;
+  const distRow = rowOf('Focus distance');
+  const depthRow = rowOf('Focus depth');
   const mask = es.getState().draft?.masks?.[idx] ?? {};
   window.__maskProbe = {
-    rowFound: !!row,
-    thumbCount: row?.querySelectorAll('[data-slot="slider-thumb"]').length ?? 0,
-    display: row?.querySelector('span.font-mono')?.textContent ?? '',
+    distRowFound: !!distRow,
+    depthRowFound: !!depthRow,
+    // lo 0.35 / hi 0.8 → centre 57.5 (rounds to 58), width 45.
+    distDisplay: distRow?.querySelector('span.font-mono')?.textContent ?? '',
+    depthDisplay: depthRow?.querySelector('span.font-mono')?.textContent ?? '',
     depthLo: mask.depthLo,
     depthHi: mask.depthHi,
   };
@@ -950,28 +956,25 @@ if (shot === 'cull') {
     P.error = String(err);
   }
 } else if (shot === 'tiltshift') {
-  // Tilt shift: switch the depth-graded defocus on through the Effects
-  // group's own button (which runs the model behind the consent gate), then
-  // assert the frame actually loses detail, that the focus window steers
-  // WHICH part keeps it, and that clearing takes the whole param set with it.
-  // Progress is recorded as it goes: the harness forwards only the returned
-  // probe, so a bare throw would say "timeout" and nothing about where.
+  // Tilt shift as a mask recipe: the Local tab's own button generates the
+  // depth map (consent-gated) and adds an inverted depth mask carrying Blur;
+  // the render grades the blur by the mask's weight ramp. Asserts the frame
+  // loses detail, the Focus distance / Focus depth rows drive the window,
+  // and removing the mask restores the params.
   const P = { stage: 'start' };
   window.__tiltProbe = P;
   try {
     ui().setMode('develop');
     const es = mw.useEditSession;
     await until(() => es.getState().draft != null);
-    ui().setDevelopTab('develop');
-    mw.setEditGroupOpen('effects', true);
-    P.stage = 'panel-open';
-    // Idempotence: a previous run may have left the effect on.
-    mw.esUpdate({ tiltAmount: 0, tiltLo: 0, tiltHi: 0, tiltMapVer: '' });
+    ui().setDevelopTab('masks');
+    await sleep(600);
+    mw.esUpdate({ masks: [] }); // idempotence: drop persisted masks first
     mw.esCommit();
     await sleep(1500);
 
-    // Detail proxy: mean absolute difference between neighbouring pixels of a
-    // downscaled frame. A defocused photo has less of it, everywhere.
+    // Detail proxy: mean absolute difference between neighbouring pixels of
+    // a downscaled frame. A defocused photo has less of it.
     const detail = async () => {
       const img = document.querySelector('[data-testid="loupe-image"]') ?? document.querySelector('main img');
       if (!img || !img.complete || !img.naturalWidth) return null;
@@ -984,90 +987,62 @@ if (shot === 'cull') {
       ctx.drawImage(img, 0, 0, w, h);
       const d = ctx.getImageData(0, 0, w, h).data;
       const lum = (i) => (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
-      // Halves of the frame, so a window that keeps one depth band sharp
-      // shows up as the two halves diverging rather than as one mean.
-      const half = [0, 0];
-      const n = [0, 0];
+      let sum = 0, n = 0;
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w - 1; x++) {
           const i = (y * w + x) * 4;
-          const k = x < w / 2 ? 0 : 1;
-          half[k] += Math.abs(lum(i) - lum(i + 4));
-          n[k]++;
+          sum += Math.abs(lum(i) - lum(i + 4));
+          n++;
         }
       }
-      return { left: half[0] / n[0], right: half[1] / n[1], all: (half[0] + half[1]) / (n[0] + n[1]) };
+      return sum / n;
     };
     const sharp = await detail();
     P.stage = 'sharp-measured';
 
-    // The panel's own button — this is the wiring under test, not the render.
-    const btn = () => document.querySelector('[data-testid="tilt-enable"]');
-    await until(() => btn() != null, 20000);
-    P.stage = 'button-found';
-    btn().click();
-    // Generating the depth map runs a model; the button is replaced by the
-    // two sliders once the params land.
-    await until(() => (es.getState().draft?.tiltAmount ?? 0) > 0, 180000);
-    P.stage = 'enabled';
+    document.querySelector('[data-testid="ai-mask-tilt"]')?.click();
+    await until(() => (es.getState().draft?.masks ?? []).some(
+      (m) => m.aiKind === 'depth' && m.invert && (m.adjust?.blur ?? 0) > 0), 180000);
+    P.stage = 'mask-added';
     await sleep(3000);
     const defocused = await detail();
 
-    // The rows the effect swaps in, read while they are on screen showing the
-    // default window (a detached node keeps its last text, so reading these
-    // after the clear below would report whatever was set last).
+    const idx = (es.getState().draft?.masks ?? []).findIndex((m) => m.aiKind === 'depth');
+    const m0 = es.getState().draft?.masks?.[idx] ?? {};
     const rowOf = (label) =>
-      [...document.querySelectorAll('span')].find((s) => s.textContent === label)?.parentElement;
-    const windowRow = rowOf('Focus range');
-    const draft = es.getState().draft ?? {};
-    const windowRowFound = !!windowRow;
-    const windowThumbs = windowRow?.querySelectorAll('[data-slot="slider-thumb"]').length ?? 0;
-    const windowDisplay = windowRow?.querySelector('span.font-mono')?.textContent ?? '';
+      [...document.querySelectorAll('span')].find((sp) => sp.textContent === label)?.parentElement;
+    const distRow = rowOf('Focus distance');
+    const depthRow = rowOf('Focus depth');
 
-    // Steering: the window decides WHICH depths keep their detail, so moving
-    // it from the near end to the far end has to redistribute the sharpness
-    // between the halves of the frame. Reported as each half's detail rather
-    // than as a pass/fail — which half wins depends on what the fixture has at
-    // which distance, and a fixture-tuned assertion is worth less than the
-    // numbers (the depths themselves are asserted in scripts/tilt-verify.mjs).
-    mw.esUpdate({ tiltLo: 0.75, tiltHi: 1 });
+    // Drive the window through the rows' own backing state and assert the
+    // lo/hi pair moves as centre/width.
+    mw.esUpdateMask(idx, { depthLo: 0.5, depthHi: 0.9 });
     mw.esCommit();
-    await sleep(3000);
-    const nearFocus = await detail();
-    mw.esUpdate({ tiltLo: 0, tiltHi: 0.25 });
-    mw.esCommit();
-    await sleep(3000);
-    const farFocus = await detail();
+    await sleep(500);
+    const m1 = es.getState().draft?.masks?.[idx] ?? {};
 
-    // Clearing must take the whole set, so the panel and the server agree.
-    mw.esUpdate({ tiltAmount: 0, tiltLo: 0, tiltHi: 0, tiltMapVer: '' });
-    mw.esCommit();
-    await sleep(2000);
-    const cleared = es.getState().draft ?? {};
-    const buttonBack = btn() != null;
+    // Removing the mask takes the whole effect with it.
+    mw.esRemoveMask(idx);
+    await sleep(1000);
+    const cleared = (es.getState().draft?.masks ?? []).length;
 
-    // Leave the capture on the state under test: the effect on at its default,
-    // with the Effects group scrolled to.
-    mw.esUpdate({ ...draft });
-    mw.esCommit();
+    // Leave the capture on the state under test.
+    document.querySelector('[data-testid="ai-mask-tilt"]')?.click();
+    await until(() => (es.getState().draft?.masks ?? []).some((m) => m.aiKind === 'depth'), 60000);
     await sleep(3000);
-    rowOf('Focus range')?.scrollIntoView({ block: 'center' });
-    await sleep(400);
 
     Object.assign(P, {
       stage: 'done',
-      sharpDetail: sharp?.all,
-      defocusedDetail: defocused?.all,
-      mapVer: draft.tiltMapVer ?? '',
-      amount: draft.tiltAmount ?? 0,
-      windowRowFound,
-      windowThumbs,
-      windowDisplay,
-      nearWindow: nearFocus && { left: nearFocus.left, right: nearFocus.right },
-      farWindow: farFocus && { left: farFocus.left, right: farFocus.right },
-      clearedAmount: cleared.tiltAmount ?? 0,
-      clearedMapVer: cleared.tiltMapVer ?? '',
-      buttonBack,
+      sharpDetail: sharp,
+      defocusedDetail: defocused,
+      maskInverted: !!m0.invert,
+      maskBlur: m0.adjust?.blur ?? 0,
+      mapVer: m0.mapVer ?? '',
+      distRowFound: !!distRow,
+      depthRowFound: !!depthRow,
+      distDisplay: distRow?.querySelector('span.font-mono')?.textContent ?? '',
+      windowMoved: m1.depthLo === 0.5 && m1.depthHi === 0.9,
+      clearedMaskCount: cleared,
     });
   } catch (err) {
     P.error = String(err);

@@ -137,6 +137,7 @@ check(inert.hash === plain.hash, 'an inert fxAngle does not change the edit hash
 
 // --- 5. The remaining effects each render and each differ. ---
 for (const [name, adjust] of [
+  ['bokeh', { bokeh: 0.6 }],
   ['zoom blur', { zoomBlur: 0.6 }],
   ['mosaic', { mosaic: 0.5 }],
   ['streaks', { streaks: 0.6 }],

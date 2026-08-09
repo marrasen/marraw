@@ -56,31 +56,6 @@ describe('labelForDiff', () => {
       expect(labelForDiff(a, b)).toBe('Vignette');
     });
 
-    // Switching tilt shift on writes four keys at once (amount, window, map
-    // version), and the server omits every one of them while it is off — so
-    // the diff has to read absent as neutral to earn its "Add".
-    it('names switching tilt shift on and off', () => {
-      const on = withParams({
-        tiltAmount: 0.6, tiltLo: 0.45, tiltHi: 0.75, tiltMapVer: 'depthany2s-1',
-      });
-      const offAsStored: Params = { ...NEUTRAL };
-      delete offAsStored.tiltAmount;
-      delete offAsStored.tiltLo;
-      delete offAsStored.tiltHi;
-      delete offAsStored.tiltMapVer;
-      expect(labelForDiff(offAsStored, on)).toBe('Add tilt shift');
-      // Switching it off writes the neutral values rather than dropping the
-      // keys (labelForDiff only sees the keys present in `next`), which is
-      // what the panel's clear does.
-      expect(labelForDiff(on, withParams({ tiltMapVer: '' }))).toBe('Remove tilt shift');
-    });
-
-    it('names moving the tilt window after the control', () => {
-      const a = withParams({ tiltAmount: 0.6, tiltLo: 0.45, tiltHi: 0.75, tiltMapVer: 'v1' });
-      const b = { ...a, tiltLo: 0.3 };
-      expect(labelForDiff(a, b)).toBe('Tilt shift');
-    });
-
     it('leaves controls outside the effect set alone', () => {
       expect(labelForDiff(base(), withParams({ expEV: 0.5 }))).toBe('Exposure');
     });

@@ -188,7 +188,7 @@ func nested(a, b string) bool {
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r12"
+const renderVersion = "r13"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
@@ -556,7 +556,6 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		report(0.78)
 		suppress := ApplyMasks(rgba, edits, ai)
 		ApplyBW(rgba, edits)
-		suppress = mergeSuppression(suppress, ApplyTilt(rgba, edits, ai))
 		report(0.82)
 		ApplyDetail(rgba, edits, suppress)
 		report(0.90)

@@ -97,17 +97,6 @@ func presetLook(p UserPreset, baseEV float64) edit.Params {
 	}
 	if s["effects"] {
 		out.Vignette = src.Vignette
-		// The depth window travels as a relative band, not as a distance: the
-		// map is min-max normalized per photo, so the same numbers pick out
-		// the same near/far slice of whatever the target photo contains. The
-		// map version travels too, and the seeded photo renders without the
-		// effect until a map of that version exists for it — the AI-mask
-		// contract, and the reason the client ensures the depth map for a
-		// tilted edit the same way it does for an AI mask.
-		out.TiltAmount = src.TiltAmount
-		out.TiltLo = src.TiltLo
-		out.TiltHi = src.TiltHi
-		out.TiltMapVer = src.TiltMapVer
 	}
 	if s["detail"] {
 		out.Sharpen = src.Sharpen

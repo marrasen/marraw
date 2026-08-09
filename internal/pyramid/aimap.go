@@ -162,9 +162,8 @@ func (s *AIMapStore) Load(photoKey string, kind edit.AIKind, ver string) *AIMap 
 	return m
 }
 
-// SetFor loads every map the edit reads — the ones its AI masks reference,
-// plus the depth map when tilt shift is on — transformed into the edit's
-// oriented frame. Maps are stored in the base display orientation (no
+// SetFor loads every map the edit's AI masks reference, transformed into the
+// edit's oriented frame. Maps are stored in the base display orientation (no
 // user rotate/flip) so a later quarter-rotate or mirror doesn't orphan them —
 // the transform is a lossless pixel-grid permutation done at load and cached.
 // Missing maps are simply absent from the set — the mask renders as a no-op
@@ -176,13 +175,6 @@ func (s *AIMapStore) SetFor(photoKey string, e *edit.Params) AIMapSet {
 	}
 	rot, flip := e.RotateTurns(), e.FlipH
 	var set AIMapSet
-	// Tilt shift reads the depth map without a mask around it (ApplyTilt), so
-	// it has to ask for its map here too — the loop below only sees masks.
-	if e.HasTilt() {
-		if am := s.loadOriented(photoKey, edit.AIDepth, e.TiltMapVer, rot, flip); am != nil {
-			set = AIMapSet{aiSetKey(edit.AIDepth, e.TiltMapVer): am}
-		}
-	}
 	for i := range e.Masks {
 		m := &e.Masks[i]
 		if m.Type != edit.MaskAI || m.AIKind == "" {
