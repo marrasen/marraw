@@ -8,35 +8,22 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
-## 0.10.0-beta.18 - 2026-08-09
+## 0.10.0 - 2026-08-09
 
-- Local: **tilt shift focuses itself on the subject**. If the subject-detection model is already on your machine, the Tilt shift button finds where the subject stands in the scene's depth and puts the sharp band right there — no extra download, no extra dialog; without it, the band lands at a sensible middle distance as before
-- Local: **gentler tilt shift by default** — the heavy blur is gone from the recipe, replaced by a touch of bokeh and glow with a prism fringe that grows with distance: defocused highlights become blooming discs, and the whole thing reads as a lens rather than a smear. All four dials are yours to push further
-- Cull: **hold Backspace to see the original** — the photo before any edit — the same hold that already worked in Develop. Release puts the developed frame back
-
-## 0.10.0-beta.17 - 2026-08-09
-
-- Local: **tilt shift moved into the masks**, where it belongs. The Local tab's new Tilt shift button adds an inverted Depth mask with the blur pre-dialled: set the sharp band with **Focus distance** and **Focus depth** (every Depth mask now uses that pair instead of the two-thumb range — same stored window, friendlier handles), and everything a mask can do now grades with distance — darken and cool the far background, fringe it with prism, streak its highlights. Note for beta.16 testers: the short-lived Effects-panel version is gone, and an edit made with it loses the effect — re-add it from the Local tab
-- Local: **Bokeh** joins Blur in every mask's Effects block — defocus through a hard-edged aperture disc that favours the highlights, so a defocused point light becomes a bright disc instead of a soft smudge. Try it on the tilt-shift mask for night lights
-- Local: **mask blur is now graded**: through a feather (or a depth ramp) the blur radius grows with the mask's weight, instead of cross-fading between sharp and one fixed blur. Feathered blur masks read as real depth of field now — existing edits re-render once as previews rebuild
-
-## 0.10.0-beta.16 - 2026-08-09
-
-- Develop: **tilt shift** in the Effects group — blur by distance, keeping a band of the scene sharp and defocusing everything in front of and behind it. Unlike reaching for a Depth mask and its blur, which gives you two zones and a seam, the blur here *grows* with how far a thing sits from the band you kept, the way depth of field actually falls off. One button switches it on (it runs the depth model on your machine, once per photo), then an amount and a two-thumb focus range. The sharp subject never smears into the background behind it, and the whole thing travels in presets and copy-paste
-- Develop: a **Black & white treatment** switch at the top of the Color group. Not a saturation drag to −1, which collapses every pixel onto one fixed mapping and lands a blue sky and a green field on the same grey — this weights each pixel's grey by the hue it came from, through the eight bands the colour mixer already owns. Pull the red band down and red content darkens while blue sits still, the way screwing a coloured filter onto a black-and-white camera does. Split toning tints the grey rather than the colour underneath, so warm shadows and warm highlights are sepia. Saturation and the mixer's hue rows go inert while it's on, and keep their values, so switching back to colour restores the photo exactly
-
-## 0.10.0-beta.15 - 2026-08-09
-
-- Windows: marraw **opens where you left it**. The library window comes back at the size and position it had when you quit, maximized if it was. If it was last on a screen that isn't there any more — a laptop undocked from the monitor on your desk — it comes back on a screen you do have, rather than somewhere off the edge you could never drag it from
-- Windows: the **pop-out photo window comes back too** when it was open at quit, showing whatever the library window has focused. It already remembered its own size and position; now it remembers having been up at all
-- Library: the **develop panel remembers being hidden**, the way the library rail already did. The two toggles sit at either end of the same toolbar and now behave the same — hide the panel for a wider grid and it stays hidden next time you open marraw
-
-## 0.10.0-beta.14 - 2026-08-09
-
-- Library: marraw **reopens the folder you had open** when you quit, so a launch lands you back in the shoot you were working on instead of on the welcome page. If that folder has since been deleted, renamed, or its drive unplugged, it says so and leaves you on the library — and it stays remembered, so plugging the drive back in lands you there again next time
-- Library: fixed — hiding the library rail and quitting left no way to bring it back. The rail's show/hide button lives in the folder toolbar, so a collapsed rail with no folder open was a dead end: no rail, no button, no way to open a library at all. The rail now comes back for good whenever nothing is open, and with the folder above reopening, a collapsed rail otherwise stays exactly as you left it
-- Updates: **what's new arrives as a dialog** — the mark, the version you just moved to, and every release since the one this machine last saw — rather than a card on a welcome page that reopening a folder means you never land on. It waits until you dismiss it, so quitting mid-read brings it back next launch, and the release notes' emphasis now renders instead of showing its asterisks
-- Updates: **beta builds carry their release notes in the app**. Betas get their own changelog sections, and a tester moving from the last beta onto the final stable release sees that release's notes as well — until now a beta showed neither
+- Share: **hand a shoot to a friend's phone**. Pick the photos, make a link, send it — the album opens in their browser over a secure Tailscale Funnel tunnel, straight off your machine, with pinch-to-zoom deep into the full-resolution tiles and landscape rotation filling the screen. Links are scoped to exactly the photos you chose, you pick who each link is for, and stopping a share stops it everywhere
+- Retouch: **Remove on masks** — any eligible mask gains a Remove toggle that fills its region from the surround with the on-device inpainting model. Person mask + Remove is a one-click person eraser; brush + Remove erases anything you can paint over
+- Local: **tilt shift** — one click adds an inverted Depth mask that keeps a band of the scene sharp and defocuses by distance, the way a lens would. It finds where your subject stands in the scene's depth and focuses there when the subject model is on your machine; set the band yourself with the new **Focus distance** and **Focus depth** handles every Depth mask now uses. The default look is discs and bloom with a prism fringe growing off-focus — not a flat smear
+- Local: **Bokeh** joins Blur in every mask's Effects block — defocus through a hard-edged aperture disc that favours the highlights, so a defocused point light becomes a bright disc instead of a soft smudge
+- Local: **mask blur is graded**: through a feather or a depth ramp the radius grows with the mask's weight instead of cross-fading between sharp and one fixed blur, so feathered defocus finally reads as depth of field. Existing edits re-render once as previews rebuild
+- Local: **masks can be dragged into a different order**, and leaving the Local tab puts its tools down
+- Develop: a **Black & white treatment** switch at the top of the Color group — each pixel's grey is weighted by the hue it came from through the mixer's eight bands, the digital coloured filter, not a saturation drag to −1. Split toning tints the grey, so warm both ends and you have sepia; switching back to colour restores the photo exactly
+- Develop: **hold Backspace to see the original** — the photo before any edit — in Develop and Cull both; release puts the developed frame back. The chrome steps aside while you hold
+- Develop: **exposure spans −5..+5 EV** (was −2..+3), rendered correctly everywhere from the live drag to the export, and the tone curve's points now drag reliably every time
+- Viewer: **Ctrl+N pops the photo onto a second monitor**, controlled from a glass island instead of a hidden right-click menu, with toolbar buttons for it and the library rail — and it comes back at launch if it was open when you quit
+- Library: **marraw opens where you left it** — the folder you had open, the window's size and place (on a screen you still have), the pop-out viewer, the develop panel's visibility, a collapsed rail. A machine you sit down at looks like you left it
+- Updates: **what's new arrives as a dialog** on the first launch after an update, covering every release since the one this machine last saw — and beta builds carry their release notes too
+- Loupe: a photo with a saved edit **no longer flashes the camera's JPEG** before the developed frame, and a cold frame paints instantly from the embedded JPEG instead of freezing the walk
+- Fixed: a white-balance drag now lands on the frame you dragged (not a stale one), a preset's hover preview ends when its card goes away, batch adjustments can no longer overwrite an edit they could not read, and the Info panel's focus scores read against their own shoot
 
 ## 0.9.0 - 2026-08-03
 
