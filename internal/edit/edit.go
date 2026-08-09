@@ -526,6 +526,32 @@ type Params struct {
 	ToneCurveR []CurvePoint `json:"toneCurveR,omitempty"`
 	ToneCurveG []CurvePoint `json:"toneCurveG,omitempty"`
 	ToneCurveB []CurvePoint `json:"toneCurveB,omitempty"`
+
+	// Tilt shift is depth-graded defocus (pyramid.ApplyTilt): the depth band
+	// between TiltLo and TiltHi stays sharp and everything outside it blurs,
+	// with the radius growing the further a pixel's depth sits from the band.
+	// That grading is why this is its own stage rather than an AI depth mask
+	// carrying MaskAdjust.Blur — a mask applies ONE radius through its
+	// coverage, which reads as two zones with a seam, not as depth of field.
+	//
+	// TiltAmount is the maximum blur (0 = off, and the gate the whole stage
+	// hangs on). TiltLo/TiltHi are the in-focus window in the depth map's own
+	// normalized space, 1 = nearest — the Mask.DepthLo/DepthHi convention, and
+	// like it a per-photo min-max normalization, so a window copied to another
+	// photo lands on the same relative band, not the same metres. TiltMapVer
+	// pins the model version the map was generated with, exactly as
+	// Mask.MapVer does: it is part of the normalized JSON, so regenerating the
+	// map with a newer model re-renders, and an unstamped version means the
+	// effect cannot resolve a map and Normalize clears it.
+	//
+	// Appended last and omitempty so every pre-tilt edit marshals — and
+	// therefore hashes — byte-identically. The subset hashes (librawInputs /
+	// linearInputs) never copy these fields, so dragging the sliders stays on
+	// the warm decode.
+	TiltAmount float64 `json:"tiltAmount,omitempty" validate:"gte=0,lte=1"`
+	TiltLo     float64 `json:"tiltLo,omitempty" validate:"gte=0,lte=1"`
+	TiltHi     float64 `json:"tiltHi,omitempty" validate:"gte=0,lte=1"`
+	TiltMapVer string  `json:"tiltMapVer,omitempty"`
 }
 
 // CurvePoint is one control point of a ToneCurve: X is the input level and Y
@@ -613,6 +639,13 @@ func (e *Params) IsBW() bool {
 	return e != nil && e.BW
 }
 
+// HasTilt reports whether the depth-graded defocus stage should run. Both
+// halves are required: an amount with no stamped map version has no map to
+// read, and Normalize clears one without the other.
+func (e *Params) HasTilt() bool {
+	return e != nil && e.TiltAmount > 0 && e.TiltMapVer != ""
+}
+
 // HasMasks reports whether any local adjustment mask is present.
 func (e *Params) HasMasks() bool {
 	return e != nil && len(e.Masks) > 0
@@ -697,9 +730,34 @@ func (e *Params) Normalize() {
 		e.HSLSat[i] = clamp(e.HSLSat[i], -1, 1)
 		e.HSLLum[i] = clamp(e.HSLLum[i], -1, 1)
 	}
+	e.normalizeTilt()
 	e.normalizeMasks()
 	e.normalizeSpots()
 	e.normalizeCurve()
+}
+
+// normalizeTilt canonicalizes the depth-graded defocus params. An effect that
+// cannot run — no amount, or no map version to resolve a depth map with —
+// clears its companions so the states that render identically hash identically
+// (the LensOff precedent). A fully-open window is deliberately NOT folded:
+// it renders as no defocus, but zeroing the amount to say so would yank the
+// slider out from under a photographer who is still dragging the window back.
+func (e *Params) normalizeTilt() {
+	// Quantize before the gate, so an amount that rounds away takes the rest
+	// of the fields with it instead of leaving a live-looking edit that
+	// renders nothing.
+	e.TiltAmount = quant4(clamp(e.TiltAmount, 0, 1))
+	if e.TiltAmount == 0 || e.TiltMapVer == "" {
+		e.TiltAmount, e.TiltLo, e.TiltHi, e.TiltMapVer = 0, 0, 0, ""
+		return
+	}
+	e.TiltLo = quant4(clamp(e.TiltLo, 0, 1))
+	e.TiltHi = quant4(clamp(e.TiltHi, 0, 1))
+	// The depth window is linear (unlike the range mask's circular hue), so
+	// an inverted pair is just reordered — normalizeMasks' AIDepth case.
+	if e.TiltHi < e.TiltLo {
+		e.TiltLo, e.TiltHi = e.TiltHi, e.TiltLo
+	}
 }
 
 // normalizeCurve canonicalizes the master and per-channel tone curves.

@@ -11,9 +11,10 @@ import {
   Eye, EyeOff, Focus, GripVertical, Layers, Loader2, Shapes, Users, Check, Blend, Aperture,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-// (aprot's camelCasing lowercases exactly one leading character: aIModelStatus.)
-import { aIModelStatus as aiModelStatus, fillModelStatus, generateAIMap } from '@/api/edits';
+import { fillModelStatus } from '@/api/edits';
+import type { AIMapResult } from '@/api/edits';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
+import { useAIMapGate } from '@/components/edit/useAIMapGate';
 import type { AIKindType, Mask, MaskAdjust, Params } from '@/api/edit';
 import {
   DEPTH_WINDOW_DEFAULT,
@@ -79,9 +80,10 @@ export function MasksSection({ client, draft }: { client: ApiClient; draft: Para
   const sceneDetect = aiDetect.class;
   const photoId = useEditSession((s) => s.photoId);
   const setMode = useUIStore((s) => s.setMode);
-  const [generating, setGenerating] = useState<AIKindType | null>(null);
-  // A feature waiting on download consent; non-null renders the dialog.
-  const [pendingAI, setPendingAI] = useState<PendingAIDownload | null>(null);
+  // Consent + generation for every AI-map kind this section offers; only what
+  // to do with the finished map is local (applyAIMap).
+  const aiGate = useAIMapGate(client, photoId);
+  const generating = aiGate.generating;
   // The same gate for the inpainting model behind a mask's Remove pill — kept
   // apart from pendingAI because declining reverts the flag rather than just
   // closing (the Retouch group's fill dialog precedent).
@@ -112,19 +114,17 @@ export function MasksSection({ client, draft }: { client: ApiClient; draft: Para
     esAddMask(client, type);
   };
 
-  // runAI generates the map (downloading only with explicit consent) and
-  // applies the mode: add a fresh mask / show scene chips, or — for a
-  // restore — nudge a preview re-render so the now-live mask shows.
-  const runAI = async (
+  // What to do with a generated map, by mode: add a fresh mask / show scene
+  // chips, or — for a restore — nudge a preview re-render so the now-live
+  // mask shows. The consent and generation around it are useAIMapGate's.
+  const applyAIMap = (
     kind: AIKindType,
-    allowDownload: boolean,
+    res: AIMapResult,
     mode: 'add' | 'restore',
     variant: 'subject' | 'background' = 'subject',
   ) => {
     if (photoId == null) return;
-    setGenerating(kind);
-    try {
-      const res = await generateAIMap(client, photoId, kind, allowDownload);
+    {
       if (mode === 'restore') {
         // Repaint ONLY when a map actually regenerated: an unconditional
         // nudge forces a transient (non-abortable) decode on every first
@@ -158,30 +158,15 @@ export function MasksSection({ client, draft }: { client: ApiClient; draft: Para
             : aiMask(kind as 'subject' | 'depth', res.mapVer),
         );
       }
-    } catch (err) {
-      toast.error(`AI mask failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setGenerating(null);
     }
   };
 
-  // Button path: ask for consent first when the model isn't on disk yet.
-  const addAI = async (
+  // Button path: the gate handles the consent ask and the generation.
+  const addAI = (
     kind: 'subject' | 'depth' | 'class' | 'person',
     variant: 'subject' | 'background' = 'subject',
   ) => {
-    if (photoId == null || generating) return;
-    try {
-      const status = await aiModelStatus(client, kind);
-      if (!status.downloaded) {
-        setPendingAI({ kind, bytes: status.bytes, mode: 'add', variant });
-        return;
-      }
-    } catch (err) {
-      toast.error(`AI mask failed: ${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
-    void runAI(kind, false, 'add', variant);
+    aiGate.request(kind, (res) => applyAIMap(kind, res, 'add', variant), { variant });
   };
 
   // Generating the maps an AI mask references is the edit session's job (it
@@ -194,9 +179,10 @@ export function MasksSection({ client, draft }: { client: ApiClient; draft: Para
     if (aiMapRestore == null) return;
     esClearAIMapRestore(); // consumed — the dialog owns the ask from here
     const kind = aiMapRestore;
-    aiModelStatus(client, kind)
-      .then((status) => setPendingAI({ kind, bytes: status.bytes, mode: 'restore' }))
-      .catch(() => {}); // no status, no dialog — the mask just stays inactive
+    aiGate.request(kind, (res) => applyAIMap(kind, res, 'restore'), { mode: 'restore' });
+    // aiGate.request is stable enough for this one-shot hand-off; re-running
+    // on every render of the section would re-ask.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, aiMapRestore]);
 
   return (
@@ -377,15 +363,7 @@ export function MasksSection({ client, draft }: { client: ApiClient; draft: Para
           }}
         />
       ))}
-      <AIModelDialog
-        pending={pendingAI}
-        onConfirm={(p) => {
-          setPendingAI(null);
-          // This section's pending is always an AI-mask kind, never 'fill'.
-          if (p.kind !== 'fill') void runAI(p.kind, true, p.mode, p.variant);
-        }}
-        onCancel={() => setPendingAI(null)}
-      />
+      {aiGate.dialog}
       <AIModelDialog
         pending={maskFillConsent != null ? pendingMaskFill : null}
         onConfirm={() => {

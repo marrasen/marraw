@@ -1040,7 +1040,13 @@ const aiMapsFired = new Set<string>();
 // consent dialog, exactly once per session per kind.
 export function esEnsureAIMaps(client: ApiClient, photoId: number, params: Params, rest: number[] = []) {
   const kinds = [
-    ...new Set((params.masks ?? []).filter((m) => m.type === 'ai' && m.aiKind).map((m) => m.aiKind!)),
+    ...new Set([
+      ...(params.masks ?? []).filter((m) => m.type === 'ai' && m.aiKind).map((m) => m.aiKind!),
+      // Tilt shift reads the depth map with no mask around it, so it has to
+      // ask here too — otherwise a pasted or preset-seeded tilt would render
+      // as nothing at all on a photo whose map was never generated.
+      ...((params.tiltAmount ?? 0) > 0 ? (['depth'] as AIKindType[]) : []),
+    ]),
   ];
   if (kinds.length === 0) return;
   void (async () => {
@@ -1125,7 +1131,14 @@ function esApplyParamsPreview(client: ApiClient, params: Params, label: string) 
   setState({ draft: params, lastPresetApply: null, hoverParams: null });
   pushHistory(s.photoId, params, label);
   const ids = s.applyIds.length > 1 ? s.applyIds : [s.photoId];
-  void persist(client, params, ids);
+  const photoId = s.photoId;
+  // A preset can carry tilt shift, which reads the depth map — so the same
+  // save-then-generate ordering esApplyParams uses applies here (generating
+  // first would invalidate the pre-apply hash and cache the maskless frame
+  // under the new one).
+  void persist(client, params, ids).then(() =>
+    esEnsureAIMaps(client, photoId, params, ids.filter((id) => id !== photoId)),
+  );
   previewThenSettle(client);
 }
 

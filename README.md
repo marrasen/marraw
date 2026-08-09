@@ -259,7 +259,10 @@ are the controls you chose to keep at hand.</sup>
   eyedropper (`W`).
 - **Color** — saturation, vibrance, split toning (shadow + highlight tint),
   and an 8-band HSL color mixer (per-band hue / saturation / luminance).
-- **Effects** — creative vignette.
+- **Effects** — creative vignette, and tilt shift: depth-graded defocus that
+  keeps a band of the scene sharp and blurs the rest by how far it sits from
+  that band. Runs the same on-device depth model the Depth mask uses, but as
+  a real depth-of-field ramp rather than one blur radius through a window.
 - **Detail** — sharpen, highlight recovery (clip/unclip/blend/rebuild), noise
   reduction, FBDD denoise, median passes, demosaic algorithm (VNG/PPG/AHD/DHT),
   manual chromatic-aberration correction.

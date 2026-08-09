@@ -142,6 +142,10 @@ export interface Params {
     toneCurveR?: CurvePoint[];
     toneCurveG?: CurvePoint[];
     toneCurveB?: CurvePoint[];
+    tiltAmount?: number;
+    tiltLo?: number;
+    tiltHi?: number;
+    tiltMapVer?: string;
 }
 
 export interface Spot {

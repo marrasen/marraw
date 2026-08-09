@@ -12,10 +12,15 @@ import { MASK_TYPE_LABELS, NEUTRAL, paramLabel } from '@/lib/controlSpecs';
 const ADD_REMOVE_LABELS = new Set([
   'Vignette', 'Texture', 'Clarity', 'Dehaze',
   'Split shadow', 'Split highlight', 'Sharpen', 'Noise reduction',
+  'Tilt shift',
 ]);
 
 function paramIsDefault(p: Params, key: keyof Params): boolean {
-  const v = p[key];
+  // The server omits a field that holds its default (bw, the lens offsets,
+  // the tilt params), so absent has to read as neutral — otherwise switching
+  // such an effect on looks like a change FROM something and never earns its
+  // "Add …" wording.
+  const v = p[key] ?? NEUTRAL[key];
   const d = NEUTRAL[key];
   if (Array.isArray(v) && Array.isArray(d)) return JSON.stringify(v) === JSON.stringify(d);
   return v === d;

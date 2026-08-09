@@ -95,6 +95,18 @@ export const PRESET_FIELDS = {
   hslSat: { group: 'color', mode: 'add' },
   hslLum: { group: 'color', mode: 'add' },
   vignette: { group: 'effects', mode: 'add' },
+  // Tilt shift travels as a relative depth band: the map is min-max
+  // normalized per photo, so the same window picks out the same near/far
+  // slice of whatever the target photo contains rather than the same
+  // distance. The window and the map version are position-valued (a "delta
+  // from neutral" on a depth coordinate means nothing), while the amount is
+  // an ordinary quantity the Amount scrubber can lerp. The seeded photo
+  // renders without the effect until its own depth map exists — the AI-mask
+  // contract; esEnsureAIMaps asks for one as soon as the edit loads.
+  tiltAmount: { group: 'effects', mode: 'add' },
+  tiltLo: { group: 'effects', mode: 'absolute' },
+  tiltHi: { group: 'effects', mode: 'absolute' },
+  tiltMapVer: { group: 'effects', mode: 'absolute' },
   sharpen: { group: 'detail', mode: 'add' },
   highlight: { group: 'detail', mode: 'enum' },
   nrThreshold: { group: 'detail', mode: 'add' },

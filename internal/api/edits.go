@@ -710,6 +710,10 @@ func (e *Edits) wbPickFrame(ctx context.Context, photoID int64, photo store.Phot
 	// every pick would come back as no correction at all. Dropping it here
 	// also keeps the satFactor back-out below matching what was rendered.
 	base.BW = false
+	// Tilt shift gathers neighbouring pixels, so a pick landing in the
+	// defocused region would sample an average of everything around it rather
+	// than the grey card the photographer clicked.
+	base.TiltAmount = 0
 	base.Normalize()
 	key := base.Hash()
 	if c := e.cachedPick(photoID, key); c != nil {
@@ -869,6 +873,10 @@ func (e *Edits) developedBaseForMask(ctx context.Context, photoID int64, photo s
 	// ...and before the B&W conversion, which runs after the masks: hue
 	// ranges and the eyedropper select on the color the mask stage sees.
 	params.BW = false
+	// Tilt shift runs after the masks too, and it gathers: a range mask must
+	// select on the pixels as the mask stage sees them, not on a defocused
+	// average of their neighbours.
+	params.TiltAmount = 0
 	var ep *edit.Params
 	if !params.IsNeutral() {
 		ep = &params

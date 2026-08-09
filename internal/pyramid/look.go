@@ -98,8 +98,10 @@ func MeanLuma(img *image.RGBA) float64 {
 // retouch spots (a pixel transplant, before the look so healed pixels develop
 // like their source), the global look, then the local adjustment masks over
 // the developed color, the B&W conversion (after the masks so their hue
-// ranges and color adjustments still have color to work on), then the detail
-// pass on the final tones. Every render
+// ranges and color adjustments still have color to work on), the depth-graded
+// defocus over the finished tones (so what it gathers is the colour that will
+// be shown, and its suppression joins the masks' before the detail pass reads
+// either), then the detail pass on the final tones. Every render
 // path (pyramid levels, tiles, interactive previews, export) must go through
 // this order — the one call site that can't use the helper (cache.generate's
 // full-res path, which interleaves progress reports) mirrors it stage for
@@ -111,6 +113,7 @@ func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fi
 	ApplyLook(img, gamma, e)
 	suppress := ApplyMasks(img, e, ai)
 	ApplyBW(img, e)
+	suppress = mergeSuppression(suppress, ApplyTilt(img, e, ai))
 	ApplyDetail(img, e, suppress)
 }
 

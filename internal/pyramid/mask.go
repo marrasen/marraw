@@ -636,6 +636,13 @@ type brushEval struct {
 	covToW     *[256]uint16 // 0..255 coverage → 0..256 Q8 weight
 	xMin, xMax int          // output-space bounds of the strokes (non-inverted culling)
 	yMin, yMax int
+	// clampEdge samples the plane with clamped addressing instead of letting
+	// reads past its border come back as zero. A mask WANTS the zero — its
+	// coverage genuinely ends — but the plane's outermost pixel centres sit
+	// half a plane-pixel inside the frame, so a consumer that reads the plane
+	// as a full-frame field (ApplyTilt's depth) would otherwise fade to
+	// nothing in a thin border all the way around the photo.
+	clampEdge bool
 }
 
 var covToWeight = func() *[256]uint16 {
@@ -845,8 +852,16 @@ func (ev *brushEval) centroid() (float64, float64, bool) {
 	return sx / sw / float64(ev.pw), sy / sw / float64(ev.ph), true
 }
 
-// samplePlane bilinearly reads the coverage plane; outside reads as zero.
+// samplePlane bilinearly reads the coverage plane; outside reads as zero,
+// or as the nearest border pixel under clampEdge. Clamping the coordinate
+// rather than each of the four taps keeps it to one branch per call: every
+// tap then lands inside except the +1 neighbour of an exactly-on-the-border
+// coordinate, whose bilinear weight is zero anyway.
 func (ev *brushEval) samplePlane(px, py float64) uint8 {
+	if ev.clampEdge {
+		px = math.Min(math.Max(px, 0), float64(ev.pw-1))
+		py = math.Min(math.Max(py, 0), float64(ev.ph-1))
+	}
 	x0f, y0f := math.Floor(px), math.Floor(py)
 	x0, y0 := int(x0f), int(y0f)
 	fx, fy := px-x0f, py-y0f

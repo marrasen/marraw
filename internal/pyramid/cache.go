@@ -556,6 +556,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		report(0.78)
 		suppress := ApplyMasks(rgba, edits, ai)
 		ApplyBW(rgba, edits)
+		suppress = mergeSuppression(suppress, ApplyTilt(rgba, edits, ai))
 		report(0.82)
 		ApplyDetail(rgba, edits, suppress)
 		report(0.90)

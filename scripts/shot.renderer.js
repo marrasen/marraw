@@ -949,6 +949,129 @@ if (shot === 'cull') {
   } catch (err) {
     P.error = String(err);
   }
+} else if (shot === 'tiltshift') {
+  // Tilt shift: switch the depth-graded defocus on through the Effects
+  // group's own button (which runs the model behind the consent gate), then
+  // assert the frame actually loses detail, that the focus window steers
+  // WHICH part keeps it, and that clearing takes the whole param set with it.
+  // Progress is recorded as it goes: the harness forwards only the returned
+  // probe, so a bare throw would say "timeout" and nothing about where.
+  const P = { stage: 'start' };
+  window.__tiltProbe = P;
+  try {
+    ui().setMode('develop');
+    const es = mw.useEditSession;
+    await until(() => es.getState().draft != null);
+    ui().setDevelopTab('develop');
+    mw.setEditGroupOpen('effects', true);
+    P.stage = 'panel-open';
+    // Idempotence: a previous run may have left the effect on.
+    mw.esUpdate({ tiltAmount: 0, tiltLo: 0, tiltHi: 0, tiltMapVer: '' });
+    mw.esCommit();
+    await sleep(1500);
+
+    // Detail proxy: mean absolute difference between neighbouring pixels of a
+    // downscaled frame. A defocused photo has less of it, everywhere.
+    const detail = async () => {
+      const img = document.querySelector('[data-testid="loupe-image"]') ?? document.querySelector('main img');
+      if (!img || !img.complete || !img.naturalWidth) return null;
+      const w = 128;
+      const h = Math.max(2, Math.round((w * img.naturalHeight) / img.naturalWidth));
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      const d = ctx.getImageData(0, 0, w, h).data;
+      const lum = (i) => (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+      // Halves of the frame, so a window that keeps one depth band sharp
+      // shows up as the two halves diverging rather than as one mean.
+      const half = [0, 0];
+      const n = [0, 0];
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w - 1; x++) {
+          const i = (y * w + x) * 4;
+          const k = x < w / 2 ? 0 : 1;
+          half[k] += Math.abs(lum(i) - lum(i + 4));
+          n[k]++;
+        }
+      }
+      return { left: half[0] / n[0], right: half[1] / n[1], all: (half[0] + half[1]) / (n[0] + n[1]) };
+    };
+    const sharp = await detail();
+    P.stage = 'sharp-measured';
+
+    // The panel's own button — this is the wiring under test, not the render.
+    const btn = () => document.querySelector('[data-testid="tilt-enable"]');
+    await until(() => btn() != null, 20000);
+    P.stage = 'button-found';
+    btn().click();
+    // Generating the depth map runs a model; the button is replaced by the
+    // two sliders once the params land.
+    await until(() => (es.getState().draft?.tiltAmount ?? 0) > 0, 180000);
+    P.stage = 'enabled';
+    await sleep(3000);
+    const defocused = await detail();
+
+    // The rows the effect swaps in, read while they are on screen showing the
+    // default window (a detached node keeps its last text, so reading these
+    // after the clear below would report whatever was set last).
+    const rowOf = (label) =>
+      [...document.querySelectorAll('span')].find((s) => s.textContent === label)?.parentElement;
+    const windowRow = rowOf('Focus range');
+    const draft = es.getState().draft ?? {};
+    const windowRowFound = !!windowRow;
+    const windowThumbs = windowRow?.querySelectorAll('[data-slot="slider-thumb"]').length ?? 0;
+    const windowDisplay = windowRow?.querySelector('span.font-mono')?.textContent ?? '';
+
+    // Steering: the window decides WHICH depths keep their detail, so moving
+    // it from the near end to the far end has to redistribute the sharpness
+    // between the halves of the frame. Reported as each half's detail rather
+    // than as a pass/fail — which half wins depends on what the fixture has at
+    // which distance, and a fixture-tuned assertion is worth less than the
+    // numbers (the depths themselves are asserted in scripts/tilt-verify.mjs).
+    mw.esUpdate({ tiltLo: 0.75, tiltHi: 1 });
+    mw.esCommit();
+    await sleep(3000);
+    const nearFocus = await detail();
+    mw.esUpdate({ tiltLo: 0, tiltHi: 0.25 });
+    mw.esCommit();
+    await sleep(3000);
+    const farFocus = await detail();
+
+    // Clearing must take the whole set, so the panel and the server agree.
+    mw.esUpdate({ tiltAmount: 0, tiltLo: 0, tiltHi: 0, tiltMapVer: '' });
+    mw.esCommit();
+    await sleep(2000);
+    const cleared = es.getState().draft ?? {};
+    const buttonBack = btn() != null;
+
+    // Leave the capture on the state under test: the effect on at its default,
+    // with the Effects group scrolled to.
+    mw.esUpdate({ ...draft });
+    mw.esCommit();
+    await sleep(3000);
+    rowOf('Focus range')?.scrollIntoView({ block: 'center' });
+    await sleep(400);
+
+    Object.assign(P, {
+      stage: 'done',
+      sharpDetail: sharp?.all,
+      defocusedDetail: defocused?.all,
+      mapVer: draft.tiltMapVer ?? '',
+      amount: draft.tiltAmount ?? 0,
+      windowRowFound,
+      windowThumbs,
+      windowDisplay,
+      nearWindow: nearFocus && { left: nearFocus.left, right: nearFocus.right },
+      farWindow: farFocus && { left: farFocus.left, right: farFocus.right },
+      clearedAmount: cleared.tiltAmount ?? 0,
+      clearedMapVer: cleared.tiltMapVer ?? '',
+      buttonBack,
+    });
+  } catch (err) {
+    P.error = String(err);
+  }
 } else if (shot === 'tonecurve') {
   // Point tone curve: from a curve-free state, commit a midtone-lift curve
   // and assert (a) the developed preview brightens the mids while the
@@ -2907,6 +3030,7 @@ const probe =
   window.__maskRemoveProbe ??
   window.__lensProbe ??
   window.__bwProbe ??
+  window.__tiltProbe ??
   window.__presetsProbe ??
   window.__presetMasksProbe ??
   window.__suggestProbe ??

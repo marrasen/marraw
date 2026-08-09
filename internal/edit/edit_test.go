@@ -51,6 +51,7 @@ func TestIsNeutralNewFields(t *testing.T) {
 		"toneCurveR": {ToneCurveR: []CurvePoint{{X: 0, Y: 0}, {X: 0.5, Y: 0.7}, {X: 1, Y: 1}}},
 		"toneCurveG": {ToneCurveG: []CurvePoint{{X: 0, Y: 0}, {X: 0.5, Y: 0.7}, {X: 1, Y: 1}}},
 		"toneCurveB": {ToneCurveB: []CurvePoint{{X: 0, Y: 0}, {X: 0.5, Y: 0.7}, {X: 1, Y: 1}}},
+		"tilt":       {TiltAmount: 0.5, TiltLo: 0.4, TiltHi: 0.8, TiltMapVer: "depthany2s-1"},
 	} {
 		if p.IsNeutral() {
 			t.Errorf("%s edit must not be neutral", name)
@@ -563,6 +564,77 @@ func TestBWOmittedFromColorJSON(t *testing.T) {
 	}
 	if b, _ = json.Marshal(&Params{BW: true}); !bytes.Contains(b, []byte(`"bw":true`)) {
 		t.Errorf("a B&W edit must carry the bw key, got %s", b)
+	}
+}
+
+func TestTiltOmittedFromJSON(t *testing.T) {
+	// The same load-bearing omitempty as BW and the masks: an edit made
+	// before tilt shift existed must marshal — and therefore hash —
+	// byte-identically, or the whole pyramid cache re-keys.
+	b, _ := json.Marshal(&Params{Contrast: 0.5})
+	if bytes.Contains(b, []byte("tilt")) {
+		t.Errorf("untilted params must omit every tilt key, got %s", b)
+	}
+	b, _ = json.Marshal(&Params{TiltAmount: 0.5, TiltLo: 0.2, TiltHi: 0.6, TiltMapVer: "v1"})
+	for _, k := range []string{`"tiltAmount":0.5`, `"tiltLo":0.2`, `"tiltHi":0.6`, `"tiltMapVer":"v1"`} {
+		if !bytes.Contains(b, []byte(k)) {
+			t.Errorf("a tilted edit must carry %s, got %s", k, b)
+		}
+	}
+}
+
+// TestTiltNormalize: the window is clamped, quantized and reordered like the
+// depth mask's, and an effect that cannot run clears its companions so states
+// that render identically hash identically.
+func TestTiltNormalize(t *testing.T) {
+	e := &Params{TiltAmount: 3, TiltLo: 0.80001, TiltHi: 0.4000049, TiltMapVer: "depthany2s-1"}
+	e.Normalize()
+	if e.TiltAmount != 1 || e.TiltLo != 0.4 || e.TiltHi != 0.8 {
+		t.Errorf("clamp/quantize/reorder failed: %+v", e)
+	}
+
+	for name, p := range map[string]Params{
+		"no amount":         {TiltLo: 0.3, TiltHi: 0.7, TiltMapVer: "depthany2s-1"},
+		"no map":            {TiltAmount: 0.6, TiltLo: 0.3, TiltHi: 0.7},
+		"quantizes to zero": {TiltAmount: 1e-9, TiltHi: 0.7, TiltMapVer: "depthany2s-1"},
+	} {
+		p.Normalize()
+		if p.TiltAmount != 0 || p.TiltLo != 0 || p.TiltHi != 0 || p.TiltMapVer != "" {
+			t.Errorf("%s: an unrunnable tilt must clear its companions, got %+v", name, p)
+		}
+		if !p.IsNeutral() {
+			t.Errorf("%s: an unrunnable tilt must hash as neutral", name)
+		}
+		if p.HasTilt() {
+			t.Errorf("%s: HasTilt must be false", name)
+		}
+	}
+
+	// A fully-open window renders as no defocus but is deliberately NOT folded
+	// to neutral: zeroing the amount would yank the slider out from under a
+	// photographer still dragging the window back.
+	open := Params{TiltAmount: 0.6, TiltLo: 0, TiltHi: 1, TiltMapVer: "depthany2s-1"}
+	if !open.HasTilt() || open.IsNeutral() {
+		t.Error("a fully-open tilt window must stay a live edit")
+	}
+}
+
+// TestTiltStaysOffTheDecodeHashes: the tilt stage runs long after the decode,
+// so dragging its sliders must keep the warm decode and the linear reference —
+// otherwise every drag pays a ~400 ms demosaic.
+func TestTiltStaysOffTheDecodeHashes(t *testing.T) {
+	base := Params{Contrast: 0.3}
+	tilted := base
+	tilted.TiltAmount, tilted.TiltLo, tilted.TiltHi = 0.7, 0.2, 0.5
+	tilted.TiltMapVer = "depthany2s-1"
+	if base.LibrawInputsHash() != tilted.LibrawInputsHash() {
+		t.Error("tilt must not re-key the LibRaw decode")
+	}
+	if base.LinearInputsHash() != tilted.LinearInputsHash() {
+		t.Error("tilt must not re-key the linear reference decode")
+	}
+	if base.Hash() == tilted.Hash() {
+		t.Error("tilt must re-key the rendered pyramid")
 	}
 }
 
