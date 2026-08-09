@@ -8,6 +8,12 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
+## 0.10.0-beta.15 - 2026-08-09
+
+- Windows: marraw **opens where you left it**. The library window comes back at the size and position it had when you quit, maximized if it was. If it was last on a screen that isn't there any more — a laptop undocked from the monitor on your desk — it comes back on a screen you do have, rather than somewhere off the edge you could never drag it from
+- Windows: the **pop-out photo window comes back too** when it was open at quit, showing whatever the library window has focused. It already remembered its own size and position; now it remembers having been up at all
+- Library: the **develop panel remembers being hidden**, the way the library rail already did. The two toggles sit at either end of the same toolbar and now behave the same — hide the panel for a wider grid and it stays hidden next time you open marraw
+
 ## 0.10.0-beta.14 - 2026-08-09
 
 - Library: marraw **reopens the folder you had open** when you quit, so a launch lands you back in the shoot you were working on instead of on the welcome page. If that folder has since been deleted, renamed, or its drive unplugged, it says so and leaves you on the library — and it stays remembered, so plugging the drive back in lands you there again next time
