@@ -1803,7 +1803,7 @@ if (shot === 'cull') {
   // its tabs and its navigator, so probe that too.
   ui().setMode('library');
   ui().setView('grid');
-  ui().setShowEditPanel(true);
+  mw.setEditPanelHidden(false);
   await sleep(600);
   const aside = () => document.querySelector('aside.w-\\[300px\\]');
   // Match on leaf text: the info rows are dt/dd and the flag buttons wrap a
@@ -2355,7 +2355,7 @@ if (shot === 'cull') {
   // probe's `label` reads textContent, which includes the hidden span).
   ui().setMode('library');
   ui().setView('grid');
-  ui().setShowEditPanel(false);
+  mw.setEditPanelHidden(true);
   await sleep(400);
   const scanBtn = document.querySelector('[data-testid="subject-scan-button"]');
   if (shot === 'subjectscan') {
@@ -2379,7 +2379,7 @@ if (shot === 'cull') {
   // its ◡ badge); toggling off must restore the full grid.
   ui().setMode('library');
   ui().setView('grid');
-  ui().setShowEditPanel(false);
+  mw.setEditPanelHidden(true);
   await sleep(400);
   const btn = () => document.querySelector('[data-testid="blinks-filter"]');
   // Eye scores exist only after a user-initiated scan (the calibrate pass no
@@ -2427,7 +2427,7 @@ if (shot === 'cull') {
   // then drive the subjects-complete and both-partial cases.
   ui().setMode('library');
   ui().setView('grid');
-  ui().setShowEditPanel(false);
+  mw.setEditPanelHidden(true);
   await sleep(400);
   const label = (tid) =>
     document.querySelector(`[data-testid="${tid}"]`)?.textContent?.trim() ?? null;

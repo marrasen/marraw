@@ -30,7 +30,7 @@ try {
   // what mounts EditPanel and loads the edit session for the focused photo,
   // making Ctrl+U reachable without leaving Library.
   ui().setMode('library');
-  mw.useUIStore.setState({ showEditPanel: true });
+  mw.setEditPanelHidden(false);
   const target = ui().visibleIds[0];
   ui().focus(target);
   await until(() => es().photoId === target && es().draft != null, 20000, 'edit session on focused photo');

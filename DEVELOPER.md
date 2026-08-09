@@ -206,6 +206,10 @@ UI verification harnesses live in `scripts/` (`ui-verify.mjs`, `shot.mjs`,
 `auto-verify.mjs`, …). Kill any user-launched Electron first — the GPU cache
 lock will stall rAF.
 
+`window-verify.mjs` is the odd one out: it launches Electron three times over,
+seeding `preferences.json` in a throwaway `--user-data-dir` between runs, to
+check what survives a restart (see [Remembered window state](#remembered-window-state)).
+
 ## Repo layout
 
 ```
@@ -277,6 +281,37 @@ Because the app is **not code-signed**:
 To sign later: add the `CSC_LINK` / `CSC_KEY_PASSWORD` (Windows) or
 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` (macOS) secrets
 and drop the `mac`/`win` `signAndEditExecutable: false` escape hatches.
+
+### Remembered window state
+
+`preferences.json` — the same shell-side file as the update opt-out, for the
+same reason: a window has to be placed before any renderer, or any daemon,
+exists.
+
+| key | what |
+| --- | --- |
+| `mainBounds` | the library window's rectangle + maximized, written as it moves |
+| `viewerBounds` | the same for the pop-out photo window (Ctrl+N) |
+| `viewerOpen` | whether that window was up at quit, so the next launch reopens it |
+| `viewerAlwaysOnTop` | its right-click float toggle |
+
+Only the **launch** window restores `mainBounds`; a window opened later in the
+session (New window, a remote library) keeps the centred default rather than
+landing exactly on top of the first. A stored rectangle is honoured only while
+at least a 100×100 corner of it still falls on some display — a laptop
+undocked from the monitor it was last used on gets the window back on the
+primary screen instead of somewhere it could never be dragged from, these
+windows being frameless.
+
+Harness runs (`MARRAW_UITEST`, `MARRAW_SCREENSHOT`) neither restore the
+library window nor reopen the viewer: shots assert against a 1500×1000
+viewport, and a rectangle left by an earlier interactive session would quietly
+resize every capture. `scripts/window-verify.mjs`, the acceptance test for the
+remembering itself, opts back in with `MARRAW_WINDOW_STATE=1`.
+
+Panel visibility is *not* here — the library rail and the info aside are
+ordinary `ui:*` settings in the daemon's database, so they follow the library
+rather than the machine.
 
 ## macOS and Linux
 

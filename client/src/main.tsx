@@ -104,6 +104,10 @@ if (import.meta.env.DEV && !isViewer) {
       esHoverSuggestion: (s: unknown) => es.esHoverSuggestion(client, s as never),
       // Server-persisted UI settings (optimistic store write + server call).
       setEditGroupOpen: (id: string, open: boolean) => us.updateEditGroupOpen(client, id, open),
+      // The info aside. A server write, not a local store poke: every settings
+      // snapshot re-applies the persisted value, so an override that skipped
+      // the daemon would be undone by the next unrelated write's echo.
+      setEditPanelHidden: (hidden: boolean) => us.updateEditPanelHidden(client, hidden),
       // Feature toggles (the `features*` shot surfaces).
       setFeature: (id: unknown, enabled: boolean) => us.updateFeature(client, id as never, enabled),
       setTheme: (t: unknown) => us.updateTheme(client, t as never),

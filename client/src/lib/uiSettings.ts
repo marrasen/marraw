@@ -11,6 +11,7 @@ import {
   setBurstHamming,
   setCullDials,
   setEditGroupOpen,
+  setEditPanelHidden,
   setExportDir,
   setExportOptions,
   setExportPresets,
@@ -251,6 +252,14 @@ export function updateLastFolder(client: ApiClient, path: string) {
 export function updateRailHidden(client: ApiClient, hidden: boolean) {
   useUIStore.setState({ railHidden: hidden });
   setRailHidden(client, hidden).catch(swallow);
+}
+
+// Collapse or restore the Library view's info aside — the rail toggle's
+// opposite number. Stored hidden-side to match railHidden; the store keeps the
+// shown-side spelling the components read.
+export function updateEditPanelHidden(client: ApiClient, hidden: boolean) {
+  useUIStore.setState({ showEditPanel: !hidden });
+  setEditPanelHidden(client, hidden).catch(swallow);
 }
 
 export function updateRailWidth(client: ApiClient, px: number) {

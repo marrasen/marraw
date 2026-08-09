@@ -51,13 +51,18 @@ try {
   // bar (the @max-[1040px] container breakpoint), so the precondition is a roomy
   // bar: the 300px EditPanel is open by default and shrinks the FilterBar past
   // the breakpoint, so close it for the measurement, then restore.
+  // The aside is a persisted setting, so closing it is a server write. The
+  // edit-group writes above are still echoing, and every snapshot re-applies
+  // the stored value — wait for the aside to actually be gone rather than for
+  // a fixed delay that a late echo could reopen it inside of.
   const hadEditPanel = ui().showEditPanel;
-  ui().setShowEditPanel(false);
-  await sleep(100);
+  mw.setEditPanelHidden(true);
+  await until(() => !ui().showEditPanel, 15000, 'edit aside closed');
+  await sleep(150); // layout settles at the wider FilterBar
   const thumbSlider = document.querySelector('[title="Thumbnail size"] [data-slot="slider"]');
   const thumbW = thumbSlider ? thumbSlider.getBoundingClientRect().width : 0;
   R.thumbSliderWidth = thumbW >= 90 ? true : `width=${thumbW}px`;
-  ui().setShowEditPanel(hadEditPanel);
+  mw.setEditPanelHidden(!hadEditPanel);
 
   // --- library grid groups by time gap -------------------------------------
   // GapControl lives in the FilterBar; grouping is driven through the server

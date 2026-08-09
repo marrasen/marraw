@@ -135,8 +135,6 @@ interface UIState {
   fullscreen: boolean;
   // Cull: the contact sheet (G). Per-window, not persisted.
   contactSheet: boolean;
-  // Library: show/hide the 300px develop aside. Per-window, not persisted.
-  showEditPanel: boolean;
 
   // ---- Server-persisted settings (settings table, one `uiSettings`
   // subscription). This store is a read mirror: <UISettingsSync/> pushes
@@ -210,6 +208,10 @@ interface UIState {
   // Library rail collapsed out of view (its toolbar toggle). Kept apart from
   // railWidth so showing it again restores the width it was dragged to.
   railHidden: boolean;
+  // Library: show/hide the 300px info aside (its toolbar toggle). Stored
+  // server-side as editPanelHidden — this is the shown-side spelling the
+  // components read.
+  showEditPanel: boolean;
   // Feature id -> explicit enable/disable override (absent = the default in
   // lib/features.ts; resolve through useFeature/featureEnabled, not directly).
   features: Record<string, boolean>;
@@ -318,8 +320,6 @@ interface UIState {
   setPaletteOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setContactSheet: (open: boolean) => void;
-  setShowEditPanel: (open: boolean) => void;
-  toggleEditPanel: () => void;
   setDevelopTab: (t: DevelopTab) => void;
   applyUISettings: (s: UISettings) => void;
   setFolder: (id: number, path: string) => void;
@@ -435,8 +435,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setContactSheet: (open) => set({ contactSheet: open }),
-  setShowEditPanel: (open) => set({ showEditPanel: open }),
-  toggleEditPanel: () => set((s) => ({ showEditPanel: !s.showEditPanel })),
   setDevelopTab: (t) => set({ developTab: t }),
   // Server snapshot in (wire shapes sanitized to the client types). The
   // effective view is resolved against the folder open *now*, so a late
@@ -475,6 +473,8 @@ export const useUIStore = create<UIState>((set, get) => ({
       railGroups: s.railGroups,
       railWidth: clampRailWidth(s.railWidth),
       railHidden: s.railHidden === true,
+      // Stored hidden-side, read shown-side: an unset preference means shown.
+      showEditPanel: s.editPanelHidden !== true,
       // No sanitizer: unknown ids are inert, resolution goes through the
       // lib/features.ts registry.
       features: s.features ?? {},

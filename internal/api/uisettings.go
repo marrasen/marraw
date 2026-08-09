@@ -289,6 +289,10 @@ type UISettings struct {
 	// toolbar toggle). Separate from RailWidth so bringing it back restores
 	// the width it was dragged to.
 	RailHidden bool `json:"railHidden"`
+	// EditPanelHidden collapses the Library view's info aside (its toolbar
+	// toggle), the mirror image of RailHidden on the other edge. Named for
+	// hiding, like RailHidden, so the shown default stores nothing.
+	EditPanelHidden bool `json:"editPanelHidden"`
 	// PrerenderFullres pre-renders 1:1 full-resolution tiles for a folder
 	// after the calibrate and pre-render passes. Off by default — full-res
 	// tiles are large, so it can push the preview cache past its cap.
@@ -358,6 +362,7 @@ const (
 	settingUIRailGroups     = "ui:railGroups"
 	settingUIRailWidth      = "ui:railWidth"
 	settingUIRailHidden     = "ui:railHidden"
+	settingUIEditPanelHid   = "ui:editPanelHidden"
 	settingUIPrerenderFull  = "ui:prerenderFullres"
 	settingUIThumbFit       = "ui:thumbFit"
 	settingUILibrarySort    = "ui:librarySort"
@@ -414,6 +419,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 
 	// Shown unless explicitly hidden.
 	railHiddenRaw, _ := db.GetSetting(ctx, settingUIRailHidden)
+	editPanelHiddenRaw, _ := db.GetSetting(ctx, settingUIEditPanelHid)
 
 	// Pinned by default; only an explicit "false" unpins (SidecarWrites style).
 	pinnedRaw, _ := db.GetSetting(ctx, settingUIDevelopPinned)
@@ -471,6 +477,7 @@ func (u *Settings) GetUISettings(ctx context.Context) (*UISettings, error) {
 		RailGroups:       jsonSetting(ctx, db, settingUIRailGroups, map[string]bool{}),
 		RailWidth:        railWidth,
 		RailHidden:       railHiddenRaw == "true",
+		EditPanelHidden:  editPanelHiddenRaw == "true",
 		PrerenderFullres: prerenderFullRaw == "true",
 		ThumbFit:         thumbFit,
 		LibrarySort:      librarySort,
@@ -841,6 +848,16 @@ func (u *Settings) SetRailHidden(ctx context.Context, hidden bool) error {
 		v = "true"
 	}
 	return u.save(ctx, settingUIRailHidden, v)
+}
+
+// SetEditPanelHidden persists whether the Library view's info aside is
+// collapsed out of view.
+func (u *Settings) SetEditPanelHidden(ctx context.Context, hidden bool) error {
+	v := "false"
+	if hidden {
+		v = "true"
+	}
+	return u.save(ctx, settingUIEditPanelHid, v)
 }
 
 // SetPrerenderFullres persists whether opened folders auto-render 1:1

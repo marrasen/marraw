@@ -26,7 +26,12 @@ import { cn } from '@/lib/utils';
 import { applyFlag, applyRating, judgeAllBursts } from '@/lib/actions';
 import type { BurstInfo } from '@/lib/bursts';
 import { useFeature } from '@/lib/features';
-import { updateFolderFilters, updateLibrarySort, updateRailHidden } from '@/lib/uiSettings';
+import {
+  updateEditPanelHidden,
+  updateFolderFilters,
+  updateLibrarySort,
+  updateRailHidden,
+} from '@/lib/uiSettings';
 import { useUIStore, type FlagFilter, type LibrarySort } from '@/stores/uiStore';
 
 const FLAG_ITEMS: { value: FlagFilter; label: string }[] = [
@@ -102,7 +107,6 @@ export function FilterBar({
   const cellSize = useUIStore((s) => s.cellSize);
   const setCellSize = useUIStore((s) => s.setCellSize);
   const showEditPanel = useUIStore((s) => s.showEditPanel);
-  const toggleEditPanel = useUIStore((s) => s.toggleEditPanel);
   const multiSelect = useUIStore((s) => s.selection.size > 1);
   const burstsEnabled = useFeature('bursts');
   const softEnabled = useFeature('softFilter');
@@ -431,7 +435,7 @@ export function FilterBar({
       <div className="h-5 w-px bg-border" />
 
       <button
-        onClick={toggleEditPanel}
+        onClick={() => updateEditPanelHidden(client, showEditPanel)}
         className={cn(
           'flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-secondary hover:text-foreground',
           showEditPanel ? 'text-foreground' : 'text-muted-foreground',

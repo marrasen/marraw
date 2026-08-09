@@ -32,6 +32,12 @@ const UNPACKAGED = DEV || PREVIEW;
 // an occluded window stops getting BeginFrames and every rAF-coalesced code
 // path (edit-draft flushes, the zoom tween) silently stalls mid-test.
 const UITEST = !!(process.env.MARRAW_UITEST || process.env.MARRAW_SCREENSHOT);
+// Harness runs pin the library window to its default rectangle and never
+// resurrect a pop-out viewer: shots and ui-verify assert against a 1500x1000
+// viewport, and geometry remembered from an earlier run would silently resize
+// every capture. scripts/window-verify.mjs — the acceptance test for the
+// remembering itself — opts back in.
+const WINDOW_STATE = !UITEST || process.env.MARRAW_WINDOW_STATE === '1';
 if (UITEST) {
   app.commandLine.appendSwitch('disable-renderer-backgrounding');
   app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
@@ -375,6 +381,15 @@ function ensureDaemon() {
 // in createWindow).
 const windows = new Set();
 
+// A library window opens at 3:2, matching the photos — full-bleed frames fill
+// it cleanly (and screenshots of the app read like photographs). The minimum
+// is the handoff's "minimum comfortable window"; there is no minimum height,
+// so guard the stored one against a prefs file that claims a sliver.
+const MAIN_DEFAULT_W = 1500;
+const MAIN_DEFAULT_H = 1000;
+const MAIN_MIN_W = 1280;
+const MAIN_MIN_H = 400;
+
 // ---- Pop-out photo window (Ctrl+N) ----
 // A chromeless always-on-top window showing the same photo as the window that
 // drives it, with its own zoom and pan. One per app instance: a second Ctrl+N
@@ -393,6 +408,8 @@ const lastViewerPhoto = new Map();
 // corner of a second monitor, so the main window's minimum does not apply.
 const VIEWER_MIN_W = 480;
 const VIEWER_MIN_H = 320;
+const VIEWER_DEFAULT_W = 1100;
+const VIEWER_DEFAULT_H = 750;
 
 // The backend params a window was loaded with, read back off its own URL — the
 // shell doesn't otherwise remember which daemon each window talks to. Covers
@@ -428,13 +445,44 @@ const backendKeyOf = (win) => {
 // geometry the answer is needed before the window exists.
 const viewerAlwaysOnTop = () => readPrefs().viewerAlwaysOnTop !== false;
 
-// Viewer geometry lives in the shell's prefs, not the daemon's uiSettings: the
-// window has to be placed before any renderer — or any daemon — exists.
-function viewerBoundsPrefs() {
-  const b = readPrefs().viewerBounds;
+// Whether the viewer was up when the app last quit, so the next launch brings
+// it back with the first library window. Off by default: a pop-out nobody
+// asked for is worse than one Ctrl+N away.
+function setViewerOpenPref(open) {
+  const prefs = readPrefs();
+  if (prefs.viewerOpen === open) return;
+  prefs.viewerOpen = open;
+  writePrefs(prefs);
+}
+// Set while the viewer is closing because the last library window went away
+// rather than because anyone asked it to. See the close handler below.
+let viewerFollowingOut = false;
+
+// Reopen the remembered viewer once there is a window for it to follow. It
+// inherits that window's daemon, exactly as a Ctrl+N pop-out would: photo ids
+// only mean something inside one library, so a viewer with no library behind
+// it has nothing it could show.
+function restoreViewer() {
+  if (!WINDOW_STATE || readPrefs().viewerOpen !== true) return;
+  const opener = [...windows].find((w) => !w.isDestroyed());
+  const params = opener ? backendParamsOf(opener) : null;
+  if (!params) return;
+  viewerBackendKey = backendKeyOf(opener);
+  void createWindow({ viewer: { backend: params } });
+}
+
+// ---- Remembered window geometry ----
+// Lives in the shell's prefs, not the daemon's uiSettings: a window has to be
+// placed before any renderer — or any daemon — exists. Two rectangles are
+// kept, under `viewerBounds` and `mainBounds`.
+
+// A stored rectangle, or null when it is absent, malformed, or too small to be
+// a window we would open (a hand-edited or half-written prefs file).
+function boundsPrefs(key, minW, minH) {
+  const b = readPrefs()[key];
   if (!b || typeof b !== 'object') return null;
   if (![b.x, b.y, b.width, b.height].every((n) => Number.isFinite(n))) return null;
-  if (b.width < VIEWER_MIN_W || b.height < VIEWER_MIN_H) return null;
+  if (b.width < minW || b.height < minH) return null;
   return {
     x: Math.round(b.x),
     y: Math.round(b.y),
@@ -443,22 +491,39 @@ function viewerBoundsPrefs() {
     maximized: b.maximized === true,
   };
 }
-function saveViewerBounds(win) {
+function saveBounds(key, win) {
   if (!win || win.isDestroyed()) return;
   const prefs = readPrefs();
   // getNormalBounds, not getBounds: a maximized window must remember the
   // rectangle it will be restored to, not the screen-filling one.
-  prefs.viewerBounds = { ...win.getNormalBounds(), maximized: win.isMaximized() };
+  prefs[key] = { ...win.getNormalBounds(), maximized: win.isMaximized() };
   writePrefs(prefs);
 }
-// Where to open the viewer: its remembered rectangle when enough of it still
+// Geometry is written as it changes, not only on close: a crash — or a quit
+// that tears the window down without a 'close' — would otherwise forget
+// wherever it had been dragged this session.
+function rememberBounds(key, win) {
+  let saveTimer = null;
+  const later = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => saveBounds(key, win), 400);
+  };
+  win.on('move', later);
+  win.on('resize', later);
+  win.on('close', () => {
+    clearTimeout(saveTimer);
+    saveBounds(key, win);
+  });
+}
+// Where to open a window: its remembered rectangle when enough of it still
 // lands on a display, else centred on the primary one. A monitor unplugged (or
 // a resolution change) since last time would otherwise put it off-screen — and
-// being frameless, with no controls of its own, it could not be dragged back.
-function viewerPlacement(saved) {
+// marraw's windows are frameless, so one that opens past the edge of every
+// display cannot be dragged back by a title bar it does not have.
+function windowPlacement(saved, defaultW, defaultH) {
   const { screen } = require('electron');
-  const width = saved?.width ?? 1100;
-  const height = saved?.height ?? 750;
+  const width = saved?.width ?? defaultW;
+  const height = saved?.height ?? defaultH;
   if (saved) {
     const area = screen.getDisplayMatching(saved).workArea;
     const onX = Math.min(saved.x + width, area.x + area.width) - Math.max(saved.x, area.x);
@@ -496,15 +561,32 @@ async function createWindow(opts = {}) {
     }
   }
 
-  // The viewer reopens where it was left; ordinary windows open at 3:2,
-  // matching the photos — full-bleed frames fill the window cleanly (and
-  // screenshots of the app read like photographs).
-  const savedViewer = opts.viewer ? viewerBoundsPrefs() : null;
-  const geometry = opts.viewer ? viewerPlacement(savedViewer) : { width: 1500, height: 1000 };
+  // The viewer and the launch window reopen where they were left. Windows
+  // opened later in the session (New window, a remote library) are not the
+  // window whose place is remembered — they would land exactly on top of it —
+  // so they keep the centred default.
+  //
+  // The viewer remembers its rectangle even in harness runs (WINDOW_STATE
+  // covers the library window only) — scripts/viewer-verify.mjs asserts it.
+  const boundsKey = opts.viewer
+    ? 'viewerBounds'
+    : opts.initial && WINDOW_STATE
+      ? 'mainBounds'
+      : null;
+  const saved = opts.viewer
+    ? boundsPrefs(boundsKey, VIEWER_MIN_W, VIEWER_MIN_H)
+    : boundsKey
+      ? boundsPrefs(boundsKey, MAIN_MIN_W, MAIN_MIN_H)
+      : null;
+  const geometry = opts.viewer
+    ? windowPlacement(saved, VIEWER_DEFAULT_W, VIEWER_DEFAULT_H)
+    : saved
+      ? windowPlacement(saved, MAIN_DEFAULT_W, MAIN_DEFAULT_H)
+      : { width: MAIN_DEFAULT_W, height: MAIN_DEFAULT_H };
 
   const win = new BrowserWindow({
     ...geometry,
-    minWidth: opts.viewer ? VIEWER_MIN_W : 1280, // the handoff's "minimum comfortable window"
+    minWidth: opts.viewer ? VIEWER_MIN_W : MAIN_MIN_W,
     minHeight: opts.viewer ? VIEWER_MIN_H : undefined,
     // The viewer floats over every app, not just marraw's own windows: the
     // whole point of popping a photo onto a second monitor is that it stays
@@ -530,28 +612,24 @@ async function createWindow(opts = {}) {
   // when the window goes away rejects, and that is not a failure worth
   // reporting (see the load below).
   let viewerClosing = false;
+  if (boundsKey) {
+    if (saved?.maximized) win.once('ready-to-show', () => win.maximize());
+    rememberBounds(boundsKey, win);
+  }
   if (opts.viewer) {
     viewerWin = win;
     pushViewerOpen(true);
+    setViewerOpenPref(true);
     win.on('closed', () => {
       if (viewerWin === win) viewerWin = null;
       pushViewerOpen(false);
     });
-    if (savedViewer?.maximized) win.once('ready-to-show', () => win.maximize());
-    // Geometry is written as it changes, not only on close: a crash — or a quit
-    // that tears the window down without a 'close' — would otherwise forget
-    // wherever it had been dragged this session.
-    let saveTimer = null;
-    const remember = () => {
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => saveViewerBounds(win), 400);
-    };
-    win.on('move', remember);
-    win.on('resize', remember);
     win.on('close', () => {
       viewerClosing = true;
-      clearTimeout(saveTimer);
-      saveViewerBounds(win);
+      // Following the last library window out is a teardown, not a decision —
+      // the next launch should still bring the viewer back. Only a close the
+      // user asked for retires it.
+      if (!viewerFollowingOut) setViewerOpenPref(false);
     });
   } else {
     windows.add(win);
@@ -560,7 +638,10 @@ async function createWindow(opts = {}) {
       // A lone viewer would strand the app: it is chromeless, has no library
       // behind it, and window-all-closed never fires while it is up. It
       // follows the last real window out.
-      if (windows.size === 0 && viewerWin && !viewerWin.isDestroyed()) viewerWin.close();
+      if (windows.size === 0 && viewerWin && !viewerWin.isDestroyed()) {
+        viewerFollowingOut = true;
+        viewerWin.close();
+      }
     });
   }
   win.setMenuBarVisibility(false);
@@ -910,7 +991,7 @@ if (!gotLock) {
     void createWindow({ openFolder: folder });
   });
   app.whenReady().then(() => {
-    void createWindow({ initial: true });
+    void createWindow({ initial: true }).then(restoreViewer);
     initAutoUpdater();
   });
 }
