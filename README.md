@@ -344,11 +344,13 @@ work, marraw is not ready for you yet.
 - ❌ **Not code-signed.** Expect a SmartScreen warning on first install
   (Windows), or a "damaged and can't be opened" refusal on macOS that needs
   one `xattr` command to clear — see [Install](#install).
-- ❌ **No second-display window.**
-
-Multi-window (several windows, one library) *does* work. So do light/dark
-themes, per-photo edit undo/redo, one-`Ctrl+Z`-per-stroke culling undo, and a
-cache with a configurable size cap.
+Multi-window (several windows, one library) *does* work — including a
+second-display window: `Ctrl+N` pops the focused photo out into a frameless
+viewer that follows your culling on the main screen, with a glass island for
+its few controls. Drag it to the monitor you point at the client, and it
+comes back there, open, next launch. So do light/dark themes, per-photo edit
+undo/redo, one-`Ctrl+Z`-per-stroke culling undo, and a cache with a
+configurable size cap.
 
 ## What marraw *won't* do (probably)
 
