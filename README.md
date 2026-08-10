@@ -231,15 +231,22 @@ are the controls you chose to keep at hand.</sup>
 - **Local adjustments** — linear (graduated) filters, radial filters, a
   feathered brush with flow and eraser, a **range** mask that selects by
   luminance and hue (two-thumb tone window, hue centre/range, and an
-  eyedropper to pick a colour off the photo), and AI masks: Subject, Depth (a
-  two-thumb near/far range) and Scene selections, with mask edges refined
-  automatically at high zoom and a mask row's region tinted on hover. Each
-  mask carries its own exposure, contrast, highlights/shadows, whites/blacks,
-  temperature, tint and saturation, plus an **Effects** group: blur, motion
-  blur, zoom blur, glow, anamorphic light streaks, prism (radial colour
-  fringing) and mosaic. A **Background** button is the one-click version — it
-  detects the subject, inverts the mask and defocuses everything else with a
-  bloom and light streaks. A mask can also **Remove** what it
+  eyedropper to pick a colour off the photo), and AI masks: Subject, Depth
+  (set by **Focus distance** and **Focus depth**) and Scene selections, with
+  mask edges refined automatically at high zoom and a mask row's region
+  tinted on hover. Each mask carries its own exposure, contrast,
+  highlights/shadows, whites/blacks, temperature, tint and saturation, plus
+  an **Effects** group: blur, **bokeh** (a hard-edged aperture disc that
+  keeps defocused highlights bright), motion blur, zoom blur, glow,
+  anamorphic light streaks, prism (radial colour fringing) and mosaic — and
+  the defocus and prism *grade* with the mask's weight, so through a feather
+  or a depth ramp they grow the way a real lens falls off. Two one-click
+  recipes sit beside the mask types: **Background** detects the subject,
+  inverts the mask and separates everything else with a bloom, streaks and a
+  prism fringe; **Tilt shift** keeps a depth band sharp — centred on the
+  subject when the subject model is on your machine — and defocuses the rest
+  by distance, discs, bloom and fringe growing the further things sit from
+  the band. A mask can also **Remove** what it
   covers — the region is synthesized away from its surround by the same
   on-device model content-aware fill uses, so masking a person and pressing
   Remove erases them; it is offered on brushed and AI (Subject / Scene /
@@ -258,7 +265,11 @@ are the controls you chose to keep at hand.</sup>
 - **White balance** — as shot / auto / Kelvin, temperature, tint, and an
   eyedropper (`W`).
 - **Color** — saturation, vibrance, split toning (shadow + highlight tint),
-  and an 8-band HSL color mixer (per-band hue / saturation / luminance).
+  an 8-band HSL color mixer (per-band hue / saturation / luminance), and a
+  **Black & white treatment** that weighs each pixel's grey by the hue it
+  came from through those same bands — the digital coloured filter, not a
+  flat desaturation. Split toning tints the grey, so warm both ends and you
+  have sepia; switching back to colour restores the photo exactly.
 - **Effects** — creative vignette.
 - **Detail** — sharpen, highlight recovery (clip/unclip/blend/rebuild), noise
   reduction, FBDD denoise, median passes, demosaic algorithm (VNG/PPG/AHD/DHT),
