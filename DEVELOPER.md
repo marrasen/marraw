@@ -139,6 +139,10 @@ npm run gen            # aprot codegen -> client/src/api
 PowerShell 7 (`pwsh`), not the Windows PowerShell 5.1 that `powershell` resolves
 to.
 
+Since Electron 42 `npm install` no longer downloads the Electron binary; the
+first `npx electron` / `npm run dev:electron` fetches it. Run
+`npx install-electron` up front if you want that to happen during setup.
+
 marraw builds against the published `aprot` module in `go.mod`. To develop the
 two side by side, create a `go.work` — it is deliberately untracked, because a
 committed one would hardcode your checkout path and, worse, silently mask the

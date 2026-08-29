@@ -29,9 +29,9 @@
     "electron-updater": "^6.3.9"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2",
+    "concurrently": "^10.0.5",
     "cross-env": "^10.0.0",
-    "electron": "^38.4.0",
+    "electron": "^44.0.0",
     "electron-builder": "^26.0.12"
   },
   "build": {

@@ -964,6 +964,9 @@ export function CinemaImage({
   const [firstFrameSlow, setFirstFrameSlow] = useState(false);
   useEffect(() => {
     if (shownSrc !== '') return;
+    // Reset before arming the timer: this effect re-runs per session, and a
+    // chip left on by the previous one would show before the 200 ms beat.
+    // oxlint-disable-next-line react/set-state-in-effect
     setFirstFrameSlow(false);
     const t = window.setTimeout(() => setFirstFrameSlow(true), 200);
     return () => window.clearTimeout(t);

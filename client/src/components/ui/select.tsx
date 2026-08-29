@@ -4,7 +4,14 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+// A real function component rather than `const Select = SelectPrimitive.Root`:
+// eslint-plugin-react-refresh 0.5.5 cannot tell a re-exported binding is a
+// component and flags the `export { Select }` below as breaking Fast Refresh.
+function Select<Value, Multiple extends boolean | undefined = false>(
+  props: SelectPrimitive.Root.Props<Value, Multiple>,
+) {
+  return <SelectPrimitive.Root data-slot="select" {...props} />
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (

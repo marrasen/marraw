@@ -734,6 +734,11 @@ function runHarnessHooks(win) {
       try {
         const src = require('node:fs').readFileSync(process.env.MARRAW_UITEST, 'utf8');
         const result = await win.webContents.executeJavaScript(`(async () => { ${src}\n })()`);
+        // The window's rectangle as the shell sees it. Since Electron 43 a
+        // frameless window on Linux carries client-side decoration insets, so
+        // the renderer's screenX/outerWidth describe the widget around the
+        // window, not the window — harnesses that check placement read this.
+        console.log(`UITEST_WINDOW ${JSON.stringify(win.getBounds())}`);
         console.log(`UITEST_RESULT ${JSON.stringify(result)}`);
       } catch (err) {
         console.log(`UITEST_RESULT ${JSON.stringify({ fatal: String(err) })}`);
@@ -844,13 +849,16 @@ ipcMain.handle('marraw:pick-image', async () => {
 ipcMain.handle('marraw:reveal', (_ev, p) => {
   if (typeof p === 'string') shell.showItemInFolder(p);
 });
-ipcMain.handle('marraw:copy-image', (_ev, buf) => {
+ipcMain.handle('marraw:copy-image', async (_ev, buf) => {
   if (!(buf instanceof ArrayBuffer) && !ArrayBuffer.isView(buf)) return false;
   const img = nativeImage.createFromBuffer(
     ArrayBuffer.isView(buf) ? Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength) : Buffer.from(buf),
   );
   if (img.isEmpty()) return false;
-  clipboard.writeImage(img);
+  // Electron 44 rebuilt clipboard on the W3C API: writeImage now returns a
+  // Promise, and returning before it settles would report success for a
+  // write that has not happened yet.
+  await clipboard.writeImage(img);
   return true;
 });
 ipcMain.handle('marraw:is-directory', (_ev, p) => {

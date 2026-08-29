@@ -7,9 +7,10 @@ const R = {};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 try {
-  // Frameless windows have no title bar or borders, so the content origin IS
-  // the window's x/y and outer size IS its width/height — what the shell wrote
-  // to preferences.json can be compared straight across.
+  // A first approximation only: since Electron 43 a frameless window on Linux
+  // sits inside client-side decoration insets, so these describe the widget
+  // rather than the window. The shell overrides x/y/width/height with its own
+  // getBounds() (UITEST_WINDOW) before the harness compares anything.
   R.x = window.screenX;
   R.y = window.screenY;
   R.width = window.outerWidth;

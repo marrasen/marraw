@@ -65,9 +65,14 @@ async function run(name, rendererScript, prefs) {
   });
 
   let result = null;
+  let bounds = null;
   child.stdout.on('data', (d) => {
     for (const line of String(d).split(/\r?\n/)) {
-      if (line.startsWith('UITEST_RESULT ')) {
+      if (line.startsWith('UITEST_WINDOW ')) {
+        try {
+          bounds = JSON.parse(line.slice('UITEST_WINDOW '.length));
+        } catch {}
+      } else if (line.startsWith('UITEST_RESULT ')) {
         const payload = line.slice('UITEST_RESULT '.length);
         try {
           result = JSON.parse(payload);
@@ -91,6 +96,11 @@ async function run(name, rendererScript, prefs) {
 
   if (!result) throw new Error(`${name}: no UITEST_RESULT (electron exited ${code})`);
   if (result.fatal) throw new Error(`${name}: ${result.fatal}`);
+  // Placement comes from the shell's own getBounds(): the renderer's
+  // screenX/outerWidth include the client-side decoration insets Electron 43+
+  // puts around a frameless window on Linux, and the shell writes and reads
+  // its rectangle without them.
+  if (bounds) Object.assign(result, bounds);
   return result;
 }
 

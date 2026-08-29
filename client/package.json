@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && vite build --config vite.guest.config.ts",
-    "lint": "eslint .",
+    "lint": "oxlint",
     "test": "vitest run",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc -b",
@@ -31,21 +31,16 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@eslint/js": "^10",
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6",
-    "eslint": "^10",
-    "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
-    "globals": "^17",
     "jsdom": "^30.0.1",
+    "oxlint": "^1.80.0",
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "shadcn": "^4.13.0",
-    "typescript": "~6",
-    "typescript-eslint": "^8",
+    "typescript": "^7.0.2",
     "vite": "^8",
     "vitest": "^4.1.10"
   }
