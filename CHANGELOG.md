@@ -8,6 +8,11 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
+## 0.10.1-beta.1 - 2026-08-29
+
+- Platform: **the whole toolchain moved up a generation** — Electron 44 (a newer Chromium under the app), Go 1.27 under the daemon, ONNX Runtime 1.29 under the AI models, and the latest aprot for the app's own wiring. No feature rides along; this beta exists to prove the new stack on real Windows and macOS installs, and on the auto-updater, before feature work lands on top of it
+- Fixed: **Copy image** reports success only once the image is actually on the clipboard — the newer Electron writes it asynchronously, and the old code answered before the write had happened
+
 ## 0.10.0 - 2026-08-09
 
 - Share: **hand a shoot to a friend's phone**. Pick the photos, make a link, send it — the album opens in their browser over a secure Tailscale Funnel tunnel, straight off your machine, with pinch-to-zoom deep into the full-resolution tiles and landscape rotation filling the screen. Links are scoped to exactly the photos you chose, you pick who each link is for, and stopping a share stops it everywhere
