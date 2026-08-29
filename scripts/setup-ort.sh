@@ -8,7 +8,7 @@
 # this path.
 set -euo pipefail
 
-VERSION="${ORT_VERSION:-1.27.1}"
+VERSION="${ORT_VERSION:-1.29.0}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 third="$root/third_party"
 out_dir="$third/onnxruntime"

@@ -16,7 +16,7 @@ concurrency:
 
 env:
   LIBRAW_VERSION: '0.22.1'
-  ORT_VERSION: '1.27.1'
+  ORT_VERSION: '1.29.0'
   NODE_VERSION: '24'
 
 jobs:

@@ -121,7 +121,7 @@ behind it.
 
 ## Prerequisites
 
-- Go 1.26+
+- Go 1.27+
 - Node 24+
 - MinGW-w64 `gcc`/`g++` on `PATH` (Windows)
 

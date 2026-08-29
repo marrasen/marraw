@@ -7,7 +7,7 @@
 param([switch]$Force)
 $ErrorActionPreference = 'Stop'
 
-$Version = if ($env:ORT_VERSION) { $env:ORT_VERSION } else { '1.27.1' }
+$Version = if ($env:ORT_VERSION) { $env:ORT_VERSION } else { '1.29.0' }
 $root = Split-Path -Parent $PSScriptRoot
 $third = Join-Path $root 'third_party'
 $outDir = Join-Path $third 'onnxruntime'
