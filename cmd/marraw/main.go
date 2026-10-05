@@ -12,7 +12,8 @@
 //	go run ./cmd/marraw -folder ~/Pictures/shoot -skim 40 -every 150ms
 //
 // Keys: Left and Right step through the folder, Home and End go to its ends,
-// Escape quits.
+// Z goes between fit and one to one, and Escape quits. The wheel zooms
+// about the pointer and a drag pans.
 package main
 
 import (
@@ -44,12 +45,13 @@ func main() {
 	skim := flag.Int("skim", 0, "step right this many times on its own, -every apart, report the timings, and quit")
 	every := flag.Duration("every", 150*time.Millisecond, "how far apart -skim steps")
 	shot := flag.String("shot", "", "write the window to this PNG file once -skim is done, or after a second")
+	zoom := flag.Bool("zoom", false, "once -skim is done, zoom to one to one with Z, and wait for the full resolution before the shot")
 	flag.Parse()
 	if *folder == "" {
 		log.Fatal("marraw: -folder is required")
 	}
 	if err := run(options{folder: *folder, connect: *connect, token: *token, dataDir: *dataDir,
-		skim: *skim, every: *every, shot: *shot}); err != nil {
+		skim: *skim, every: *every, shot: *shot, zoom: *zoom}); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -59,6 +61,7 @@ type options struct {
 	skim                            int
 	every                           time.Duration
 	shot                            string
+	zoom                            bool
 }
 
 func run(o options) error {
@@ -112,8 +115,8 @@ func run(o options) error {
 		registerViews(w)
 		c := w.Client()
 		cu := newCuller(ctx, c, api, newImages("http://"+host, token), info.FolderID, photos)
-		if o.skim > 0 || o.shot != "" {
-			go cu.script(o.skim, o.every, o.shot)
+		if o.skim > 0 || o.shot != "" || o.zoom {
+			go cu.script(o.skim, o.every, o.shot, o.zoom)
 		}
 		return cu.serve()
 	})

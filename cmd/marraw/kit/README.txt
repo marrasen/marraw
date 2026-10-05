@@ -33,12 +33,17 @@ Run anyway. When it is done, send results.zip.
     .\bin\marraw-cull.exe -folder ".\photos\2017-03-24 Flygtur (Canon CR2)" -data-dir $env:TEMP\marraw-cull-test-data
 
 Left and Right (or Space and Backspace) step through the folder, Home and
-End go to its ends, Escape quits. The corner says which rendition shows
-and how long it took. Worth noticing:
+End go to its ends, Escape quits. Z or a double click goes between fit
+and 100%, the wheel zooms about the pointer, and dragging pans; the zoom
+stays as you step, to compare a burst. The corner says which rendition
+shows, how long it took, and how the full-resolution tiles stand.
+Worth noticing:
 
   - Does stepping ever freeze or stutter, even for a moment?
   - How soon does a photo turn sharp once you stop on it?
   - Holding Right down: does the window keep up?
+  - Zoomed in: does panning and zooming stay smooth, and the step to the
+    next photo too?
 
 What to send back
 -----------------

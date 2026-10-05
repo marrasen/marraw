@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"image"
 	"log"
 	"os"
 	"slices"
@@ -30,6 +31,19 @@ type (
 		Aspect float32
 		// Note says which rendition shows and what it took.
 		Note string
+		// Full is the photo's full resolution, which the tiles cover, and
+		// Tiles those of them fetched, by their place in the grid.
+		Full  image.Point
+		Tiles map[image.Point]*paint.Image
+		// TileNote says how the tiles stand.
+		TileNote string
+	}
+	// WantTiles asks for the tiles of the photo at Index in Range of the
+	// grid, as the view zooms past what the 2048 shows sharp; an empty
+	// Range wants none.
+	WantTiles struct {
+		Index int
+		Range image.Rectangle
 	}
 	// Step moves through the folder by By photos.
 	Step struct{ By int }
@@ -70,6 +84,19 @@ type culler struct {
 	// stepped is when the user last moved, for the timings.
 	stepped time.Time
 	timings []timing
+
+	// tiles holds the photos' full-resolution tiles, and tilesFor the state
+	// of the photo showing's.
+	tiles    *tileCache
+	tileWant WantTiles
+	tileWarm map[int64]bool
+	// tileStop cancels the tile fetches under way; probing is the photo
+	// whose tiles are being looked for, or rendered, and probeStop stops
+	// that.
+	tileStop  context.CancelFunc
+	probing   int64
+	probeStop context.CancelFunc
+	tileNote  string
 }
 
 // arrival is a rendition decoded for photo at index, in generation gen.
@@ -89,7 +116,8 @@ type timing struct {
 func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im *images, folder int64, photos []marrawclient.Photo) *culler {
 	sort.SliceStable(photos, func(i, j int) bool { return photos[i].TakenAt < photos[j].TakenAt })
 	return &culler{ctx: ctx, c: c, api: api, im: im, folder: folder, photos: photos,
-		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 4)}
+		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
+		tiles: newTileCache(48), tileWarm: map[int64]bool{}}
 }
 
 func (cu *culler) serve() error {
@@ -119,6 +147,8 @@ func (cu *culler) serve() error {
 					to = len(cu.photos) - 1
 				}
 				cu.goTo(to)
+			case WantTiles:
+				cu.wantTiles(in)
 			case Quit:
 				cu.c.Leave()
 			}
@@ -134,7 +164,8 @@ func (cu *culler) state() Cull {
 	if s.Y > 0 {
 		aspect = float32(s.X) / float32(s.Y)
 	}
-	st := Cull{Index: cu.at, Total: len(cu.photos), Name: p.FileName, Aspect: aspect}
+	st := Cull{Index: cu.at, Total: len(cu.photos), Name: p.FileName, Aspect: aspect, Full: s,
+		Tiles: cu.tiles.of(p.ID), TileNote: cu.tileNote}
 	if e, ok := cu.cache.get(p.ID); ok {
 		st.Img, st.Note = e.img, e.note
 	}
@@ -155,6 +186,15 @@ func (cu *culler) goTo(i int) {
 	if cu.warm != nil {
 		cu.warm()
 	}
+	if cu.tileStop != nil {
+		cu.tileStop()
+		cu.tileStop = nil
+	}
+	if cu.probeStop != nil {
+		cu.probeStop()
+		cu.probing, cu.probeStop = 0, nil
+	}
+	cu.tileNote = ""
 	_ = cu.c.Update("cull", cu.state())
 	p := cu.photos[i]
 	// Where the user is, so the backend's pre-render works outward from
@@ -317,19 +357,40 @@ func (cu *culler) record(what string, sharp bool) {
 
 // script steps right n times, every apart, then reports the timings and
 // writes a picture of the window to shot, for measuring without hands.
-func (cu *culler) script(n int, every time.Duration, shot string) {
+func (cu *culler) script(n int, every time.Duration, shot string, zoom bool) {
 	time.Sleep(time.Second)
 	for range n {
 		cu.c.Input(cu.ctx, keyRight())
 		time.Sleep(every)
 	}
 	time.Sleep(time.Second)
+	if zoom {
+		start := time.Now()
+		cu.c.Input(cu.ctx, keyZ())
+		// Until the tiles in view are in, or a while.
+		for time.Since(start) < 20*time.Second {
+			time.Sleep(200 * time.Millisecond)
+			done := make(chan bool, 1)
+			cu.do <- func() {
+				r := cu.tileWant.Range
+				done <- !r.Empty() && len(cu.tiles.of(cu.photos[cu.at].ID)) >= r.Dx()*r.Dy()
+			}
+			if <-done {
+				break
+			}
+		}
+		took := time.Since(start)
+		done := make(chan string, 1)
+		cu.do <- func() { done <- cu.tileNote }
+		fmt.Fprintf(os.Stderr, "zoom: tiles in view after %d ms (%s)\n", took.Milliseconds(), <-done)
+		time.Sleep(500 * time.Millisecond)
+	}
 	if shot != "" {
 		if err := writeShot(cu.ctx, cu.c, shot); err != nil {
 			log.Print(err)
 		}
 	}
-	if n > 0 {
+	if n > 0 || zoom {
 		cu.do <- func() {
 			cu.report()
 			cu.c.Leave()

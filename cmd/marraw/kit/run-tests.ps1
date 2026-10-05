@@ -21,15 +21,15 @@ Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion, Curre
     Format-List | Out-File (Join-Path $out 'machine.txt')
 Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores | Format-List | Out-File -Append (Join-Path $out 'machine.txt')
 
-function Run($name, $folder, $steps, $every) {
+function Run($name, $folder, $steps, $every, $extra = '') {
     Write-Host "== $name"
     $log = Join-Path $out "$name.log"
     $shot = Join-Path $out "$name.png"
     # Start-Process rather than & and 2>: Windows PowerShell takes a native
     # program's stderr as errors, and would stop at its first log line.
-    $argLine = "-folder `"$folder`" -data-dir `"$data`" -skim $steps -every $every -shot `"$shot`""
+    $argLine = "-folder `"$folder`" -data-dir `"$data`" -skim $steps -every $every -shot `"$shot`" $extra"
     Start-Process -FilePath $exe -ArgumentList $argLine -RedirectStandardError $log -NoNewWindow -Wait
-    Get-Content $log | Select-String '^steps ' | ForEach-Object { Write-Host "   $_" }
+    Get-Content $log | Select-String '^(steps|zoom): ' | ForEach-Object { Write-Host "   $_" }
 }
 
 foreach ($f in Get-ChildItem (Join-Path $here 'photos') -Directory) {
@@ -43,6 +43,8 @@ foreach ($f in Get-ChildItem (Join-Path $here 'photos') -Directory) {
     Write-Host '   (a minute for the backend to render ahead)'
     Start-Sleep -Seconds 60
     Run "$n-3-warm-fast" $f.FullName ($count - 1) '150ms'
+    # Zoom to one to one on a photo, and wait for its full resolution.
+    Run "$n-4-zoom" $f.FullName 2 '700ms' '-zoom'
 }
 
 Compress-Archive -Force -Path (Join-Path $out '*') -DestinationPath (Join-Path $here 'results.zip')
