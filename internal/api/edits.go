@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/jpeg"
 	"log"
 	"math"
 	"os"
@@ -21,6 +20,7 @@ import (
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/jpegturbo"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
@@ -378,7 +378,7 @@ func jpegBlob(img *image.RGBA) (*aprot.Blob, error) {
 // jpegBlobAt is jpegBlob at the given quality.
 func jpegBlobAt(img *image.RGBA, quality int) (*aprot.Blob, error) {
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
+	if err := jpegturbo.EncodeRGBA(&buf, img, quality); err != nil {
 		return nil, err
 	}
 	return &aprot.Blob{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
