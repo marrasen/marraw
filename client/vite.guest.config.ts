@@ -23,11 +23,11 @@ export default defineConfig({
   build: {
     outDir: 'dist-guest',
     emptyOutDir: true,
-    rollupOptions: { input: path.resolve(__dirname, 'guest.html') },
+    rollupOptions: { input: path.resolve(import.meta.dirname, 'guest.html') },
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
 });

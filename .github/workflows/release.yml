@@ -29,7 +29,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # A tag whose version disagrees with package.json would publish an
       # installer that electron-updater's latest.yml never points at.
@@ -54,14 +54,14 @@ jobs:
     runs-on: windows-latest
     needs: check
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -105,7 +105,7 @@ jobs:
       # libraw.a takes several minutes to compile. setup-libraw.ps1 exits early
       # when the artifact is already present, so a cache hit skips the build.
       - name: Cache LibRaw
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             third_party/libraw
@@ -116,7 +116,7 @@ jobs:
         run: npm run setup:libraw
 
       - name: Cache ONNX Runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: third_party/onnxruntime
           key: ort-${{ runner.os }}-${{ env.ORT_VERSION }}-${{ hashFiles('scripts/setup-ort.ps1') }}
@@ -148,7 +148,7 @@ jobs:
       - name: Build installer
         run: npm run dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: marraw-windows
           path: |
@@ -176,14 +176,14 @@ jobs:
     runs-on: ubuntu-22.04 # oldest supported image = oldest glibc users can run
     needs: check
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -192,7 +192,7 @@ jobs:
             client/package-lock.json
 
       - name: Cache LibRaw
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             third_party/libraw
@@ -203,7 +203,7 @@ jobs:
         run: bash scripts/setup-libraw.sh
 
       - name: Cache ONNX Runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: third_party/onnxruntime
           key: ort-${{ runner.os }}-${{ env.ORT_VERSION }}-${{ hashFiles('scripts/setup-ort.sh') }}
@@ -241,7 +241,7 @@ jobs:
       - name: Build installer
         run: npm run dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: marraw-linux
           path: |
@@ -258,14 +258,14 @@ jobs:
       # keychain and stalling or failing on whatever it finds there.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -274,7 +274,7 @@ jobs:
             client/package-lock.json
 
       - name: Cache LibRaw
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             third_party/libraw
@@ -285,7 +285,7 @@ jobs:
         run: bash scripts/setup-libraw.sh
 
       - name: Cache ONNX Runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: third_party/onnxruntime
           key: ort-${{ runner.os }}-${{ env.ORT_VERSION }}-${{ hashFiles('scripts/setup-ort.sh') }}
@@ -323,7 +323,7 @@ jobs:
       - name: Build installer
         run: npm run dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: marraw-macos
           path: |
@@ -354,7 +354,7 @@ jobs:
     env:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: assets
           pattern: marraw-*

@@ -744,6 +744,8 @@ function ManagedParent({
     if (collapseTick === seenTick.current) return;
     seenTick.current = collapseTick;
     if (shootGroup === 'none') return;
+    // This runs in the effect, not during render; react/purity misreads it.
+    // oxlint-disable-next-line react/purity
     const currentYear = new Date().getFullYear();
     for (const g of groupShoots(sortShoots(shoots ?? [], shootSort), shootGroup)) {
       if (g.year == null) continue;

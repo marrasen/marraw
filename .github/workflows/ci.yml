@@ -27,14 +27,14 @@ jobs:
   check:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -43,7 +43,7 @@ jobs:
             client/package-lock.json
 
       - name: Cache LibRaw
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             third_party/libraw
@@ -54,7 +54,7 @@ jobs:
         run: bash scripts/setup-libraw.sh
 
       - name: Cache ONNX Runtime
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: third_party/onnxruntime
           key: ort-${{ runner.os }}-${{ env.ORT_VERSION }}-${{ hashFiles('scripts/setup-ort.sh') }}
@@ -99,7 +99,7 @@ jobs:
       # calibrated to real-world sensor sizes.
       - name: Cache sample RAW
         id: sample
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /tmp/marraw-raw
           key: sample-raw-ilce7m3-v1

@@ -17,10 +17,10 @@ export default defineConfig({
   // CHANGELOG.md lives at the repo root (imported ?raw by lib/changelog.ts);
   // dev mode serves it via /@fs/, which needs the parent dir allowed. Builds
   // inline the text regardless.
-  server: { fs: { allow: [path.resolve(__dirname, "..")] } },
+  server: { fs: { allow: [path.resolve(import.meta.dirname, "..")] } },
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
 })
