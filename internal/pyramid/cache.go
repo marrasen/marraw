@@ -5,11 +5,11 @@
 package pyramid
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"image"
 	"image/jpeg"
+	"io"
 	"io/fs"
 	"log"
 	"math"
@@ -29,6 +29,7 @@ import (
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/jpegturbo"
 	"github.com/marrasen/marraw/internal/lens"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/store"
@@ -398,17 +399,12 @@ func (c *Cache) readLevel(cacheKey, level, editHash string) *image.RGBA {
 	if err != nil {
 		return nil
 	}
-	img, err := jpeg.Decode(f)
+	img, err := jpegturbo.Decode(f)
 	f.Close()
 	if err != nil {
 		return nil
 	}
-	if rgba, ok := img.(*image.RGBA); ok {
-		return rgba
-	}
-	rgba := image.NewRGBA(img.Bounds())
-	xdraw.Copy(rgba, image.Point{}, img, img.Bounds(), xdraw.Src, nil)
-	return rgba
+	return img
 }
 
 // editsForHash returns the parsed edit params identified by editHash, or nil
@@ -624,14 +620,9 @@ func (c *Cache) lookGammaFor(proc *libraw.Processor, photo store.Photo, isBase b
 	if err != nil {
 		return FallbackLookGamma
 	}
-	thumbImg, err := jpeg.Decode(bytes.NewReader(thumb))
+	cameraRGBA, err := jpegturbo.DecodeRGBA(thumb)
 	if err != nil {
 		return FallbackLookGamma
-	}
-	cameraRGBA, ok := thumbImg.(*image.RGBA)
-	if !ok {
-		cameraRGBA = image.NewRGBA(thumbImg.Bounds())
-		xdraw.Copy(cameraRGBA, image.Point{}, thumbImg, thumbImg.Bounds(), xdraw.Src, nil)
 	}
 	gamma := ComputeLookGamma(MeanLuma(rendered), MeanLuma(cameraRGBA))
 	if c.db != nil {
@@ -652,14 +643,9 @@ func thumbRGBA(proc *libraw.Processor) *image.RGBA {
 	if err != nil {
 		return nil
 	}
-	img, err := jpeg.Decode(bytes.NewReader(data))
+	rgba, err := jpegturbo.DecodeRGBA(data)
 	if err != nil {
 		return nil
-	}
-	rgba, ok := img.(*image.RGBA)
-	if !ok {
-		rgba = image.NewRGBA(img.Bounds())
-		xdraw.Copy(rgba, image.Point{}, img, img.Bounds(), xdraw.Src, nil)
 	}
 	return rotateFlip(rgba, proc.Metadata().Orientation)
 }
@@ -911,6 +897,15 @@ func (c *Cache) writeJPEG(img *image.RGBA, cacheKey, level, editHash string, qua
 	return writeJPEGFile(c.PathFor(cacheKey, level, editHash), img, quality)
 }
 
+// encodeJPEG writes img as a JPEG: with libjpeg-turbo for the RGBA the
+// pipeline renders, and with image/jpeg for anything else.
+func encodeJPEG(w io.Writer, img image.Image, quality int) error {
+	if rgba, ok := img.(*image.RGBA); ok {
+		return jpegturbo.EncodeRGBA(w, rgba, quality)
+	}
+	return jpeg.Encode(w, img, &jpeg.Options{Quality: quality})
+}
+
 // tmpSeq disambiguates concurrent writes of the same cache file.
 var tmpSeq atomic.Uint64
 
@@ -932,7 +927,7 @@ func writeJPEGFile(path string, img image.Image, quality int) error {
 	if err != nil {
 		return err
 	}
-	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: quality}); err != nil {
+	if err := encodeJPEG(f, img, quality); err != nil {
 		f.Close()
 		os.Remove(tmp)
 		return err

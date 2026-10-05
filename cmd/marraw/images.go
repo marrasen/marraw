@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"image"
-	"image/jpeg"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,6 +11,7 @@ import (
 
 	"github.com/marrasen/gunim/paint"
 
+	"github.com/marrasen/marraw/internal/jpegturbo"
 	"github.com/marrasen/marraw/internal/marrawclient"
 )
 
@@ -54,10 +53,10 @@ func (w want) String() string {
 
 // got is a decoded rendition, and what it took.
 type got struct {
-	img            *paint.Image
-	w, h           int
-	fetch, decode  time.Duration
-	provisional    bool
+	img           *paint.Image
+	w, h          int
+	fetch, decode time.Duration
+	provisional   bool
 }
 
 // url is the content-addressed URL of p's rendition, as client/src/lib/backend.ts
@@ -108,7 +107,7 @@ func (im *images) get(ctx context.Context, p marrawclient.Photo, w want) (got, e
 		return got{}, err
 	}
 	fetched := time.Now()
-	m, err := jpeg.Decode(bytes.NewReader(raw))
+	m, err := jpegturbo.DecodeRGBA(raw)
 	if err != nil {
 		return got{}, fmt.Errorf("%s: %w", w, err)
 	}

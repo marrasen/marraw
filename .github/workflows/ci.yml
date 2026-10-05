@@ -18,6 +18,7 @@ concurrency:
 
 env:
   LIBRAW_VERSION: '0.22.1'
+  LIBJPEG_TURBO_VERSION: '3.2.0'
   ORT_VERSION: '1.29.0'
   NODE_VERSION: '24'
 
@@ -52,6 +53,22 @@ jobs:
 
       - name: Build LibRaw
         run: bash scripts/setup-libraw.sh
+
+      - name: Cache libjpeg-turbo
+        uses: actions/cache@v6
+        with:
+          path: |
+            third_party/libjpeg-turbo
+            third_party/libjpeg-turbo-${{ env.LIBJPEG_TURBO_VERSION }}.tar.gz
+          key: libjpeg-turbo-${{ runner.os }}-${{ runner.arch }}-${{ env.LIBJPEG_TURBO_VERSION }}-${{ hashFiles('scripts/setup-libjpeg-turbo.sh') }}
+
+      # Its SIMD code needs NASM on x86-64, which the image lacks.
+      - name: Build libjpeg-turbo
+        run: |
+          if [ ! -f third_party/libjpeg-turbo/lib/libturbojpeg.a ] && [ "$(uname -s)" = Linux ]; then
+            sudo apt-get install -y --no-install-recommends nasm
+          fi
+          LIBJPEG_TURBO_VERSION=$LIBJPEG_TURBO_VERSION bash scripts/setup-libjpeg-turbo.sh
 
       - name: Cache ONNX Runtime
         uses: actions/cache@v6

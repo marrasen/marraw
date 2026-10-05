@@ -10,6 +10,7 @@ on:
 
 env:
   LIBRAW_VERSION: '0.22.1'
+  LIBJPEG_TURBO_VERSION: '3.2.0'
   ORT_VERSION: '1.29.0'
 
 jobs:
@@ -55,6 +56,25 @@ jobs:
       - name: Build LibRaw
         shell: pwsh
         run: ./scripts/setup-libraw.ps1
+
+      - name: Cache libjpeg-turbo
+        uses: actions/cache@v6
+        with:
+          path: |
+            third_party/libjpeg-turbo
+            third_party/libjpeg-turbo-${{ env.LIBJPEG_TURBO_VERSION }}.tar.gz
+          key: libjpeg-turbo-${{ runner.os }}-${{ env.LIBJPEG_TURBO_VERSION }}-${{ hashFiles('scripts/setup-libjpeg-turbo.ps1') }}
+
+      # Its SIMD code needs NASM, which the image lacks.
+      - name: Build libjpeg-turbo
+        shell: pwsh
+        run: |
+          if (-not (Test-Path third_party/libjpeg-turbo/lib/libturbojpeg.a)) {
+            choco install nasm --no-progress --yes
+            Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\NASM'
+            $env:PATH = "C:\Program Files\NASM;$env:PATH"
+          }
+          ./scripts/setup-libjpeg-turbo.ps1 -Version $env:LIBJPEG_TURBO_VERSION
 
       - name: Cache ONNX Runtime
         uses: actions/cache@v6

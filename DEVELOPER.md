@@ -124,11 +124,14 @@ behind it.
 - Go 1.27+
 - Node 24+
 - MinGW-w64 `gcc`/`g++` on `PATH` (Windows)
+- CMake, and NASM on x86-64, for libjpeg-turbo (`winget install Kitware.CMake NASM.NASM`
+  on Windows)
 
 ## Setup
 
 ```powershell
 npm run setup:libraw   # download + build static libraw.a (one-time, few min)
+npm run setup:jpeg     # download + build static libjpeg-turbo (one-time, a minute)
 npm run setup:ort      # download the ONNX Runtime shared lib (ML features/tests)
 npm install
 npm --prefix client install
@@ -332,6 +335,11 @@ How the port is wired:
 - **LibRaw** — `scripts/setup-libraw.sh` (Unix twin of `setup-libraw.ps1`)
   builds a static `libraw.a` via LibRaw's dependency-free `Makefile.dist`,
   which is thread-safe on Unix by default.
+- **libjpeg-turbo** — `scripts/setup-libjpeg-turbo.sh` (twin of the `.ps1`)
+  builds its static libraries with CMake and its SIMD code: NASM on x86-64,
+  nothing more on Arm. `internal/jpegturbo` wraps it; every cached rendition
+  and live preview is encoded with it, several times faster than
+  `image/jpeg`. A build without cgo falls back to `image/jpeg`.
 - **Trash** — `trash_linux.go` prefers `gio trash` (full freedesktop spec,
   external drives included) with a home-trash fallback; `trash_darwin.go`
   calls `NSFileManager trashItemAtURL` via a small Objective-C cgo shim.
