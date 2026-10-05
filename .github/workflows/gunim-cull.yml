@@ -77,8 +77,20 @@ jobs:
           go build -tags nobackend -o dist/marraw-cull-connect.exe ./cmd/marraw
           Copy-Item third_party/onnxruntime/lib/*.dll dist/
 
+      # The test kit's script and its instructions go with the programs; a
+      # script that does not parse fails here, not on the machine testing.
+      - name: Check the test kit's script
+        shell: pwsh
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD/cmd/marraw/kit/run-tests.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Host $_ }; throw 'run-tests.ps1 does not parse' }
+          New-Item -ItemType Directory -Force kit/bin | Out-Null
+          Copy-Item dist/* kit/bin/
+          Copy-Item cmd/marraw/kit/* kit/
+
       - uses: actions/upload-artifact@v7
         with:
           name: marraw-cull-windows
-          path: dist/*
+          path: kit/*
           if-no-files-found: error
