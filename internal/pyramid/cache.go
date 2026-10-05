@@ -190,6 +190,10 @@ func nested(a, b string) bool {
 // cached as immutable, so the version has to appear in the URL too.
 const renderVersion = "r13"
 
+// RenderVersion is renderVersion for a client in Go, which puts it in its
+// image URLs as the TypeScript client's RENDER_VERSION does.
+const RenderVersion = renderVersion
+
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
 	return filepath.Join(c.Dir(), cacheKey[:2],

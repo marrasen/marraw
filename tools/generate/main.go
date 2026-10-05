@@ -1,4 +1,5 @@
-// Command generate emits the TypeScript client into client/src/api.
+// Command generate emits the TypeScript client into client/src/api, and
+// the Go client the gunim program uses into internal/marrawclient.
 // Run from the repo root: go run ./tools/generate
 package main
 
@@ -26,5 +27,18 @@ func main() {
 	}
 	for name := range files {
 		fmt.Printf("generated client/src/api/%s\n", name)
+	}
+
+	goGen := aprot.NewGoGenerator(registry).WithOptions(aprot.GoGeneratorOptions{
+		OutputDir:   "internal/marrawclient",
+		PackageName: "marrawclient",
+	})
+	goFiles, err := goGen.Generate()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "generate the Go client failed: %v\n", err)
+		os.Exit(1)
+	}
+	for name := range goFiles {
+		fmt.Printf("generated internal/marrawclient/%s\n", name)
 	}
 }

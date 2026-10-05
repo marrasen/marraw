@@ -1,11 +1,12 @@
 module github.com/marrasen/marraw
 
-go 1.27
+go 1.27.1
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/libp2p/zeroconf/v2 v2.2.0
 	github.com/marrasen/aprot v0.65.0
+	github.com/marrasen/gunim v0.0.0-20261005220444-099ef410548d
 	github.com/yalue/onnxruntime_go v1.36.0
 	golang.org/x/image v0.46.0
 	golang.org/x/sync v0.23.0
@@ -14,11 +15,14 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
+	github.com/ebitengine/purego v0.11.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.15 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3 // indirect
 	github.com/go-playground/locales v0.14.2 // indirect
 	github.com/go-playground/universal-translator v0.18.2 // indirect
 	github.com/go-playground/validator/v10 v10.30.5 // indirect
+	github.com/go-text/typesetting v0.3.5 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
