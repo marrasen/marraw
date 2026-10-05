@@ -11,7 +11,7 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $exe = Join-Path $here 'bin\marraw-cull.exe'
 $out = Join-Path $here 'results'
 $data = Join-Path $env:TEMP 'marraw-cull-test-data'
-if (-not (Test-Path $exe)) { throw "No $exe: unpack the whole kit." }
+if (-not (Test-Path $exe)) { throw "No ${exe}: unpack the whole kit." }
 Remove-Item -Recurse -Force $out, $data -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $out | Out-Null
 $env:GUNIM_DEBUG_FRAMES = '1'
