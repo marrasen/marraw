@@ -1,0 +1,84 @@
+name: gunim cull test build
+
+# Builds cmd/marraw, the gunim test build, for Windows, on every push to its
+# branch: with its own backend (cgo and LibRaw, as the release builds
+# marrawd), and the connect-only build beside it. The programs are kept as
+# an artifact of the run, to try on a Windows machine with a real GPU.
+on:
+  push:
+    branches: [gunim-cull]
+
+env:
+  LIBRAW_VERSION: '0.22.1'
+  ORT_VERSION: '1.29.0'
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # As the release job finds it: probe the image, else install.
+      - name: Locate MinGW-w64
+        shell: pwsh
+        run: |
+          $probe = @(
+            'C:\msys64\ucrt64\bin'
+            'C:\msys64\mingw64\bin'
+            'C:\mingw64\bin'
+            'C:\ProgramData\mingw64\mingw64\bin'
+          )
+          $bin = $probe | Where-Object { Test-Path (Join-Path $_ 'g++.exe') } | Select-Object -First 1
+          if (-not $bin) {
+            choco install mingw --no-progress --yes
+            $bin = @(
+              'C:\ProgramData\mingw64\mingw64\bin'
+              'C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin'
+            ) | Where-Object { Test-Path (Join-Path $_ 'g++.exe') } | Select-Object -First 1
+          }
+          if (-not $bin) { throw 'MinGW-w64 g++ not found' }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+
+      - name: Cache LibRaw
+        uses: actions/cache@v6
+        with:
+          path: |
+            third_party/libraw
+            third_party/LibRaw-${{ env.LIBRAW_VERSION }}.tar.gz
+          key: libraw-${{ runner.os }}-${{ env.LIBRAW_VERSION }}-${{ hashFiles('scripts/setup-libraw.ps1') }}
+
+      - name: Build LibRaw
+        shell: pwsh
+        run: ./scripts/setup-libraw.ps1
+
+      - name: Cache ONNX Runtime
+        uses: actions/cache@v6
+        with:
+          path: third_party/onnxruntime
+          key: ort-${{ runner.os }}-${{ env.ORT_VERSION }}-${{ hashFiles('scripts/setup-ort.ps1') }}
+
+      - name: Fetch ONNX Runtime
+        shell: pwsh
+        run: ./scripts/setup-ort.ps1
+
+      # A console program, not -H windowsgui, so its log and -skim's timings
+      # show in the terminal and redirect to a file.
+      - name: Build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          go build -o dist/marraw-cull.exe ./cmd/marraw
+          $env:CGO_ENABLED = '0'
+          go build -tags nobackend -o dist/marraw-cull-connect.exe ./cmd/marraw
+          Copy-Item third_party/onnxruntime/lib/*.dll dist/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: marraw-cull-windows
+          path: dist/*
+          if-no-files-found: error
