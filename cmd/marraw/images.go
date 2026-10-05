@@ -14,7 +14,6 @@ import (
 	"github.com/marrasen/gunim/paint"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
-	"github.com/marrasen/marraw/internal/pyramid"
 )
 
 // images fetches a photo's renditions from the backend's HTTP endpoints, as
@@ -64,7 +63,7 @@ type got struct {
 // url is the content-addressed URL of p's rendition, as client/src/lib/backend.ts
 // builds it.
 func (im *images) url(p marrawclient.Photo, w want) string {
-	q := url.Values{"v": {p.CacheKey}, "r": {pyramid.RenderVersion}}
+	q := url.Values{"v": {p.CacheKey}, "r": {renderVersion}}
 	if p.EditHash != "" && p.EditHash != "base" {
 		q.Set("e", p.EditHash)
 	}

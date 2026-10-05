@@ -33,7 +33,6 @@ import (
 	"github.com/marrasen/gunim/driver"
 	"github.com/marrasen/gunim/geom"
 
-	"github.com/marrasen/marraw/internal/daemon"
 	"github.com/marrasen/marraw/internal/marrawclient"
 )
 
@@ -71,17 +70,12 @@ func run(o options) error {
 		// The backend in this process: loopback only, with a token of its
 		// own, as the Electron shell starts marrawd.
 		token = randomToken()
-		daemon.LimitMemory()
-		d, err := daemon.Start(ctx, daemon.Options{Listen: "127.0.0.1", DataDir: o.dataDir, CacheCapGB: 20, Token: token})
+		addr, stopBackend, err := startBackend(ctx, o.dataDir, token)
 		if err != nil {
 			return fmt.Errorf("start the backend: %w", err)
 		}
-		defer func() {
-			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			d.Close(sctx)
-		}()
-		host = d.Addr
+		defer stopBackend()
+		host = addr
 	}
 
 	cc, err := client.Dial(ctx, "ws://"+host+"/ws", client.Options{
