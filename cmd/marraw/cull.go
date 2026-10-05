@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/marrasen/gunim"
+	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
@@ -37,7 +38,25 @@ type (
 		Tiles map[image.Point]*paint.Image
 		// TileNote says how the tiles stand.
 		TileNote string
+		// Rating and Flag are the photo's, and Strip the photos around it,
+		// for the filmstrip.
+		Rating int
+		Flag   string
+		Strip  []Thumb
 	}
+	// Thumb is one photo in the filmstrip: where it is in the folder, its
+	// small picture once fetched, and its rating and flag.
+	Thumb struct {
+		Index  int
+		Img    *paint.Image
+		Aspect float32
+		Rating int
+		Flag   string
+	}
+	// Rate rates the photo showing, 0 to 5 stars.
+	Rate struct{ Stars int }
+	// Mark flags the photo showing: "pick", "exclude" or "none".
+	Mark struct{ Flag string }
 	// WantTiles asks for the tiles of the photo at Index in Range of the
 	// grid, as the view zooms past what the 2048 shows sharp; an empty
 	// Range wants none.
@@ -97,7 +116,17 @@ type culler struct {
 	probing   int64
 	probeStop context.CancelFunc
 	tileNote  string
+
+	// thumbs are the filmstrip's pictures by photo, and thumbsWanted those
+	// asked for and not in yet.
+	thumbs       map[int64]*paint.Image
+	thumbsWanted map[int64]bool
+	thumbSlots   chan struct{}
 }
+
+// stripReach is how many photos the filmstrip shows on each side of the
+// one showing.
+const stripReach = 7
 
 // arrival is a rendition decoded for photo at index, in generation gen.
 type arrival struct {
@@ -117,7 +146,8 @@ func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im
 	sort.SliceStable(photos, func(i, j int) bool { return photos[i].TakenAt < photos[j].TakenAt })
 	return &culler{ctx: ctx, c: c, api: api, im: im, folder: folder, photos: photos,
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
-		tiles: newTileCache(48), tileWarm: map[int64]bool{}}
+		tiles: newTileCache(48), tileWarm: map[int64]bool{},
+		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 4)}
 }
 
 func (cu *culler) serve() error {
@@ -125,6 +155,15 @@ func (cu *culler) serve() error {
 		return err
 	}
 	_ = cu.c.Focus("cull")
+	// Ratings, flags and edits made elsewhere, as in the Electron app on
+	// the same backend, show here as they happen.
+	stopPatches := cu.api.OnPhotoPatchEvent(func(ev marrawclient.PhotoPatchEvent) {
+		select {
+		case cu.do <- func() { cu.patched(ev.Patches) }:
+		case <-cu.ctx.Done():
+		}
+	})
+	defer stopPatches()
 	cu.goTo(0)
 	for {
 		select {
@@ -149,6 +188,10 @@ func (cu *culler) serve() error {
 				cu.goTo(to)
 			case WantTiles:
 				cu.wantTiles(in)
+			case Rate:
+				cu.rate(in.Stars)
+			case Mark:
+				cu.mark(marrawclient.Flag(in.Flag))
 			case Quit:
 				cu.c.Leave()
 			}
@@ -165,7 +208,16 @@ func (cu *culler) state() Cull {
 		aspect = float32(s.X) / float32(s.Y)
 	}
 	st := Cull{Index: cu.at, Total: len(cu.photos), Name: p.FileName, Aspect: aspect, Full: s,
-		Tiles: cu.tiles.of(p.ID), TileNote: cu.tileNote}
+		Tiles: cu.tiles.of(p.ID), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag)}
+	for i := max(0, cu.at-stripReach); i <= min(len(cu.photos)-1, cu.at+stripReach); i++ {
+		q := cu.photos[i]
+		qs := size(q)
+		a := float32(1.5)
+		if qs.Y > 0 {
+			a = float32(qs.X) / float32(qs.Y)
+		}
+		st.Strip = append(st.Strip, Thumb{Index: i, Img: cu.thumbs[q.ID], Aspect: a, Rating: q.Rating, Flag: string(q.Flag)})
+	}
 	if e, ok := cu.cache.get(p.ID); ok {
 		st.Img, st.Note = e.img, e.note
 	}
@@ -196,6 +248,7 @@ func (cu *culler) goTo(i int) {
 	}
 	cu.tileNote = ""
 	_ = cu.c.Update("cull", cu.state())
+	cu.loadStrip()
 	p := cu.photos[i]
 	// Where the user is, so the backend's pre-render works outward from
 	// here.
@@ -357,13 +410,19 @@ func (cu *culler) record(what string, sharp bool) {
 
 // script steps right n times, every apart, then reports the timings and
 // writes a picture of the window to shot, for measuring without hands.
-func (cu *culler) script(n int, every time.Duration, shot string, zoom bool) {
+func (cu *culler) script(n int, every time.Duration, shot string, zoom bool, keys string) {
 	time.Sleep(time.Second)
 	for range n {
 		cu.c.Input(cu.ctx, keyRight())
 		time.Sleep(every)
 	}
 	time.Sleep(time.Second)
+	for _, k := range strings.Split(keys, ",") {
+		if key, ok := namedKeys[strings.TrimSpace(strings.ToLower(k))]; ok {
+			cu.c.Input(cu.ctx, input.KeyPress{Key: key})
+			time.Sleep(300 * time.Millisecond)
+		}
+	}
 	if zoom {
 		start := time.Now()
 		cu.c.Input(cu.ctx, keyZ())
@@ -390,7 +449,7 @@ func (cu *culler) script(n int, every time.Duration, shot string, zoom bool) {
 			log.Print(err)
 		}
 	}
-	if n > 0 || zoom {
+	if n > 0 || zoom || keys != "" {
 		cu.do <- func() {
 			cu.report()
 			cu.c.Leave()
@@ -445,6 +504,14 @@ func newPixelCache(limit int) *pixelCache {
 	return &pixelCache{limit: limit, m: map[int64]cacheEntry{}}
 }
 
+// drop forgets id's pixels, as after an edit.
+func (pc *pixelCache) drop(id int64) {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	delete(pc.m, id)
+	pc.order = slices.DeleteFunc(pc.order, func(x int64) bool { return x == id })
+}
+
 func (pc *pixelCache) get(id int64) (cacheEntry, bool) {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
@@ -465,5 +532,107 @@ func (pc *pixelCache) put(id int64, e cacheEntry) {
 	for len(pc.order) > pc.limit {
 		delete(pc.m, pc.order[0])
 		pc.order = pc.order[1:]
+	}
+}
+
+// loadStrip fetches the filmstrip's pictures not fetched yet: the 256 at any
+// edit state, never decoding a RAW, a few at a time, nearest first.
+func (cu *culler) loadStrip() {
+	for d := 0; d <= stripReach; d++ {
+		for _, i := range []int{cu.at + d, cu.at - d} {
+			if i < 0 || i >= len(cu.photos) {
+				continue
+			}
+			p := cu.photos[i]
+			if cu.thumbs[p.ID] != nil || cu.thumbsWanted[p.ID] {
+				continue
+			}
+			cu.thumbsWanted[p.ID] = true
+			go func() {
+				select {
+				case cu.thumbSlots <- struct{}{}:
+				case <-cu.ctx.Done():
+					return
+				}
+				g, err := cu.im.get(cu.ctx, p, want{level: "256", stale: true, fast: true})
+				<-cu.thumbSlots
+				select {
+				case cu.do <- func() {
+					delete(cu.thumbsWanted, p.ID)
+					if err != nil {
+						return
+					}
+					cu.thumbs[p.ID] = g.img
+					if i >= cu.at-stripReach && i <= cu.at+stripReach {
+						_ = cu.c.Update("cull", cu.state())
+					}
+				}:
+				case <-cu.ctx.Done():
+				}
+			}()
+		}
+	}
+}
+
+// rate gives the photo showing stars, here at once and on the backend.
+func (cu *culler) rate(stars int) {
+	p := &cu.photos[cu.at]
+	p.Rating = max(0, min(stars, 5))
+	_ = cu.c.Update("cull", cu.state())
+	id, r := p.ID, p.Rating
+	go func() {
+		if err := cu.api.Library.SetRating(cu.ctx, []int64{id}, r); err != nil {
+			log.Printf("rate: %v", err)
+		}
+	}()
+}
+
+// mark flags the photo showing, here at once and on the backend.
+func (cu *culler) mark(f marrawclient.Flag) {
+	p := &cu.photos[cu.at]
+	p.Flag = f
+	_ = cu.c.Update("cull", cu.state())
+	id := p.ID
+	go func() {
+		if err := cu.api.Library.SetFlag(cu.ctx, []int64{id}, f); err != nil {
+			log.Printf("flag: %v", err)
+		}
+	}()
+}
+
+// patched takes changes to photos made anywhere: their ratings and flags,
+// and an edit, whose new pixels are fetched again.
+func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
+	changed := false
+	for _, pp := range ps {
+		for i := range cu.photos {
+			p := &cu.photos[i]
+			if p.ID != pp.ID {
+				continue
+			}
+			if pp.Rating != nil {
+				p.Rating = *pp.Rating
+			}
+			if pp.Flag != nil {
+				p.Flag = *pp.Flag
+			}
+			if pp.EditHash != nil && *pp.EditHash != p.EditHash {
+				p.EditHash = *pp.EditHash
+				cu.cache.drop(p.ID)
+				delete(cu.thumbs, p.ID)
+				if i == cu.at {
+					// Again, with the new edit's pixels.
+					cu.load = nil
+					cu.goTo(i)
+				}
+			}
+			if i >= cu.at-stripReach && i <= cu.at+stripReach {
+				changed = true
+			}
+		}
+	}
+	if changed {
+		_ = cu.c.Update("cull", cu.state())
+		cu.loadStrip()
 	}
 }

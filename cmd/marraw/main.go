@@ -11,9 +11,11 @@
 //	go run ./cmd/marraw -connect 192.168.1.20:8482 -token … -folder D:\Photos\shoot
 //	go run ./cmd/marraw -folder ~/Pictures/shoot -skim 40 -every 150ms
 //
-// Keys: Left and Right step through the folder, Home and End go to its ends,
-// Z goes between fit and one to one, and Escape quits. The wheel zooms
-// about the pointer and a drag pans.
+// Keys, as marraw's: Left and Right step through the folder, Home and End go
+// to its ends, 0 to 5 rate, P picks, X rejects and U clears the flag, Z or
+// Space goes between fit and one to one, + and - zoom, and Escape quits.
+// The wheel zooms about the pointer, a drag pans, and a click on the
+// filmstrip goes to that photo.
 package main
 
 import (
@@ -45,13 +47,14 @@ func main() {
 	skim := flag.Int("skim", 0, "step right this many times on its own, -every apart, report the timings, and quit")
 	every := flag.Duration("every", 150*time.Millisecond, "how far apart -skim steps")
 	shot := flag.String("shot", "", "write the window to this PNG file once -skim is done, or after a second")
+	keys := flag.String("keys", "", "once -skim is done, press these keys, a comma-separated list such as 3,p,right,x")
 	zoom := flag.Bool("zoom", false, "once -skim is done, zoom to one to one with Z, and wait for the full resolution before the shot")
 	flag.Parse()
 	if *folder == "" {
 		log.Fatal("marraw: -folder is required")
 	}
 	if err := run(options{folder: *folder, connect: *connect, token: *token, dataDir: *dataDir,
-		skim: *skim, every: *every, shot: *shot, zoom: *zoom}); err != nil {
+		skim: *skim, every: *every, shot: *shot, zoom: *zoom, keys: *keys}); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -62,6 +65,7 @@ type options struct {
 	every                           time.Duration
 	shot                            string
 	zoom                            bool
+	keys                            string
 }
 
 func run(o options) error {
@@ -115,8 +119,8 @@ func run(o options) error {
 		registerViews(w)
 		c := w.Client()
 		cu := newCuller(ctx, c, api, newImages("http://"+host, token), info.FolderID, photos)
-		if o.skim > 0 || o.shot != "" || o.zoom {
-			go cu.script(o.skim, o.every, o.shot, o.zoom)
+		if o.skim > 0 || o.shot != "" || o.zoom || o.keys != "" {
+			go cu.script(o.skim, o.every, o.shot, o.zoom, o.keys)
 		}
 		return cu.serve()
 	})

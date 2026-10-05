@@ -32,11 +32,13 @@ Run anyway. When it is done, send results.zip.
 
     .\bin\marraw-cull.exe -folder ".\photos\2017-03-24 Flygtur (Canon CR2)" -data-dir $env:TEMP\marraw-cull-test-data
 
-Left and Right (or Space and Backspace) step through the folder, Home and
-End go to its ends, Escape quits. Z or a double click goes between fit
-and 100%, the wheel zooms about the pointer, and dragging pans; the zoom
-stays as you step, to compare a burst. The corner says which rendition
-shows, how long it took, and how the full-resolution tiles stand.
+Left and Right step through the folder, Home and End go to its ends, and
+a click on the filmstrip goes to that photo. 0 to 5 rate it, P picks, X
+rejects and U clears the flag, as in marraw. Z, Space or a double click
+goes between fit and 100%, + and - zoom in steps, the wheel zooms about
+the pointer, and dragging pans; the zoom stays as you step, to compare a
+burst. Escape quits. The corner says which rendition shows, how long it
+took, and how the full-resolution tiles stand.
 Worth noticing:
 
   - Does stepping ever freeze or stutter, even for a moment?
