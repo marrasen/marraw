@@ -94,9 +94,11 @@ type culler struct {
 	folder     int64
 	folderPath string
 	photos     []marrawclient.Photo
-	// index is where each photo is in photos, by its ID.
-	index map[int64]int
-	at    int
+	// index is where each photo is in photos, by its ID, and aspects the
+	// shapes learned from their pixels.
+	index   map[int64]int
+	aspects map[int64]float32
+	at      int
 
 	// cache holds decoded pixels by photo, the best of each so far.
 	cache *pixelCache
@@ -172,7 +174,7 @@ func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im
 	for i, p := range photos {
 		index[p.ID] = i
 	}
-	return &culler{index: index, ctx: ctx, c: c, api: api, im: im, folder: folder, folderPath: folderPath, photos: photos,
+	return &culler{index: index, aspects: map[int64]float32{}, ctx: ctx, c: c, api: api, im: im, folder: folder, folderPath: folderPath, photos: photos,
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
 		tiles: newTileCache(48), tileWarm: map[int64]bool{},
 		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), cursor: -1}
@@ -246,21 +248,11 @@ func (cu *culler) serve() error {
 // state is what the window shows now.
 func (cu *culler) state() Cull {
 	p := cu.photos[cu.at]
-	s := size(p)
-	aspect := float32(1.5)
-	if s.Y > 0 {
-		aspect = float32(s.X) / float32(s.Y)
-	}
-	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Aspect: aspect, Full: s,
+	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
 		Tiles: cu.tiles.of(p.ID), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag)}
 	for i := max(0, cu.at-stripReach); i <= min(len(cu.photos)-1, cu.at+stripReach); i++ {
 		q := cu.photos[i]
-		qs := size(q)
-		a := float32(1.5)
-		if qs.Y > 0 {
-			a = float32(qs.X) / float32(qs.Y)
-		}
-		st.Strip = append(st.Strip, Thumb{Index: i, Img: cu.thumbs[q.ID], Aspect: a, Rating: q.Rating, Flag: string(q.Flag)})
+		st.Strip = append(st.Strip, Thumb{Index: i, Img: cu.thumbs[q.ID], Aspect: cu.aspectOf(q), Rating: q.Rating, Flag: string(q.Flag)})
 	}
 	if e, ok := cu.cache.get(p.ID); ok {
 		st.Img, st.Note = e.img, e.note
@@ -404,6 +396,7 @@ func (cu *culler) take(a arrival) {
 		note += " · provisional"
 	}
 	cu.cache.put(p.ID, cacheEntry{img: a.got.img, rank: a.rank, note: note})
+	cu.learnShape(p.ID, a.got.w, a.got.h)
 	if a.index != cu.at {
 		return
 	}
@@ -684,6 +677,7 @@ func (cu *culler) loadThumb(ctx context.Context, i int) {
 				return
 			}
 			cu.keepThumb(p.ID, g.img)
+			cu.learnShape(p.ID, g.w, g.h)
 			_ = cu.c.Patch("grid", ThumbIn{Index: i, Img: g.img})
 			if cu.culling && i >= cu.at-stripReach && i <= cu.at+stripReach {
 				cu.showCull()

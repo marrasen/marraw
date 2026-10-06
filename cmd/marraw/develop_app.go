@@ -144,7 +144,11 @@ func (cu *culler) loadEdit(i int) {
 			if gen != d.gen || !d.open || !cu.culling {
 				return
 			}
-			d.id, d.params = id, *p
+			// No edit stored, and no exposure measured yet: all neutral.
+			d.id, d.params = id, marrawclient.Params{}
+			if p != nil {
+				d.params = *p
+			}
 			if !d.mounted {
 				d.mounted = true
 				_ = cu.c.Mount("cull", "develop", "develop", cu.developState(), "develop")
@@ -292,6 +296,10 @@ func (cu *culler) startPreview() {
 		select {
 		case cu.do <- func() {
 			d.busy = false
+			if err == nil {
+				// Its shape, as the edit's crop and rotation give it.
+				cu.learnShape(id, size.X, size.Y)
+			}
 			if err == nil && d.open && id == d.id && id == cu.photos[cu.at].ID {
 				d.live = img
 				what := "draft"

@@ -57,12 +57,7 @@ type (
 func (cu *culler) gridState() GridState {
 	st := GridState{Folder: filepath.Base(cu.folderPath)}
 	for _, p := range cu.photos {
-		s := size(p)
-		a := float32(1.5)
-		if s.Y > 0 {
-			a = float32(s.X) / float32(s.Y)
-		}
-		st.Photos = append(st.Photos, GridPhoto{ID: p.ID, Name: p.FileName, Aspect: a, Rating: p.Rating, Flag: string(p.Flag)})
+		st.Photos = append(st.Photos, GridPhoto{ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Rating: p.Rating, Flag: string(p.Flag)})
 	}
 	return st
 }

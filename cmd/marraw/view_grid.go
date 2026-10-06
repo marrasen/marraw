@@ -97,6 +97,19 @@ func (v *gridView) thumbIn(t ThumbIn, u *gunim.UI) {
 	u.Invalidate()
 }
 
+// photoAspect takes a photo's shape learned from its pixels; its tile
+// glides to it.
+func (v *gridView) photoAspect(a PhotoAspect, u *gunim.UI) {
+	if a.Index < 0 || a.Index >= len(v.st.Photos) {
+		return
+	}
+	v.st.Photos[a.Index].Aspect = a.Aspect
+	if t := v.tiles[a.Index]; t != nil {
+		t.aspect.Animate(a.Aspect, widget.Quick.Get(u.Theme()))
+	}
+	u.Invalidate()
+}
+
 // photoMarked shows a photo's new rating and flag.
 func (v *gridView) photoMarked(m PhotoMarked, u *gunim.UI) {
 	if m.Index < 0 || m.Index >= len(v.st.Photos) {
@@ -131,7 +144,8 @@ func (v *gridView) gridAt(a GridAt, u *gunim.UI) {
 
 func (v *gridView) newTile(i int) gunim.Node {
 	p := v.st.Photos[i]
-	t := &photoTile{aspect: p.Aspect, pic: newThumbPic(v.thumbs[i])}
+	t := &photoTile{aspect: anim.NewFloat(p.Aspect), pic: newThumbPic(v.thumbs[i])}
+	t.Add(t.aspect)
 	t.hero = widget.NewHero(heroTag(p.ID), t.pic)
 	// The tile is where the cull view's picture flies from and back to.
 	t.hero.Anchor = true
@@ -185,7 +199,9 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 // its stars and flag beneath.
 type photoTile struct {
 	anim.Group
-	aspect float32
+	// aspect is the picture's shape, gliding to the one its pixels have
+	// once they come.
+	aspect *anim.Float
 	pic    *thumbPic
 	hero   *widget.Hero
 	marks  *marks
@@ -202,7 +218,7 @@ func picRoom(box geom.Size) geom.Rect {
 // Layout implements [gunim.Node].
 func (t *photoTile) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
-	r := fitIn(picRoom(box), t.aspect)
+	r := fitIn(picRoom(box), t.aspect.Value())
 	k := kids.At(0)
 	k.Layout(gunim.Tight(r.Size()))
 	k.Place(r.Min)
@@ -255,14 +271,24 @@ func (q *thumbPic) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, _ gunim
 	op := 1 - 0.6*q.dim
 	k := q.in.Value()
 	if q.old != nil && k < 1 {
-		p.Image(q.old, r, paint.ImageOpts{Opacity: op, Radius: 3})
+		p.Image(q.old, pixelFit(r, q.old), paint.ImageOpts{Opacity: op, Radius: 3})
 	} else if q.img == nil || k < 1 {
 		p.RRect(r, 3, paint.Solid(frameInk))
 	}
 	if q.img != nil {
 		// It settles from a touch larger as it fades in.
-		p.Image(q.img, scaleAbout(r, 1+0.04*(1-k)), paint.ImageOpts{Opacity: op * k, Radius: 3})
+		p.Image(q.img, scaleAbout(pixelFit(r, q.img), 1+0.04*(1-k)), paint.ImageOpts{Opacity: op * k, Radius: 3})
 	}
+}
+
+// pixelFit is img fitted into r by the shape of its own pixels, so a
+// frame of another shape never stretches it.
+func pixelFit(r geom.Rect, img *paint.Image) geom.Rect {
+	w, h := img.Size()
+	if w <= 0 || h <= 0 {
+		return r
+	}
+	return fitIn(r, float32(w)/float32(h))
 }
 
 // marks are a photo's stars and flag as they show, animated: the stars

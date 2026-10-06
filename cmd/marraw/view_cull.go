@@ -62,6 +62,9 @@ type cullView struct {
 	// beside the photo, which makes room for it.
 	slot *gunim.Box
 	side *anim.Float
+	// shape is the photo's full size, gliding to its true shape as its
+	// pixels tell it.
+	shape *anim.Size
 }
 
 // The cull view's motions: in, out, a step's slide and a sharper
@@ -76,11 +79,11 @@ var (
 func newCullView(s Cull) *cullView {
 	v := &cullView{name: widget.NewLabel(""), note: widget.NewLabel(""), z: anim.NewFloat(1), c: anim.NewPoint(geom.Pt(0.5, 0.5)),
 		scale: 1, in: anim.NewFloat(0), strip: anim.NewFloat(float32(s.Index)), ring: anim.NewFloat(0),
-		slot: &gunim.Box{}, side: anim.NewFloat(0)}
+		slot: &gunim.Box{}, side: anim.NewFloat(0), shape: anim.NewSize(fullOf(s))}
 	if s.Panel {
 		v.side.Jump(1)
 	}
-	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side)
+	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -98,6 +101,12 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 	prev := v.st
 	v.st = s
 	th := u.Theme()
+	if s.ID != prev.ID {
+		v.shape.Jump(fullOf(s))
+	} else {
+		// The same photo in a shape learned from its pixels: it glides.
+		v.shape.Animate(fullOf(s), widget.Quick.Get(th))
+	}
 	v.hero.Tag = heroTag(s.ID)
 	switch {
 	case s.ID != prev.ID:
@@ -150,11 +159,14 @@ func (v *cullView) Transition(p gunim.Presence, _ gunim.Frame) bool {
 }
 
 // full is the photo's full resolution, or a guess from its frame.
-func (v *cullView) full() geom.Size {
-	if v.st.Full.X > 0 && v.st.Full.Y > 0 {
-		return geom.Sz(float32(v.st.Full.X), float32(v.st.Full.Y))
+func (v *cullView) full() geom.Size { return v.shape.Value() }
+
+// fullOf is the full resolution s gives, or a guess from its shape.
+func fullOf(s Cull) geom.Size {
+	if s.Full.X > 0 && s.Full.Y > 0 {
+		return geom.Sz(float32(s.Full.X), float32(s.Full.Y))
 	}
-	return geom.Sz(3000*v.st.Aspect, 3000)
+	return geom.Sz(3000*s.Aspect, 3000)
 }
 
 // stripHeight is the filmstrip's band along the bottom, and thumbHeight its
@@ -583,14 +595,14 @@ func (q *cullPic) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, _ gunim.
 		// The last picture, where it was, sliding away.
 		at := q.v.fitRect().Min
 		o := q.oldRect.Add(geom.Pt(-at.X-q.slide*k, -at.Y))
-		p.Image(q.old, o, paint.ImageOpts{Opacity: 1 - k*k})
+		p.Image(q.old, pixelFit(o, q.old), paint.ImageOpts{Opacity: 1 - k*k})
 	}
 	if q.img == nil {
 		p.RRect(r.Add(geom.Pt(q.slide*(1-k), 0)), 2, paint.Solid(withAlpha(frameInk, k)))
 		return
 	}
 	in := min(1, k*1.6)
-	p.Image(q.img, r.Add(geom.Pt(q.slide*(1-k), 0)), paint.ImageOpts{Opacity: in})
+	p.Image(q.img, pixelFit(r, q.img).Add(geom.Pt(q.slide*(1-k), 0)), paint.ImageOpts{Opacity: in})
 	if len(q.tiles) == 0 || q.full.X <= 0 {
 		return
 	}
