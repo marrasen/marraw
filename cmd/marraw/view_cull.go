@@ -58,6 +58,10 @@ type cullView struct {
 	// showing, and ring the width of the ring around it.
 	strip, ring *anim.Float
 	marks       *marks
+	// slot holds the develop panel, and side is how far it has come in
+	// beside the photo, which makes room for it.
+	slot *gunim.Box
+	side *anim.Float
 }
 
 // The cull view's motions: in, out, a step's slide and a sharper
@@ -71,8 +75,12 @@ var (
 
 func newCullView(s Cull) *cullView {
 	v := &cullView{name: widget.NewLabel(""), note: widget.NewLabel(""), z: anim.NewFloat(1), c: anim.NewPoint(geom.Pt(0.5, 0.5)),
-		scale: 1, in: anim.NewFloat(0), strip: anim.NewFloat(float32(s.Index)), ring: anim.NewFloat(0)}
-	v.Add(v.z, v.c, v.in, v.strip, v.ring)
+		scale: 1, in: anim.NewFloat(0), strip: anim.NewFloat(float32(s.Index)), ring: anim.NewFloat(0),
+		slot: &gunim.Box{}, side: anim.NewFloat(0)}
+	if s.Panel {
+		v.side.Jump(1)
+	}
+	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -111,6 +119,7 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 		v.pic.sharpen(s)
 		v.marks.set(s.Rating, s.Flag, th)
 	}
+	v.side.Animate(map[bool]float32{false: 0, true: 1}[s.Panel], panelSlide)
 	v.readout(v.z.Target())
 	note := s.Note
 	if s.TileNote != "" {
@@ -156,10 +165,19 @@ const (
 	thumbGap    = 6
 )
 
-// room is where the photo goes at fit: above the filmstrip.
+// room is where the photo goes at fit: above the filmstrip, and beside
+// the develop panel as far as it has come in.
 func (v *cullView) room() geom.Rect {
-	return geom.Rc(0, 0, v.box.W, max(0, v.box.H-stripHeight)).Inset(geom.Uniform(16))
+	return geom.Rc(0, 0, max(0, v.box.W-panelWidth*v.side.Value()), max(0, v.box.H-stripHeight)).Inset(geom.Uniform(16))
 }
+
+// inPanel reports whether p is over the develop panel.
+func (v *cullView) inPanel(p geom.Point) bool {
+	return v.side.Value() > 0.01 && p.X >= v.box.W-panelWidth*v.side.Value() && p.Y < v.box.H-stripHeight
+}
+
+// Slot implements [gunim.Slotted]: the develop panel mounts here.
+func (v *cullView) Slot() gunim.Node { return v.slot }
 
 // fitRect is where the photo shows at fit.
 func (v *cullView) fitRect() geom.Rect {
@@ -294,7 +312,7 @@ func (v *cullView) askTiles(u *gunim.UI) {
 }
 
 // Children implements [gunim.Composite].
-func (v *cullView) Children() []gunim.Node { return []gunim.Node{v.hero, v.hud} }
+func (v *cullView) Children() []gunim.Node { return []gunim.Node{v.hero, v.hud, v.slot} }
 
 // Focusable implements [gunim.Focusable]: the keys step through the folder.
 func (v *cullView) Focusable() bool { return true }
@@ -327,11 +345,16 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			v.zoomTo(v.z.Target()*0.8, v.room().Center(), u)
 		case input.KeyEscape, input.KeyEnter, input.KeyG:
 			u.Send(v, LeaveCull{})
+		case input.KeyD:
+			u.Send(v, ToggleDevelop{})
 		default:
 			return false
 		}
 		return true
 	case input.Scroll:
+		if v.inPanel(e.Pos) {
+			return false
+		}
 		d := e.Notches.Y
 		if d == 0 {
 			d = -e.Delta.Y / 40
@@ -341,7 +364,7 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		}
 		return true
 	case input.PointerDown:
-		if e.Button != input.ButtonPrimary {
+		if e.Button != input.ButtonPrimary || v.inPanel(e.Pos) {
 			return false
 		}
 		for _, t := range v.stripRects() {
@@ -389,6 +412,9 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	hud := kids.At(1)
 	sz := hud.Layout(gunim.Loose(box))
 	hud.Place(geom.Pt(0, max(0, box.H-stripHeight-sz.H)))
+	slot := kids.At(2)
+	slot.Layout(gunim.Tight(geom.Sz(panelWidth, max(0, box.H-stripHeight))))
+	slot.Place(geom.Pt(box.W-panelWidth, 0))
 	if cur := v.current(); cur != nil {
 		v.ring.Animate(thumbWidth(*cur), widget.Quick.Get(f.Theme))
 		if v.ring.Value() == 0 {
@@ -445,6 +471,7 @@ func (v *cullView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	hs := hud.Size()
 	p.RRect(geom.Rc(0, box.H-stripHeight-hs.H, hs.W, hs.H), 0, paint.Solid(color.NRGBA{A: 0xa0}))
 	hud.Paint(p)
+	kids.At(2).Paint(p)
 }
 
 func withAlpha(c color.NRGBA, a float32) color.NRGBA {

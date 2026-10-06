@@ -16,9 +16,9 @@
 // marraw's keys do, Ctrl and the wheel size the tiles, and Enter or a double
 // click opens the cull view. There Left and Right step through the folder,
 // Home and End go to its ends, the same keys rate and flag, Z or Space goes
-// between fit and one to one, + and - zoom, and Escape goes back. The wheel
-// zooms about the pointer, a drag pans, and a click on the filmstrip goes
-// to that photo.
+// between fit and one to one, + and - zoom, D opens the develop panel, and
+// Escape goes back. The wheel zooms about the pointer, a drag pans, and a
+// click on the filmstrip goes to that photo.
 package main
 
 import (
@@ -55,13 +55,14 @@ func main() {
 	keys := flag.String("keys", "", "once -skim is done, press these keys, a comma-separated list such as 3,p,right,x")
 	wait := flag.Duration("wait", time.Second, "how long the window shows the grid before the script starts")
 	burst := flag.Int("burst", 0, "write this many pictures, from the last of -keys on, to -shot's name with -01, -02 and on, instead of one")
+	edit := flag.String("edit", "", "once -keys are pressed, with the develop panel open, set adjustments as the panel does, such as contrast=0.6,expEV=2, and save them")
 	zoom := flag.Bool("zoom", false, "once -skim is done, zoom to one to one with Z, and wait for the full resolution before the shot")
 	flag.Parse()
 	if *folder == "" {
 		log.Fatal("marraw: -folder is required")
 	}
 	if err := run(options{folder: *folder, connect: *connect, token: *token, dataDir: *dataDir,
-		skim: *skim, every: *every, wait: *wait, burst: *burst, shot: *shot, zoom: *zoom, keys: *keys}); err != nil {
+		skim: *skim, every: *every, wait: *wait, burst: *burst, edit: *edit, shot: *shot, zoom: *zoom, keys: *keys}); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -73,6 +74,7 @@ type options struct {
 	shot                            string
 	zoom                            bool
 	keys                            string
+	edit                            string
 }
 
 func run(o options) error {

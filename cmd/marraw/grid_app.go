@@ -97,6 +97,7 @@ func (cu *culler) openCull(i int) {
 		return
 	}
 	cu.culling = true
+	cu.dev.mounted = false
 	// With no pipeline, goTo starts one even on the photo it is on.
 	cu.at, cu.load = i, nil
 	_ = cu.c.Mount(gunim.Root, "cull", "cull", cu.state())
@@ -110,6 +111,14 @@ func (cu *culler) leaveCull() {
 	if !cu.culling {
 		return
 	}
+	if cu.dev.mounted {
+		cu.dev.mounted = false
+		_ = cu.c.Unmount("develop")
+	}
+	if cu.dev.stop != nil {
+		cu.dev.stop()
+	}
+	cu.dev.live = nil
 	cu.culling = false
 	for _, stop := range []context.CancelFunc{cu.load, cu.warm, cu.tileStop, cu.probeStop} {
 		if stop != nil {

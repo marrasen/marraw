@@ -261,6 +261,21 @@ func (tc *tileCache) put(id int64, t image.Point, img *paint.Image) {
 	}
 }
 
+// drop forgets photo id's tiles, as after an edit.
+func (tc *tileCache) drop(id int64) {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+	keep := tc.order[:0]
+	for _, k := range tc.order {
+		if k.id == id {
+			delete(tc.m, k)
+			continue
+		}
+		keep = append(keep, k)
+	}
+	tc.order = keep
+}
+
 // of is a new map of photo id's tiles, the window's to keep.
 func (tc *tileCache) of(id int64) map[image.Point]*paint.Image {
 	tc.mu.Lock()

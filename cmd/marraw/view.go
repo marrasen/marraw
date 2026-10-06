@@ -22,6 +22,8 @@ func registerViews(w *gunim.Window) {
 	gunim.RegisterPatch(w, "grid", (*gridView).photoMarked)
 	gunim.RegisterPatch(w, "grid", (*gridView).gridAt)
 	gunim.RegisterView(w, "cull", newCullView, (*cullView).show)
+	gunim.RegisterView(w, "develop", newDevelopView, (*developView).show)
+	gunim.RegisterPatch(w, "develop", (*developView).histIn)
 }
 
 // The colours and sizes the views share.
@@ -90,7 +92,7 @@ func keyZ() input.Event     { return input.KeyPress{Key: input.KeyZ} }
 // namedKeys are the keys -keys can press.
 var namedKeys = map[string]input.Key{
 	"0": input.Key0, "1": input.Key1, "2": input.Key2, "3": input.Key3, "4": input.Key4, "5": input.Key5,
-	"p": input.KeyP, "x": input.KeyX, "u": input.KeyU, "z": input.KeyZ, "space": input.KeySpace,
+	"p": input.KeyP, "x": input.KeyX, "u": input.KeyU, "z": input.KeyZ, "space": input.KeySpace, "d": input.KeyD,
 	"right": input.KeyRight, "left": input.KeyLeft, "escape": input.KeyEscape, "enter": input.KeyEnter,
 }
 

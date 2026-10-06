@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,8 @@ type (
 		Tiles map[image.Point]*paint.Image
 		// TileNote says how the tiles stand.
 		TileNote string
+		// Panel says the develop panel is open beside the photo.
+		Panel bool
 		// Rating and Flag are the photo's, and Strip the photos around it,
 		// for the filmstrip.
 		Rating int
@@ -138,6 +141,9 @@ type culler struct {
 	culling bool
 	sel     [][2]int
 	cursor  int
+
+	// dev is the develop panel's side.
+	dev developer
 }
 
 // stripReach is how many photos the filmstrip shows on each side of the
@@ -222,6 +228,14 @@ func (cu *culler) serve() error {
 				cu.openCull(in.Index)
 			case LeaveCull:
 				cu.leaveCull()
+			case ToggleDevelop:
+				cu.toggleDevelop()
+			case DevSet:
+				cu.devSet(in)
+			case DevCurve:
+				cu.devCurve(in)
+			case DevChannel:
+				cu.devChannel(in.Channel)
 			case Quit:
 				cu.c.Leave()
 			}
@@ -251,7 +265,12 @@ func (cu *culler) state() Cull {
 	if e, ok := cu.cache.get(p.ID); ok {
 		st.Img, st.Note = e.img, e.note
 	}
+	// The edit being made shows as its previews come.
+	if d := &cu.dev; d.open && d.live != nil && d.id == p.ID {
+		st.Img, st.Note = d.live, d.note
+	}
 	st.Thumb = cu.thumbs[p.ID]
+	st.Panel = cu.dev.open
 	return st
 }
 
@@ -279,6 +298,7 @@ func (cu *culler) goTo(i int) {
 	}
 	cu.tileNote = ""
 	cu.showCull()
+	cu.developFollows(i)
 	// The grid follows, so the photo flies back to its own tile.
 	cu.sel, cu.cursor = [][2]int{{i, i + 1}}, i
 	_ = cu.c.Patch("grid", GridAt{Index: i})
@@ -388,6 +408,9 @@ func (cu *culler) take(a arrival) {
 		return
 	}
 	cu.showCull()
+	if cu.dev.live == nil {
+		cu.histogramShowing()
+	}
 	if a.gen == cu.gen {
 		cu.record(note, a.rank >= rankSharp)
 	}
@@ -470,6 +493,33 @@ func (cu *culler) script(o options) {
 			}
 		}
 	}
+	for _, kv := range strings.Split(o.edit, ",") {
+		key, val, ok := strings.Cut(strings.TrimSpace(kv), "=")
+		x, err := strconv.ParseFloat(val, 64)
+		if !ok || err != nil {
+			continue
+		}
+		start := time.Now()
+		cu.do <- func() {
+			cu.devSet(DevSet{Key: key, Value: x, Commit: true})
+			// As the slider would show it, had it been dragged there.
+			if cu.dev.mounted {
+				_ = cu.c.Update("develop", cu.developState())
+			}
+		}
+		// Until the full-size preview of it shows, or a while.
+		for time.Since(start) < 20*time.Second {
+			time.Sleep(100 * time.Millisecond)
+			done := make(chan bool, 1)
+			cu.do <- func() { done <- !cu.dev.busy && !cu.dev.want && cu.dev.live != nil }
+			if <-done {
+				break
+			}
+		}
+		note := make(chan string, 1)
+		cu.do <- func() { note <- cu.dev.note }
+		fmt.Fprintf(os.Stderr, "edit: %s=%v shown after %d ms (%s)\n", key, x, time.Since(start).Milliseconds(), <-note)
+	}
 	if zoom {
 		start := time.Now()
 		cu.c.Input(cu.ctx, keyZ())
@@ -505,7 +555,7 @@ func (cu *culler) script(o options) {
 			log.Print(err)
 		}
 	}
-	if n > 0 || zoom || keys != "" || shot != "" {
+	if n > 0 || zoom || keys != "" || shot != "" || o.edit != "" {
 		cu.do <- func() {
 			cu.report()
 			cu.c.Leave()
@@ -746,8 +796,20 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 			if pp.Rating != nil || pp.Flag != nil {
 				_ = cu.c.Patch("grid", PhotoMarked{Index: i, Rating: p.Rating, Flag: string(p.Flag)})
 			}
+			if pp.EditHash != nil && *pp.EditHash != p.EditHash && cu.dev.saved[p.ID] {
+				// The panel's own save, whose pixels show already.
+				delete(cu.dev.saved, p.ID)
+				p.EditHash = *pp.EditHash
+				delete(cu.thumbs, p.ID)
+				cu.loadThumb(cu.ctx, i)
+			}
 			if pp.EditHash != nil && *pp.EditHash != p.EditHash {
 				p.EditHash = *pp.EditHash
+				cu.tiles.drop(p.ID)
+				if cu.dev.open && cu.dev.id == p.ID {
+					// Edited elsewhere: the panel takes the new edit.
+					cu.loadEdit(i)
+				}
 				cu.cache.drop(p.ID)
 				delete(cu.thumbs, p.ID)
 				cu.loadThumb(cu.ctx, i)

@@ -45,6 +45,14 @@ dragging pans; the zoom stays as you step, to compare a burst. Escape
 goes back to the grid. The corner says which rendition shows, how long
 it took, and how the full-resolution tiles stand.
 
+D opens the develop panel beside the photo: the histogram, the main
+adjustments and the tone curve. Drag a slider to see the photo change
+live; letting go saves the edit, as marraw does. Shift drags finely, a
+double click on a slider or a click on its reset mark sends it back. On
+the curve, a click adds a point, a drag moves it and a double click
+removes it. Edits are saved next to the photos, so try it on these
+copies only.
+
 Every action has a short animation: the tiles growing in, the photo
 flying out of its tile and back, stars and flags changing. Tell me if
 any of them feels slow or gets in the way.
