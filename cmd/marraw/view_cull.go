@@ -12,7 +12,6 @@ import (
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
-	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
 )
 
@@ -68,13 +67,11 @@ type cullView struct {
 	shape *anim.Size
 	// trail follows a drag, for a flick's speed; fling is the glide's
 	// speed on screen, in pixels a second, while flinging, and glided says
-	// a glide came to rest and the tiles there are to be asked for. th is
-	// the theme, for the springs a glide ends with.
+	// a glide came to rest and the tiles there are to be asked for.
 	trail    anim.Trail
 	fling    geom.Point
 	flinging bool
 	glided   bool
-	th       *theme.Live
 }
 
 // The cull view's motions: in, out, a step's slide and a sharper
@@ -272,17 +269,28 @@ func (v *cullView) origin(z float32, c geom.Point) geom.Point {
 	return geom.Pt(mid.X-c.X*f.W*s, mid.Y-c.Y*f.H*s)
 }
 
-// clampCentre keeps the image over the view at zoom z: centred while it is
-// smaller, and with no gap at an edge once it is larger.
+// panSlack is how far past the view's edge, as a share of the view, the
+// photo may be pushed, as in marraw's loupe: anywhere from edge to edge
+// while it is smaller than the view, and this far beyond, so it can always
+// be moved clear of what lies over it.
+const panSlack = 0.4
+
+// clampCentre keeps the photo at zoom z where it may be pushed: its edges
+// no further past the view's than panSlack of the view, whatever its size.
+// Anywhere inside, it stays where it is put.
 func (v *cullView) clampCentre(z float32, c geom.Point) geom.Point {
 	f, s, rs := v.full(), v.fit()*z, v.room().Size()
-	axis := func(c, length, room float32) float32 {
+	axis := func(c, length, view float32) float32 {
 		w := length * s
-		if w <= room {
+		if w <= 0 {
 			return 0.5
 		}
-		half := room / 2 / w
-		return max(half, min(c, 1-half))
+		// The photo's near edge, from the view's, at most slack past it,
+		// as React's scroll slack has it.
+		slack := view*panSlack + max(0, view-w)
+		lo, hi := view-w-slack, slack
+		// c puts the photo's near edge at view/2 - c*w.
+		return max((view/2-hi)/w, min(c, (view/2-lo)/w))
 	}
 	return geom.Pt(axis(c.X, f.W, rs.W), axis(c.Y, f.H, rs.H))
 }
@@ -306,7 +314,12 @@ func (v *cullView) zoomTo(z float32, at geom.Point, u *gunim.UI) {
 // toggle goes between fit and one to one, about at.
 func (v *cullView) toggle(at geom.Point, u *gunim.UI) {
 	if v.z.Target() > 1.01 {
-		v.zoomTo(1, v.room().Center(), u)
+		// Back to fit, in the middle.
+		v.flinging = false
+		v.z.Animate(1, widget.Quick.Get(u.Theme()))
+		v.c.Animate(geom.Pt(0.5, 0.5), widget.Quick.Get(u.Theme()))
+		v.readout(1)
+		v.askTiles(u)
 		return
 	}
 	v.zoomTo(v.oneToOne(), at, u)
@@ -429,7 +442,7 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		if v.dragging {
 			v.dragging = false
 			// A flick sends the photo gliding on, slowing to a stop.
-			if fl := v.trail.Velocity(e.Time); v.z.Value() > 1.01 && math.Hypot(float64(fl.X), float64(fl.Y)) > 60 {
+			if fl := v.trail.Velocity(e.Time); math.Hypot(float64(fl.X), float64(fl.Y)) > 60 {
 				v.fling, v.flinging = fl, true
 				u.Invalidate()
 				return true
@@ -441,13 +454,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 	return false
 }
 
-// The glide of a flick: its speed falls to a third in a third of a
-// second, as a fling does in gunim's scroll views, and past the photo's
-// edge in a twentieth, before it springs back.
-const (
-	glideTau = 0.33
-	edgeTau  = 0.05
-)
+// glideTau is how a flick's glide slows: its speed falls to a third in a
+// third of a second, as a fling does in gunim's scroll views.
+const glideTau = 0.33
 
 // Step implements [gunim.Animator]: the springs, and a flick's glide.
 func (v *cullView) Step(dt time.Duration) bool {
@@ -463,24 +472,18 @@ func (v *cullView) Step(dt time.Duration) bool {
 	f, s := v.full(), v.fit()*z
 	c := v.c.Value()
 	c = geom.Pt(c.X-move.X/(f.W*s), c.Y-move.Y/(f.H*s))
+	// At the furthest it may go, it stops that way, and stays.
 	in := v.clampCentre(z, c)
-	edge := float32(math.Exp(-sec / edgeTau))
-	if c.X != in.X {
-		v.fling.X *= edge
+	if in.X != c.X {
+		v.fling.X = 0
 	}
-	if c.Y != in.Y {
-		v.fling.Y *= edge
+	if in.Y != c.Y {
+		v.fling.Y = 0
 	}
-	v.c.Jump(c)
+	v.c.Jump(in)
 	if math.Hypot(float64(v.fling.X), float64(v.fling.Y)) < 20 {
-		// At rest: back inside the edges with a spring, and the tiles of
-		// where it came to.
+		// At rest: the tiles of where it came to.
 		v.flinging, v.glided = false, true
-		if v.th != nil {
-			v.c.Animate(in, widget.Settle.Get(v.th))
-		} else {
-			v.c.Jump(in)
-		}
 	}
 	return true
 }
@@ -489,7 +492,7 @@ func (v *cullView) Step(dt time.Duration) bool {
 // scales as it paints, and the readout in the lower left corner.
 func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
-	v.box, v.scale, v.th = box, max(f.Scale, 0.1), f.Theme
+	v.box, v.scale = box, max(f.Scale, 0.1)
 	if v.glided {
 		v.glided = false
 		v.askTilesBy(f.Send)
