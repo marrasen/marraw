@@ -411,6 +411,9 @@ func (v *cullView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	in := min(max(v.in.Value(), 0), 1)
 	p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(withAlpha(backdrop, in)))
 	func() {
+		// The picture shows above the filmstrip, and a flight in lands
+		// inside the same, so a zoom during it never covers the chrome.
+		defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(0, 0, box.W, max(0, box.H-stripHeight)), Opacity: 1, Clip: true})()
 		if v.leaving && in < 0.999 {
 			// No tile to fly back to: the picture fades with the rest.
 			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: in})()

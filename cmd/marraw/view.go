@@ -90,7 +90,7 @@ func keyZ() input.Event     { return input.KeyPress{Key: input.KeyZ} }
 // namedKeys are the keys -keys can press.
 var namedKeys = map[string]input.Key{
 	"0": input.Key0, "1": input.Key1, "2": input.Key2, "3": input.Key3, "4": input.Key4, "5": input.Key5,
-	"p": input.KeyP, "x": input.KeyX, "u": input.KeyU, "z": input.KeyZ,
+	"p": input.KeyP, "x": input.KeyX, "u": input.KeyU, "z": input.KeyZ, "space": input.KeySpace,
 	"right": input.KeyRight, "left": input.KeyLeft, "escape": input.KeyEscape, "enter": input.KeyEnter,
 }
 
