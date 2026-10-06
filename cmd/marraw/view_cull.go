@@ -419,7 +419,7 @@ func (v *cullView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 		// starts whole and a zoom never covers the strip.
 		bottom := box.H - stripHeight*in
 		defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(0, 0, box.W, max(0, bottom)), Opacity: 1, Clip: true})()
-		if v.leaving && in < 0.999 {
+		if v.leaving && in < 0.999 && !v.hero.Flying() {
 			// No tile to fly back to: the picture fades with the rest.
 			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: in})()
 		}
