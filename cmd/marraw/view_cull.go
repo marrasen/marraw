@@ -78,6 +78,9 @@ func newCullView(s Cull) *cullView {
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
 	v.pic = newCullPic(v, s)
 	v.hero = widget.NewHero(heroTag(s.ID), v.pic)
+	// It flies in under the readout and the marks, which this view draws
+	// over it, not above the whole window.
+	v.hero.InPlace = true
 	v.marks = newMarks(&v.Group, s.Rating, s.Flag)
 	v.st = s
 	return v
@@ -411,9 +414,11 @@ func (v *cullView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	in := min(max(v.in.Value(), 0), 1)
 	p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(withAlpha(backdrop, in)))
 	func() {
-		// The picture shows above the filmstrip, and a flight in lands
-		// inside the same, so a zoom during it never covers the chrome.
-		defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(0, 0, box.W, max(0, box.H-stripHeight)), Opacity: 1, Clip: true})()
+		// The picture shows above the filmstrip, whose top edge it follows
+		// as the strip slides in, so a flight from a tile low in the grid
+		// starts whole and a zoom never covers the strip.
+		bottom := box.H - stripHeight*in
+		defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(0, 0, box.W, max(0, bottom)), Opacity: 1, Clip: true})()
 		if v.leaving && in < 0.999 {
 			// No tile to fly back to: the picture fades with the rest.
 			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: in})()
