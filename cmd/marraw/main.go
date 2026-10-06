@@ -32,6 +32,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"github.com/marrasen/aprot/client"
@@ -115,10 +116,10 @@ func run(o options) error {
 	if len(photos) == 0 {
 		return fmt.Errorf("%s has no photos", path)
 	}
-	log.Printf("marraw: %d photos in %s, backend at %s", len(photos), path, host)
+	log.Printf("marraw: build %s; %d photos in %s, backend at %s", build(), len(photos), path, host)
 
 	err = gunim.Main(ctx, func(a *gunim.App) error {
-		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build)", Size: geom.Sz(1400, 900), Root: widget.NewSurface()})
+		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: geom.Sz(1400, 900), Root: widget.NewSurface()})
 		if err != nil {
 			return err
 		}
@@ -143,4 +144,28 @@ func randomToken() string {
 		panic(err)
 	}
 	return hex.EncodeToString(b)
+}
+
+// build is the commit this program was built from, as Go stamps it, with
+// "+" after it for changes not committed, so a test build says what it is.
+func build() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	var rev, dirty string
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.modified":
+			if s.Value == "true" {
+				dirty = "+"
+			}
+		}
+	}
+	if rev == "" {
+		return "unknown"
+	}
+	return rev[:min(7, len(rev))] + dirty
 }
