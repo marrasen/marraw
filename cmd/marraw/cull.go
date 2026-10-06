@@ -136,10 +136,12 @@ type arrival struct {
 	got        got
 }
 
-// timing is how long one step took to show pixels, and to show sharp ones.
+// timing is how long one step took to show pixels, and to show sharp ones;
+// sharpSeen says it did, as at once from the cache, where sharp is 0.
 type timing struct {
 	first, sharp time.Duration
 	firstWhat    string
+	sharpSeen    bool
 }
 
 func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im *images, folder int64, photos []marrawclient.Photo) *culler {
@@ -403,8 +405,8 @@ func (cu *culler) record(what string, sharp bool) {
 	if t.firstWhat == "" {
 		t.first, t.firstWhat = d, what
 	}
-	if sharp && t.sharp == 0 {
-		t.sharp = d
+	if sharp && !t.sharpSeen {
+		t.sharp, t.sharpSeen = d, true
 	}
 }
 
@@ -467,7 +469,7 @@ func (cu *culler) report() {
 			continue
 		}
 		firsts = append(firsts, t.first)
-		if t.sharp > 0 {
+		if t.sharpSeen {
 			sharps = append(sharps, t.sharp)
 		}
 		lines = append(lines, fmt.Sprintf("step %2d: first %4d ms (%s), sharp %4d ms", i, t.first.Milliseconds(), t.firstWhat, t.sharp.Milliseconds()))
