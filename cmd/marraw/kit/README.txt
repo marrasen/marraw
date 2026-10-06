@@ -32,13 +32,22 @@ Run anyway. When it is done, send results.zip.
 
     .\bin\marraw-cull.exe -folder ".\photos\2017-03-24 Flygtur (Canon CR2)" -data-dir $env:TEMP\marraw-cull-test-data
 
-Left and Right step through the folder, Home and End go to its ends, and
-a click on the filmstrip goes to that photo. 0 to 5 rate it, P picks, X
-rejects and U clears the flag, as in marraw. Z, Space or a double click
-goes between fit and 100%, + and - zoom in steps, the wheel zooms about
-the pointer, and dragging pans; the zoom stays as you step, to compare a
-burst. Escape quits. The corner says which rendition shows, how long it
-took, and how the full-resolution tiles stand.
+It opens on the library grid. The arrow keys, a click, Ctrl and Shift
+select; Ctrl and the wheel change the tiles' size. 0 to 5 rate the photos
+selected, P picks, X rejects and U clears the flag, as in marraw. Enter
+or a double click opens a photo in the cull view.
+
+In the cull view, Left and Right step through the folder, Home and End
+go to its ends, and a click on the filmstrip goes to that photo. The
+same keys rate and flag it. Z, Space or a double click goes between fit
+and 100%, + and - zoom in steps, the wheel zooms about the pointer, and
+dragging pans; the zoom stays as you step, to compare a burst. Escape
+goes back to the grid. The corner says which rendition shows, how long
+it took, and how the full-resolution tiles stand.
+
+Every action has a short animation: the tiles growing in, the photo
+flying out of its tile and back, stars and flags changing. Tell me if
+any of them feels slow or gets in the way.
 Worth noticing:
 
   - Does stepping ever freeze or stutter, even for a moment?

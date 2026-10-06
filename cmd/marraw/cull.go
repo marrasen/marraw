@@ -25,8 +25,11 @@ type (
 	// pixels of it so far, and what they are.
 	Cull struct {
 		Index, Total int
+		ID           int64
 		Name         string
 		Img          *paint.Image
+		// Thumb is the photo's small picture, to show until Img comes.
+		Thumb *paint.Image
 		// Aspect is the photo's width over its height, for its frame before
 		// any pixels arrive.
 		Aspect float32
@@ -81,13 +84,16 @@ const dwell = 350 * time.Millisecond
 // and the pipeline that brings each photo's pixels in without ever making
 // navigation wait on a RAW decode.
 type culler struct {
-	ctx    context.Context
-	c      gunim.Client
-	api    *marrawclient.Client
-	im     *images
-	folder int64
-	photos []marrawclient.Photo
-	at     int
+	ctx        context.Context
+	c          gunim.Client
+	api        *marrawclient.Client
+	im         *images
+	folder     int64
+	folderPath string
+	photos     []marrawclient.Photo
+	// index is where each photo is in photos, by its ID.
+	index map[int64]int
+	at    int
 
 	// cache holds decoded pixels by photo, the best of each so far.
 	cache *pixelCache
@@ -117,11 +123,21 @@ type culler struct {
 	probeStop context.CancelFunc
 	tileNote  string
 
-	// thumbs are the filmstrip's pictures by photo, and thumbsWanted those
-	// asked for and not in yet.
+	// thumbs are the small pictures of the grid and the filmstrip by
+	// photo, the last thumbKeep of them, and thumbsWanted those asked for
+	// and not in yet.
 	thumbs       map[int64]*paint.Image
+	thumbOrder   []int64
 	thumbsWanted map[int64]bool
 	thumbSlots   chan struct{}
+	// gridStop cancels the grid's fetches when it scrolls on.
+	gridStop context.CancelFunc
+
+	// culling says the cull view is open over the grid; sel and cursor are
+	// the grid's selection.
+	culling bool
+	sel     [][2]int
+	cursor  int
 }
 
 // stripReach is how many photos the filmstrip shows on each side of the
@@ -144,19 +160,24 @@ type timing struct {
 	sharpSeen    bool
 }
 
-func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im *images, folder int64, photos []marrawclient.Photo) *culler {
+func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im *images, folder int64, folderPath string, photos []marrawclient.Photo) *culler {
 	sort.SliceStable(photos, func(i, j int) bool { return photos[i].TakenAt < photos[j].TakenAt })
-	return &culler{ctx: ctx, c: c, api: api, im: im, folder: folder, photos: photos,
+	index := make(map[int64]int, len(photos))
+	for i, p := range photos {
+		index[p.ID] = i
+	}
+	return &culler{index: index, ctx: ctx, c: c, api: api, im: im, folder: folder, folderPath: folderPath, photos: photos,
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
 		tiles: newTileCache(48), tileWarm: map[int64]bool{},
-		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 4)}
+		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), cursor: -1}
 }
 
 func (cu *culler) serve() error {
-	if err := cu.c.Mount(gunim.Root, "cull", "cull", cu.state()); err != nil {
+	// The library grid is always there; the cull view opens over it.
+	if err := cu.c.Mount(gunim.Root, "grid", "grid", cu.gridState(), "grid"); err != nil {
 		return err
 	}
-	_ = cu.c.Focus("cull")
+	_ = cu.c.Focus("grid")
 	// Ratings, flags and edits made elsewhere, as in the Electron app on
 	// the same backend, show here as they happen.
 	stopPatches := cu.api.OnPhotoPatchEvent(func(ev marrawclient.PhotoPatchEvent) {
@@ -166,7 +187,6 @@ func (cu *culler) serve() error {
 		}
 	})
 	defer stopPatches()
-	cu.goTo(0)
 	for {
 		select {
 		case <-cu.ctx.Done():
@@ -194,6 +214,14 @@ func (cu *culler) serve() error {
 				cu.rate(in.Stars)
 			case Mark:
 				cu.mark(marrawclient.Flag(in.Flag))
+			case NeedThumbs:
+				cu.needThumbs(in)
+			case Selected:
+				cu.sel, cu.cursor = in.Runs, in.Cursor
+			case OpenCull:
+				cu.openCull(in.Index)
+			case LeaveCull:
+				cu.leaveCull()
 			case Quit:
 				cu.c.Leave()
 			}
@@ -209,7 +237,7 @@ func (cu *culler) state() Cull {
 	if s.Y > 0 {
 		aspect = float32(s.X) / float32(s.Y)
 	}
-	st := Cull{Index: cu.at, Total: len(cu.photos), Name: p.FileName, Aspect: aspect, Full: s,
+	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Aspect: aspect, Full: s,
 		Tiles: cu.tiles.of(p.ID), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag)}
 	for i := max(0, cu.at-stripReach); i <= min(len(cu.photos)-1, cu.at+stripReach); i++ {
 		q := cu.photos[i]
@@ -223,6 +251,7 @@ func (cu *culler) state() Cull {
 	if e, ok := cu.cache.get(p.ID); ok {
 		st.Img, st.Note = e.img, e.note
 	}
+	st.Thumb = cu.thumbs[p.ID]
 	return st
 }
 
@@ -230,7 +259,7 @@ func (cu *culler) state() Cull {
 // for the rest starts, and the old one stops.
 func (cu *culler) goTo(i int) {
 	i = max(0, min(i, len(cu.photos)-1))
-	if i == cu.at && cu.load != nil {
+	if !cu.culling || i == cu.at && cu.load != nil {
 		return
 	}
 	cu.at, cu.gen, cu.stepped = i, cu.gen+1, time.Now()
@@ -249,7 +278,10 @@ func (cu *culler) goTo(i int) {
 		cu.probing, cu.probeStop = 0, nil
 	}
 	cu.tileNote = ""
-	_ = cu.c.Update("cull", cu.state())
+	cu.showCull()
+	// The grid follows, so the photo flies back to its own tile.
+	cu.sel, cu.cursor = [][2]int{{i, i + 1}}, i
+	_ = cu.c.Patch("grid", GridAt{Index: i})
 	cu.loadStrip()
 	p := cu.photos[i]
 	// Where the user is, so the backend's pre-render works outward from
@@ -353,7 +385,7 @@ func (cu *culler) take(a arrival) {
 	if a.index != cu.at {
 		return
 	}
-	_ = cu.c.Update("cull", cu.state())
+	cu.showCull()
 	if a.gen == cu.gen {
 		cu.record(note, a.rank >= rankSharp)
 	}
@@ -410,19 +442,30 @@ func (cu *culler) record(what string, sharp bool) {
 	}
 }
 
-// script steps right n times, every apart, then reports the timings and
-// writes a picture of the window to shot, for measuring without hands.
-func (cu *culler) script(n int, every time.Duration, shot string, zoom bool, keys string) {
-	time.Sleep(time.Second)
+// script steps right o.skim times, o.every apart, then reports the timings
+// and writes a picture of the window to o.shot, for measuring without
+// hands.
+func (cu *culler) script(o options) {
+	n, every, shot, zoom, keys := o.skim, o.every, o.shot, o.zoom, o.keys
+	time.Sleep(o.wait)
+	if n > 0 || zoom {
+		// Into the cull view on the first photo, as Enter on it does.
+		cu.do <- func() { cu.openCull(0) }
+		time.Sleep(time.Second)
+	}
 	for range n {
 		cu.c.Input(cu.ctx, keyRight())
 		time.Sleep(every)
 	}
 	time.Sleep(time.Second)
-	for _, k := range strings.Split(keys, ",") {
+	pressed := strings.Split(keys, ",")
+	for i, k := range pressed {
 		if key, ok := namedKeys[strings.TrimSpace(strings.ToLower(k))]; ok {
 			cu.c.Input(cu.ctx, input.KeyPress{Key: key})
-			time.Sleep(300 * time.Millisecond)
+			// A burst starts with the last key, to catch what it animates.
+			if i < len(pressed)-1 || o.burst == 0 {
+				time.Sleep(300 * time.Millisecond)
+			}
 		}
 	}
 	if zoom {
@@ -446,12 +489,21 @@ func (cu *culler) script(n int, every time.Duration, shot string, zoom bool, key
 		fmt.Fprintf(os.Stderr, "zoom: tiles in view after %d ms (%s)\n", took.Milliseconds(), <-done)
 		time.Sleep(500 * time.Millisecond)
 	}
-	if shot != "" {
+	if shot != "" && o.burst > 0 {
+		// A run of pictures, name-01.png on, to see the motion.
+		base := strings.TrimSuffix(shot, ".png")
+		for i := range o.burst {
+			if err := writeShot(cu.ctx, cu.c, fmt.Sprintf("%s-%02d.png", base, i+1)); err != nil {
+				log.Print(err)
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+	} else if shot != "" {
 		if err := writeShot(cu.ctx, cu.c, shot); err != nil {
 			log.Print(err)
 		}
 	}
-	if n > 0 || zoom || keys != "" {
+	if n > 0 || zoom || keys != "" || shot != "" {
 		cu.do <- func() {
 			cu.report()
 			cu.c.Leave()
@@ -537,69 +589,140 @@ func (pc *pixelCache) put(id int64, e cacheEntry) {
 	}
 }
 
-// loadStrip fetches the filmstrip's pictures not fetched yet: the 256 at any
-// edit state, never decoding a RAW, a few at a time, nearest first.
+// loadStrip fetches the filmstrip's pictures not fetched yet, nearest
+// first.
 func (cu *culler) loadStrip() {
 	for d := 0; d <= stripReach; d++ {
 		for _, i := range []int{cu.at + d, cu.at - d} {
-			if i < 0 || i >= len(cu.photos) {
-				continue
+			if i >= 0 && i < len(cu.photos) {
+				cu.loadThumb(cu.ctx, i)
 			}
-			p := cu.photos[i]
-			if cu.thumbs[p.ID] != nil || cu.thumbsWanted[p.ID] {
-				continue
-			}
-			cu.thumbsWanted[p.ID] = true
-			go func() {
-				select {
-				case cu.thumbSlots <- struct{}{}:
-				case <-cu.ctx.Done():
-					return
-				}
-				g, err := cu.im.get(cu.ctx, p, want{level: "256", stale: true, fast: true})
-				<-cu.thumbSlots
-				select {
-				case cu.do <- func() {
-					delete(cu.thumbsWanted, p.ID)
-					if err != nil {
-						return
-					}
-					cu.thumbs[p.ID] = g.img
-					if i >= cu.at-stripReach && i <= cu.at+stripReach {
-						_ = cu.c.Update("cull", cu.state())
-					}
-				}:
-				case <-cu.ctx.Done():
-				}
-			}()
 		}
 	}
 }
 
-// rate gives the photo showing stars, here at once and on the backend.
-func (cu *culler) rate(stars int) {
-	p := &cu.photos[cu.at]
-	p.Rating = max(0, min(stars, 5))
-	_ = cu.c.Update("cull", cu.state())
-	id, r := p.ID, p.Rating
+// thumbKeep is how many small pictures are kept.
+const thumbKeep = 800
+
+// loadThumb fetches photo i's small picture unless it is in or on its way:
+// the 256 at any edit state, never decoding a RAW, a few at a time. It
+// shows in the grid and the filmstrip as it comes.
+func (cu *culler) loadThumb(ctx context.Context, i int) {
+	p := cu.photos[i]
+	if cu.thumbs[p.ID] != nil || cu.thumbsWanted[p.ID] {
+		return
+	}
+	cu.thumbsWanted[p.ID] = true
 	go func() {
-		if err := cu.api.Library.SetRating(cu.ctx, []int64{id}, r); err != nil {
+		var g got
+		err := ctx.Err()
+		if err == nil {
+			select {
+			case cu.thumbSlots <- struct{}{}:
+				g, err = cu.im.get(ctx, p, want{level: "256", stale: true, fast: true})
+				<-cu.thumbSlots
+			case <-ctx.Done():
+				err = ctx.Err()
+			}
+		}
+		select {
+		case cu.do <- func() {
+			delete(cu.thumbsWanted, p.ID)
+			if err != nil {
+				return
+			}
+			cu.keepThumb(p.ID, g.img)
+			_ = cu.c.Patch("grid", ThumbIn{Index: i, Img: g.img})
+			if cu.culling && i >= cu.at-stripReach && i <= cu.at+stripReach {
+				cu.showCull()
+			}
+		}:
+		case <-cu.ctx.Done():
+		}
+	}()
+}
+
+// keepThumb keeps id's small picture, letting the oldest go, in the grid
+// too.
+func (cu *culler) keepThumb(id int64, img *paint.Image) {
+	if _, ok := cu.thumbs[id]; !ok {
+		cu.thumbOrder = append(cu.thumbOrder, id)
+	}
+	cu.thumbs[id] = img
+	for len(cu.thumbOrder) > thumbKeep {
+		gone := cu.thumbOrder[0]
+		delete(cu.thumbs, gone)
+		cu.thumbOrder = cu.thumbOrder[1:]
+		_ = cu.c.Patch("grid", ThumbIn{Index: cu.index[gone]})
+	}
+}
+
+// rate gives stars: to the photo showing, or to the grid's selection,
+// here at once and on the backend.
+func (cu *culler) rate(stars int) {
+	stars = max(0, min(stars, 5))
+	idx := cu.targets()
+	var ids []int64
+	for _, i := range idx {
+		cu.photos[i].Rating = stars
+		ids = append(ids, cu.photos[i].ID)
+		cu.marked(i)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	go func() {
+		if err := cu.api.Library.SetRating(cu.ctx, ids, stars); err != nil {
 			log.Printf("rate: %v", err)
 		}
 	}()
 }
 
-// mark flags the photo showing, here at once and on the backend.
+// mark flags the photo showing, or the grid's selection, here at once and
+// on the backend.
 func (cu *culler) mark(f marrawclient.Flag) {
-	p := &cu.photos[cu.at]
-	p.Flag = f
-	_ = cu.c.Update("cull", cu.state())
-	id := p.ID
+	idx := cu.targets()
+	var ids []int64
+	for _, i := range idx {
+		cu.photos[i].Flag = f
+		ids = append(ids, cu.photos[i].ID)
+		cu.marked(i)
+	}
+	if len(ids) == 0 {
+		return
+	}
 	go func() {
-		if err := cu.api.Library.SetFlag(cu.ctx, []int64{id}, f); err != nil {
+		if err := cu.api.Library.SetFlag(cu.ctx, ids, f); err != nil {
 			log.Printf("flag: %v", err)
 		}
 	}()
+}
+
+// targets are the photos a rating or a flag goes to: the one showing, or
+// the grid's selection, or the photo its keyboard is on.
+func (cu *culler) targets() []int {
+	if cu.culling {
+		return []int{cu.at}
+	}
+	var out []int
+	for _, r := range cu.sel {
+		for i := r[0]; i < r[1] && i < len(cu.photos); i++ {
+			out = append(out, i)
+		}
+	}
+	if len(out) == 0 && cu.cursor >= 0 && cu.cursor < len(cu.photos) {
+		out = append(out, cu.cursor)
+	}
+	return out
+}
+
+// marked shows photo i's rating and flag wherever it shows.
+func (cu *culler) marked(i int) {
+	p := cu.photos[i]
+	_ = cu.c.Patch("grid", PhotoMarked{Index: i, Rating: p.Rating, Flag: string(p.Flag)})
+	if cu.culling && i >= cu.at-stripReach && i <= cu.at+stripReach {
+		cu.showCull()
+	}
 }
 
 // patched takes changes to photos made anywhere: their ratings and flags,
@@ -618,11 +741,15 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 			if pp.Flag != nil {
 				p.Flag = *pp.Flag
 			}
+			if pp.Rating != nil || pp.Flag != nil {
+				_ = cu.c.Patch("grid", PhotoMarked{Index: i, Rating: p.Rating, Flag: string(p.Flag)})
+			}
 			if pp.EditHash != nil && *pp.EditHash != p.EditHash {
 				p.EditHash = *pp.EditHash
 				cu.cache.drop(p.ID)
 				delete(cu.thumbs, p.ID)
-				if i == cu.at {
+				cu.loadThumb(cu.ctx, i)
+				if cu.culling && i == cu.at {
 					// Again, with the new edit's pixels.
 					cu.load = nil
 					cu.goTo(i)
@@ -634,7 +761,7 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 		}
 	}
 	if changed {
-		_ = cu.c.Update("cull", cu.state())
+		cu.showCull()
 		cu.loadStrip()
 	}
 }

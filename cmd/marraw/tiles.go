@@ -184,7 +184,7 @@ func (cu *culler) fetchTiles(p marrawclient.Photo) {
 				case cu.do <- func() {
 					cu.tiles.put(p.ID, t, img)
 					if cu.at == at {
-						_ = cu.c.Update("cull", cu.state())
+						cu.showCull()
 					}
 				}:
 				case <-ctx.Done():
@@ -220,7 +220,7 @@ func (cu *culler) say(gen int, note string) {
 
 func (cu *culler) setTileNote(note string) {
 	cu.tileNote = note
-	_ = cu.c.Update("cull", cu.state())
+	cu.showCull()
 }
 
 // tileCache keeps the tiles fetched last, of any photo.
