@@ -83,11 +83,32 @@ func (cu *culler) wantTiles(w WantTiles) {
 		return
 	}
 	p := cu.photos[cu.at]
-	if !cu.tileWarm[p.ID] {
+	if cu.editing(p.ID) {
+		// The edit under way is not the one the tiles would show; they
+		// come once it is saved.
+		cu.stopTiles()
+		return
+	}
+	if !cu.tileWarm[tileSet(p)] {
 		cu.probeTiles(p)
 		return
 	}
 	cu.fetchTiles(p)
+}
+
+// tileSet names p's tiles as its edit has them.
+func tileSet(p marrawclient.Photo) string { return fmt.Sprint(p.ID, "|", p.EditHash) }
+
+// stopTiles stops the tile fetches and the probe under way.
+func (cu *culler) stopTiles() {
+	if cu.tileStop != nil {
+		cu.tileStop()
+		cu.tileStop = nil
+	}
+	if cu.probeStop != nil {
+		cu.probeStop()
+		cu.probing, cu.probeStop = 0, nil
+	}
 }
 
 // probeTiles finds whether p's tile set is rendered, and renders it once
@@ -129,7 +150,7 @@ func (cu *culler) probeTiles(p marrawclient.Photo) {
 				}
 				return
 			}
-			cu.tileWarm[p.ID] = true
+			cu.tileWarm[tileSet(p)] = true
 			note := "tiles: rendered already"
 			if rendered {
 				note = fmt.Sprintf("tiles: full resolution rendered in %d ms", took.Milliseconds())
@@ -159,7 +180,7 @@ func (cu *culler) fetchTiles(p marrawclient.Photo) {
 	for ty := r.Min.Y; ty < r.Max.Y; ty++ {
 		for tx := r.Min.X; tx < r.Max.X; tx++ {
 			t := image.Pt(tx, ty)
-			if !cu.tiles.has(p.ID, t) {
+			if !cu.tiles.has(p.ID, p.EditHash, t) {
 				need = append(need, t)
 			}
 		}
@@ -182,7 +203,9 @@ func (cu *culler) fetchTiles(p marrawclient.Photo) {
 				}
 				select {
 				case cu.do <- func() {
-					cu.tiles.put(p.ID, t, img)
+					// Under the edit it shows: a tile of an edit since
+					// replaced never shows over the new one.
+					cu.tiles.put(p.ID, p.EditHash, t, img)
 					if cu.at == at {
 						cu.showCull()
 					}
@@ -232,25 +255,26 @@ type tileCache struct {
 }
 
 type tileKey struct {
-	id int64
-	t  image.Point
+	id   int64
+	hash string
+	t    image.Point
 }
 
 func newTileCache(limit int) *tileCache {
 	return &tileCache{limit: limit, m: map[tileKey]*paint.Image{}}
 }
 
-func (tc *tileCache) has(id int64, t image.Point) bool {
+func (tc *tileCache) has(id int64, hash string, t image.Point) bool {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
-	_, ok := tc.m[tileKey{id, t}]
+	_, ok := tc.m[tileKey{id, hash, t}]
 	return ok
 }
 
-func (tc *tileCache) put(id int64, t image.Point, img *paint.Image) {
+func (tc *tileCache) put(id int64, hash string, t image.Point, img *paint.Image) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
-	k := tileKey{id, t}
+	k := tileKey{id, hash, t}
 	if _, ok := tc.m[k]; !ok {
 		tc.order = append(tc.order, k)
 	}
@@ -276,13 +300,13 @@ func (tc *tileCache) drop(id int64) {
 	tc.order = keep
 }
 
-// of is a new map of photo id's tiles, the window's to keep.
-func (tc *tileCache) of(id int64) map[image.Point]*paint.Image {
+// of is a new map of photo id's tiles of edit hash, the window's to keep.
+func (tc *tileCache) of(id int64, hash string) map[image.Point]*paint.Image {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	out := map[image.Point]*paint.Image{}
 	for k, img := range tc.m {
-		if k.id == id {
+		if k.id == id && k.hash == hash {
 			out[k.t] = img
 		}
 	}

@@ -119,7 +119,7 @@ type culler struct {
 	// of the photo showing's.
 	tiles    *tileCache
 	tileWant WantTiles
-	tileWarm map[int64]bool
+	tileWarm map[string]bool
 	// tileStop cancels the tile fetches under way; probing is the photo
 	// whose tiles are being looked for, or rendered, and probeStop stops
 	// that.
@@ -176,7 +176,7 @@ func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im
 	}
 	return &culler{index: index, aspects: map[int64]float32{}, ctx: ctx, c: c, api: api, im: im, folder: folder, folderPath: folderPath, photos: photos,
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
-		tiles: newTileCache(48), tileWarm: map[int64]bool{},
+		tiles: newTileCache(48), tileWarm: map[string]bool{},
 		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), cursor: -1}
 }
 
@@ -186,15 +186,12 @@ func (cu *culler) serve() error {
 		return err
 	}
 	_ = cu.c.Focus("grid")
-	// Ratings, flags and edits made elsewhere, as in the Electron app on
-	// the same backend, show here as they happen.
-	stopPatches := cu.api.OnPhotoPatchEvent(func(ev marrawclient.PhotoPatchEvent) {
-		select {
-		case cu.do <- func() { cu.patched(ev.Patches) }:
-		case <-cu.ctx.Done():
-		}
-	})
-	defer stopPatches()
+	// The folder's photos as a live query, as the Electron app holds
+	// them: ratings, flags and edits, made here or elsewhere on the same
+	// backend, come as patches, and each new listing brings what the
+	// backend has measured since, such as sizes and base exposures.
+	stopLive := cu.followFolder()
+	defer stopLive()
 	for {
 		select {
 		case <-cu.ctx.Done():
@@ -249,7 +246,7 @@ func (cu *culler) serve() error {
 func (cu *culler) state() Cull {
 	p := cu.photos[cu.at]
 	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
-		Tiles: cu.tiles.of(p.ID), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag)}
+		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag)}
 	for i := max(0, cu.at-stripReach); i <= min(len(cu.photos)-1, cu.at+stripReach); i++ {
 		q := cu.photos[i]
 		st.Strip = append(st.Strip, Thumb{Index: i, Img: cu.thumbs[q.ID], Aspect: cu.aspectOf(q), Rating: q.Rating, Flag: string(q.Flag)})
@@ -522,7 +519,7 @@ func (cu *culler) script(o options) {
 			done := make(chan bool, 1)
 			cu.do <- func() {
 				r := cu.tileWant.Range
-				done <- !r.Empty() && len(cu.tiles.of(cu.photos[cu.at].ID)) >= r.Dx()*r.Dy()
+				done <- !r.Empty() && len(cu.tilesShowing(cu.photos[cu.at])) >= r.Dx()*r.Dy()
 			}
 			if <-done {
 				break
@@ -790,12 +787,20 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 			if pp.Rating != nil || pp.Flag != nil {
 				_ = cu.c.Patch("grid", PhotoMarked{Index: i, Rating: p.Rating, Flag: string(p.Flag)})
 			}
-			if pp.EditHash != nil && *pp.EditHash != p.EditHash && cu.dev.saved[p.ID] {
-				// The panel's own save, whose pixels show already.
+			if pp.EditHash != nil && cu.dev.saved[p.ID] {
+				// The panel's own save, whose pixels show already: the
+				// tiles of it can come now.
 				delete(cu.dev.saved, p.ID)
+				changed := *pp.EditHash != p.EditHash
 				p.EditHash = *pp.EditHash
-				delete(cu.thumbs, p.ID)
-				cu.loadThumb(cu.ctx, i)
+				cu.dev.confirmed = cu.dev.committed
+				if cu.culling && i == cu.at && !cu.tileWant.Range.Empty() {
+					cu.wantTiles(cu.tileWant)
+				}
+				if changed {
+					delete(cu.thumbs, p.ID)
+					cu.loadThumb(cu.ctx, i)
+				}
 			}
 			if pp.EditHash != nil && *pp.EditHash != p.EditHash {
 				p.EditHash = *pp.EditHash

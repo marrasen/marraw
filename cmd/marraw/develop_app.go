@@ -67,6 +67,27 @@ type developer struct {
 	// saved are the photos whose own saves are on their way back as
 	// patches, not to be fetched again.
 	saved map[int64]bool
+	// edits counts the changes made, committed what it was at the last
+	// save, and confirmed what it was at the last save the backend has
+	// confirmed: while they differ, the edit showing is not the saved
+	// one, which the full-resolution tiles are of.
+	edits, committed, confirmed int
+}
+
+// editing reports whether photo id has an edit under way the backend has
+// not confirmed: its tiles would show the edit before.
+func (cu *culler) editing(id int64) bool {
+	d := &cu.dev
+	return d.open && d.id == id && d.edits != d.confirmed
+}
+
+// tilesShowing are the tiles to show of p: of its saved edit, and none
+// while an edit of it is under way.
+func (cu *culler) tilesShowing(p marrawclient.Photo) map[image.Point]*paint.Image {
+	if cu.editing(p.ID) {
+		return nil
+	}
+	return cu.tiles.of(p.ID, p.EditHash)
 }
 
 // draftEdge is the long edge of the previews while a slider moves; a
@@ -121,30 +142,22 @@ func (cu *culler) loadEdit(i int) {
 		d.stop()
 	}
 	d.live, d.want = nil, false
-	unmeasured := cu.photos[i].BaseExpEV == 0
 	go func() {
 		p, err := cu.api.Edits.GetEditParams(cu.ctx, id)
-		// The exposure a photo rests at is measured after the folder opens;
-		// one not known yet may be by now.
-		var fresh []marrawclient.Photo
-		if err == nil && unmeasured {
-			fresh, _ = cu.api.Library.ListPhotos(cu.ctx, cu.folder)
-		}
 		select {
 		case cu.do <- func() {
 			if err != nil {
 				log.Printf("develop: %v", err)
 				return
 			}
-			for _, f := range fresh {
-				if j, ok := cu.index[f.ID]; ok {
-					cu.photos[j].BaseExpEV = f.BaseExpEV
-				}
-			}
 			if gen != d.gen || !d.open || !cu.culling {
 				return
 			}
 			// No edit stored, and no exposure measured yet: all neutral.
+			// A new photo, with no edit of it under way.
+			if id != d.id {
+				d.edits, d.committed, d.confirmed = 0, 0, 0
+			}
 			d.id, d.params = id, marrawclient.Params{}
 			if p != nil {
 				d.params = *p
@@ -227,17 +240,11 @@ func curveOf(p *marrawclient.Params, ch int) *[]marrawclient.CurvePoint {
 // The photo's full-resolution tiles are of the edit before, so they go.
 func (cu *culler) edited(commit bool) {
 	d := &cu.dev
-	cu.tiles.drop(d.id)
-	if cu.tileStop != nil {
-		cu.tileStop()
-		cu.tileStop = nil
-	}
-	if cu.probeStop != nil {
-		cu.probeStop()
-		cu.probing, cu.probeStop = 0, nil
-	}
-	cu.tileWant, cu.tileNote = WantTiles{}, ""
+	d.edits++
+	cu.stopTiles()
+	cu.tileNote = "tiles: once the edit is saved"
 	if commit {
+		d.committed = d.edits
 		id, params := d.id, d.params
 		if d.saved == nil {
 			d.saved = map[int64]bool{}
