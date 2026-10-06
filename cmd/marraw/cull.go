@@ -289,7 +289,9 @@ func (cu *culler) goTo(i int) {
 	go func(folder, id int64) { _ = cu.api.Library.SetFocus(cu.ctx, folder, id) }(cu.folder, p.ID)
 	if e, ok := cu.cache.get(p.ID); ok && e.rank >= rankSharp {
 		cu.record(e.note, true)
-		cu.warmNeighbours()
+		// Here, on the culler's goroutine, at once: warmNeighbours would
+		// wait for this goroutine to take it, forever if do is full.
+		cu.startWarming()
 		return
 	}
 	ctx, cancel := context.WithCancel(cu.ctx)
@@ -356,8 +358,8 @@ func (cu *culler) pipeline(ctx context.Context, gen, i int, p marrawclient.Photo
 }
 
 // warmNeighbours fetches the next, the previous and the one after next,
-// from what is rendered already, so stepping to them is instant. It may be
-// called from a pipeline's goroutine.
+// from what is rendered already, so stepping to them is instant. It is for
+// the pipelines' goroutines; the culler's own calls startWarming.
 func (cu *culler) warmNeighbours() {
 	select {
 	case cu.do <- cu.startWarming:

@@ -126,6 +126,8 @@ func (v *cullView) readout(z float32) {
 func (v *cullView) Transition(p gunim.Presence, _ gunim.Frame) bool {
 	switch p {
 	case gunim.Entering:
+		// Mounted again mid-exit, the view is brought back, not built anew.
+		v.leaving = false
 		v.in.Animate(1, cullIn)
 	case gunim.Exiting:
 		v.leaving = true
