@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/marrasen/gunim/geom"
@@ -23,6 +24,8 @@ type (
 		Params    marrawclient.Params
 		BaseExpEV float64
 		Channel   int
+		// Active is the control the keys act on, or none.
+		Active string
 	}
 	// DevHist is the histogram of the pixels showing.
 	DevHist struct{ Counts [3][256]uint32 }
@@ -76,6 +79,10 @@ type developer struct {
 	// carries the saves out in order.
 	history map[int64]*editHistory
 	saves   chan saveJob
+	// active is the control the keys act on, and nudge saves a run of
+	// + and - presses once they stop.
+	active string
+	nudge  *time.Timer
 }
 
 // editing reports whether photo id has an edit under way the backend has
@@ -101,7 +108,7 @@ const draftEdge = 1024
 // developState is the panel's state.
 func (cu *culler) developState() DevelopState {
 	d := &cu.dev
-	st := DevelopState{ID: d.id, Params: d.params, Channel: d.channel}
+	st := DevelopState{ID: d.id, Params: d.params, Channel: d.channel, Active: d.active}
 	if i, ok := cu.index[d.id]; ok {
 		st.BaseExpEV = cu.photos[i].BaseExpEV
 	}
@@ -129,7 +136,7 @@ func (cu *culler) closeDevelop() {
 	if d.stop != nil {
 		d.stop()
 	}
-	d.live, d.want = nil, false
+	d.live, d.want, d.active = nil, false, ""
 	if d.mounted {
 		d.mounted = false
 		_ = cu.c.Unmount("develop")
@@ -210,6 +217,10 @@ func (cu *culler) devSet(in DevSet) {
 		return
 	}
 	sp.set(&d.params, in.Value)
+	// The control dragged is the one the keys act on now.
+	if in.Key != d.active && !strings.Contains(in.Key, ":") {
+		cu.setActive(in.Key)
+	}
 	cu.edited(in.Commit)
 	if in.Commit {
 		cu.remember(stepLabel(in.Key, in.Value))

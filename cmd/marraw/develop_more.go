@@ -111,6 +111,7 @@ func (cu *culler) devChoose(in DevChoice) {
 		return
 	}
 	ch.set(&d.params, in.Index)
+	d.active = in.Key
 	// A mode that changes what the panel shows: it follows.
 	_ = cu.c.Update("develop", cu.developState())
 	cu.edited(true)

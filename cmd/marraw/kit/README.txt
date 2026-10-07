@@ -58,7 +58,9 @@ sections that fold open and shut with a click on their heading, a dot
 showing which hold changes: tone, presence, white balance (As shot, Auto
 or Kelvin), colour (black and white, split toning), the colour mixer,
 effects, detail and the tone curve. Auto beside Tone and Color sets them
-for the photo. Drag a slider to see the photo change
+for the photo. With the panel open, Up and Down walk its controls, + and
+- step the one chosen (Shift for big steps), a letter jumps to one as in
+marraw (E exposure, C contrast, T temperature, ...), and Escape lets it go. Drag a slider to see the photo change
 live; letting go saves the edit, as marraw does. Shift drags finely, a
 double click on a slider or a click on its reset mark sends it back. On
 the curve, a click adds a point, a drag moves it and a double click

@@ -398,6 +398,12 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		if e.Mods.Has(input.ModShift) && v.panKey(e.Key, u) {
 			return true
 		}
+		// With the develop panel open, Up and Down walk its controls, + and
+		// - step the one chosen, a letter chooses one, and Escape lets it
+		// go, as marraw's keys do.
+		if v.st.Panel && v.developKey(e, u) {
+			return true
+		}
 		if in, ok := markKey(e.Key); ok {
 			u.Send(v, in)
 			return true
@@ -413,10 +419,10 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			u.Send(v, Jump{To: -1})
 		case input.KeyZ, input.KeySpace:
 			v.toggle(v.room().Center(), u)
-		case input.KeyEqual:
-			v.zoomTo(v.z.Target()*1.25, v.room().Center(), u)
-		case input.KeyMinus:
-			v.zoomTo(v.z.Target()*0.8, v.room().Center(), u)
+		case input.KeyEqual, input.KeyMinus, input.KeyKPAdd, input.KeyKPSubtract:
+			// By what the key types, so + is + on any keyboard.
+			z := map[bool]float32{false: 0.8, true: 1.25}[plusMinus(e) > 0]
+			v.zoomTo(v.z.Target()*z, v.room().Center(), u)
 		case input.KeyEscape, input.KeyEnter, input.KeyG:
 			u.Send(v, LeaveCull{})
 		case input.KeyD:
@@ -482,6 +488,67 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			v.askTiles(u)
 			return true
 		}
+	}
+	return false
+}
+
+// plusMinus is +1 for a key that types + or =, -1 for one that types -,
+// and 0 for another: by the character, so + is + on a Swedish keyboard,
+// where the key sits where a US one has -.
+func plusMinus(e input.KeyPress) int {
+	switch e.Char {
+	case '+', '=':
+		return 1
+	case '-':
+		return -1
+	case 0:
+		switch e.Key {
+		case input.KeyEqual, input.KeyKPAdd:
+			return 1
+		case input.KeyMinus, input.KeyKPSubtract:
+			return -1
+		}
+	}
+	switch e.Key {
+	case input.KeyKPAdd:
+		return 1
+	case input.KeyKPSubtract:
+		return -1
+	}
+	return 0
+}
+
+// developKey takes a key for the develop panel, and reports whether it
+// was one.
+func (v *cullView) developKey(e input.KeyPress, u *gunim.UI) bool {
+	if e.Mods.Has(input.ModControl) || e.Mods.Has(input.ModAlt) {
+		return false
+	}
+	switch e.Key {
+	case input.KeyUp:
+		u.Send(v, DevWalk{By: -1})
+		return true
+	case input.KeyDown:
+		u.Send(v, DevWalk{By: 1})
+		return true
+	case input.KeyEscape:
+		if v.st.Active != "" {
+			u.Send(v, DevPick{})
+			return true
+		}
+		return false
+	}
+	if d := plusMinus(e); d != 0 && v.st.Active != "" {
+		u.Send(v, DevNudge{Dir: d, Big: e.Mods.Has(input.ModShift)})
+		return true
+	}
+	ch := e.Char
+	if ch == 0 && e.Key >= input.KeyA && e.Key <= input.KeyZ {
+		ch = rune('a' + int(e.Key-input.KeyA))
+	}
+	if key, ok := controlKeys[ch]; ok && !e.Mods.Has(input.ModShift) {
+		u.Send(v, DevPick{Key: key})
+		return true
 	}
 	return false
 }
@@ -763,6 +830,13 @@ func (q *cullPic) sharpen(s Cull) {
 	if img == q.img {
 		return
 	}
+	if s.Live {
+		// A live preview of an edit under way swaps in at once, so the photo
+		// keeps up with the slider.
+		q.img, q.old = img, nil
+		q.mix.Jump(1)
+		return
+	}
 	if q.img == nil || q.mix.Value() < 1 {
 		// Mid-step, or nothing to fade from: the new pixels take the place.
 		q.img = img
@@ -786,7 +860,13 @@ func (q *cullPic) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, _ gunim.
 		// The last picture, where it was, sliding away.
 		at := q.v.fitRect().Min
 		o := q.oldRect.Add(geom.Pt(-at.X-q.slide*k, -at.Y))
-		p.Image(q.old, pixelFit(o, q.old), paint.ImageOpts{Opacity: 1 - k*k})
+		// Sliding, it fades as it goes; fading to sharper pixels in place,
+		// it stays whole under them, so nothing behind shows through.
+		op := float32(1)
+		if q.slide != 0 {
+			op = 1 - k*k
+		}
+		p.Image(q.old, pixelFit(o, q.old), paint.ImageOpts{Opacity: op})
 	}
 	if q.img == nil {
 		p.RRect(r.Add(geom.Pt(q.slide*(1-k), 0)), 2, paint.Solid(withAlpha(frameInk, k)))

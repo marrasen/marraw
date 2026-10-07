@@ -16,9 +16,7 @@ import (
 // registerViews is the window half: the library grid, and the cull view
 // that opens over it.
 func registerViews(w *gunim.Window) {
-	// The develop panel's labels are longer than a slider row's default
-	// room, as "Preserve highlights".
-	w.RegisterTheme(widget.Dark().With(theme.Set(widget.SliderRowLabel, 136), theme.Set(widget.SliderRowValue, 58)))
+	w.RegisterTheme(marrawTheme())
 	gunim.RegisterView(w, "grid", newGridView, (*gridView).show)
 	gunim.RegisterPatch(w, "grid", (*gridView).thumbIn)
 	gunim.RegisterPatch(w, "grid", (*gridView).photoMarked)
@@ -29,6 +27,15 @@ func registerViews(w *gunim.Window) {
 	gunim.RegisterView(w, "cull", newCullView, (*cullView).show)
 	gunim.RegisterView(w, "develop", newDevelopView, (*developView).show)
 	gunim.RegisterPatch(w, "develop", (*developView).histIn)
+}
+
+// marrawTheme is gunim's dark theme with room for the develop panel's
+// longer labels, as "Preserve highlights". The window takes it as it
+// opens.
+func marrawTheme() theme.Theme {
+	th := widget.Dark().With(theme.Set(widget.SliderRowLabel, 136), theme.Set(widget.SliderRowValue, 58))
+	th.Name = "marraw"
+	return th
 }
 
 // The colours and sizes the views share.

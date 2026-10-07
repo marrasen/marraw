@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/anim"
@@ -33,6 +34,28 @@ type devSpec struct {
 	// says it has none, as a hue.
 	rest   func(s DevelopState) float32
 	noRest bool
+}
+
+// bigStep is how far Shift with + or - steps sp, as marraw's control
+// table has it.
+func (sp devSpec) bigStep() float32 {
+	switch sp.key {
+	case "expEV", "bright", "gamma":
+		return 0.25
+	case "expPreserve":
+		return 0.2
+	case "shadow":
+		return 1.5
+	case "wbKelvin":
+		return 250
+	case "splitShadowHue", "splitHighlightHue":
+		return 30
+	case "nrThreshold":
+		return 100
+	case "medPasses":
+		return 1
+	}
+	return 0.1
 }
 
 // restOf is the value spec sp rests at in s.
@@ -284,21 +307,32 @@ type developView struct {
 	chips   *bandChips
 	mixRows []*widget.SliderRow
 	body    gunim.Node
+	// choiceRows are the choices' rows, and sectionOf and nodeOf where
+	// each control is, to show the one the keys act on.
+	choiceRows map[string]*labeled
+	sectionOf  map[string]int
+	nodeOf     map[string]gunim.Node
+	folds2     []*widget.Fold
+	active     string
 }
 
 func newDevelopView(s DevelopState) *developView {
 	v := &developView{in: anim.NewFloat(0), hist: widget.NewHistogram(), rows: map[string]*widget.SliderRow{},
 		choices: map[string]*widget.Segmented{}, folds: map[string]*widget.Fold{},
+		choiceRows: map[string]*labeled{}, sectionOf: map[string]int{}, nodeOf: map[string]gunim.Node{},
 		curve: widget.NewToneCurve(), channel: widget.NewSegmented(curveChannels...)}
 	v.Add(v.in)
 	kids := []gunim.Node{v.hist}
-	for _, sec := range devSections {
+	for si, sec := range devSections {
 		var body []gunim.Node
 		for _, key := range sec.choices {
-			body = append(body, v.choiceRow(key))
+			n := v.choiceRow(key)
+			v.sectionOf[key], v.nodeOf[key] = si, n
+			body = append(body, n)
 		}
 		for _, key := range sec.keys {
 			var n gunim.Node = v.row(devSpecs[key])
+			v.sectionOf[key], v.nodeOf[key] = si, n
 			if key == "wbTemp" || key == "wbKelvin" {
 				// One of the two shows, as the mode is Kelvin or not.
 				f := widget.NewFold(n, (key == "wbKelvin") == (s.Params.WBMode == "kelvin"))
@@ -330,6 +364,7 @@ func newDevelopView(s DevelopState) *developView {
 		fold.Children()[0].(*widget.Pad).Padding = theme.Insets("marraw.section.pad", geom.Insets{Bottom: 6})
 		h := newDevHeading(sec, fold)
 		v.heads = append(v.heads, h)
+		v.folds2 = append(v.folds2, fold)
 		kids = append(kids, h, fold)
 	}
 	col := widget.Column(kids...)
@@ -360,7 +395,10 @@ func (v *developView) choiceRow(key string) gunim.Node {
 	seg.KeepFocus = true
 	seg.OnChange = func(i int) gunim.Intent { return DevChoice{Key: key, Index: i} }
 	v.choices[key] = seg
-	return &labeled{label: newSmallLabel(ch.label), child: seg}
+	l := &labeled{label: newSmallLabel(ch.label), child: seg, active: anim.NewFloat(0)}
+	l.Add(l.active)
+	v.choiceRows[key] = l
+	return l
 }
 
 // mixer is the colour mixer: the bands as chips, and the chosen band's
@@ -459,8 +497,39 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 	}
 	v.curve.Guides = guides
 	v.curve.SetPoints(points(*curveOf(p, s.Channel)), u)
+	v.showActive(s.Active, u)
 	u.Invalidate()
 }
+
+// showActive marks the control the keys act on, opens its section if it
+// is shut, and brings it into view.
+func (v *developView) showActive(key string, u *gunim.UI) {
+	for k, r := range v.rows {
+		r.SetActive(k == key, u)
+	}
+	for k, l := range v.choiceRows {
+		l.setActive(k == key, u)
+	}
+	if key == v.active {
+		return
+	}
+	v.active = key
+	si, ok := v.sectionOf[key]
+	if !ok {
+		return
+	}
+	n := v.nodeOf[key]
+	if f := v.folds2[si]; !f.Open() {
+		v.heads[si].setOpen(true, u)
+		// Once it has opened.
+		u.After(foldTime, func(u *gunim.UI) { u.Reveal(n) })
+		return
+	}
+	u.Reveal(n)
+}
+
+// foldTime is about how long a section takes to fold open.
+const foldTime = 320 * time.Millisecond
 
 // sectionChanged reports whether anything in sec is off its rest in s.
 func sectionChanged(sec devSection, s DevelopState) bool {
@@ -568,6 +637,14 @@ func newDevHeading(sec devSection, fold *widget.Fold) *devHeading {
 	return h
 }
 
+// setOpen folds the section open or shut, the chevron turning with it.
+func (h *devHeading) setOpen(open bool, u *gunim.UI) {
+	h.fold.SetOpen(open, u)
+	sectionsOpen[h.sec.title] = open
+	h.turn.Animate(map[bool]float32{false: 0, true: 1}[open], widget.Quick.Get(u.Theme()))
+	u.Invalidate()
+}
+
 // setChanged shows or hides the changed dot.
 func (h *devHeading) setChanged(on bool, u *gunim.UI) {
 	h.dot.Animate(map[bool]float32{false: 0, true: 1}[on], widget.Quick.Get(u.Theme()))
@@ -596,11 +673,7 @@ func (h *devHeading) Handle(e input.Event, u *gunim.UI) bool {
 			u.Send(h, DevAuto{Sections: h.sec.auto})
 			return true
 		}
-		open := !h.fold.Open()
-		h.fold.SetOpen(open, u)
-		sectionsOpen[h.sec.title] = open
-		h.turn.Animate(map[bool]float32{false: 0, true: 1}[open], widget.Quick.Get(th))
-		u.Invalidate()
+		h.setOpen(!h.fold.Open(), u)
 		return true
 	}
 	return false
@@ -655,8 +728,22 @@ func newSmallLabel(s string) *widget.Label {
 // labeled is a label, then a control filling the rest of the row, as a
 // slider row lays them out.
 type labeled struct {
-	label *widget.Label
-	child gunim.Node
+	anim.Group
+	label  *widget.Label
+	child  gunim.Node
+	active *anim.Float
+	on     bool
+}
+
+// setActive marks the row as the one the keys act on, as a slider row
+// marks itself.
+func (l *labeled) setActive(on bool, u *gunim.UI) {
+	if on == l.on {
+		return
+	}
+	l.on = on
+	l.active.Animate(map[bool]float32{false: 0, true: 1}[on], widget.Quick.Get(u.Theme()))
+	u.Invalidate()
 }
 
 // Children implements [gunim.Composite].
@@ -676,7 +763,8 @@ func (l *labeled) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children
 }
 
 // Paint implements [gunim.Node].
-func (l *labeled) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+func (l *labeled) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
+	widget.PaintActive(p, f.Theme, box, l.active.Value())
 	for k := range kids.All {
 		k.Paint(p)
 	}

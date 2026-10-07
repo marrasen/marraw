@@ -42,8 +42,12 @@ type (
 		Tiles map[image.Point]*paint.Image
 		// TileNote says how the tiles stand.
 		TileNote string
-		// Panel says the develop panel is open beside the photo.
+		// Panel says the develop panel is open beside the photo, and Live
+		// that Img is a live preview of an edit under way.
 		Panel bool
+		Live  bool
+		// Active is the develop control the keys act on, or none.
+		Active string
 		// Notice is a note to show over the photo for a moment, each time
 		// NoticeSeq changes, as an undo says what it undid.
 		Notice    string
@@ -197,6 +201,7 @@ func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im
 }
 
 func (cu *culler) serve() error {
+	_ = cu.c.SetTheme("marraw")
 	// The library grid is always there; the cull view opens over it.
 	if err := cu.c.Mount(gunim.Root, "grid", "grid", cu.gridState(), "grid"); err != nil {
 		return err
@@ -262,6 +267,12 @@ func (cu *culler) serve() error {
 				cu.undo(in.Redo)
 			case DevChoice:
 				cu.devChoose(in)
+			case DevWalk:
+				cu.devWalk(in.By)
+			case DevNudge:
+				cu.devNudge(in)
+			case DevPick:
+				cu.setActive(in.Key)
 			case DevAuto:
 				cu.devAuto(in)
 			case EditCopy:
@@ -291,10 +302,13 @@ func (cu *culler) state() Cull {
 	}
 	// The edit being made shows as its previews come.
 	if d := &cu.dev; d.open && d.live != nil && d.id == p.ID {
-		st.Img, st.Note = d.live, d.note
+		st.Img, st.Note, st.Live = d.live, d.note, true
 	}
 	st.Thumb = cu.thumbs[p.ID]
 	st.Panel = cu.dev.open
+	if cu.dev.open {
+		st.Active = cu.dev.active
+	}
 	st.Notice, st.NoticeSeq = cu.notice, cu.noticeSeq
 	return st
 }
