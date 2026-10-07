@@ -386,6 +386,12 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			case input.KeyY:
 				u.Send(v, DevUndo{Redo: true})
 				return true
+			case input.KeyC:
+				u.Send(v, EditCopy{})
+				return true
+			case input.KeyV:
+				u.Send(v, EditPaste{})
+				return true
 			}
 			return false
 		}
@@ -653,11 +659,15 @@ func (v *cullView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 
 // paintNotice draws the note in a pill, popping in and fading out.
 func (v *cullView) paintNotice(p *paint.Painter, note gunim.Child) {
-	k := v.noticeIn.Value()
+	paintNote(p, note, v.noteRect, v.noticeIn.Value())
+}
+
+// paintNote draws note, placed at at, in a pill, k of the way in.
+func paintNote(p *paint.Painter, note gunim.Child, at geom.Rect, k float32) {
 	if k < 0.01 {
 		return
 	}
-	r := v.noteRect.Inset(geom.Insets{Top: -7, Bottom: -7, Left: -14, Right: -14})
+	r := at.Inset(geom.Insets{Top: -7, Bottom: -7, Left: -14, Right: -14})
 	defer p.Push(paint.Scale(0.9+0.1*k, r.Center()))()
 	if k < 0.999 {
 		defer p.Layer(paint.LayerOpts{Bounds: r.Inset(geom.Uniform(-8)), Opacity: min(k, 1)})()

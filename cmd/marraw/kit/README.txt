@@ -53,12 +53,17 @@ zoom stays as you step, to compare a burst. Escape
 goes back to the grid. The corner says which rendition shows, how long
 it took, and how the full-resolution tiles stand.
 
-D opens the develop panel beside the photo: the histogram, the main
-adjustments and the tone curve. Drag a slider to see the photo change
+D opens the develop panel beside the photo: the histogram, then
+sections that fold open and shut with a click on their heading, a dot
+showing which hold changes: tone, presence, white balance (As shot, Auto
+or Kelvin), colour (black and white, split toning), the colour mixer,
+effects, detail and the tone curve. Auto beside Tone and Color sets them
+for the photo. Drag a slider to see the photo change
 live; letting go saves the edit, as marraw does. Shift drags finely, a
 double click on a slider or a click on its reset mark sends it back. On
 the curve, a click adds a point, a drag moves it and a double click
-removes it. Ctrl+Z undoes a change and Ctrl+Shift+Z or Ctrl+Y redoes
+removes it. Ctrl+C copies a photo's edit settings and Ctrl+V pastes them,
+in the grid on every photo selected. Ctrl+Z undoes a change and Ctrl+Shift+Z or Ctrl+Y redoes
 it, each photo with its own history. Edits are saved next to the photos, so try it on these
 copies only.
 

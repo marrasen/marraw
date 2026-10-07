@@ -151,6 +151,8 @@ type culler struct {
 	// dev is the develop panel's side.
 	dev developer
 
+	// clipboard is the edit copied, to paste.
+	clipboard *marrawclient.Params
 	// notice is a note over the photo, shown anew as noticeSeq changes.
 	notice    string
 	noticeSeq int
@@ -258,6 +260,14 @@ func (cu *culler) serve() error {
 				cu.devChannel(in.Channel)
 			case DevUndo:
 				cu.undo(in.Redo)
+			case DevChoice:
+				cu.devChoose(in)
+			case DevAuto:
+				cu.devAuto(in)
+			case EditCopy:
+				cu.editCopy()
+			case EditPaste:
+				cu.editPaste()
 			case OpenShoot:
 				cu.openShoot(in.Path)
 			case Quit:
@@ -517,12 +527,26 @@ func (cu *culler) script(o options) {
 	}
 	for _, kv := range strings.Split(o.edit, ",") {
 		key, val, ok := strings.Cut(strings.TrimSpace(kv), "=")
+		if !ok {
+			continue
+		}
+		if key == "auto" {
+			// An Auto button: wait for its result to show.
+			cu.do <- func() { cu.devAuto(DevAuto{Sections: strings.Split(val, "+")}) }
+			time.Sleep(4 * time.Second)
+			fmt.Fprintf(os.Stderr, "edit: auto %s\n", val)
+			continue
+		}
 		x, err := strconv.ParseFloat(val, 64)
-		if !ok || err != nil {
+		if err != nil {
 			continue
 		}
 		start := time.Now()
 		cu.do <- func() {
+			if _, isChoice := devChoices[key]; isChoice {
+				cu.devChoose(DevChoice{Key: key, Index: int(x)})
+				return
+			}
 			cu.devSet(DevSet{Key: key, Value: x, Commit: true})
 			// As the slider would show it, had it been dragged there.
 			if cu.dev.mounted {
@@ -722,6 +746,42 @@ func (cu *culler) loadThumb(ctx context.Context, i int) {
 	}()
 }
 
+// refreshThumb brings photo p's small picture of its new edit, the old
+// one showing until it comes: the backend renders it as the edit is
+// saved, so it is asked for from what is rendered, every little while,
+// for a while. Asked for at any edit state, the old one would come back.
+func (cu *culler) refreshThumb(p marrawclient.Photo) {
+	go func() {
+		for range 40 {
+			g, err := cu.im.get(cu.ctx, p, want{level: "256", cacheOnly: true})
+			if err == nil {
+				select {
+				case cu.do <- func() {
+					// Only while the photo is still at that edit.
+					i, ok := cu.index[p.ID]
+					if !ok || cu.photos[i].EditHash != p.EditHash {
+						return
+					}
+					cu.keepThumb(p.ID, g.img)
+					cu.learnShape(p.ID, g.w, g.h)
+					_ = cu.c.Patch("grid", ThumbIn{Folder: cu.folder, Index: i, Img: g.img})
+					if cu.culling && i >= cu.at-stripReach && i <= cu.at+stripReach {
+						cu.showCull()
+					}
+				}:
+				case <-cu.ctx.Done():
+				}
+				return
+			}
+			select {
+			case <-time.After(400 * time.Millisecond):
+			case <-cu.ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
 // keepThumb keeps id's small picture, letting the oldest go, in the grid
 // too.
 func (cu *culler) keepThumb(id int64, img *paint.Image) {
@@ -833,12 +893,14 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 				changed := *pp.EditHash != p.EditHash
 				p.EditHash = *pp.EditHash
 				cu.dev.confirmed = cu.dev.committed
+				if cu.tileNote == "tiles: once the edit is saved" {
+					cu.tileNote = ""
+				}
 				if cu.culling && i == cu.at && !cu.tileWant.Range.Empty() {
 					cu.wantTiles(cu.tileWant)
 				}
 				if changed {
-					delete(cu.thumbs, p.ID)
-					cu.loadThumb(cu.ctx, i)
+					cu.refreshThumb(*p)
 				}
 			}
 			if pp.EditHash != nil && *pp.EditHash != p.EditHash {
@@ -849,8 +911,7 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 					cu.loadEdit(i)
 				}
 				cu.cache.drop(p.ID)
-				delete(cu.thumbs, p.ID)
-				cu.loadThumb(cu.ctx, i)
+				cu.refreshThumb(*p)
 				if cu.culling && i == cu.at {
 					// Again, with the new edit's pixels.
 					cu.load = nil

@@ -16,13 +16,16 @@ import (
 // registerViews is the window half: the library grid, and the cull view
 // that opens over it.
 func registerViews(w *gunim.Window) {
-	w.RegisterTheme(widget.Dark())
+	// The develop panel's labels are longer than a slider row's default
+	// room, as "Preserve highlights".
+	w.RegisterTheme(widget.Dark().With(theme.Set(widget.SliderRowLabel, 136), theme.Set(widget.SliderRowValue, 58)))
 	gunim.RegisterView(w, "grid", newGridView, (*gridView).show)
 	gunim.RegisterPatch(w, "grid", (*gridView).thumbIn)
 	gunim.RegisterPatch(w, "grid", (*gridView).photoMarked)
 	gunim.RegisterPatch(w, "grid", (*gridView).gridAt)
 	gunim.RegisterPatch(w, "grid", (*gridView).photoAspect)
 	gunim.RegisterPatch(w, "grid", (*gridView).railIn)
+	gunim.RegisterPatch(w, "grid", (*gridView).gridNotice)
 	gunim.RegisterView(w, "cull", newCullView, (*cullView).show)
 	gunim.RegisterView(w, "develop", newDevelopView, (*developView).show)
 	gunim.RegisterPatch(w, "develop", (*developView).histIn)

@@ -35,6 +35,11 @@ type gridView struct {
 	// another under way.
 	folder   int64
 	swapStop func()
+	// notice is a note over the grid, noticeIn how far it has come in.
+	notice    *widget.Label
+	noticeIn  *anim.Float
+	noticeSeq int
+	noteRect  geom.Rect
 }
 
 const (
@@ -51,7 +56,9 @@ const (
 func cellSize(w float32) geom.Size { return geom.Sz(w, w*0.78+captionHeight) }
 
 func newGridView(GridState) *gridView {
-	v := &gridView{thumbs: map[int]*paint.Image{}, tiles: map[int]*photoTile{}, head: newGridHead(), rail: newRailView()}
+	v := &gridView{thumbs: map[int]*paint.Image{}, tiles: map[int]*photoTile{}, head: newGridHead(), rail: newRailView(),
+		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0)}
+	v.notice.Size = noteSize
 	v.grid = widget.NewTileGrid(cellSize(200))
 	v.grid.Tile = v.newTile
 	v.grid.OnView = func(first, count int) gunim.Intent { return NeedThumbs{First: first, Count: count} }
@@ -209,7 +216,25 @@ func (v *gridView) newTile(i int) gunim.Node {
 }
 
 // Children implements [gunim.Composite].
-func (v *gridView) Children() []gunim.Node { return []gunim.Node{v.head, v.grid, v.rail} }
+func (v *gridView) Children() []gunim.Node { return []gunim.Node{v.head, v.grid, v.rail, v.notice} }
+
+// Step implements [gunim.Animator]: the note's coming and going.
+func (v *gridView) Step(dt time.Duration) bool { return v.noticeIn.Step(dt) }
+
+// gridNotice pops a note in over the grid, and lets it fade after a
+// moment.
+func (v *gridView) gridNotice(n GridNotice, u *gunim.UI) {
+	v.noticeSeq = n.Seq
+	v.notice.SetText(n.Text)
+	v.noticeIn.Jump(min(v.noticeIn.Value(), 0.6))
+	v.noticeIn.Animate(1, widget.Bounce.Get(u.Theme()))
+	u.After(noticeFor, func(u *gunim.UI) {
+		if v.noticeSeq == n.Seq {
+			v.noticeIn.Animate(0, widget.Settle.Get(u.Theme()))
+		}
+	})
+	u.Invalidate()
+}
 
 // Handle implements [gunim.Handler]: the keyboard goes on to the tiles,
 // and the keys they leave rate and flag the photos selected.
@@ -219,7 +244,20 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 		u.After(0, func(u *gunim.UI) { u.Focus(v.grid) })
 		return true
 	case input.KeyPress:
-		if e.Mods.Has(input.ModControl) || e.Mods.Has(input.ModAlt) {
+		// Ctrl and C copies the edit of the photo the keyboard is on, and
+		// Ctrl and V pastes it on the photos selected.
+		if e.Mods.Has(input.ModControl) && !e.Mods.Has(input.ModAlt) {
+			switch e.Key {
+			case input.KeyC:
+				u.Send(v, EditCopy{})
+				return true
+			case input.KeyV:
+				u.Send(v, EditPaste{})
+				return true
+			}
+			return false
+		}
+		if e.Mods.Has(input.ModAlt) {
 			return false
 		}
 		if in, ok := markKey(e.Key); ok {
@@ -242,6 +280,10 @@ func (v *gridView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	head.Place(geom.Pt(railWidth, 0))
 	grid.Layout(gunim.Tight(geom.Sz(w, max(0, box.H-gridHeadHeight))))
 	grid.Place(geom.Pt(railWidth, gridHeadHeight))
+	note := kids.At(3)
+	ns := note.Layout(gunim.Loose(geom.Sz(w/2, 60)))
+	v.noteRect = geom.Rc(railWidth+w/2-ns.W/2, gridHeadHeight+16, ns.W, ns.H)
+	note.Place(v.noteRect.Min)
 	return box
 }
 
@@ -251,6 +293,7 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	kids.At(0).Paint(p)
 	p.RRect(geom.Rc(railWidth, gridHeadHeight-1, box.W-railWidth, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
 	kids.At(2).Paint(p)
+	paintNote(p, kids.At(3), v.noteRect, v.noticeIn.Value())
 }
 
 // photoTile is one photo in the grid: its picture, fitted, as a hero, and

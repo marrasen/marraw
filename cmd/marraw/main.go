@@ -59,7 +59,7 @@ func main() {
 	keys := flag.String("keys", "", "once -skim is done, press these keys, a comma-separated list such as 3,p,right,x")
 	wait := flag.Duration("wait", time.Second, "how long the window shows the grid before the script starts")
 	burst := flag.Int("burst", 0, "write this many pictures, from the last of -keys on, to -shot's name with -01, -02 and on, instead of one")
-	edit := flag.String("edit", "", "once -keys are pressed, with the develop panel open, set adjustments as the panel does, such as contrast=0.6,expEV=2, and save them")
+	edit := flag.String("edit", "", "once -keys are pressed, with the develop panel open, set adjustments as the panel does, such as contrast=0.6,expEV=2, choices by their option, such as wbMode=2 for Kelvin, or auto=tone or auto=wb+color, and save them")
 	zoom := flag.Bool("zoom", false, "once -skim is done, zoom to one to one with Z, and wait for the full resolution before the shot")
 	flag.Parse()
 	if err := run(options{folder: *folder, connect: *connect, token: *token, dataDir: *dataDir,
