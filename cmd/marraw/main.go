@@ -18,7 +18,8 @@
 // tiles, and Enter or a double click opens the cull view. There Left and
 // Right step through the folder, Home and End go to its ends, the same keys
 // rate and flag, Z or Space goes between fit and one to one, + and - zoom,
-// Shift and the arrows pan, D opens the develop panel, and Escape goes back.
+// Shift and the arrows pan, D opens the develop panel, where Ctrl+Z undoes
+// and Ctrl+Shift+Z or Ctrl+Y redoes, and Escape goes back.
 // The wheel zooms about the pointer, a drag pans and a flick glides, and a
 // click on the filmstrip goes to that photo.
 package main

@@ -44,6 +44,10 @@ type (
 		TileNote string
 		// Panel says the develop panel is open beside the photo.
 		Panel bool
+		// Notice is a note to show over the photo for a moment, each time
+		// NoticeSeq changes, as an undo says what it undid.
+		Notice    string
+		NoticeSeq int
 		// Rating and Flag are the photo's, and Strip the photos around it,
 		// for the filmstrip.
 		Rating int
@@ -147,6 +151,10 @@ type culler struct {
 	// dev is the develop panel's side.
 	dev developer
 
+	// notice is a note over the photo, shown anew as noticeSeq changes.
+	notice    string
+	noticeSeq int
+
 	// stopLive stops following the folder showing, and rail is the
 	// library as the sidebar shows it.
 	stopLive func()
@@ -248,6 +256,8 @@ func (cu *culler) serve() error {
 				cu.devCurve(in)
 			case DevChannel:
 				cu.devChannel(in.Channel)
+			case DevUndo:
+				cu.undo(in.Redo)
 			case OpenShoot:
 				cu.openShoot(in.Path)
 			case Quit:
@@ -275,6 +285,7 @@ func (cu *culler) state() Cull {
 	}
 	st.Thumb = cu.thumbs[p.ID]
 	st.Panel = cu.dev.open
+	st.Notice, st.NoticeSeq = cu.notice, cu.noticeSeq
 	return st
 }
 

@@ -58,7 +58,8 @@ adjustments and the tone curve. Drag a slider to see the photo change
 live; letting go saves the edit, as marraw does. Shift drags finely, a
 double click on a slider or a click on its reset mark sends it back. On
 the curve, a click adds a point, a drag moves it and a double click
-removes it. Edits are saved next to the photos, so try it on these
+removes it. Ctrl+Z undoes a change and Ctrl+Shift+Z or Ctrl+Y redoes
+it, each photo with its own history. Edits are saved next to the photos, so try it on these
 copies only.
 
 Every action has a short animation: the tiles growing in, the photo

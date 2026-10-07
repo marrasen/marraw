@@ -65,6 +65,12 @@ type cullView struct {
 	// shape is the photo's full size, gliding to its true shape as its
 	// pixels tell it.
 	shape *anim.Size
+	// notice is the note over the photo, noticeIn how far it has come in,
+	// and noticeSeq the note it is, to show each anew.
+	notice    *widget.Label
+	noticeIn  *anim.Float
+	noticeSeq int
+	noteRect  geom.Rect
 	// trail follows a drag, for a flick's speed; fling is the glide's
 	// speed on screen, in pixels a second, while flinging, and glided says
 	// a glide came to rest and the tiles there are to be asked for.
@@ -86,11 +92,13 @@ var (
 func newCullView(s Cull) *cullView {
 	v := &cullView{name: widget.NewLabel(""), note: widget.NewLabel(""), z: anim.NewFloat(1), c: anim.NewPoint(geom.Pt(0.5, 0.5)),
 		scale: 1, in: anim.NewFloat(0), strip: anim.NewFloat(float32(s.Index)), ring: anim.NewFloat(0),
-		slot: &gunim.Box{}, side: anim.NewFloat(0), shape: anim.NewSize(fullOf(s))}
+		slot: &gunim.Box{}, side: anim.NewFloat(0), shape: anim.NewSize(fullOf(s)),
+		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0), noticeSeq: s.NoticeSeq}
+	v.notice.Size = noteSize
 	if s.Panel {
 		v.side.Jump(1)
 	}
-	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape)
+	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape, v.noticeIn)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -137,6 +145,9 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 		v.marks.set(s.Rating, s.Flag, th)
 	}
 	v.side.Animate(map[bool]float32{false: 0, true: 1}[s.Panel], panelSlide)
+	if s.NoticeSeq != v.noticeSeq {
+		v.showNotice(s.Notice, s.NoticeSeq, u)
+	}
 	v.readout(v.z.Target())
 	note := s.Note
 	if s.TileNote != "" {
@@ -354,7 +365,7 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 }
 
 // Children implements [gunim.Composite].
-func (v *cullView) Children() []gunim.Node { return []gunim.Node{v.hero, v.hud, v.slot} }
+func (v *cullView) Children() []gunim.Node { return []gunim.Node{v.hero, v.hud, v.slot, v.notice} }
 
 // Focusable implements [gunim.Focusable]: the keys step through the folder.
 func (v *cullView) Focusable() bool { return true }
@@ -366,6 +377,18 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 	}
 	switch e := e.(type) {
 	case input.KeyPress:
+		// Ctrl and Z undoes the edit, with Shift or as Ctrl and Y redoes.
+		if e.Mods.Has(input.ModControl) {
+			switch e.Key {
+			case input.KeyZ:
+				u.Send(v, DevUndo{Redo: e.Mods.Has(input.ModShift)})
+				return true
+			case input.KeyY:
+				u.Send(v, DevUndo{Redo: true})
+				return true
+			}
+			return false
+		}
 		if e.Mods.Has(input.ModShift) && v.panKey(e.Key, u) {
 			return true
 		}
@@ -457,6 +480,24 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 	return false
 }
 
+// noticeFor is how long a note stays over the photo.
+const noticeFor = 1400 * time.Millisecond
+
+// showNotice pops note in over the photo, and lets it fade after a moment;
+// a note on the heels of the last pops again.
+func (v *cullView) showNotice(note string, seq int, u *gunim.UI) {
+	v.noticeSeq = seq
+	v.notice.SetText(note)
+	v.noticeIn.Jump(min(v.noticeIn.Value(), 0.6))
+	v.noticeIn.Animate(1, widget.Bounce.Get(u.Theme()))
+	u.After(noticeFor, func(u *gunim.UI) {
+		if v.noticeSeq == seq {
+			v.noticeIn.Animate(0, widget.Settle.Get(u.Theme()))
+		}
+	})
+	u.Invalidate()
+}
+
 // panStep is how far Shift and an arrow pan, as a share of the view, as
 // in marraw's loupe; panEase carries the photo there. A held key's
 // repeats push the destination on ahead of the photo, so it glides.
@@ -544,6 +585,12 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	slot := kids.At(2)
 	slot.Layout(gunim.Tight(geom.Sz(panelWidth, max(0, box.H-stripHeight))))
 	slot.Place(geom.Pt(box.W-panelWidth, 0))
+	// The note, in the middle at the top of the photo's room.
+	note := kids.At(3)
+	ns := note.Layout(gunim.Loose(geom.Sz(box.W/2, 60)))
+	room := v.room()
+	v.noteRect = geom.Rc(room.Center().X-ns.W/2, room.Min.Y+14, ns.W, ns.H)
+	note.Place(v.noteRect.Min)
 	if cur := v.current(); cur != nil {
 		v.ring.Animate(thumbWidth(*cur), widget.Quick.Get(f.Theme))
 		if v.ring.Value() == 0 {
@@ -601,6 +648,23 @@ func (v *cullView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	p.RRect(geom.Rc(0, box.H-stripHeight-hs.H, hs.W, hs.H), 0, paint.Solid(color.NRGBA{A: 0xa0}))
 	hud.Paint(p)
 	kids.At(2).Paint(p)
+	v.paintNotice(p, kids.At(3))
+}
+
+// paintNotice draws the note in a pill, popping in and fading out.
+func (v *cullView) paintNotice(p *paint.Painter, note gunim.Child) {
+	k := v.noticeIn.Value()
+	if k < 0.01 {
+		return
+	}
+	r := v.noteRect.Inset(geom.Insets{Top: -7, Bottom: -7, Left: -14, Right: -14})
+	defer p.Push(paint.Scale(0.9+0.1*k, r.Center()))()
+	if k < 0.999 {
+		defer p.Layer(paint.LayerOpts{Bounds: r.Inset(geom.Uniform(-8)), Opacity: min(k, 1)})()
+	}
+	p.ShadowRRect(r, r.Size().H/2, paint.Solid(color.NRGBA{R: 0x1d, G: 0x20, B: 0x28, A: 0xee}),
+		paint.Shadow{Offset: geom.Pt(0, 2), Blur: 10, Color: color.NRGBA{A: 0x70}})
+	note.Paint(p)
 }
 
 func withAlpha(c color.NRGBA, a float32) color.NRGBA {

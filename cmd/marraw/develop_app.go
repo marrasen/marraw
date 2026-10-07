@@ -72,6 +72,10 @@ type developer struct {
 	// confirmed: while they differ, the edit showing is not the saved
 	// one, which the full-resolution tiles are of.
 	edits, committed, confirmed int
+	// history is each photo's edits, step by step, for undo, and saves
+	// carries the saves out in order.
+	history map[int64]*editHistory
+	saves   chan saveJob
 }
 
 // editing reports whether photo id has an edit under way the backend has
@@ -162,6 +166,8 @@ func (cu *culler) loadEdit(i int) {
 			if p != nil {
 				d.params = *p
 			}
+			// The edit as first loaded is the history's original.
+			cu.historyOf(id, d.params)
 			if !d.mounted {
 				d.mounted = true
 				_ = cu.c.Mount("cull", "develop", "develop", cu.developState(), "develop")
@@ -205,6 +211,9 @@ func (cu *culler) devSet(in DevSet) {
 	}
 	sp.set(&d.params, in.Value)
 	cu.edited(in.Commit)
+	if in.Commit {
+		cu.remember(stepLabel(in.Key, in.Value))
+	}
 }
 
 // devCurve takes a tone curve from the panel.
@@ -221,6 +230,9 @@ func (cu *culler) devCurve(in DevCurve) {
 	}
 	*curveOf(&d.params, in.Channel) = pts
 	cu.edited(in.Commit)
+	if in.Commit {
+		cu.remember(curveChannels[in.Channel] + " curve")
+	}
 }
 
 // curveOf is the place in p of channel ch's curve.
@@ -250,11 +262,7 @@ func (cu *culler) edited(commit bool) {
 			d.saved = map[int64]bool{}
 		}
 		d.saved[id] = true
-		go func() {
-			if err := cu.api.Edits.SetEditParams(cu.ctx, id, params); err != nil {
-				log.Printf("develop: save: %v", err)
-			}
-		}()
+		cu.save(id, params)
 	}
 	cu.preview(commit)
 }
