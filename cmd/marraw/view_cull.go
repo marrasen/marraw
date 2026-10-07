@@ -366,6 +366,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 	}
 	switch e := e.(type) {
 	case input.KeyPress:
+		if e.Mods.Has(input.ModShift) && v.panKey(e.Key, u) {
+			return true
+		}
 		if in, ok := markKey(e.Key); ok {
 			u.Send(v, in)
 			return true
@@ -452,6 +455,40 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		}
 	}
 	return false
+}
+
+// panStep is how far Shift and an arrow pan, as a share of the view, as
+// in marraw's loupe; panEase carries the photo there. A held key's
+// repeats push the destination on ahead of the photo, so it glides.
+const panStep = 0.1
+
+var panEase = anim.Tween{Duration: 160 * time.Millisecond}
+
+// panKey pans the photo for Shift and an arrow, and reports whether k is
+// one.
+func (v *cullView) panKey(k input.Key, u *gunim.UI) bool {
+	var d geom.Point
+	switch k {
+	case input.KeyLeft:
+		d.X = -1
+	case input.KeyRight:
+		d.X = 1
+	case input.KeyUp:
+		d.Y = -1
+	case input.KeyDown:
+		d.Y = 1
+	default:
+		return false
+	}
+	v.flinging = false
+	z := v.z.Target()
+	f, s, view := v.full(), v.fit()*z, v.room().Size()
+	c := v.c.Target()
+	c = geom.Pt(c.X+d.X*panStep*view.W/(f.W*s), c.Y+d.Y*panStep*view.H/(f.H*s))
+	v.c.Animate(v.clampCentre(z, c), panEase)
+	v.askTiles(u)
+	u.Invalidate()
+	return true
 }
 
 // glideTau is how a flick's glide slows: its speed falls to a third in a
