@@ -9,6 +9,7 @@ import (
 
 // PhotoAspect is the shape of the photo at Index, learned from its pixels.
 type PhotoAspect struct {
+	Folder int64
 	Index  int
 	Aspect float32
 }
@@ -64,7 +65,7 @@ func (cu *culler) learnShape(id int64, w, h int) {
 		return
 	}
 	cu.aspects[id] = a
-	_ = cu.c.Patch("grid", PhotoAspect{Index: i, Aspect: a})
+	_ = cu.c.Patch("grid", PhotoAspect{Folder: cu.folder, Index: i, Aspect: a})
 	if cu.culling && i >= cu.at-stripReach && i <= cu.at+stripReach {
 		cu.showCull()
 	}

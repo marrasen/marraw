@@ -11,13 +11,15 @@
 //	go run ./cmd/marraw -connect 192.168.1.20:8482 -token … -folder D:\Photos\shoot
 //	go run ./cmd/marraw -folder ~/Pictures/shoot -skim 40 -every 150ms
 //
-// It opens on the folder's grid: the arrow keys and the mouse select, 0 to
-// 5 rate the photos selected, P picks, X rejects and U clears the flag, as
-// marraw's keys do, Ctrl and the wheel size the tiles, and Enter or a double
-// click opens the cull view. There Left and Right step through the folder,
-// Home and End go to its ends, the same keys rate and flag, Z or Space goes
-// between fit and one to one, + and - zoom, D opens the develop panel, and
-// Escape goes back. The wheel zooms about the pointer, a drag pans, and a
+// It opens on the folder's grid, or without -folder on an empty one, with
+// the library's shoots in a sidebar: a click on one opens it. The arrow keys
+// and the mouse select, 0 to 5 rate the photos selected, P picks, X rejects
+// and U clears the flag, as marraw's keys do, Ctrl and the wheel size the
+// tiles, and Enter or a double click opens the cull view. There Left and
+// Right step through the folder, Home and End go to its ends, the same keys
+// rate and flag, Z or Space goes between fit and one to one, + and - zoom,
+// Shift and the arrows pan, D opens the develop panel, and Escape goes back.
+// The wheel zooms about the pointer, a drag pans and a flick glides, and a
 // click on the filmstrip goes to that photo.
 package main
 
@@ -45,7 +47,7 @@ import (
 )
 
 func main() {
-	folder := flag.String("folder", "", "the folder of photos to cull")
+	folder := flag.String("folder", "", "the folder of photos to open; without it, the library opens, to choose one")
 	connect := flag.String("connect", "", "another marraw to cull on, as host:port; by default this program runs its own backend")
 	token := flag.String("token", "", "the token for -connect")
 	dataDir := flag.String("data-dir", "", "the backend's data folder (default: the config folder's marraw, as marrawd uses)")
@@ -58,9 +60,6 @@ func main() {
 	edit := flag.String("edit", "", "once -keys are pressed, with the develop panel open, set adjustments as the panel does, such as contrast=0.6,expEV=2, and save them")
 	zoom := flag.Bool("zoom", false, "once -skim is done, zoom to one to one with Z, and wait for the full resolution before the shot")
 	flag.Parse()
-	if *folder == "" {
-		log.Fatal("marraw: -folder is required")
-	}
 	if err := run(options{folder: *folder, connect: *connect, token: *token, dataDir: *dataDir,
 		skim: *skim, every: *every, wait: *wait, burst: *burst, edit: *edit, shot: *shot, zoom: *zoom, keys: *keys}); err != nil {
 		log.Fatal(err)
@@ -103,22 +102,28 @@ func run(o options) error {
 	defer cc.Close()
 	api := marrawclient.New(cc)
 
-	path, err := filepath.Abs(o.folder)
-	if err != nil {
-		return err
+	// The folder asked for opens before the window, so the script's
+	// timings start with it there; without one the library opens empty.
+	var path string
+	var info marrawclient.FolderInfo
+	var photos []marrawclient.Photo
+	if o.folder != "" {
+		if path, err = filepath.Abs(o.folder); err != nil {
+			return err
+		}
+		inf, err := api.Library.OpenFolder(ctx, path)
+		if err != nil {
+			return fmt.Errorf("open %s: %w", path, err)
+		}
+		info = *inf
+		if photos, err = api.Library.ListPhotos(ctx, info.FolderID); err != nil {
+			return fmt.Errorf("list %s: %w", path, err)
+		}
+		if len(photos) == 0 {
+			return fmt.Errorf("%s has no photos", path)
+		}
 	}
-	info, err := api.Library.OpenFolder(ctx, path)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", path, err)
-	}
-	photos, err := api.Library.ListPhotos(ctx, info.FolderID)
-	if err != nil {
-		return fmt.Errorf("list %s: %w", path, err)
-	}
-	if len(photos) == 0 {
-		return fmt.Errorf("%s has no photos", path)
-	}
-	log.Printf("marraw: build %s; %d photos in %s, backend at %s", build(), len(photos), path, host)
+	log.Printf("marraw: build %s; %d photos in %q, backend at %s", build(), len(photos), path, host)
 
 	err = gunim.Main(ctx, func(a *gunim.App) error {
 		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: geom.Sz(1400, 900), Root: widget.NewSurface()})

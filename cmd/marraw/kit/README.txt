@@ -32,7 +32,9 @@ Run anyway. When it is done, send results.zip.
 
     .\bin\marraw-cull.exe -folder ".\photos\2017-03-24 Flygtur (Canon CR2)" -data-dir $env:TEMP\marraw-cull-test-data
 
-It opens on the library grid. The arrow keys, a click, Ctrl and Shift
+It opens on the folder's grid, with the library in a sidebar on the
+left: a click on a shoot there opens it. With the test data folder the
+library is empty, so the folder given with -folder shows at its top. The arrow keys, a click, Ctrl and Shift
 select; Ctrl and the wheel change the tiles' size. 0 to 5 rate the photos
 selected, P picks, X rejects and U clears the flag, as in marraw. Enter
 or a double click opens a photo in the cull view.
@@ -41,7 +43,8 @@ In the cull view, Left and Right step through the folder, Home and End
 go to its ends, and a click on the filmstrip goes to that photo. The
 same keys rate and flag it. Z, Space or a double click goes between fit
 and 100%, + and - zoom in steps, the wheel zooms about the pointer, and
-dragging pans; the zoom stays as you step, to compare a burst. Escape
+dragging pans, a flick glides and Shift with the arrows pans too; the
+zoom stays as you step, to compare a burst. Escape
 goes back to the grid. The corner says which rendition shows, how long
 it took, and how the full-resolution tiles stand.
 

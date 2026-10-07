@@ -146,6 +146,11 @@ type culler struct {
 
 	// dev is the develop panel's side.
 	dev developer
+
+	// stopLive stops following the folder showing, and rail is the
+	// library as the sidebar shows it.
+	stopLive func()
+	rail     RailState
 }
 
 // stripReach is how many photos the filmstrip shows on each side of the
@@ -154,6 +159,7 @@ const stripReach = 7
 
 // arrival is a rendition decoded for photo at index, in generation gen.
 type arrival struct {
+	id         int64
 	gen, index int
 	rank       int
 	want       want
@@ -190,8 +196,15 @@ func (cu *culler) serve() error {
 	// them: ratings, flags and edits, made here or elsewhere on the same
 	// backend, come as patches, and each new listing brings what the
 	// backend has measured since, such as sizes and base exposures.
-	stopLive := cu.followFolder()
-	defer stopLive()
+	if cu.folder != 0 {
+		cu.stopLive = cu.followFolder()
+	}
+	defer func() {
+		if cu.stopLive != nil {
+			cu.stopLive()
+		}
+	}()
+	go cu.loadLibrary()
 	for {
 		select {
 		case <-cu.ctx.Done():
@@ -235,6 +248,8 @@ func (cu *culler) serve() error {
 				cu.devCurve(in)
 			case DevChannel:
 				cu.devChannel(in.Channel)
+			case OpenShoot:
+				cu.openShoot(in.Path)
 			case Quit:
 				cu.c.Leave()
 			}
@@ -290,7 +305,7 @@ func (cu *culler) goTo(i int) {
 	cu.developFollows(i)
 	// The grid follows, so the photo flies back to its own tile.
 	cu.sel, cu.cursor = [][2]int{{i, i + 1}}, i
-	_ = cu.c.Patch("grid", GridAt{Index: i})
+	_ = cu.c.Patch("grid", GridAt{Folder: cu.folder, Index: i})
 	cu.loadStrip()
 	p := cu.photos[i]
 	// Where the user is, so the backend's pre-render works outward from
@@ -337,7 +352,7 @@ func (cu *culler) pipeline(ctx context.Context, gen, i int, p marrawclient.Photo
 		if g.provisional && rank == rankSharp {
 			rank = rankProvisional
 		}
-		cu.send(arrival{gen: gen, index: i, rank: rank, want: w, got: g})
+		cu.send(arrival{id: p.ID, gen: gen, index: i, rank: rank, want: w, got: g})
 		have = max(have, rank)
 		return rank == rankSharp
 	}
@@ -386,6 +401,12 @@ func (cu *culler) send(a arrival) {
 
 // take keeps an arrival, and shows it if it is for the photo showing.
 func (cu *culler) take(a arrival) {
+	// By its photo, wherever that is now: the folder may have changed.
+	i, ok := cu.index[a.id]
+	if !ok {
+		return
+	}
+	a.index = i
 	p := cu.photos[a.index]
 	note := fmt.Sprintf("%s · %dx%d · fetch %d ms, decode %d ms", a.want, a.got.w, a.got.h,
 		a.got.fetch.Milliseconds(), a.got.decode.Milliseconds())
@@ -434,7 +455,7 @@ func (cu *culler) startWarming() {
 				if g.provisional {
 					rank = rankProvisional
 				}
-				cu.send(arrival{gen: gen, index: j, rank: rank, want: w, got: g})
+				cu.send(arrival{id: p.ID, gen: gen, index: j, rank: rank, want: w, got: g})
 				break
 			}
 		}
@@ -675,7 +696,12 @@ func (cu *culler) loadThumb(ctx context.Context, i int) {
 			}
 			cu.keepThumb(p.ID, g.img)
 			cu.learnShape(p.ID, g.w, g.h)
-			_ = cu.c.Patch("grid", ThumbIn{Index: i, Img: g.img})
+			// Where the photo is now: the folder may have changed.
+			i, ok := cu.index[p.ID]
+			if !ok {
+				return
+			}
+			_ = cu.c.Patch("grid", ThumbIn{Folder: cu.folder, Index: i, Img: g.img})
 			if cu.culling && i >= cu.at-stripReach && i <= cu.at+stripReach {
 				cu.showCull()
 			}
@@ -696,7 +722,9 @@ func (cu *culler) keepThumb(id int64, img *paint.Image) {
 		gone := cu.thumbOrder[0]
 		delete(cu.thumbs, gone)
 		cu.thumbOrder = cu.thumbOrder[1:]
-		_ = cu.c.Patch("grid", ThumbIn{Index: cu.index[gone]})
+		if i, ok := cu.index[gone]; ok {
+			_ = cu.c.Patch("grid", ThumbIn{Folder: cu.folder, Index: i})
+		}
 	}
 }
 
@@ -762,7 +790,7 @@ func (cu *culler) targets() []int {
 // marked shows photo i's rating and flag wherever it shows.
 func (cu *culler) marked(i int) {
 	p := cu.photos[i]
-	_ = cu.c.Patch("grid", PhotoMarked{Index: i, Rating: p.Rating, Flag: string(p.Flag)})
+	_ = cu.c.Patch("grid", PhotoMarked{Folder: cu.folder, Index: i, Rating: p.Rating, Flag: string(p.Flag)})
 	if cu.culling && i >= cu.at-stripReach && i <= cu.at+stripReach {
 		cu.showCull()
 	}
@@ -785,7 +813,7 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 				p.Flag = *pp.Flag
 			}
 			if pp.Rating != nil || pp.Flag != nil {
-				_ = cu.c.Patch("grid", PhotoMarked{Index: i, Rating: p.Rating, Flag: string(p.Flag)})
+				_ = cu.c.Patch("grid", PhotoMarked{Folder: cu.folder, Index: i, Rating: p.Rating, Flag: string(p.Flag)})
 			}
 			if pp.EditHash != nil && cu.dev.saved[p.ID] {
 				// The panel's own save, whose pixels show already: the

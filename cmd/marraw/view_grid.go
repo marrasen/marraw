@@ -26,10 +26,15 @@ type gridView struct {
 	st     GridState
 	grid   *widget.TileGrid
 	head   *gridHead
+	rail   *railView
 	thumbs map[int]*paint.Image
 	tiles  map[int]*photoTile
 	box    geom.Size
 	shown  bool
+	// folder is the folder the tiles show, and swapStop stops a swap to
+	// another under way.
+	folder   int64
+	swapStop func()
 }
 
 const (
@@ -46,7 +51,7 @@ const (
 func cellSize(w float32) geom.Size { return geom.Sz(w, w*0.78+captionHeight) }
 
 func newGridView(GridState) *gridView {
-	v := &gridView{thumbs: map[int]*paint.Image{}, tiles: map[int]*photoTile{}, head: newGridHead()}
+	v := &gridView{thumbs: map[int]*paint.Image{}, tiles: map[int]*photoTile{}, head: newGridHead(), rail: newRailView()}
 	v.grid = widget.NewTileGrid(cellSize(200))
 	v.grid.Tile = v.newTile
 	v.grid.OnView = func(first, count int) gunim.Intent { return NeedThumbs{First: first, Count: count} }
@@ -68,6 +73,11 @@ func newGridView(GridState) *gridView {
 }
 
 func (v *gridView) show(s GridState, u *gunim.UI) {
+	if v.shown && s.FolderID != v.folder {
+		v.swapTo(s, u)
+		return
+	}
+	v.folder = s.FolderID
 	v.st = s
 	v.grid.SetLen(len(s.Photos), u)
 	for i, t := range v.tiles {
@@ -83,8 +93,52 @@ func (v *gridView) show(s GridState, u *gunim.UI) {
 	}
 }
 
+// swapDelay is how long the last folder's tiles have to leave before the
+// next folder's come.
+const swapDelay = 240 * time.Millisecond
+
+// swapTo shows another folder: the tiles there are sink a little and fade,
+// and the new folder's grow in, one after another, from the top.
+func (v *gridView) swapTo(s GridState, u *gunim.UI) {
+	if v.swapStop != nil {
+		v.swapStop()
+		v.swapStop = nil
+	}
+	if v.grid.Built() == 0 {
+		v.enter(s, u)
+		return
+	}
+	v.grid.Depart(func(i int) (geom.Rect, bool) {
+		return scaleAbout(v.grid.TileRect(i), 0.86).Add(geom.Pt(0, 18)), true
+	}, u)
+	v.swapStop = u.After(swapDelay, func(u *gunim.UI) {
+		v.swapStop = nil
+		v.enter(s, u)
+	})
+}
+
+// enter shows folder s from the top, its tiles growing in.
+func (v *gridView) enter(s GridState, u *gunim.UI) {
+	v.folder, v.st = s.FolderID, s
+	clear(v.thumbs)
+	clear(v.tiles)
+	v.grid.SetSelected(nil, -1, u)
+	v.grid.SetLen(len(s.Photos), u)
+	v.grid.JumpTo(0)
+	v.grid.Rebuild(u)
+	v.head.set(s, false, u.Theme())
+	v.head.selected(0)
+	v.grid.Arrive(func(int) (geom.Rect, bool) { return geom.Rect{}, false }, u)
+}
+
+// railIn shows the library.
+func (v *gridView) railIn(s RailState, u *gunim.UI) { v.rail.show(s, u) }
+
 // thumbIn takes a tile's small picture, or, nil, lets it go.
 func (v *gridView) thumbIn(t ThumbIn, u *gunim.UI) {
+	if t.Folder != v.folder {
+		return
+	}
 	if t.Img == nil {
 		// A tile built keeps what it shows; one built later asks again.
 		delete(v.thumbs, t.Index)
@@ -100,7 +154,7 @@ func (v *gridView) thumbIn(t ThumbIn, u *gunim.UI) {
 // photoAspect takes a photo's shape learned from its pixels; its tile
 // glides to it.
 func (v *gridView) photoAspect(a PhotoAspect, u *gunim.UI) {
-	if a.Index < 0 || a.Index >= len(v.st.Photos) {
+	if a.Folder != v.folder || a.Index < 0 || a.Index >= len(v.st.Photos) {
 		return
 	}
 	v.st.Photos[a.Index].Aspect = a.Aspect
@@ -112,7 +166,7 @@ func (v *gridView) photoAspect(a PhotoAspect, u *gunim.UI) {
 
 // photoMarked shows a photo's new rating and flag.
 func (v *gridView) photoMarked(m PhotoMarked, u *gunim.UI) {
-	if m.Index < 0 || m.Index >= len(v.st.Photos) {
+	if m.Folder != v.folder || m.Index < 0 || m.Index >= len(v.st.Photos) {
 		return
 	}
 	p := &v.st.Photos[m.Index]
@@ -127,7 +181,7 @@ func (v *gridView) photoMarked(m PhotoMarked, u *gunim.UI) {
 // gridAt puts the keyboard on photo i and, unseen under the cull view,
 // its tile in the middle of the view, for the photo to fly back to.
 func (v *gridView) gridAt(a GridAt, u *gunim.UI) {
-	if a.Index < 0 || a.Index >= len(v.st.Photos) {
+	if a.Folder != v.folder || a.Index < 0 || a.Index >= len(v.st.Photos) {
 		return
 	}
 	v.grid.SetSelected([][2]int{{a.Index, a.Index + 1}}, a.Index, u)
@@ -155,7 +209,7 @@ func (v *gridView) newTile(i int) gunim.Node {
 }
 
 // Children implements [gunim.Composite].
-func (v *gridView) Children() []gunim.Node { return []gunim.Node{v.head, v.grid} }
+func (v *gridView) Children() []gunim.Node { return []gunim.Node{v.head, v.grid, v.rail} }
 
 // Handle implements [gunim.Handler]: the keyboard goes on to the tiles,
 // and the keys they leave rate and flag the photos selected.
@@ -180,11 +234,14 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 func (v *gridView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
 	v.box = box
-	head, grid := kids.At(0), kids.At(1)
-	head.Layout(gunim.Tight(geom.Sz(box.W, gridHeadHeight)))
-	head.Place(geom.Point{})
-	grid.Layout(gunim.Tight(geom.Sz(box.W, max(0, box.H-gridHeadHeight))))
-	grid.Place(geom.Pt(0, gridHeadHeight))
+	head, grid, rail := kids.At(0), kids.At(1), kids.At(2)
+	rail.Layout(gunim.Tight(geom.Sz(railWidth, box.H)))
+	rail.Place(geom.Point{})
+	w := max(0, box.W-railWidth)
+	head.Layout(gunim.Tight(geom.Sz(w, gridHeadHeight)))
+	head.Place(geom.Pt(railWidth, 0))
+	grid.Layout(gunim.Tight(geom.Sz(w, max(0, box.H-gridHeadHeight))))
+	grid.Place(geom.Pt(railWidth, gridHeadHeight))
 	return box
 }
 
@@ -192,7 +249,8 @@ func (v *gridView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
 	kids.At(1).Paint(p)
 	kids.At(0).Paint(p)
-	p.RRect(geom.Rc(0, gridHeadHeight-1, box.W, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
+	p.RRect(geom.Rc(railWidth, gridHeadHeight-1, box.W-railWidth, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
+	kids.At(2).Paint(p)
 }
 
 // photoTile is one photo in the grid: its picture, fitted, as a hero, and
@@ -400,6 +458,8 @@ type gridHead struct {
 	title, sub *widget.Label
 	pills      [3]*countPill
 	total, sel int
+	// none says no folder is chosen yet.
+	none bool
 }
 
 var (
@@ -418,6 +478,10 @@ func newGridHead() *gridHead {
 // set shows s's counts, popping those that changed when animate is set.
 func (h *gridHead) set(s GridState, animate bool, th *theme.Live) {
 	h.title.SetText(s.Folder)
+	h.none = s.FolderID == 0
+	if h.none {
+		h.title.SetText("Choose a shoot in the library")
+	}
 	h.total = len(s.Photos)
 	h.subText()
 	var picks, rejects, rated int
@@ -444,6 +508,10 @@ func (h *gridHead) selected(n int) {
 }
 
 func (h *gridHead) subText() {
+	if h.none {
+		h.sub.SetText("")
+		return
+	}
 	s := fmt.Sprintf("%d photos", h.total)
 	if h.sel > 1 {
 		s += fmt.Sprintf(" · %d selected", h.sel)
