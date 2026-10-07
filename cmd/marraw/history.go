@@ -55,12 +55,16 @@ func (cu *culler) remember(label string) {
 		h.steps = h.steps[len(h.steps)-historyKeep:]
 	}
 	h.index = len(h.steps) - 1
+	// The panel's history list shows the step at once.
+	if d.mounted {
+		_ = cu.c.Update("develop", cu.developState())
+	}
 }
 
 // undo steps the edit of the photo showing back, or on, saves it, and
 // shows it: the sliders glide to it, the photo renders it, and a note
 // says what was undone.
-func (cu *culler) undo(redo bool) {
+func (cu *culler) undoEdit(redo bool) {
 	d := &cu.dev
 	if !d.open || !d.mounted || !cu.culling || d.id != cu.photos[cu.at].ID {
 		return

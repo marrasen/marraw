@@ -31,10 +31,12 @@ type gridView struct {
 	tiles  map[int]*photoTile
 	box    geom.Size
 	shown  bool
-	// folder is the folder the tiles show, and swapStop stops a swap to
-	// another under way.
+	// folder is the folder the tiles show, viewSeq the view of it, and
+	// swapStop stops a swap to another under way.
 	folder   int64
+	viewSeq  int
 	swapStop func()
+	bar      *gridBar
 	// notice is a note over the grid, noticeIn how far it has come in.
 	notice    *widget.Label
 	noticeIn  *anim.Float
@@ -58,6 +60,7 @@ func cellSize(w float32) geom.Size { return geom.Sz(w, w*0.78+captionHeight) }
 func newGridView(GridState) *gridView {
 	v := &gridView{thumbs: map[int]*paint.Image{}, tiles: map[int]*photoTile{}, head: newGridHead(), rail: newRailView(),
 		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0)}
+	v.bar = newGridBar(v)
 	v.notice.Size = noteSize
 	v.grid = widget.NewTileGrid(cellSize(200))
 	v.grid.Tile = v.newTile
@@ -74,17 +77,20 @@ func newGridView(GridState) *gridView {
 	v.grid.OnZoom = func(notches float32, u *gunim.UI) {
 		w := v.grid.Size.W * float32(math.Pow(1.15, float64(notches)))
 		v.grid.Size = cellSize(max(tileMin, min(w, tileMax)))
+		v.bar.size.SetValue(v.grid.Size.W, u)
 		u.Invalidate()
 	}
 	return v
 }
 
 func (v *gridView) show(s GridState, u *gunim.UI) {
-	if v.shown && s.FolderID != v.folder {
+	lastGrid = s
+	v.bar.set(s.View, u)
+	if v.shown && (s.FolderID != v.folder || s.ViewSeq != v.viewSeq) {
 		v.swapTo(s, u)
 		return
 	}
-	v.folder = s.FolderID
+	v.folder, v.viewSeq = s.FolderID, s.ViewSeq
 	v.st = s
 	v.grid.SetLen(len(s.Photos), u)
 	for i, t := range v.tiles {
@@ -126,7 +132,7 @@ func (v *gridView) swapTo(s GridState, u *gunim.UI) {
 
 // enter shows folder s from the top, its tiles growing in.
 func (v *gridView) enter(s GridState, u *gunim.UI) {
-	v.folder, v.st = s.FolderID, s
+	v.folder, v.viewSeq, v.st = s.FolderID, s.ViewSeq, s
 	clear(v.thumbs)
 	clear(v.tiles)
 	v.grid.SetSelected(nil, -1, u)
@@ -139,7 +145,10 @@ func (v *gridView) enter(s GridState, u *gunim.UI) {
 }
 
 // railIn shows the library.
-func (v *gridView) railIn(s RailState, u *gunim.UI) { v.rail.show(s, u) }
+func (v *gridView) railIn(s RailState, u *gunim.UI) {
+	lastRail = s
+	v.rail.show(s, u)
+}
 
 // thumbIn takes a tile's small picture, or, nil, lets it go.
 func (v *gridView) thumbIn(t ThumbIn, u *gunim.UI) {
@@ -195,7 +204,7 @@ func (v *gridView) gridAt(a GridAt, u *gunim.UI) {
 	v.head.selected(1)
 	if v.grid.Columns() > 0 {
 		r := v.grid.TileRect(a.Index)
-		room := v.box.H - gridHeadHeight
+		room := v.box.H - gridTop
 		if r.Min.Y < 0 || r.Max.Y > room {
 			v.grid.JumpTo(r.Min.Y + v.grid.Offset() - (room-r.Size().H)/2)
 		}
@@ -216,7 +225,9 @@ func (v *gridView) newTile(i int) gunim.Node {
 }
 
 // Children implements [gunim.Composite].
-func (v *gridView) Children() []gunim.Node { return []gunim.Node{v.head, v.grid, v.rail, v.notice} }
+func (v *gridView) Children() []gunim.Node {
+	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.bar}
+}
 
 // Step implements [gunim.Animator]: the note's coming and going.
 func (v *gridView) Step(dt time.Duration) bool { return v.noticeIn.Step(dt) }
@@ -254,8 +265,32 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 			case input.KeyV:
 				u.Send(v, EditPaste{})
 				return true
+			case input.KeyZ:
+				u.Send(v, DevUndo{Redo: e.Mods.Has(input.ModShift)})
+				return true
+			case input.KeyY:
+				u.Send(v, DevUndo{Redo: true})
+				return true
+			case input.Key0:
+				u.Send(v, DevReset{})
+				return true
+			case input.KeyE:
+				u.Send(v, AskExport{})
+				return true
+			case input.KeyK:
+				_, cursor := v.grid.Selected()
+				openPalette(v, geom.Rc(railWidth, 0, v.box.W-railWidth, v.box.H), u, paletteFor{cursor: cursor})
+				return true
 			}
 			return false
+		}
+		if e.Key == input.KeyDelete {
+			u.Send(v, AskDelete{})
+			return true
+		}
+		if e.Char == '?' {
+			u.Send(v, ShowShortcuts{})
+			return true
 		}
 		if e.Mods.Has(input.ModAlt) {
 			return false
@@ -278,11 +313,14 @@ func (v *gridView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	w := max(0, box.W-railWidth)
 	head.Layout(gunim.Tight(geom.Sz(w, gridHeadHeight)))
 	head.Place(geom.Pt(railWidth, 0))
-	grid.Layout(gunim.Tight(geom.Sz(w, max(0, box.H-gridHeadHeight))))
-	grid.Place(geom.Pt(railWidth, gridHeadHeight))
+	grid.Layout(gunim.Tight(geom.Sz(w, max(0, box.H-gridTop))))
+	grid.Place(geom.Pt(railWidth, gridTop))
+	bar := kids.At(4)
+	bar.Layout(gunim.Tight(geom.Sz(w, barHeight)))
+	bar.Place(geom.Pt(railWidth, gridHeadHeight))
 	note := kids.At(3)
 	ns := note.Layout(gunim.Loose(geom.Sz(w/2, 60)))
-	v.noteRect = geom.Rc(railWidth+w/2-ns.W/2, gridHeadHeight+16, ns.W, ns.H)
+	v.noteRect = geom.Rc(railWidth+w/2-ns.W/2, gridTop+16, ns.W, ns.H)
 	note.Place(v.noteRect.Min)
 	return box
 }
@@ -292,6 +330,7 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	kids.At(1).Paint(p)
 	kids.At(0).Paint(p)
 	p.RRect(geom.Rc(railWidth, gridHeadHeight-1, box.W-railWidth, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
+	kids.At(4).Paint(p)
 	kids.At(2).Paint(p)
 	paintNote(p, kids.At(3), v.noteRect, v.noticeIn.Value())
 }
@@ -501,8 +540,10 @@ type gridHead struct {
 	title, sub *widget.Label
 	pills      [3]*countPill
 	total, sel int
-	// none says no folder is chosen yet.
-	none bool
+	// none says no folder is chosen yet, and folderTotal is how many
+	// photos the folder holds, filtered or not.
+	none        bool
+	folderTotal int
 }
 
 var (
@@ -521,7 +562,7 @@ func newGridHead() *gridHead {
 // set shows s's counts, popping those that changed when animate is set.
 func (h *gridHead) set(s GridState, animate bool, th *theme.Live) {
 	h.title.SetText(s.Folder)
-	h.none = s.FolderID == 0
+	h.none, h.folderTotal = s.FolderID == 0, s.Total
 	if h.none {
 		h.title.SetText("Choose a shoot in the library")
 	}
@@ -556,6 +597,9 @@ func (h *gridHead) subText() {
 		return
 	}
 	s := fmt.Sprintf("%d photos", h.total)
+	if h.folderTotal > h.total {
+		s = fmt.Sprintf("%d of %d photos", h.total, h.folderTotal)
+	}
 	if h.sel > 1 {
 		s += fmt.Sprintf(" · %d selected", h.sel)
 	}

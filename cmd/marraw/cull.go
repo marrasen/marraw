@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,8 +45,12 @@ type (
 		// that Img is a live preview of an edit under way.
 		Panel bool
 		Live  bool
-		// Active is the develop control the keys act on, or none.
-		Active string
+		// Active is the develop control the keys act on, or none, and
+		// Original says the photo shows as it was before any edit.
+		Active   string
+		Original bool
+		// WBPick says the white-balance eyedropper is on.
+		WBPick bool
 		// Notice is a note to show over the photo for a moment, each time
 		// NoticeSeq changes, as an undo says what it undid.
 		Notice    string
@@ -106,7 +109,15 @@ type culler struct {
 	// shapes learned from their pixels.
 	index   map[int64]int
 	aspects map[int64]float32
-	at      int
+	// all is the folder's every photo, and allIndex where each is in it;
+	// photos are those of them libView shows, in its order, and viewSeq
+	// counts the views made. ui is marraw's settings, as last read.
+	all      []marrawclient.Photo
+	allIndex map[int64]int
+	libView  LibView
+	viewSeq  int
+	ui       *marrawclient.UISettings
+	at       int
 
 	// cache holds decoded pixels by photo, the best of each so far.
 	cache *pixelCache
@@ -155,6 +166,29 @@ type culler struct {
 	// dev is the develop panel's side.
 	dev developer
 
+	// cullSteps are the ratings and flags given, to undo, and cullAt how
+	// many of them stand.
+	cullSteps []cullStep
+	cullAt    int
+	// original says the photo shows as it was before any edit, origImg
+	// those pixels for photo origID, and swapNow that the next picture
+	// shows at once, with no fade.
+	// wbPicking says the white-balance eyedropper is on, sampling the
+	// edit wbBase.
+	wbPicking bool
+	wbBase    marrawclient.Params
+	original  bool
+	origID    int64
+	origImg   *paint.Image
+	swapNow   bool
+	// asking says a dialog is open, and deleting holds the photos its
+	// answer deletes.
+	asking   bool
+	deleting []int64
+	// exporting holds the photos the export dialog is for, and exports
+	// the exports under way, by their tasks.
+	exporting []int64
+	exports   map[string]exportRun
 	// clipboard is the edit copied, to paste.
 	clipboard *marrawclient.Params
 	// notice is a note over the photo, shown anew as noticeSeq changes.
@@ -189,15 +223,14 @@ type timing struct {
 }
 
 func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im *images, folder int64, folderPath string, photos []marrawclient.Photo) *culler {
-	sort.SliceStable(photos, func(i, j int) bool { return photos[i].TakenAt < photos[j].TakenAt })
-	index := make(map[int64]int, len(photos))
-	for i, p := range photos {
-		index[p.ID] = i
-	}
-	return &culler{index: index, aspects: map[int64]float32{}, ctx: ctx, c: c, api: api, im: im, folder: folder, folderPath: folderPath, photos: photos,
+	cu := &culler{aspects: map[int64]float32{}, ctx: ctx, c: c, api: api, im: im, folder: folder, folderPath: folderPath,
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
 		tiles: newTileCache(48), tileWarm: map[string]bool{},
-		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), cursor: -1}
+		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), cursor: -1,
+		libView: defaultView("")}
+	cu.setAll(photos)
+	cu.applyView()
+	return cu
 }
 
 func (cu *culler) serve() error {
@@ -214,6 +247,27 @@ func (cu *culler) serve() error {
 	if cu.folder != 0 {
 		cu.stopLive = cu.followFolder()
 	}
+	// The backend's tasks as they change, for the exports' notes.
+	cu.exports = map[string]exportRun{}
+	stopTasks := cu.api.OnTaskStateEvent(func(ev marrawclient.TaskStateEvent) {
+		select {
+		case cu.do <- func() { cu.tasksChanged(ev.Tasks) }:
+		case <-cu.ctx.Done():
+		}
+	})
+	defer stopTasks()
+	// And how far each has got, which comes apart from its state.
+	stopProgress := cu.api.OnTaskUpdateEvent(func(ev marrawclient.TaskUpdateEvent) {
+		if ev.Current == nil || ev.Total == nil {
+			return
+		}
+		select {
+		case cu.do <- func() { cu.taskProgress(ev.TaskID, *ev.Current, *ev.Total) }:
+		case <-cu.ctx.Done():
+		}
+	})
+	defer stopProgress()
+	go cu.loadSettings()
 	defer func() {
 		if cu.stopLive != nil {
 			cu.stopLive()
@@ -281,6 +335,28 @@ func (cu *culler) serve() error {
 				cu.editPaste()
 			case OpenShoot:
 				cu.openShoot(in.Path)
+			case SetLibView:
+				cu.setView(in.View)
+			case AskDelete:
+				cu.askDelete()
+			case ShowOriginal:
+				cu.showOriginal(in.On)
+			case DevReset:
+				cu.devReset()
+			case AskExport:
+				cu.askExport()
+			case ShowShortcuts:
+				cu.showShortcuts()
+			case ExportGo:
+				cu.exportGo(in)
+			case DevJump:
+				cu.devJump(in.Index)
+			case DevWBPick:
+				cu.devWBPick(in.On)
+			case DevWBAt:
+				cu.devWBAt(in.X, in.Y)
+			case Confirmed:
+				cu.confirmed(in)
 			case Quit:
 				cu.c.Leave()
 			}
@@ -303,6 +379,14 @@ func (cu *culler) state() Cull {
 	// The edit being made shows as its previews come.
 	if d := &cu.dev; d.open && d.live != nil && d.id == p.ID {
 		st.Img, st.Note, st.Live = d.live, d.note, true
+	}
+	// Backspace held: the photo before any edit, and back again, at once.
+	st.Original, st.WBPick = cu.original, cu.wbPicking
+	if img := cu.originalShowing(p.ID); img != nil {
+		st.Img, st.Note = img, "original, before any edit"
+	}
+	if cu.swapNow {
+		st.Live, cu.swapNow = true, false
 	}
 	st.Thumb = cu.thumbs[p.ID]
 	st.Panel = cu.dev.open
@@ -336,6 +420,7 @@ func (cu *culler) goTo(i int) {
 		cu.probing, cu.probeStop = 0, nil
 	}
 	cu.tileNote = ""
+	cu.original, cu.wbPicking = false, false
 	cu.showCull()
 	cu.developFollows(i)
 	// The grid follows, so the photo flies back to its own tile.
@@ -819,14 +904,20 @@ func (cu *culler) rate(stars int) {
 	stars = max(0, min(stars, 5))
 	idx := cu.targets()
 	var ids []int64
+	step := cullStep{what: map[bool]string{false: fmt.Sprintf("%d stars", stars), true: "rating cleared"}[stars == 0]}
 	for _, i := range idx {
-		cu.photos[i].Rating = stars
-		ids = append(ids, cu.photos[i].ID)
+		p := &cu.photos[i]
+		step.ids = append(step.ids, p.ID)
+		step.before = append(step.before, photoMark{p.Rating, p.Flag})
+		p.Rating = stars
+		step.after = append(step.after, photoMark{p.Rating, p.Flag})
+		ids = append(ids, p.ID)
 		cu.marked(i)
 	}
 	if len(ids) == 0 {
 		return
 	}
+	cu.recordCull(step)
 	go func() {
 		if err := cu.api.Library.SetRating(cu.ctx, ids, stars); err != nil {
 			log.Printf("rate: %v", err)
@@ -838,15 +929,32 @@ func (cu *culler) rate(stars int) {
 // on the backend.
 func (cu *culler) mark(f marrawclient.Flag) {
 	idx := cu.targets()
+	// P on a photo picked already, or X on one rejected, takes the flag
+	// off again, as marraw's keys do.
+	if f != "none" && len(idx) > 0 {
+		all := true
+		for _, i := range idx {
+			all = all && cu.photos[i].Flag == f
+		}
+		if all {
+			f = "none"
+		}
+	}
 	var ids []int64
+	step := cullStep{what: map[marrawclient.Flag]string{"pick": "pick", "exclude": "reject", "none": "flag cleared"}[f]}
 	for _, i := range idx {
-		cu.photos[i].Flag = f
-		ids = append(ids, cu.photos[i].ID)
+		p := &cu.photos[i]
+		step.ids = append(step.ids, p.ID)
+		step.before = append(step.before, photoMark{p.Rating, p.Flag})
+		p.Flag = f
+		step.after = append(step.after, photoMark{p.Rating, p.Flag})
+		ids = append(ids, p.ID)
 		cu.marked(i)
 	}
 	if len(ids) == 0 {
 		return
 	}
+	cu.recordCull(step)
 	go func() {
 		if err := cu.api.Library.SetFlag(cu.ctx, ids, f); err != nil {
 			log.Printf("flag: %v", err)
@@ -884,6 +992,26 @@ func (cu *culler) marked(i int) {
 // patched takes changes to photos made anywhere: their ratings and flags,
 // and an edit, whose new pixels are fetched again.
 func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
+	// The folder's whole list takes them too, for the photos not showing.
+	for _, pp := range ps {
+		ai, ok := cu.allIndex[pp.ID]
+		if !ok {
+			continue
+		}
+		if _, showing := cu.index[pp.ID]; showing {
+			continue
+		}
+		p := &cu.all[ai]
+		if pp.Rating != nil {
+			p.Rating = *pp.Rating
+		}
+		if pp.Flag != nil {
+			p.Flag = *pp.Flag
+		}
+		if pp.EditHash != nil {
+			p.EditHash = *pp.EditHash
+		}
+	}
 	changed := false
 	for _, pp := range ps {
 		for i := range cu.photos {

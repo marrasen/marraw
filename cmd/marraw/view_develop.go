@@ -194,6 +194,9 @@ var devSpecs = func() map[string]devSpec {
 			set:    func(p *marrawclient.Params, v float64) { p.MedPasses = int(math.Round(v)) }},
 		unit("caRed", "CA red", func(p *marrawclient.Params) *float64 { return &p.CARed }),
 		unit("caBlue", "CA blue", func(p *marrawclient.Params) *float64 { return &p.CABlue }),
+		lensSpec("lensDistortion", "Distortion", func(p *marrawclient.Params) *float64 { return &p.LensDistortion }),
+		lensSpec("lensVignetting", "Vignetting", func(p *marrawclient.Params) *float64 { return &p.LensVignetting }),
+		lensSpec("lensCA", "Chromatic aberration", func(p *marrawclient.Params) *float64 { return &p.LensCA }),
 	}
 	// The mixer's adjustments, a band's each, as "hslHue:3".
 	for b := range bandNames {
@@ -237,6 +240,16 @@ var devSpecs = func() map[string]devSpec {
 	return out
 }()
 
+// lensSpec is a lens correction: stored from -1 to 1 as an offset from the
+// profile's own measurement, read as 0 to 200%, at rest at 100%, as
+// marraw's lens section reads it.
+func lensSpec(key, label string, get func(p *marrawclient.Params) *float64) devSpec {
+	s := unit(key, label, get)
+	s.snap = 0.05
+	s.format = func(v float32) string { return fmt.Sprintf("%d%%", int(math.Round(float64((v+1)*100)))) }
+	return s
+}
+
 // devSection is a group of adjustments under a heading that folds them
 // away: its sliders, choices, and the parts of its own, auto naming the
 // sections its Auto button sets.
@@ -257,7 +270,10 @@ var devSections = []devSection{
 	{title: "Color mixer", open: false},
 	{title: "Effects", keys: []string{"vignette"}, open: true},
 	{title: "Detail", keys: []string{"sharpen", "nrThreshold", "medPasses", "caRed", "caBlue"}, choices: []string{"highlight", "fbddNoiseRd", "demosaic"}, open: false},
+	{title: "Lens", keys: []string{"lensDistortion", "lensVignetting", "lensCA"}, choices: []string{"lensMode"}, open: false},
 	{title: "Tone curve", open: true},
+	{title: "History", open: false},
+	{title: "Info", open: false},
 }
 
 // sectionsOpen are the sections open, by title, kept as the panel comes
@@ -314,6 +330,11 @@ type developView struct {
 	nodeOf     map[string]gunim.Node
 	folds2     []*widget.Fold
 	active     string
+	// lensNote names the lens profile, history lists the edit's steps,
+	// and info says what the photo is.
+	lensNote *widget.Label
+	history  *widget.List
+	info     *infoRows
 }
 
 func newDevelopView(s DevelopState) *developView {
@@ -344,6 +365,21 @@ func newDevelopView(s DevelopState) *developView {
 		switch sec.title {
 		case "Color mixer":
 			body = append(body, v.mixer()...)
+		case "Lens":
+			v.lensNote = newSmallLabel("")
+			v.lensNote.Color, v.lensNote.MaxLines = noteInk, 2
+			body = append([]gunim.Node{v.lensNote}, body...)
+		case "History":
+			v.history = widget.NewList()
+			v.history.NoFocus, v.history.ClickOnce = true, true
+			v.history.OnClick = func(k widget.Key) gunim.Intent {
+				i, _ := strconv.Atoi(string(k))
+				return DevJump{Index: i}
+			}
+			body = append(body, v.history)
+		case "Info":
+			v.info = newInfoRows()
+			body = append(body, v.info)
 		case "Tone curve":
 			v.channel.KeepFocus = true
 			v.channel.OnChange = func(i int) gunim.Intent { return DevChannel{Channel: i} }
@@ -498,7 +534,141 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 	v.curve.Guides = guides
 	v.curve.SetPoints(points(*curveOf(p, s.Channel)), u)
 	v.showActive(s.Active, u)
+	v.showLens(s, u)
+	v.showHistory(s, u)
+	v.info.show(s.Info)
 	u.Invalidate()
+}
+
+// showLens names the lens profile, and lets the corrections it has move.
+func (v *developView) showLens(s DevelopState, u *gunim.UI) {
+	l := s.Lens
+	switch {
+	case l.Matched && l.Lens != "":
+		v.lensNote.SetText(l.Lens + " · profile " + l.Profile)
+	case l.Matched:
+		v.lensNote.SetText("Profile " + l.Profile)
+	case l.Lens != "":
+		v.lensNote.SetText(l.Lens + " · no profile for this lens")
+	default:
+		v.lensNote.SetText("No lens profile for this photo")
+	}
+	off := s.Params.LensMode == "off"
+	v.rows["lensDistortion"].Slider.Disabled = off || !l.Distortion
+	v.rows["lensVignetting"].Slider.Disabled = off || !l.Vignetting
+	v.rows["lensCA"].Slider.Disabled = off || !l.CA
+}
+
+// historyRow is a step of the edit's history in the list.
+type historyRow struct {
+	Index   int
+	Label   string
+	Current bool
+}
+
+// showHistory lists the edit's steps, the one showing marked; new steps
+// slide in as they are taken.
+func (v *developView) showHistory(s DevelopState, u *gunim.UI) {
+	rows := make([]historyRow, len(s.History))
+	for i, l := range s.History {
+		rows[i] = historyRow{Index: i, Label: l, Current: i == s.HistoryAt}
+	}
+	widget.Sync(v.history, u, rows,
+		func(r historyRow) widget.Key { return widget.Key(strconv.Itoa(r.Index)) },
+		newHistoryItem, setHistoryItem)
+}
+
+// newHistoryItem is a row of the history list: the step, marked while it
+// is the one showing.
+func newHistoryItem(r historyRow) *labeled {
+	l := &labeled{label: newSmallLabel(r.Label), child: widget.NewSpacer(), active: anim.NewFloat(0)}
+	l.label.MaxLines = 1
+	l.Add(l.active)
+	if r.Current {
+		l.on = true
+		l.active.Jump(1)
+	}
+	return l
+}
+
+func setHistoryItem(l *labeled, r historyRow, u *gunim.UI) {
+	l.label.SetText(r.Label)
+	l.setActive(r.Current, u)
+}
+
+// infoRows say what the photo is, a name and a value a row.
+type infoRows struct {
+	names, values []*widget.Label
+	col           gunim.Node
+}
+
+// infoNames are the Info section's rows, as marraw's Info tab has them.
+var infoNames = []string{"File", "Folder", "Resolution", "File size", "Camera", "ISO", "Aperture", "Shutter", "Focal length", "Taken"}
+
+func newInfoRows() *infoRows {
+	r := &infoRows{}
+	var rows []gunim.Node
+	for _, n := range infoNames {
+		name, value := newSmallLabel(n), newSmallLabel("")
+		name.Color = noteInk
+		value.MaxLines = 2
+		r.names, r.values = append(r.names, name), append(r.values, value)
+		rows = append(rows, &labeled{label: name, child: value, active: anim.NewFloat(0)})
+	}
+	r.col = widget.Column(rows...)
+	return r
+}
+
+// show says what photo in is.
+func (r *infoRows) show(in PhotoInfo) {
+	val := func(f float64, form string) string {
+		if f <= 0 {
+			return "—"
+		}
+		return fmt.Sprintf(form, f)
+	}
+	shutter := "—"
+	switch {
+	case in.Shutter >= 1:
+		shutter = fmt.Sprintf("%.1f s", in.Shutter)
+	case in.Shutter > 0:
+		shutter = fmt.Sprintf("1/%d s", int(math.Round(1/in.Shutter)))
+	}
+	size := "—"
+	if in.Size > 0 {
+		size = fmt.Sprintf("%.1f MB", float64(in.Size)/1e6)
+	}
+	res := "—"
+	if in.Width > 0 {
+		res = fmt.Sprintf("%d × %d (%.1f MP)", in.Width, in.Height, float64(in.Width*in.Height)/1e6)
+	}
+	camera, taken := in.Camera, in.Taken
+	if camera == "" {
+		camera = "—"
+	}
+	if taken == "" {
+		taken = "—"
+	}
+	for i, v := range []string{in.File, in.Folder, res, size, camera, val(in.ISO, "ISO %.0f"),
+		val(in.Aperture, "f/%.1f"), shutter, val(in.Focal, "%.0f mm"), taken} {
+		r.values[i].SetText(v)
+	}
+}
+
+// Children implements [gunim.Composite].
+func (r *infoRows) Children() []gunim.Node { return []gunim.Node{r.col} }
+
+// Layout implements [gunim.Node].
+func (r *infoRows) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	k := kids.At(0)
+	s := k.Layout(c)
+	k.Place(geom.Point{})
+	return s
+}
+
+// Paint implements [gunim.Node].
+func (r *infoRows) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
 }
 
 // showActive marks the control the keys act on, opens its section if it

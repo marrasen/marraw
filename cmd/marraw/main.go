@@ -22,7 +22,8 @@
 // walk its controls, + and - step the one chosen and Ctrl+Z undoes, and
 // Escape goes back.
 // The wheel zooms about the pointer, a drag pans and a flick glides, and a
-// click on the filmstrip goes to that photo.
+// click on the filmstrip goes to that photo. Ctrl+K opens the command
+// palette, Ctrl+E exports, and ? lists the keys.
 package main
 
 import (

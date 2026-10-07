@@ -71,6 +71,12 @@ type cullView struct {
 	noticeIn  *anim.Float
 	noticeSeq int
 	noteRect  geom.Rect
+	// navDrag says a press in the navigator moves the view, and origIn
+	// and wbIn bring the labels for the original and the eyedropper in.
+	navDrag      bool
+	origIn, wbIn *anim.Float
+	labelOrig    *widget.Label
+	labelWB      *widget.Label
 	// trail follows a drag, for a flick's speed; fling is the glide's
 	// speed on screen, in pixels a second, while flinging, and glided says
 	// a glide came to rest and the tiles there are to be asked for.
@@ -93,12 +99,15 @@ func newCullView(s Cull) *cullView {
 	v := &cullView{name: widget.NewLabel(""), note: widget.NewLabel(""), z: anim.NewFloat(1), c: anim.NewPoint(geom.Pt(0.5, 0.5)),
 		scale: 1, in: anim.NewFloat(0), strip: anim.NewFloat(float32(s.Index)), ring: anim.NewFloat(0),
 		slot: &gunim.Box{}, side: anim.NewFloat(0), shape: anim.NewSize(fullOf(s)),
-		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0), noticeSeq: s.NoticeSeq}
+		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0), noticeSeq: s.NoticeSeq,
+		origIn: anim.NewFloat(0), wbIn: anim.NewFloat(0),
+		labelOrig: widget.NewLabel("Original"), labelWB: widget.NewLabel("Eyedropper: click something neutral")}
+	v.labelOrig.Size, v.labelWB.Size = noteSize, noteSize
 	v.notice.Size = noteSize
 	if s.Panel {
 		v.side.Jump(1)
 	}
-	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape, v.noticeIn)
+	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -145,6 +154,8 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 		v.marks.set(s.Rating, s.Flag, th)
 	}
 	v.side.Animate(map[bool]float32{false: 0, true: 1}[s.Panel], panelSlide)
+	v.origIn.Animate(map[bool]float32{false: 0, true: 1}[s.Original], widget.Quick.Get(th))
+	v.wbIn.Animate(map[bool]float32{false: 0, true: 1}[s.WBPick], widget.Quick.Get(th))
 	if s.NoticeSeq != v.noticeSeq {
 		v.showNotice(s.Notice, s.NoticeSeq, u)
 	}
@@ -365,7 +376,77 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 }
 
 // Children implements [gunim.Composite].
-func (v *cullView) Children() []gunim.Node { return []gunim.Node{v.hero, v.hud, v.slot, v.notice} }
+func (v *cullView) Children() []gunim.Node {
+	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.labelWB}
+}
+
+// Cursor implements [gunim.CursorShaper]: a crosshair while the
+// eyedropper is on.
+func (v *cullView) Cursor(p geom.Point) input.Cursor {
+	if v.st.WBPick && p.Y < v.box.H-stripHeight && !v.inPanel(p) {
+		return input.CursorCrosshair
+	}
+	return input.CursorArrow
+}
+
+// photoPoint is where p falls on the photo as it shows, 0 to 1 across and
+// down, and whether it falls on it.
+func (v *cullView) photoPoint(p geom.Point) (geom.Point, bool) {
+	z := v.z.Value()
+	f, s := v.full(), v.fit()*z
+	o := v.origin(z, v.c.Value())
+	at := geom.Pt((p.X-o.X)/(f.W*s), (p.Y-o.Y)/(f.H*s))
+	return at, at.X >= 0 && at.X <= 1 && at.Y >= 0 && at.Y <= 1
+}
+
+// navOn reports whether the navigator shows: while zoomed past fit.
+func (v *cullView) navOn() bool { return v.z.Value() > 1.02 }
+
+// navRect is the navigator, in the photo's room's lower right corner, in
+// the photo's shape.
+func (v *cullView) navRect() geom.Rect {
+	r := v.room()
+	f := v.full()
+	w := float32(190)
+	h := w * f.H / max(f.W, 1)
+	if h > 150 {
+		h, w = 150, 150*f.W/max(f.H, 1)
+	}
+	return geom.Rc(r.Max.X-w-6, r.Max.Y-h-6, w, h)
+}
+
+// navTo moves the view's middle to where p falls in the navigator.
+func (v *cullView) navTo(p geom.Point) {
+	n := v.navRect()
+	c := geom.Pt((p.X-n.Min.X)/n.Size().W, (p.Y-n.Min.Y)/n.Size().H)
+	v.flinging = false
+	v.c.Jump(v.clampCentre(v.z.Value(), c))
+}
+
+// paintNav draws the navigator: the photo small, and the part showing
+// framed; it fades in as the zoom passes fit.
+func (v *cullView) paintNav(p *paint.Painter) {
+	k := min(max((v.z.Value()-1.02)*6, 0), 1)
+	if k < 0.01 || v.pic.img == nil {
+		return
+	}
+	n := v.navRect()
+	defer p.Layer(paint.LayerOpts{Bounds: n.Inset(geom.Uniform(-12)), Opacity: k})()
+	p.ShadowRRect(n.Inset(geom.Uniform(-3)), 6, paint.Solid(color.NRGBA{R: 0x10, G: 0x11, B: 0x15, A: 0xf0}),
+		paint.Shadow{Offset: geom.Pt(0, 2), Blur: 10, Color: color.NRGBA{A: 0x80}})
+	p.Image(v.pic.img, pixelFit(n, v.pic.img), paint.ImageOpts{Opacity: 0.85, Radius: 3})
+	// The part of the photo the room shows, as fractions of it.
+	z := v.z.Value()
+	f, s := v.full(), v.fit()*z
+	o, r := v.origin(z, v.c.Value()), v.room()
+	x0, y0 := max(0, (r.Min.X-o.X)/(f.W*s)), max(0, (r.Min.Y-o.Y)/(f.H*s))
+	x1, y1 := min(1, (r.Max.X-o.X)/(f.W*s)), min(1, (r.Max.Y-o.Y)/(f.H*s))
+	if x1 <= x0 || y1 <= y0 {
+		return
+	}
+	frame := geom.Rect{Min: geom.Pt(n.Min.X+x0*n.Size().W, n.Min.Y+y0*n.Size().H), Max: geom.Pt(n.Min.X+x1*n.Size().W, n.Min.Y+y1*n.Size().H)}
+	p.RRectStroke(frame, 2, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x18}), paint.Stroke{Width: 1.5, Color: color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xe0}})
+}
 
 // Focusable implements [gunim.Focusable]: the keys step through the folder.
 func (v *cullView) Focusable() bool { return true }
@@ -392,8 +473,49 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			case input.KeyV:
 				u.Send(v, EditPaste{})
 				return true
+			case input.Key0:
+				u.Send(v, DevReset{})
+				return true
+			case input.KeyE:
+				u.Send(v, AskExport{})
+				return true
+			case input.KeyK:
+				openPalette(v, v.room(), u, paletteFor{culling: true, panel: v.st.Panel})
+				return true
+			case input.KeyU:
+				// Auto tone; with Shift white balance and colour; with Alt
+				// everything, as marraw's keys have it.
+				secs := []string{"tone"}
+				switch {
+				case e.Mods.Has(input.ModAlt):
+					secs = []string{"all"}
+				case e.Mods.Has(input.ModShift):
+					secs = []string{"wb", "color"}
+				}
+				u.Send(v, DevAuto{Sections: secs})
+				return true
 			}
 			return false
+		}
+		// Backspace held shows the photo before any edit.
+		if e.Key == input.KeyBackspace {
+			if !e.Repeat {
+				u.Send(v, ShowOriginal{On: true})
+			}
+			return true
+		}
+		if e.Char == '?' {
+			u.Send(v, ShowShortcuts{})
+			return true
+		}
+		if e.Key == input.KeyDelete {
+			u.Send(v, AskDelete{})
+			return true
+		}
+		// W turns the white-balance eyedropper on and off, and Escape off.
+		if v.st.Panel && !e.Mods.Has(input.ModShift) && (e.Key == input.KeyW || e.Key == input.KeyEscape && v.st.WBPick) {
+			u.Send(v, DevWBPick{On: e.Key == input.KeyW && !v.st.WBPick})
+			return true
 		}
 		if e.Mods.Has(input.ModShift) && v.panKey(e.Key, u) {
 			return true
@@ -443,9 +565,33 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			v.zoomTo(v.z.Target()*float32(math.Pow(1.25, float64(d))), e.Pos, u)
 		}
 		return true
+	case input.KeyRelease:
+		if e.Key == input.KeyBackspace && v.st.Original {
+			u.Send(v, ShowOriginal{})
+			return true
+		}
+		return false
+	case input.WindowFocusLost:
+		if v.st.Original {
+			u.Send(v, ShowOriginal{})
+		}
+		return false
 	case input.PointerDown:
 		if e.Button != input.ButtonPrimary || v.inPanel(e.Pos) {
 			return false
+		}
+		// The navigator: a press there moves the view to it.
+		if v.navOn() && v.navRect().Contains(e.Pos) {
+			v.navDrag = true
+			v.navTo(e.Pos)
+			return true
+		}
+		// The eyedropper: a click picks where it lands on the photo.
+		if v.st.WBPick && e.Pos.Y < v.box.H-stripHeight {
+			if at, ok := v.photoPoint(e.Pos); ok {
+				u.Send(v, DevWBAt{X: float64(at.X), Y: float64(at.Y)})
+			}
+			return true
 		}
 		for _, t := range v.stripRects() {
 			if t.r.Contains(e.Pos) {
@@ -465,6 +611,11 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		v.trail.Add(e.Pos, e.Time)
 		return true
 	case input.PointerMove:
+		if v.navDrag {
+			v.navTo(e.Pos)
+			u.Invalidate()
+			return true
+		}
 		if !v.dragging {
 			return false
 		}
@@ -477,6 +628,11 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		u.Invalidate()
 		return true
 	case input.PointerUp:
+		if v.navDrag {
+			v.navDrag = false
+			v.askTiles(u)
+			return true
+		}
 		if v.dragging {
 			v.dragging = false
 			// A flick sends the photo gliding on, slowing to a stop.
@@ -664,6 +820,12 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	room := v.room()
 	v.noteRect = geom.Rc(room.Center().X-ns.W/2, room.Min.Y+14, ns.W, ns.H)
 	note.Place(v.noteRect.Min)
+	for i := 4; i <= 5; i++ {
+		l := kids.At(i)
+		s := l.Layout(gunim.Loose(geom.Sz(box.W/2, 40)))
+		l.Place(geom.Pt(room.Min.X+16, room.Min.Y+14+float32(i-4)*34))
+		_ = s
+	}
 	if cur := v.current(); cur != nil {
 		v.ring.Animate(thumbWidth(*cur), widget.Quick.Get(f.Theme))
 		if v.ring.Value() == 0 {
@@ -720,8 +882,16 @@ func (v *cullView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	hs := hud.Size()
 	p.RRect(geom.Rc(0, box.H-stripHeight-hs.H, hs.W, hs.H), 0, paint.Solid(color.NRGBA{A: 0xa0}))
 	hud.Paint(p)
+	v.paintNav(p)
 	kids.At(2).Paint(p)
 	v.paintNotice(p, kids.At(3))
+	// The labels for the original and the eyedropper, in the corner.
+	for i, k := range []float32{v.origIn.Value(), v.wbIn.Value()} {
+		l := kids.At(4 + i)
+		r := v.room()
+		at := geom.Rc(r.Min.X+16, r.Min.Y+14+float32(i)*34, l.Size().W, l.Size().H)
+		paintNote(p, l, at, k)
+	}
 }
 
 // paintNotice draws the note in a pill, popping in and fading out.

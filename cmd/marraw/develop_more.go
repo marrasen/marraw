@@ -43,17 +43,24 @@ type devChoice struct {
 
 // The panel's choices, as marraw's control table has them.
 var devChoices = map[string]devChoice{
-	"wbMode": {label: "Mode", options: []string{"As shot", "Auto", "Kelvin"},
+	"wbMode": {label: "Mode", options: []string{"As shot", "Auto", "Kelvin", "Picked"},
 		get: func(p *marrawclient.Params) int {
 			switch p.WBMode {
 			case "auto":
 				return 1
 			case "kelvin":
 				return 2
+			case "custom":
+				return 3
 			}
 			return 0
 		},
 		set: func(p *marrawclient.Params, i int) {
+			if i == 3 {
+				// Picked comes of the eyedropper; chosen here it keeps a
+				// pick made, and does nothing otherwise.
+				return
+			}
 			p.WBMul = [4]float64{}
 			switch i {
 			case 1:
@@ -67,6 +74,16 @@ var devChoices = map[string]devChoice{
 				// The backend spells As shot as nothing.
 				p.WBMode, p.WBKelvin = "", 0
 			}
+		}},
+	"lensMode": {label: "Correction", options: []string{"Auto", "Off"},
+		get: func(p *marrawclient.Params) int {
+			if p.LensMode == "off" {
+				return 1
+			}
+			return 0
+		},
+		set: func(p *marrawclient.Params, i int) {
+			p.LensMode = map[bool]marrawclient.LensMode{false: "", true: "off"}[i == 1]
 		}},
 	"bw": {label: "Treatment", options: []string{"Color", "B&W"},
 		get: func(p *marrawclient.Params) int {

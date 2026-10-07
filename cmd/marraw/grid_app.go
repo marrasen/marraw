@@ -17,6 +17,11 @@ type (
 		FolderID int64
 		Folder   string
 		Photos   []GridPhoto
+		// View is how the photos are filtered and sorted, ViewSeq which
+		// making of it this is, and Total how many the folder holds.
+		View    LibView
+		ViewSeq int
+		Total   int
 	}
 	// GridPhoto is one photo as a tile shows it.
 	GridPhoto struct {
@@ -63,7 +68,7 @@ type (
 
 // gridState is the grid's state: every photo in the folder.
 func (cu *culler) gridState() GridState {
-	st := GridState{FolderID: cu.folder, Folder: filepath.Base(cu.folderPath)}
+	st := GridState{FolderID: cu.folder, Folder: filepath.Base(cu.folderPath), View: cu.libView, ViewSeq: cu.viewSeq, Total: len(cu.all)}
 	if cu.folder == 0 {
 		st.Folder = ""
 	}

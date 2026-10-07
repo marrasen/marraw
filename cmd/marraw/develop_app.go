@@ -26,6 +26,12 @@ type (
 		Channel   int
 		// Active is the control the keys act on, or none.
 		Active string
+		// Info is what the panel says of the photo, Lens its lens profile,
+		// and History its edit's steps, HistoryAt the one showing.
+		Info      PhotoInfo
+		Lens      LensInfo
+		History   []string
+		HistoryAt int
 	}
 	// DevHist is the histogram of the pixels showing.
 	DevHist struct{ Counts [3][256]uint32 }
@@ -83,6 +89,8 @@ type developer struct {
 	// + and - presses once they stop.
 	active string
 	nudge  *time.Timer
+	// lens is the lens profile matched for the photo.
+	lens LensInfo
 }
 
 // editing reports whether photo id has an edit under way the backend has
@@ -108,10 +116,12 @@ const draftEdge = 1024
 // developState is the panel's state.
 func (cu *culler) developState() DevelopState {
 	d := &cu.dev
-	st := DevelopState{ID: d.id, Params: d.params, Channel: d.channel, Active: d.active}
+	st := DevelopState{ID: d.id, Params: d.params, Channel: d.channel, Active: d.active, Lens: d.lens}
 	if i, ok := cu.index[d.id]; ok {
 		st.BaseExpEV = cu.photos[i].BaseExpEV
+		st.Info = photoInfo(cu.photos[i], cu.folderPath)
 	}
+	st.History, st.HistoryAt = cu.historyOfShowing()
 	return st
 }
 
@@ -168,6 +178,8 @@ func (cu *culler) loadEdit(i int) {
 			// A new photo, with no edit of it under way.
 			if id != d.id {
 				d.edits, d.committed, d.confirmed = 0, 0, 0
+				d.lens = LensInfo{}
+				cu.loadLens(id)
 			}
 			d.id, d.params = id, marrawclient.Params{}
 			if p != nil {

@@ -116,6 +116,27 @@ func addLibraryFolder(ctx context.Context, api *marrawclient.Client, dir string)
 	return api.Library.SetLibraryRoots(ctx, append(roots, marrawclient.LibraryRoot{Path: dir, IsParent: true}))
 }
 
+// loadSettings reads marraw's settings, for the folders' remembered views,
+// and shows the folder open as its own says.
+func (cu *culler) loadSettings() {
+	ui, err := cu.api.Settings.GetUISettings(cu.ctx)
+	select {
+	case cu.do <- func() {
+		if err != nil {
+			log.Printf("settings: %v", err)
+			return
+		}
+		cu.ui = ui
+		if v := viewFor(ui, cu.folderPath); cu.folder != 0 && v != cu.libView && !cu.culling {
+			cu.libView = v
+			cu.applyView()
+			_ = cu.c.Update("grid", cu.gridState())
+		}
+	}:
+	case <-cu.ctx.Done():
+	}
+}
+
 // railHas reports whether the sidebar lists path.
 func (cu *culler) railHas(path string) bool {
 	for _, it := range cu.rail.Items {
@@ -176,12 +197,10 @@ func (cu *culler) showFolder(id int64, path string, photos []marrawclient.Photo)
 	}
 	cu.gridStop, cu.load, cu.warm, cu.stopLive = nil, nil, nil, nil
 	cu.stopTiles()
-	sort.SliceStable(photos, func(i, j int) bool { return photos[i].TakenAt < photos[j].TakenAt })
-	cu.folder, cu.folderPath, cu.photos = id, path, photos
-	cu.index = make(map[int64]int, len(photos))
-	for i, p := range photos {
-		cu.index[p.ID] = i
-	}
+	cu.folder, cu.folderPath = id, path
+	cu.setAll(photos)
+	cu.libView = viewFor(cu.ui, path)
+	cu.applyView()
 	clear(cu.thumbsWanted)
 	cu.at, cu.gen, cu.sel, cu.cursor = 0, cu.gen+1, nil, -1
 	cu.stopLive = cu.followFolder()

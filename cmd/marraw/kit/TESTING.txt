@@ -1,0 +1,56 @@
+What to test in this build
+==========================
+
+New since the last build you tried. Everything else in README.txt still
+applies. Try it on these test photos: deleting and exporting change files.
+
+Faster develop drafts (also in marraw itself)
+  - On the concert photos (blue stage light), drag Brightness, Gamma and
+    Shadow slope: the photo should now follow as smoothly as Exposure.
+    Temperature and Tint stay slower on those photos; that is expected.
+
+Grid
+  - The filter bar under the heading: sort (capture time or file name,
+    either way), flags (All / Picks / Not rejected / Rejected), least
+    rating. The tiles leave and come back in the new order. The heading
+    says "12 of 40 photos" while a filter hides some. Each folder
+    remembers its own, as in marraw.
+  - The Size slider in the bar, and Ctrl with the wheel, move together.
+  - Delete moves the photos selected to the Recycle Bin, after asking.
+
+Rating and flags
+  - P on a photo picked already takes the pick off; X likewise.
+  - Ctrl+Z / Ctrl+Shift+Z undo and redo ratings and flags, in the grid
+    and in the cull view with the develop panel closed. A note says what.
+
+Cull view
+  - Hold Backspace: the photo as it was before any edit, "Original" in
+    the corner. Let go: the edit again.
+  - Zoom past fit (Z): a navigator in the lower right corner. Click or
+    drag in it to move around.
+  - Delete moves the photo showing to the Recycle Bin, after asking.
+
+Develop panel (D)
+  - Lens section: the lens and the profile matched, Auto or Off, and
+    distortion, vignetting and chromatic aberration as 0 to 200%.
+  - History section: every step of the edit; click one to go back to it.
+  - Info section: file, size, camera, ISO, aperture, shutter, focal
+    length and when it was taken.
+  - W: white balance eyedropper. Click something neutral; the mode turns
+    to Picked. W or Escape ends it.
+  - Ctrl+0 resets the edit. Ctrl+U auto tone, Ctrl+Shift+U auto white
+    balance and colour, Ctrl+Alt+U auto everything.
+
+Everywhere
+  - Ctrl+K: command palette. Type to find an action, a sort or filter, or
+    a shoot in the library to open.
+  - ?: the keyboard shortcuts.
+  - Ctrl+E: export the photos selected (or the one showing, or all the
+    grid shows): destination, JPEG/TIFF/PNG/RAW+XMP, quality, size, file
+    names. Notes say how it goes and where the files went. It starts
+    from the choices you used last time, in marraw too.
+
+Not here yet (from marraw): crop and straighten, masks and local
+adjustments, retouch, presets, before/after split, burst grouping and
+the culling aids, time-gap headers, watermarks, share links, remote
+connections, the second-display viewer.
