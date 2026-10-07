@@ -37,7 +37,9 @@ left: a click on a shoot there opens it. With the test data folder the
 library is empty, so the folder given with -folder shows at its top.
 To fill it, add this kit's photos folder once, and its shoots appear:
 
-    .\bin\marraw-cull.exe -add-library .\photos -data-dir $env:TEMP\marraw-cull-test-data The arrow keys, a click, Ctrl and Shift
+    .\bin\marraw-cull.exe -add-library .\photos -data-dir $env:TEMP\marraw-cull-test-data
+
+The arrow keys, a click, Ctrl and Shift
 select; Ctrl and the wheel change the tiles' size. 0 to 5 rate the photos
 selected, P picks, X rejects and U clears the flag, as in marraw. Enter
 or a double click opens a photo in the cull view.
