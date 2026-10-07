@@ -47,6 +47,7 @@ import (
 )
 
 func main() {
+	addLibrary := flag.String("add-library", "", "add this folder to the library as a library folder, its subfolders shoots, as marraw's Add library folder does, unless it is there")
 	folder := flag.String("folder", "", "the folder of photos to open; without it, the library opens, to choose one")
 	connect := flag.String("connect", "", "another marraw to cull on, as host:port; by default this program runs its own backend")
 	token := flag.String("token", "", "the token for -connect")
@@ -61,7 +62,7 @@ func main() {
 	zoom := flag.Bool("zoom", false, "once -skim is done, zoom to one to one with Z, and wait for the full resolution before the shot")
 	flag.Parse()
 	if err := run(options{folder: *folder, connect: *connect, token: *token, dataDir: *dataDir,
-		skim: *skim, every: *every, wait: *wait, burst: *burst, edit: *edit, shot: *shot, zoom: *zoom, keys: *keys}); err != nil {
+		skim: *skim, every: *every, wait: *wait, burst: *burst, edit: *edit, addLibrary: *addLibrary, shot: *shot, zoom: *zoom, keys: *keys}); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -74,6 +75,7 @@ type options struct {
 	zoom                            bool
 	keys                            string
 	edit                            string
+	addLibrary                      string
 }
 
 func run(o options) error {
@@ -102,6 +104,11 @@ func run(o options) error {
 	defer cc.Close()
 	api := marrawclient.New(cc)
 
+	if o.addLibrary != "" {
+		if err := addLibraryFolder(ctx, api, o.addLibrary); err != nil {
+			return fmt.Errorf("add %s to the library: %w", o.addLibrary, err)
+		}
+	}
 	// The folder asked for opens before the window, so the script's
 	// timings start with it there; without one the library opens empty.
 	var path string

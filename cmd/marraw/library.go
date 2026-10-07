@@ -97,6 +97,25 @@ func (cu *culler) loadLibrary() {
 	}
 }
 
+// addLibraryFolder adds dir to the library as a library folder, its
+// subfolders its shoots, unless the library holds it already.
+func addLibraryFolder(ctx context.Context, api *marrawclient.Client, dir string) error {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	roots, err := api.Library.GetLibraryRoots(ctx)
+	if err != nil {
+		return err
+	}
+	for _, r := range roots {
+		if strings.EqualFold(filepath.Clean(r.Path), dir) {
+			return nil
+		}
+	}
+	return api.Library.SetLibraryRoots(ctx, append(roots, marrawclient.LibraryRoot{Path: dir, IsParent: true}))
+}
+
 // railHas reports whether the sidebar lists path.
 func (cu *culler) railHas(path string) bool {
 	for _, it := range cu.rail.Items {
