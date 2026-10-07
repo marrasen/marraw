@@ -77,6 +77,12 @@ func (fp FoldParams) scalarGain() [3]float64 {
 	return k
 }
 
+// KeepsWB reports whether the fold keeps the reference's white balance,
+// only scaling and encoding what is there: then a channel the reference
+// floors stays floored exactly as a fresh decode at the same settings
+// leaves it, where a white-balance change would need it back.
+func (fp FoldParams) KeepsWB() bool { return fp.flat() }
+
 // flat reports whether D is close enough to no white-balance change that the
 // matrix round trip is pointless: M·(d·I)·M⁻¹ = d·I exactly, so an exposure,
 // brightness or gamma drag takes the cheap scalar path with identical output.

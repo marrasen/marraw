@@ -408,10 +408,10 @@ func (e *Edits) previewLinear(ctx context.Context, photoID int64, photo store.Ph
 	if err != nil {
 		return nil, false, err
 	}
-	if entry.clipped {
-		return nil, false, nil // reference can't carry a WB change; decode exactly
-	}
 	fp := foldParamsFor(ep, entry.refMul, entry.camXYZ, entry.rgbCam)
+	if !foldsOver(entry.clipped, fp) {
+		return nil, false, nil // reference can't carry this WB change; decode exactly
+	}
 	ai := e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep)
 	fills := e.deps.Cache.Fills.SetFor(photo.CacheKey, ep)
 	return pyramid.RenderPreviewLinear(entry.lin, longEdge, fp, gamma, ep, ai, fills, e.deps.Cache.Lenses.For(photo)), true, nil
@@ -461,7 +461,10 @@ func (e *Edits) linearMaster(ctx context.Context, photoID int64, photo store.Pho
 // channel negative and clip it. A blue-lit ILCE-7RM2 frame came back with
 // green at 0 across 92% of the reference: the fold rendered it magenta while
 // the exact decode of the same edit was correct. Photos like that give up the
-// fold path and re-decode per frame — slower to drag, but right.
+// fold path for a white-balance change and re-decode per frame — slower to
+// drag, but right. An edit that keeps the as-shot balance still folds: the
+// fold then only scales and encodes, which a floored channel survives (see
+// foldsOver).
 func refClipped(lin *image.RGBA64) bool {
 	b := lin.Bounds()
 	const (
@@ -489,6 +492,17 @@ func refClipped(lin *image.RGBA64) bool {
 	// A handful of saturated specular pixels is normal; a fifth of the lit
 	// frame missing a channel is not.
 	return litN > 0 && badN*5 > litN
+}
+
+// foldsOver reports whether the fold can render an edit over a reference:
+// always when every channel is there, and over a clipped one only while
+// the edit keeps the reference's white balance. Then the fold just scales
+// and encodes, as the exact decode does, and lands within a level of it; a
+// white-balance change needs the channel that is gone. Without this, a
+// blue-lit frame re-decoded the RAW for every brightness, gamma or shadow
+// slope drag frame, ~440 ms each, where the fold takes ~25.
+func foldsOver(clipped bool, fp pyramid.FoldParams) bool {
+	return !clipped || fp.KeepsWB()
 }
 
 // cachedLinear returns the cached linear reference for (photoID, key), or nil.

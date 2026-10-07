@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
 )
 
@@ -250,5 +251,19 @@ func TestApplyBatchEditLeavesAnUnreadableEditAlone(t *testing.T) {
 	}
 	if !p.EditParams.Valid || p.EditParams.String != corrupt {
 		t.Errorf("stored edit = %q (valid=%v), want it untouched", p.EditParams.String, p.EditParams.Valid)
+	}
+}
+
+func TestAClippedReferenceFoldsOnlyWhileTheEditKeepsItsWhiteBalance(t *testing.T) {
+	keep := pyramid.FoldParams{D: [3]float64{1, 1, 1}, Exp: 1, Bright: 1.5}
+	warm := pyramid.FoldParams{D: [3]float64{1.4, 1, 0.7}, Exp: 1, Bright: 1}
+	if !foldsOver(false, warm) || !foldsOver(false, keep) {
+		t.Fatal("a reference with every channel refused the fold")
+	}
+	if !foldsOver(true, keep) {
+		t.Fatal("a clipped reference refused a brightness change that keeps the as-shot balance")
+	}
+	if foldsOver(true, warm) {
+		t.Fatal("a clipped reference took a white-balance change it cannot carry")
 	}
 }
