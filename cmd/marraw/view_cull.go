@@ -964,13 +964,6 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	if in < 0.001 {
 		return
 	}
-	// A shade at the top, under the title bar, keeps its title and
-	// buttons readable over a bright photo.
-	if v.top > 0 {
-		h := v.top + 48
-		p.RRect(geom.Rc(0, 0, box.W, h), 0, paint.Fill{Gradient: &paint.Gradient{From: geom.Pt(0, 0), To: geom.Pt(0, h),
-			Start: color.NRGBA{A: uint8(0x8c * in)}, End: color.NRGBA{}}})
-	}
 	// The chrome comes up from below as the view comes in.
 	defer p.Push(paint.Translate(geom.Pt(0, (1-in)*stripHeight)))()
 	if in < 0.999 {

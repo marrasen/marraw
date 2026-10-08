@@ -143,3 +143,21 @@ func writeShot(ctx context.Context, c gunim.Client, path string) error {
 	}
 	return f.Close()
 }
+
+// fullSurface is gunim's surface with its views laid out to the window's
+// edges, the title bar's band included: the views keep their own controls
+// below the bar, as [gunim.Frame.Safe] says, and let the photo run under
+// it. gunim's own keeps the views clear of the band, as for a phone's
+// status bar.
+type fullSurface struct{ widget.Surface }
+
+func newFullSurface() *fullSurface { return &fullSurface{} }
+
+// Layout implements [gunim.Node].
+func (s *fullSurface) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	for kid := range kids.All {
+		kid.Layout(gunim.Tight(c.Max))
+		kid.Place(geom.Point{})
+	}
+	return c.Max
+}

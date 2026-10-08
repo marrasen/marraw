@@ -6,10 +6,10 @@ applies. Try it on these test photos: deleting and exporting change files.
 
 Looks (new in this build)
   - The photo runs up under the title bar, as in marraw: zoom in and it
-    fills the window to the top, with a soft shade under the title and
-    the window buttons so they stay readable. The stars and flags, the
-    notes and the develop panel keep below the bar. In the grid the
-    sidebar's colour runs up under it.
+    fills the window to the top, with the title and the window buttons
+    over it and no shade. The stars and flags, the notes and the develop
+    panel keep below the bar. In the grid the sidebar's colour runs up
+    under it. (The last build meant to do this and didn't.)
   - The eyedropper looks like marraw's now: the magnifier shows the
     photo three times as large in place of the pointer, with a faint
     grid, a small target and the pipette at its edge. Beside it a small
