@@ -4,6 +4,21 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
+Looks (new in this build)
+  - The eyedropper looks like marraw's now: the magnifier shows the
+    photo three times as large in place of the pointer, with a faint
+    grid, a small target and the pipette at its edge. Beside it a small
+    tag reads R G B, and says in red when the spot can't be picked. The
+    bar at the foot is glass, with the pipette and a hint, quiet buttons
+    and only Done filled.
+  - The floating pieces over the photo are frosted glass, as in marraw:
+    the note at the top, the stars and flags, the file name box (now a
+    card in the corner), the navigator and the eyedropper's bar. They
+    blur the photo behind them.
+
+From the last build (e522bc8), if you have not tried them yet
+-------------------------------------------------------------
+
 Filter bar (over the grid)
   - Sort is two buttons, Time and Name. The one in use is lit, with an
     arrow for its way. Click it again to turn the order about: the arrow
@@ -36,8 +51,8 @@ White balance
     with no "Mode" label, and an eyedropper button at the end of it.
   - The eyedropper (W or that button) now works as in marraw:
     - A magnifier follows the pointer over the photo, with the spot's
-      R G B underneath. Before you click, it warns in red when a spot
-      cannot be picked, and why: "No red or green here", "Too dark".
+      R G B beside it. Before you click, it warns in red when a spot
+      cannot be picked, and why: "No green light", "Too dark".
     - A click shows the pick, but saves nothing yet. Click other spots
       to compare.
     - A bar at the bottom: As shot, Auto, Reset, Cancel (Escape) and

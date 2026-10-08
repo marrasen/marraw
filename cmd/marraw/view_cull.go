@@ -38,6 +38,7 @@ type cullView struct {
 	// reads; wbAt is where the pointer is over the photo, as wbOver says.
 	wbBar  gunim.Node
 	wbRead *widget.Label
+	wbWarn *widget.Label
 	wbAt   geom.Point
 	wbOver bool
 	st     Cull
@@ -113,8 +114,10 @@ func newCullView(s Cull) *cullView {
 		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0), noticeSeq: s.NoticeSeq,
 		origIn: anim.NewFloat(0), wbIn: anim.NewFloat(0),
 		labelOrig: widget.NewLabel("Original"), labelWB: widget.NewLabel("Click something neutral grey or white"),
-		wbRead: widget.NewLabel("")}
-	v.labelOrig.Size, v.labelWB.Size, v.wbRead.Size = noteSize, noteSize, noteSize
+		wbRead: widget.NewLabel(""), wbWarn: widget.NewLabel("")}
+	v.labelOrig.Size, v.labelWB.Size = noteSize, noteSize
+	v.wbRead.Face, v.wbRead.Size, v.wbRead.Color = widget.MonoFont, readoutSize, readoutInk
+	v.wbWarn.Size, v.wbWarn.Color = readoutSize, warnInk
 	v.labelWB.Color = noteInk
 	v.wbBar = v.newWBBar()
 	v.notice.Size = noteSize
@@ -391,13 +394,17 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 
 // Children implements [gunim.Composite].
 func (v *cullView) Children() []gunim.Node {
-	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead}
+	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead, v.wbWarn}
 }
 
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
 // eyedropper is on.
 func (v *cullView) Cursor(p geom.Point) input.Cursor {
 	if v.st.WBPick && p.Y < v.box.H-stripHeight && !v.inPanel(p) && !v.wbBarRect.Contains(p) {
+		// The magnifier takes the pointer's place once it has a frame.
+		if _, ok := v.photoPoint(p); ok && v.st.WBFrame != nil {
+			return input.CursorNone
+		}
 		return input.CursorCrosshair
 	}
 	return input.CursorArrow
@@ -445,9 +452,8 @@ func (v *cullView) paintNav(p *paint.Painter) {
 		return
 	}
 	n := v.navRect()
-	defer p.Layer(paint.LayerOpts{Bounds: n.Inset(geom.Uniform(-12)), Opacity: k})()
-	p.ShadowRRect(n.Inset(geom.Uniform(-3)), 6, paint.Solid(color.NRGBA{R: 0x10, G: 0x11, B: 0x15, A: 0xf0}),
-		paint.Shadow{Offset: geom.Pt(0, 2), Blur: 10, Color: color.NRGBA{A: 0x80}})
+	defer p.Layer(paint.LayerOpts{Bounds: n.Inset(geom.Uniform(-48)), Opacity: k})()
+	paintGlass(p, n.Inset(geom.Uniform(-4)), 8)
 	p.Image(v.pic.img, pixelFit(n, v.pic.img), paint.ImageOpts{Opacity: 0.85, Radius: 3})
 	// The part of the photo the room shows, as fractions of it.
 	z := v.z.Value()
@@ -876,7 +882,7 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	hero.Place(r.Min)
 	hud := kids.At(1)
 	sz := hud.Layout(gunim.Loose(box))
-	hud.Place(geom.Pt(0, max(0, box.H-stripHeight-sz.H)))
+	hud.Place(geom.Pt(12, max(0, box.H-stripHeight-sz.H-12)))
 	slot := kids.At(2)
 	slot.Layout(gunim.Tight(geom.Sz(panelWidth, max(0, box.H-stripHeight))))
 	slot.Place(geom.Pt(box.W-panelWidth, 0))
@@ -895,14 +901,19 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	// and nowhere for the pointer otherwise.
 	bar := kids.At(5)
 	bs := bar.Layout(gunim.Loose(geom.Sz(room.Size().W, 60)))
-	v.wbBarRect = geom.Rc(room.Center().X-bs.W/2-14, box.H-stripHeight-sz.H-bs.H-28, bs.W+28, bs.H+16)
+	v.wbBarRect = geom.Rc(room.Center().X-bs.W/2-16, box.H-stripHeight-bs.H-20-16, bs.W+32, bs.H+20)
+	if v.wbBarRect.Min.X < 12+sz.W+12 {
+		// Over the readout's corner: above it instead.
+		v.wbBarRect = v.wbBarRect.Add(geom.Pt(0, -(sz.H + 4)))
+	}
 	if v.wbIn.Value() > 0.01 {
-		bar.Place(v.wbBarRect.Min.Add(geom.Pt(14, 8)))
+		bar.Place(v.wbBarRect.Min.Add(geom.Pt(16, 10)))
 	} else {
 		bar.Place(geom.Pt(-10000, -10000))
 	}
-	ro := kids.At(6)
-	ro.Layout(gunim.Loose(geom.Sz(300, 40)))
+	for i := 6; i <= 7; i++ {
+		kids.At(i).Layout(gunim.Loose(geom.Sz(300, 40)))
+	}
 	if cur := v.current(); cur != nil {
 		v.ring.Animate(thumbWidth(*cur), widget.Quick.Get(f.Theme))
 		if v.ring.Value() == 0 {
@@ -953,11 +964,11 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	}
 	v.paintStrip(p, box)
 	mp := v.markPlace()
-	p.RRect(v.marksRect(), 18, paint.Solid(color.NRGBA{R: 0x10, G: 0x12, B: 0x16, A: 0xb0}))
+	paintGlass(p, v.marksRect(), 18)
 	v.marks.paint(p, f.Theme, mp, 0xc0, true)
 	hud := kids.At(1)
 	hs := hud.Size()
-	p.RRect(geom.Rc(0, box.H-stripHeight-hs.H, hs.W, hs.H), 0, paint.Solid(color.NRGBA{A: 0xa0}))
+	paintGlass(p, geom.Rc(12, box.H-stripHeight-hs.H-12, hs.W, hs.H), 10)
 	hud.Paint(p)
 	v.paintNav(p)
 	kids.At(2).Paint(p)
@@ -965,7 +976,7 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	// The label for the original, in the corner.
 	l, rm := kids.At(4), v.room()
 	paintNote(p, l, geom.Rc(rm.Min.X+16, rm.Min.Y+14, l.Size().W, l.Size().H), v.origIn.Value())
-	v.paintWB(p, kids.At(5), kids.At(6))
+	v.paintWB(p, f.Theme, kids.At(5), kids.At(6), kids.At(7))
 }
 
 // markPlace is where the photo's marks are: its flags and stars, at the
@@ -995,10 +1006,9 @@ func paintNote(p *paint.Painter, note gunim.Child, at geom.Rect, k float32) {
 	r := at.Inset(geom.Insets{Top: -7, Bottom: -7, Left: -14, Right: -14})
 	defer p.Push(paint.Scale(0.9+0.1*k, r.Center()))()
 	if k < 0.999 {
-		defer p.Layer(paint.LayerOpts{Bounds: r.Inset(geom.Uniform(-8)), Opacity: min(k, 1)})()
+		defer p.Layer(paint.LayerOpts{Bounds: r.Inset(geom.Uniform(-48)), Opacity: min(k, 1)})()
 	}
-	p.ShadowRRect(r, r.Size().H/2, paint.Solid(color.NRGBA{R: 0x1d, G: 0x20, B: 0x28, A: 0xee}),
-		paint.Shadow{Offset: geom.Pt(0, 2), Blur: 10, Color: color.NRGBA{A: 0x70}})
+	paintGlass(p, r, min(r.Size().H/2, 16))
 	note.Paint(p)
 }
 
