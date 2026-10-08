@@ -696,7 +696,8 @@ func (cu *culler) record(what string, sharp bool) {
 // and writes a picture of the window to o.shot, for measuring without
 // hands.
 // scriptStep takes a step of -keys that is not a key: click:x:y and
-// move:x:y move the pointer, in the window, and click there; drag:x:y:x:y
+// move:x:y move the pointer, in the window, and click there, dclick:x:y
+// twice; drag:x:y:x:y
 // drags from one point to another; type:text
 // types; shift+plus presses Shift and + as a Swedish keyboard does, which
 // types ?; shift+ a key presses it with Shift; ctrl+z and w press those; wait:ms waits; and shot:name writes the window to name.png. It
@@ -705,15 +706,16 @@ func (cu *culler) scriptStep(k string) bool {
 	verb, arg, ok := strings.Cut(k, ":")
 	now := time.Now()
 	switch {
-	case ok && (verb == "click" || verb == "move"):
+	case ok && (verb == "click" || verb == "move" || verb == "dclick"):
 		xs, ys, _ := strings.Cut(arg, ":")
 		x, _ := strconv.ParseFloat(xs, 32)
 		y, _ := strconv.ParseFloat(ys, 32)
 		at := geom.Pt(float32(x), float32(y))
 		_ = cu.c.Input(cu.ctx, input.PointerMove{Pos: at, Time: now})
-		if verb == "click" {
+		if verb == "click" || verb == "dclick" {
 			time.Sleep(50 * time.Millisecond)
-			_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonPrimary, Clicks: 1, Time: now})
+			clicks := map[bool]int{false: 1, true: 2}[verb == "dclick"]
+			_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonPrimary, Clicks: clicks, Time: now})
 			_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: at, Button: input.ButtonPrimary, Time: now})
 		}
 	case ok && verb == "drag":
@@ -1184,8 +1186,10 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 			continue
 		}
 		takeAids(&cu.all[ai], pp)
+		takeShape(&cu.all[ai], pp)
 		if i, showing := cu.index[pp.ID]; showing {
 			takeAids(&cu.photos[i], pp)
+			takeShape(&cu.photos[i], pp)
 			continue
 		}
 		p := &cu.all[ai]

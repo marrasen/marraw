@@ -121,3 +121,14 @@ func TestBurstsFindTheirSharpest(t *testing.T) {
 		t.Fatal("collapsed bursts show the wrong frames")
 	}
 }
+
+func TestSizeIsTheCroppedFullResolution(t *testing.T) {
+	p := marrawclient.Photo{Width: 8000, Height: 5000}
+	if got := size(p); got.X != 8000 || got.Y != 5000 {
+		t.Fatalf("uncropped %v", got)
+	}
+	p.Rotate, p.CropW, p.CropH = 1, 0.5, 0.25
+	if got := size(p); got.X != 2500 || got.Y != 2000 {
+		t.Fatalf("turned and cropped %v, want 2500x2000", got)
+	}
+}

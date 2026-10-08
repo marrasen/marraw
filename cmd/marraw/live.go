@@ -128,16 +128,22 @@ func patchedList(list []marrawclient.Photo, ps []marrawclient.PhotoPatch) []marr
 		if pp.EditHash != nil {
 			p.EditHash = *pp.EditHash
 		}
-		if pp.Rotate != nil {
-			p.Rotate = *pp.Rotate
-		}
-		if pp.CropW != nil {
-			p.CropW = *pp.CropW
-		}
-		if pp.CropH != nil {
-			p.CropH = *pp.CropH
-		}
+		takeShape(p, pp)
 		takeAids(p, pp)
 	}
 	return out
+}
+
+// takeShape copies the turn and the crop's size patch pp carries into p:
+// its full resolution's size, which its tiles are laid out by.
+func takeShape(p *marrawclient.Photo, pp marrawclient.PhotoPatch) {
+	if pp.Rotate != nil {
+		p.Rotate = *pp.Rotate
+	}
+	if pp.CropW != nil {
+		p.CropW = *pp.CropW
+	}
+	if pp.CropH != nil {
+		p.CropH = *pp.CropH
+	}
 }

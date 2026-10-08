@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"time"
@@ -120,8 +121,9 @@ func (im *images) get(ctx context.Context, p marrawclient.Photo, w want) (got, e
 		provisional: resp.Header.Get("Cache-Control") == "no-store"}, nil
 }
 
-// size is the photo's displayed size, for a placeholder of the right shape
-// before any pixels arrive.
+// size is the photo's displayed size at full resolution, as the backend
+// renders it: turned, and cropped, as its edit says. The full
+// resolution's tiles are laid out by it.
 func size(p marrawclient.Photo) image.Point {
 	w, h := p.Width, p.Height
 	if p.Orientation >= 5 {
@@ -129,6 +131,9 @@ func size(p marrawclient.Photo) image.Point {
 	}
 	if p.Rotate%2 == 1 {
 		w, h = h, w
+	}
+	if p.CropW > 0 && p.CropH > 0 && w > 0 && h > 0 {
+		w, h = max(1, int(math.Round(p.CropW*float64(w)))), max(1, int(math.Round(p.CropH*float64(h))))
 	}
 	return image.Pt(w, h)
 }

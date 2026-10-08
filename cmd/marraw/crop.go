@@ -127,6 +127,14 @@ func (cu *culler) cropDone() {
 	}
 	cu.crop = cropMode{}
 	cu.dev.live = nil
+	// The photo's size as cropped, at once, for its tiles to be laid out
+	// by before the backend's word on it comes.
+	d := &cu.dev
+	for _, p := range []*marrawclient.Photo{cu.listedPhoto(d.id, true), cu.listedPhoto(d.id, false)} {
+		if p != nil {
+			p.Rotate, p.CropW, p.CropH = turns(d.params), d.params.CropW, d.params.CropH
+		}
+	}
 	cu.edited(true)
 	cu.showCull()
 }
