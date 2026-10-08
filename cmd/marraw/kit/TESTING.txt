@@ -5,6 +5,11 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 Looks (new in this build)
+  - Stepping between photos on a big screen (4K, maximized): the sharp
+    tiles now slide with the photo, the photo leaving keeps its sharp
+    tiles until it is gone, and the photo fades as one piece. Tiles that
+    arrive after a step are gathered and fade in together, not square by
+    square. Nothing should move or fade on its own any more.
   - The photo runs up under the title bar, as in marraw: zoom in and it
     fills the window to the top, with the title and the window buttons
     over it and no shade. The stars and flags, the notes and the develop

@@ -1080,13 +1080,23 @@ type cullPic struct {
 	oldRect geom.Rect
 	slide   float32
 	mix     *anim.Float
-	tiles   map[image.Point]*paint.Image
-	full    image.Point
+	// tiles are the full resolution's tiles showing over the picture, of
+	// a photo full large, and oldTiles and oldFull the old picture's.
+	tiles    map[image.Point]*paint.Image
+	full     image.Point
+	oldTiles map[image.Point]*paint.Image
+	oldFull  image.Point
+	// Tiles that come in are gathered in pending for a moment, or until
+	// the view's are all in, and fade in together, as fresh does, so the
+	// photo sharpens as a whole rather than square by square.
+	pending, fresh map[image.Point]*paint.Image
+	freshIn        *anim.Float
+	gather         time.Duration
 }
 
 func newCullPic(v *cullView, s Cull) *cullPic {
-	q := &cullPic{v: v, img: best(s), mix: anim.NewFloat(1), tiles: s.Tiles, full: s.Full}
-	q.Add(q.mix)
+	q := &cullPic{v: v, img: best(s), mix: anim.NewFloat(1), tiles: s.Tiles, full: s.Full, freshIn: anim.NewFloat(1)}
+	q.Add(q.mix, q.freshIn)
 	return q
 }
 
@@ -1101,14 +1111,118 @@ func best(s Cull) *paint.Image {
 // step shows the photo in s, come from prev, sliding in from slide.
 func (q *cullPic) step(s, prev Cull, slide float32) {
 	q.old, q.oldRect = q.img, q.v.fitRect()
-	q.img, q.tiles, q.full, q.slide = best(s), s.Tiles, s.Full, slide
+	// The old picture leaves whole, its sharp tiles with it.
+	q.oldTiles, q.oldFull = q.showing(), q.full
+	q.img, q.full, q.slide = best(s), s.Full, slide
+	// The new photo's tiles held already come with it, at once.
+	q.tiles, q.pending, q.fresh, q.gather = s.Tiles, nil, nil, 0
+	q.freshIn.Jump(1)
 	q.mix.Jump(0)
 	q.mix.Animate(1, stepIn)
 }
 
+// showing is every tile showing, fading in or not.
+func (q *cullPic) showing() map[image.Point]*paint.Image {
+	out := make(map[image.Point]*paint.Image, len(q.tiles)+len(q.fresh))
+	for at, img := range q.tiles {
+		out[at] = img
+	}
+	for at, img := range q.fresh {
+		out[at] = img
+	}
+	return out
+}
+
+// gatherFor is how long tiles that come in wait for the rest of the
+// view's, to fade in together.
+const gatherFor = 220 * time.Millisecond
+
+// takeTiles takes the tiles held for the photo: those gone go, and those
+// come wait in pending to fade in together.
+func (q *cullPic) takeTiles(all map[image.Point]*paint.Image) {
+	keep := func(m map[image.Point]*paint.Image) map[image.Point]*paint.Image {
+		out := map[image.Point]*paint.Image{}
+		for at, img := range m {
+			if now, ok := all[at]; ok && now == img {
+				out[at] = img
+			}
+		}
+		return out
+	}
+	q.tiles, q.fresh, q.pending = keep(q.tiles), keep(q.fresh), keep(q.pending)
+	for at, img := range all {
+		_, a := q.tiles[at]
+		_, b := q.fresh[at]
+		_, c := q.pending[at]
+		if !a && !b && !c {
+			q.pending[at] = img
+		}
+	}
+	if len(q.pending) > 0 && q.gather <= 0 {
+		q.gather = gatherFor
+	}
+	if q.viewIn() {
+		q.gather = min(q.gather, time.Nanosecond)
+	}
+}
+
+// viewIn reports whether every tile the view asked for is held.
+func (q *cullPic) viewIn() bool {
+	w := q.v.asked
+	if w.Range.Empty() {
+		return false
+	}
+	for y := w.Range.Min.Y; y < w.Range.Max.Y; y++ {
+		for x := w.Range.Min.X; x < w.Range.Max.X; x++ {
+			at := image.Pt(x, y)
+			_, a := q.tiles[at]
+			_, b := q.fresh[at]
+			_, c := q.pending[at]
+			if !a && !b && !c {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// Step implements [gunim.Animator]: tiles gathered fade in together,
+// once a fade before them is done.
+func (q *cullPic) Step(dt time.Duration) bool {
+	moving := q.Group.Step(dt)
+	if len(q.fresh) > 0 && !q.freshIn.Active() {
+		for at, img := range q.fresh {
+			q.tiles[at] = img
+		}
+		q.fresh = nil
+	}
+	if q.gather > 0 {
+		q.gather -= dt
+		if q.gather <= 0 && len(q.pending) > 0 {
+			if len(q.fresh) > 0 {
+				// The last ones are still coming in: these come next.
+				q.gather = time.Nanosecond
+			} else {
+				q.fresh, q.pending = q.pending, map[image.Point]*paint.Image{}
+				q.freshIn.Jump(0)
+				q.freshIn.Animate(1, sharpen)
+			}
+		}
+		moving = true
+	}
+	return moving || len(q.fresh) > 0
+}
+
 // sharpen shows the photo's better pixels, fading in over the last.
 func (q *cullPic) sharpen(s Cull) {
-	q.tiles, q.full = s.Tiles, s.Full
+	q.full = s.Full
+	if q.tiles == nil {
+		q.tiles = map[image.Point]*paint.Image{}
+	}
+	if q.pending == nil {
+		q.pending = map[image.Point]*paint.Image{}
+	}
+	q.takeTiles(s.Tiles)
 	img := best(s)
 	if img == q.img {
 		return
@@ -1126,6 +1240,7 @@ func (q *cullPic) sharpen(s Cull) {
 		return
 	}
 	q.old, q.oldRect, q.img, q.slide = q.img, q.v.fitRect(), img, 0
+	q.oldTiles, q.oldFull = q.showing(), q.full
 	q.mix.Jump(0)
 	q.mix.Animate(1, sharpen)
 }
@@ -1140,37 +1255,63 @@ func (q *cullPic) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, _ gunim.
 	r := geom.Rect{Max: box.Point()}
 	k := min(max(q.mix.Value(), 0), 1)
 	if q.old != nil && k < 1 {
-		// The last picture, where it was, sliding away.
+		// The last picture, where it was, sliding away, its tiles with it.
 		at := q.v.fitRect().Min
-		o := q.oldRect.Add(geom.Pt(-at.X-q.slide*k, -at.Y))
+		frame := q.oldRect.Add(geom.Pt(-at.X-q.slide*k, -at.Y))
+		o := pixelFit(frame, q.old)
 		// Sliding, it fades as it goes; fading to sharper pixels in place,
 		// it stays whole under them, so nothing behind shows through.
 		op := float32(1)
 		if q.slide != 0 {
 			op = 1 - k*k
 		}
-		p.Image(q.old, pixelFit(o, q.old), paint.ImageOpts{Opacity: op})
+		faded(p, o, op, func() {
+			p.Image(q.old, o, paint.ImageOpts{Opacity: 1})
+			q.paintTiles(p, q.oldTiles, frame, q.oldFull, 1)
+		})
 	}
 	if q.img == nil {
 		p.RRect(r.Add(geom.Pt(q.slide*(1-k), 0)), 2, paint.Solid(withAlpha(frameInk, k)))
 		return
 	}
-	in := min(1, k*1.6)
-	p.Image(q.img, pixelFit(r, q.img).Add(geom.Pt(q.slide*(1-k), 0)), paint.ImageOpts{Opacity: in})
-	if len(q.tiles) == 0 || q.full.X <= 0 {
+	// The picture and its tiles come in as one, so no tile's edge shows
+	// through another as they fade.
+	frame := r.Add(geom.Pt(q.slide*(1-k), 0))
+	base := pixelFit(frame, q.img)
+	faded(p, frame, min(1, k*1.6), func() {
+		p.Image(q.img, base, paint.ImageOpts{Opacity: 1})
+		q.paintTiles(p, q.tiles, frame, q.full, 1)
+		q.paintTiles(p, q.fresh, frame, q.full, q.freshIn.Value())
+	})
+}
+
+// faded draws what draw draws, in bounds, at opacity op as a whole.
+func faded(p *paint.Painter, bounds geom.Rect, op float32, draw func()) {
+	if op <= 0.001 {
 		return
 	}
-	// The tiles in the window, over the picture, scaled with it.
-	s := box.W / float32(q.full.X)
+	if op < 0.999 {
+		defer p.Layer(paint.LayerOpts{Bounds: bounds, Opacity: op})()
+	}
+	draw()
+}
+
+// paintTiles draws tiles, of a photo full large, over its picture in the
+// frame base, at opacity op: those in the window.
+func (q *cullPic) paintTiles(p *paint.Painter, tiles map[image.Point]*paint.Image, base geom.Rect, full image.Point, op float32) {
+	if len(tiles) == 0 || full.X <= 0 || op <= 0.001 {
+		return
+	}
+	s := base.Size().W / float32(full.X)
 	t := p.Transform()
 	win := geom.Rect{Max: q.v.box.Point()}
-	for at, img := range q.tiles {
+	for at, img := range tiles {
 		w, h := img.Size()
-		tr := geom.Rc(float32(at.X*tileSize)*s, float32(at.Y*tileSize)*s, float32(w)*s, float32(h)*s)
+		tr := geom.Rc(base.Min.X+float32(at.X*tileSize)*s, base.Min.Y+float32(at.Y*tileSize)*s, float32(w)*s, float32(h)*s)
 		on := geom.Rect{Min: t.Apply(tr.Min), Max: t.Apply(tr.Max)}.Normalized()
 		if on.Max.X < win.Min.X || on.Max.Y < win.Min.Y || on.Min.X > win.Max.X || on.Min.Y > win.Max.Y {
 			continue
 		}
-		p.Image(img, tr, paint.ImageOpts{Opacity: in})
+		p.Image(img, tr, paint.ImageOpts{Opacity: op})
 	}
 }
