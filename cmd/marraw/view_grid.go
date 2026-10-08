@@ -47,6 +47,9 @@ type gridView struct {
 	// in as noneIn does.
 	empty  *widget.Label
 	noneIn *anim.Float
+	// top is the title bar's height, which the window's background runs
+	// under and the rest keeps below.
+	top float32
 }
 
 const (
@@ -279,7 +282,7 @@ func (v *gridView) gridAt(a GridAt, u *gunim.UI) {
 	v.head.selected(1)
 	if v.grid.Columns() > 0 {
 		r := v.grid.TileRect(a.Index)
-		room := v.box.H - gridTop
+		room := v.box.H - gridTop - v.top
 		if r.Min.Y < 0 || r.Max.Y > room {
 			v.grid.JumpTo(r.Min.Y + v.grid.Offset() - (room-r.Size().H)/2)
 		}
@@ -358,7 +361,7 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 				return true
 			case input.KeyK:
 				_, cursor := v.grid.Selected()
-				openPalette(v, geom.Rc(railWidth, 0, v.box.W-railWidth, v.box.H), u, paletteFor{cursor: cursor})
+				openPalette(v, geom.Rc(railWidth, v.top, v.box.W-railWidth, v.box.H-v.top), u, paletteFor{cursor: cursor})
 				return true
 			}
 			return false
@@ -385,27 +388,30 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 }
 
 // Layout implements [gunim.Node].
-func (v *gridView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
 	v.box = box
+	// The sidebar runs up under the title bar; the rest starts below it.
+	top := f.Safe.Top
+	v.top, v.rail.top = top, top
 	head, grid, rail := kids.At(0), kids.At(1), kids.At(2)
 	rail.Layout(gunim.Tight(geom.Sz(railWidth, box.H)))
 	rail.Place(geom.Point{})
 	w := max(0, box.W-railWidth)
 	head.Layout(gunim.Tight(geom.Sz(w, gridHeadHeight)))
-	head.Place(geom.Pt(railWidth, 0))
-	grid.Layout(gunim.Tight(geom.Sz(w, max(0, box.H-gridTop))))
-	grid.Place(geom.Pt(railWidth, gridTop))
+	head.Place(geom.Pt(railWidth, top))
+	grid.Layout(gunim.Tight(geom.Sz(w, max(0, box.H-gridTop-top))))
+	grid.Place(geom.Pt(railWidth, gridTop+top))
 	bar := kids.At(4)
 	bar.Layout(gunim.Tight(geom.Sz(w, barHeight)))
-	bar.Place(geom.Pt(railWidth, gridHeadHeight))
+	bar.Place(geom.Pt(railWidth, gridHeadHeight+top))
 	note := kids.At(3)
 	ns := note.Layout(gunim.Loose(geom.Sz(w/2, 60)))
-	v.noteRect = geom.Rc(railWidth+w/2-ns.W/2, gridTop+16, ns.W, ns.H)
+	v.noteRect = geom.Rc(railWidth+w/2-ns.W/2, gridTop+top+16, ns.W, ns.H)
 	note.Place(v.noteRect.Min)
 	empty := kids.At(5)
 	es := empty.Layout(gunim.Loose(geom.Sz(w, 40)))
-	empty.Place(geom.Pt(railWidth+w/2-es.W/2, gridTop+80))
+	empty.Place(geom.Pt(railWidth+w/2-es.W/2, gridTop+top+80))
 	return box
 }
 
@@ -413,7 +419,7 @@ func (v *gridView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
 	kids.At(1).Paint(p)
 	kids.At(0).Paint(p)
-	p.RRect(geom.Rc(railWidth, gridHeadHeight-1, box.W-railWidth, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
+	p.RRect(geom.Rc(railWidth, v.top+gridHeadHeight-1, box.W-railWidth, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
 	kids.At(4).Paint(p)
 	kids.At(2).Paint(p)
 	paintNote(p, kids.At(3), v.noteRect, v.noticeIn.Value())

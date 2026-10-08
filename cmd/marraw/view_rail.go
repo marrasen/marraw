@@ -36,6 +36,9 @@ type railView struct {
 	list  *widget.List
 	body  gunim.Node
 	st    RailState
+	// top is the title bar's height: the sidebar's fill runs under it,
+	// its rows below.
+	top float32
 }
 
 func newRailView() *railView {
@@ -80,12 +83,11 @@ func (v *railView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	box := c.Max
 	title, empty, body := kids.At(0), kids.At(1), kids.At(2)
 	ts := title.Layout(gunim.Loose(geom.Sz(box.W-32, 40)))
-	title.Place(geom.Pt(16, (gridHeadHeight-ts.H)/2))
-	es := empty.Layout(gunim.Loose(geom.Sz(box.W-32, 200)))
-	empty.Place(geom.Pt(16, gridHeadHeight+8))
-	_ = es
-	body.Layout(gunim.Tight(geom.Sz(box.W, max(0, box.H-gridHeadHeight))))
-	body.Place(geom.Pt(0, gridHeadHeight))
+	title.Place(geom.Pt(16, v.top+(gridHeadHeight-ts.H)/2))
+	empty.Layout(gunim.Loose(geom.Sz(box.W-32, 200)))
+	empty.Place(geom.Pt(16, v.top+gridHeadHeight+8))
+	body.Layout(gunim.Tight(geom.Sz(box.W, max(0, box.H-gridHeadHeight-v.top))))
+	body.Place(geom.Pt(0, v.top+gridHeadHeight))
 	return box
 }
 
@@ -93,7 +95,7 @@ func (v *railView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 func (v *railView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
 	p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(railFill))
 	p.RRect(geom.Rc(box.W-1, 0, 1, box.H), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x10}))
-	p.RRect(geom.Rc(0, gridHeadHeight-1, box.W, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
+	p.RRect(geom.Rc(0, v.top+gridHeadHeight-1, box.W, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
 	for k := range kids.All {
 		k.Paint(p)
 	}

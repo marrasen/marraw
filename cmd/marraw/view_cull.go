@@ -84,8 +84,11 @@ type cullView struct {
 	noteRect  geom.Rect
 	// navDrag says a press in the navigator moves the view, and origIn
 	// and wbIn bring the labels for the original and the eyedropper in.
-	navDrag      bool
-	wbBarRect    geom.Rect
+	navDrag   bool
+	wbBarRect geom.Rect
+	// top is the title bar's height: the photo runs under the bar, and
+	// the panel and what floats over the photo keep below it.
+	top          float32
 	origIn, wbIn *anim.Float
 	labelOrig    *widget.Label
 	labelWB      *widget.Label
@@ -231,6 +234,10 @@ func (v *cullView) room() geom.Rect {
 }
 
 // inPanel reports whether p is over the develop panel.
+// chromeTop is where what floats at the top of the photo starts: below
+// the title bar, which the photo runs under.
+func (v *cullView) chromeTop() float32 { return max(v.room().Min.Y, v.top+8) }
+
 func (v *cullView) inPanel(p geom.Point) bool {
 	return v.side.Value() > 0.01 && p.X >= v.box.W-panelWidth*v.side.Value() && p.Y < v.box.H-stripHeight
 }
@@ -871,7 +878,7 @@ func (v *cullView) Step(dt time.Duration) bool {
 // scales as it paints, and the readout in the lower left corner.
 func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
-	v.box, v.scale = box, max(f.Scale, 0.1)
+	v.box, v.scale, v.top = box, max(f.Scale, 0.1), f.Safe.Top
 	if v.glided {
 		v.glided = false
 		v.askTilesBy(f.Send)
@@ -884,19 +891,19 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	sz := hud.Layout(gunim.Loose(box))
 	hud.Place(geom.Pt(12, max(0, box.H-stripHeight-sz.H-12)))
 	slot := kids.At(2)
-	slot.Layout(gunim.Tight(geom.Sz(panelWidth, max(0, box.H-stripHeight))))
-	slot.Place(geom.Pt(box.W-panelWidth, 0))
+	slot.Layout(gunim.Tight(geom.Sz(panelWidth, max(0, box.H-stripHeight-v.top))))
+	slot.Place(geom.Pt(box.W-panelWidth, v.top))
 	// The note, in the middle at the top of the photo's room.
 	note := kids.At(3)
 	room := v.room()
 	// It keeps clear of the marks at the top right, wrapping if need be.
 	nw := max(200, min(box.W/2, room.Size().W-2*(v.marksRect().Size().W+40)))
 	ns := note.Layout(gunim.Loose(geom.Sz(nw, 80)))
-	v.noteRect = geom.Rc(room.Center().X-ns.W/2, room.Min.Y+14, ns.W, ns.H)
+	v.noteRect = geom.Rc(room.Center().X-ns.W/2, v.chromeTop()+14, ns.W, ns.H)
 	note.Place(v.noteRect.Min)
 	orig := kids.At(4)
 	orig.Layout(gunim.Loose(geom.Sz(box.W/2, 40)))
-	orig.Place(geom.Pt(room.Min.X+16, room.Min.Y+14))
+	orig.Place(geom.Pt(room.Min.X+16, v.chromeTop()+14))
 	// The eyedropper's bar, at the foot of the photo while it is out,
 	// and nowhere for the pointer otherwise.
 	bar := kids.At(5)
@@ -957,6 +964,13 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	if in < 0.001 {
 		return
 	}
+	// A shade at the top, under the title bar, keeps its title and
+	// buttons readable over a bright photo.
+	if v.top > 0 {
+		h := v.top + 48
+		p.RRect(geom.Rc(0, 0, box.W, h), 0, paint.Fill{Gradient: &paint.Gradient{From: geom.Pt(0, 0), To: geom.Pt(0, h),
+			Start: color.NRGBA{A: uint8(0x8c * in)}, End: color.NRGBA{}}})
+	}
 	// The chrome comes up from below as the view comes in.
 	defer p.Push(paint.Translate(geom.Pt(0, (1-in)*stripHeight)))()
 	if in < 0.999 {
@@ -975,7 +989,7 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	v.paintNotice(p, kids.At(3))
 	// The label for the original, in the corner.
 	l, rm := kids.At(4), v.room()
-	paintNote(p, l, geom.Rc(rm.Min.X+16, rm.Min.Y+14, l.Size().W, l.Size().H), v.origIn.Value())
+	paintNote(p, l, geom.Rc(rm.Min.X+16, v.chromeTop()+14, l.Size().W, l.Size().H), v.origIn.Value())
 	v.paintWB(p, f.Theme, kids.At(5), kids.At(6), kids.At(7))
 }
 
@@ -983,7 +997,7 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 // top right of the room for the photo, to be clicked.
 func (v *cullView) markPlace() markPlace {
 	r := v.room()
-	x, y := r.Max.X-16-5*18-4*5, r.Min.Y+20
+	x, y := r.Max.X-16-5*18-4*5, v.chromeTop()+20
 	return markPlace{stars: geom.Pt(x, y), star: 18, gap: 5, reject: geom.Pt(x-24, y), pick: geom.Pt(x-56, y), flag: 20}
 }
 

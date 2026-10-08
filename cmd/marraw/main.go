@@ -137,7 +137,9 @@ func run(o options) error {
 	log.Printf("marraw: build %s; %d photos in %q, backend at %s", build(), len(photos), path, host)
 
 	err = gunim.Main(ctx, func(a *gunim.App) error {
-		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: geom.Sz(1400, 900), Root: widget.NewSurface()})
+		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: geom.Sz(1400, 900), Root: widget.NewSurface(),
+			// The photo runs under the title bar, as in marraw.
+			UnderTitleBar: true})
 		if err != nil {
 			return err
 		}
