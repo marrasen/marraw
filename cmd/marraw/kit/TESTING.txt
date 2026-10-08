@@ -4,89 +4,68 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
-Looks (new in this build)
-  - Stepping between photos on a big screen (4K, maximized): the sharp
-    tiles now slide with the photo, the photo leaving keeps its sharp
-    tiles until it is gone, and the photo fades as one piece. Tiles that
-    arrive after a step are gathered and fade in together, not square by
-    square. Nothing should move or fade on its own any more.
-  - The photo runs up under the title bar, as in marraw: zoom in and it
-    fills the window to the top, with the title and the window buttons
-    over it and no shade. The stars and flags, the notes and the develop
-    panel keep below the bar. In the grid the sidebar's colour runs up
-    under it. (The last build meant to do this and didn't.)
-  - The eyedropper looks like marraw's now: the magnifier shows the
-    photo three times as large in place of the pointer, with a faint
-    grid, a small target and the pipette at its edge. Beside it a small
-    tag reads R G B, and says in red when the spot can't be picked. The
-    bar at the foot is glass, with the pipette and a hint, quiet buttons
-    and only Done filled.
-  - The floating pieces over the photo are frosted glass, as in marraw:
-    the note at the top, the stars and flags, the file name box (now a
-    card in the corner), the navigator and the eyedropper's bar. They
-    blur the photo behind them.
+Crop and straighten (new)
+  - With the develop panel open (D), press R, or click "Crop and
+    straighten" in the panel's Crop section. The photo zooms out to show
+    its whole frame, with the crop over it: the rest dimmed, thirds, and
+    handles at the corners and the sides' middles. The crop's shape and
+    size in pixels show in its middle.
+  - Drag a corner or a side to resize, or inside to move it. The bar at
+    the foot: Free, Original, 1:1, 3:2, 4:3, 16:9 lock the shape. The
+    slider straightens, -15 to +15 degrees: the frame turns, and the crop
+    shrinks to stay on the photo. Then turn left or right, mirror across
+    or upside down, Reset, Done.
+  - Enter, Escape, R again or Done finish: the photo renders cropped.
+  - Each drag is a step in History; Ctrl+Z undoes it.
 
-From the last build (e522bc8), if you have not tried them yet
--------------------------------------------------------------
+Presets (new)
+  - A Presets section at the top of the panel. "Creative" holds marraw's
+    six (Cinematic, Faded film, Noir B&W, Punchy, Moody, Golden hour);
+    "My presets" your own, shared with marraw.
+  - Each card shows the photo as the preset would make it. Rest the
+    pointer on a card: the photo shows the preset. Click: it is kept, a
+    step in History.
+  - "Save the edit as a preset…" asks for a name, which groups it carries,
+    and whether it adds to a photo's own edit. A cross on your own cards
+    deletes them.
+  - Ctrl+1 to 9 apply a creative preset by its place, Ctrl+Shift+1 to 9
+    one of your own.
+  - The pictures render only while the section is open.
 
-Filter bar (over the grid)
-  - Sort is two buttons, Time and Name. The one in use is lit, with an
-    arrow for its way. Click it again to turn the order about: the arrow
-    turns. Click the other to sort by that.
-  - The least rating is five stars: click one to show photos rated that
-    or more, click the lit one again to show all. The pointer over them
-    lights the ones a click would.
-  - Changing the sort or a filter: photos that stay glide to their new
-    places, photos that go fade out, photos that come fade in.
-  - Switching shoots in the library: the zoom out and in is twice as
-    fast as before.
-  - A filter that shows nothing says "No photos match the filter".
+Bursts and culling aids (new)
+  - Burst frames have a badge at the top left of their picture: "2/4",
+    green on the sharpest frame. Soft photos have an amber mark at the
+    bottom right, photos with closed eyes a rose one. The filmstrip shows
+    them too, and the photo view's name line says them.
+  - Buttons at the right of the filter bar: soft photos only, closed
+    eyes only, the sharpest of each burst only; then judge the bursts
+    (pick the sharpest of each, reject the rest), look for closed eyes,
+    and find the subjects (to judge sharpness on the subject). Looking for
+    closed eyes asks to download the eye model the first time.
+  - Shift+P picks the frame and rejects the rest of its burst; Shift+X
+    only rejects the rest. Ctrl+Z undoes either in one step.
 
-Stars and flags
-  - Stars, the pick flag and the reject cross are icons now, on the
-    tiles, in the photo view, in the filmstrip and in the heading's
-    counts.
-  - Click them, in the grid and in the photo view. A star rates the
-    photo; the same star again takes the rating off. The flag picks it,
-    the cross rejects it; again takes it off. On a tile, the flag and
-    cross show when the pointer is over the tile.
-  - Under "Not rejected", reject a photo: it goes from the grid at once,
-    as in marraw. Likewise un-picking under "Picks", and a lower rating
-    under a star filter. Ctrl+Z brings it back.
-  - The same in the photo view: the photo goes and the next one shows.
-    The last one gone takes you back to the grid.
+Time-gap groups (new)
+  - Sorted by time, the grid splits where more than so many minutes pass
+    between frames: each group under a header with its times, how many
+    frames, and the gap before it. Choose the gap in the heading, beside
+    the size slider ("Group by 6 min gaps", or none). The filmstrip marks
+    each gap with a clock between the groups.
 
-White balance
-  - The mode buttons (As shot, Auto, Kelvin, Picked) have the whole row,
-    with no "Mode" label, and an eyedropper button at the end of it.
-  - The eyedropper (W or that button) now works as in marraw:
-    - A magnifier follows the pointer over the photo, with the spot's
-      R G B beside it. Before you click, it warns in red when a spot
-      cannot be picked, and why: "No green light", "Too dark".
-    - A click shows the pick, but saves nothing yet. Click other spots
-      to compare.
-    - A bar at the bottom: As shot, Auto, Reset, Cancel (Escape) and
-      Done (Enter). Done keeps the pick as one step in History; Cancel
-      goes back to the white balance before.
-    - A spot the backend refuses now says why, at the top of the photo.
-      On the concert photos most spots are lit by pure blue or red LEDs
-      and have no other colour in them: no white balance can make those
-      grey. Try the white spotlights, or the Canon photos.
-  - Focused on the mode buttons, "?" (Shift and + on a Swedish
-    keyboard) shows the shortcuts and leaves the mode alone. Shift and +
-    no longer zooms out in the photo view either.
+Fixed on the way
+  - A folder's sort and filters are kept when you leave it and come back
+    in the same session.
+  - Photos now sort by capture time as soon as the backend has read it,
+    and the grid and the photo view always agree on the order.
 
-Lens section
-  - The concert photos say: No profile for "85mm F1.4 DG HSM | Art 016"
-    in the lens database. That is right: the 2016 Sigma 85mm Art has no
-    profile in marraw's database, nor in Lensfun's. The Canon photos
-    have one. A camera the database does not know says so.
+From earlier builds, if you have not tried them yet
+---------------------------------------------------
+  - Stepping on a big screen moves the photo and its sharp tiles as one.
+  - The photo runs under the title bar.
+  - The eyedropper's magnifier and glass bar; frosted glass over photos.
+  - Clickable stars and flags; filters with glide and fade; Time/Name
+    sort buttons; star filter.
 
-Still to try from the last build
-  - Faster develop drafts on the concert photos: drag Brightness, Gamma
-    and Shadow slope: the photo should follow as smoothly as Exposure.
-
-Not here yet (from marraw): crop and straighten, masks and local
-adjustments, retouch, presets, before/after split, burst grouping and
-the culling aids, time-gap headers, watermarks, share links, remote
-connections, the second-display viewer.
+Not here yet (from marraw): masks and local adjustments, retouch,
+watermarks, share links, remote connections, the second-display viewer,
+the preset Amount scrubber, the crop's Auto (subject) button.
