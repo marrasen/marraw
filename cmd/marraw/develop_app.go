@@ -32,6 +32,8 @@ type (
 		Lens      LensInfo
 		History   []string
 		HistoryAt int
+		// WBPick says the white-balance eyedropper is out.
+		WBPick bool
 	}
 	// DevHist is the histogram of the pixels showing.
 	DevHist struct{ Counts [3][256]uint32 }
@@ -116,7 +118,7 @@ const draftEdge = 1024
 // developState is the panel's state.
 func (cu *culler) developState() DevelopState {
 	d := &cu.dev
-	st := DevelopState{ID: d.id, Params: d.params, Channel: d.channel, Active: d.active, Lens: d.lens}
+	st := DevelopState{ID: d.id, Params: d.params, Channel: d.channel, Active: d.active, Lens: d.lens, WBPick: cu.wb.on}
 	if i, ok := cu.index[d.id]; ok {
 		st.BaseExpEV = cu.photos[i].BaseExpEV
 		st.Info = photoInfo(cu.photos[i], cu.folderPath)
@@ -142,6 +144,7 @@ func (cu *culler) toggleDevelop() {
 
 // closeDevelop takes the panel away, and stops its preview.
 func (cu *culler) closeDevelop() {
+	cu.wbFinish(true)
 	d := &cu.dev
 	if d.stop != nil {
 		d.stop()

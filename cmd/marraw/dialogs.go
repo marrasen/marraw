@@ -34,8 +34,8 @@ func newConfirmDialog(s ConfirmAsk) *widget.Dialog {
 	body.Color, body.MaxLines = widget.PaletteHint, 4
 	d.Body = body
 	d.SetButtons(s.OK, "Cancel")
-	d.Accept = Confirmed{Kind: s.Kind, OK: true}
-	d.Dismiss = Confirmed{Kind: s.Kind}
+	d.OnAccept = widget.Sends(Confirmed{Kind: s.Kind, OK: true})
+	d.OnDismiss = widget.Sends(Confirmed{Kind: s.Kind})
 	return d
 }
 

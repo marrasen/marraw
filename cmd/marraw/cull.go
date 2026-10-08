@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/marrasen/gunim"
+	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
 
@@ -49,8 +50,12 @@ type (
 		// Original says the photo shows as it was before any edit.
 		Active   string
 		Original bool
-		// WBPick says the white-balance eyedropper is on.
-		WBPick bool
+		// WBPick says the white-balance eyedropper is out, and WBFrame
+		// and WBPix are the frame it samples, for its magnifier, once
+		// they come.
+		WBPick  bool
+		WBFrame *paint.Image
+		WBPix   *image.RGBA
 		// Notice is a note to show over the photo for a moment, each time
 		// NoticeSeq changes, as an undo says what it undid.
 		Notice    string
@@ -71,9 +76,19 @@ type (
 		Flag   string
 	}
 	// Rate rates the photo showing, 0 to 5 stars.
-	Rate struct{ Stars int }
-	// Mark flags the photo showing: "pick", "exclude" or "none".
-	Mark struct{ Flag string }
+	// With ID it rates that photo alone, as a click on its stars does,
+	// and Toggle takes a rating it has already off again.
+	Rate struct {
+		Stars  int
+		ID     int64
+		Toggle bool
+	}
+	// Mark flags the photo showing: "pick", "exclude" or "none"; with ID,
+	// that photo alone.
+	Mark struct {
+		Flag string
+		ID   int64
+	}
 	// WantTiles asks for the tiles of the photo at Index in Range of the
 	// grid, as the view zooms past what the 2048 shows sharp; an empty
 	// Range wants none.
@@ -170,17 +185,15 @@ type culler struct {
 	// many of them stand.
 	cullSteps []cullStep
 	cullAt    int
+	// wb is the white-balance eyedropper, while it is out.
+	wb wbPick
 	// original says the photo shows as it was before any edit, origImg
 	// those pixels for photo origID, and swapNow that the next picture
 	// shows at once, with no fade.
-	// wbPicking says the white-balance eyedropper is on, sampling the
-	// edit wbBase.
-	wbPicking bool
-	wbBase    marrawclient.Params
-	original  bool
-	origID    int64
-	origImg   *paint.Image
-	swapNow   bool
+	original bool
+	origID   int64
+	origImg  *paint.Image
+	swapNow  bool
 	// asking says a dialog is open, and deleting holds the photos its
 	// answer deletes.
 	asking   bool
@@ -298,9 +311,9 @@ func (cu *culler) serve() error {
 			case WantTiles:
 				cu.wantTiles(in)
 			case Rate:
-				cu.rate(in.Stars)
+				cu.rate(in)
 			case Mark:
-				cu.mark(marrawclient.Flag(in.Flag))
+				cu.mark(marrawclient.Flag(in.Flag), in.ID)
 			case NeedThumbs:
 				cu.needThumbs(in)
 			case Selected:
@@ -353,6 +366,8 @@ func (cu *culler) serve() error {
 				cu.devJump(in.Index)
 			case DevWBPick:
 				cu.devWBPick(in.On)
+			case DevWBBar:
+				cu.devWBBar(in.Act)
 			case DevWBAt:
 				cu.devWBAt(in.X, in.Y)
 			case Confirmed:
@@ -381,7 +396,8 @@ func (cu *culler) state() Cull {
 		st.Img, st.Note, st.Live = d.live, d.note, true
 	}
 	// Backspace held: the photo before any edit, and back again, at once.
-	st.Original, st.WBPick = cu.original, cu.wbPicking
+	st.Original, st.WBPick = cu.original, cu.wb.on
+	st.WBFrame, st.WBPix = cu.wb.frame, cu.wb.pix
 	if img := cu.originalShowing(p.ID); img != nil {
 		st.Img, st.Note = img, "original, before any edit"
 	}
@@ -404,6 +420,8 @@ func (cu *culler) goTo(i int) {
 	if !cu.culling || i == cu.at && cu.load != nil {
 		return
 	}
+	// The eyedropper goes, keeping what it picked.
+	cu.wbFinish(true)
 	cu.at, cu.gen, cu.stepped = i, cu.gen+1, time.Now()
 	if cu.load != nil {
 		cu.load()
@@ -420,7 +438,7 @@ func (cu *culler) goTo(i int) {
 		cu.probing, cu.probeStop = 0, nil
 	}
 	cu.tileNote = ""
-	cu.original, cu.wbPicking = false, false
+	cu.original = false
 	cu.showCull()
 	cu.developFollows(i)
 	// The grid follows, so the photo flies back to its own tile.
@@ -601,6 +619,51 @@ func (cu *culler) record(what string, sharp bool) {
 // script steps right o.skim times, o.every apart, then reports the timings
 // and writes a picture of the window to o.shot, for measuring without
 // hands.
+// scriptStep takes a step of -keys that is not a key: click:x:y and
+// move:x:y move the pointer, in the window, and click there; type:text
+// types; shift+plus presses Shift and + as a Swedish keyboard does, which
+// types ?; ctrl+z and w press those; wait:ms waits; and shot:name writes the window to name.png. It
+// reports whether k was one.
+func (cu *culler) scriptStep(k string) bool {
+	verb, arg, ok := strings.Cut(k, ":")
+	now := time.Now()
+	switch {
+	case ok && (verb == "click" || verb == "move"):
+		xs, ys, _ := strings.Cut(arg, ":")
+		x, _ := strconv.ParseFloat(xs, 32)
+		y, _ := strconv.ParseFloat(ys, 32)
+		at := geom.Pt(float32(x), float32(y))
+		_ = cu.c.Input(cu.ctx, input.PointerMove{Pos: at, Time: now})
+		if verb == "click" {
+			time.Sleep(50 * time.Millisecond)
+			_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonPrimary, Clicks: 1, Time: now})
+			_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: at, Button: input.ButtonPrimary, Time: now})
+		}
+	case ok && verb == "type":
+		_ = cu.c.Input(cu.ctx, input.TextInput{Text: arg, Time: now})
+	case k == "shift+plus":
+		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyMinus, Mods: input.ModShift, Typed: true, Char: '+', Time: now})
+		_ = cu.c.Input(cu.ctx, input.TextInput{Text: "?", Time: now})
+	case ok && verb == "wait":
+		ms, _ := strconv.Atoi(arg)
+		time.Sleep(time.Duration(ms) * time.Millisecond)
+		return true
+	case ok && verb == "shot":
+		if err := writeShot(cu.ctx, cu.c, arg+".png"); err != nil {
+			log.Print(err)
+		}
+		return true
+	case k == "ctrl+z":
+		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyZ, Mods: input.ModControl, Time: now})
+	case k == "w":
+		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyW, Time: now})
+	default:
+		return false
+	}
+	time.Sleep(300 * time.Millisecond)
+	return true
+}
+
 func (cu *culler) script(o options) {
 	n, every, shot, zoom, keys := o.skim, o.every, o.shot, o.zoom, o.keys
 	time.Sleep(o.wait)
@@ -616,6 +679,9 @@ func (cu *culler) script(o options) {
 	time.Sleep(time.Second)
 	pressed := strings.Split(keys, ",")
 	for i, k := range pressed {
+		if cu.scriptStep(strings.TrimSpace(k)) {
+			continue
+		}
 		if key, ok := namedKeys[strings.TrimSpace(strings.ToLower(k))]; ok {
 			cu.c.Input(cu.ctx, input.KeyPress{Key: key})
 			// A burst starts with the last key, to catch what it animates.
@@ -900,9 +966,18 @@ func (cu *culler) keepThumb(id int64, img *paint.Image) {
 
 // rate gives stars: to the photo showing, or to the grid's selection,
 // here at once and on the backend.
-func (cu *culler) rate(stars int) {
-	stars = max(0, min(stars, 5))
-	idx := cu.targets()
+func (cu *culler) rate(in Rate) {
+	stars := max(0, min(in.Stars, 5))
+	idx := cu.targetsOf(in.ID)
+	if in.Toggle && len(idx) > 0 {
+		all := true
+		for _, i := range idx {
+			all = all && cu.photos[i].Rating == stars
+		}
+		if all {
+			stars = 0
+		}
+	}
 	var ids []int64
 	step := cullStep{what: map[bool]string{false: fmt.Sprintf("%d stars", stars), true: "rating cleared"}[stars == 0]}
 	for _, i := range idx {
@@ -923,12 +998,13 @@ func (cu *culler) rate(stars int) {
 			log.Printf("rate: %v", err)
 		}
 	}()
+	cu.refilter()
 }
 
 // mark flags the photo showing, or the grid's selection, here at once and
 // on the backend.
-func (cu *culler) mark(f marrawclient.Flag) {
-	idx := cu.targets()
+func (cu *culler) mark(f marrawclient.Flag, id int64) {
+	idx := cu.targetsOf(id)
 	// P on a photo picked already, or X on one rejected, takes the flag
 	// off again, as marraw's keys do.
 	if f != "none" && len(idx) > 0 {
@@ -960,10 +1036,23 @@ func (cu *culler) mark(f marrawclient.Flag) {
 			log.Printf("flag: %v", err)
 		}
 	}()
+	cu.refilter()
 }
 
 // targets are the photos a rating or a flag goes to: the one showing, or
 // the grid's selection, or the photo its keyboard is on.
+// targetsOf is photo id alone, where it shows, or without one the
+// targets.
+func (cu *culler) targetsOf(id int64) []int {
+	if id == 0 {
+		return cu.targets()
+	}
+	if i, ok := cu.index[id]; ok {
+		return []int{i}
+	}
+	return nil
+}
+
 func (cu *culler) targets() []int {
 	if cu.culling {
 		return []int{cu.at}
@@ -1069,4 +1158,5 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 		cu.showCull()
 		cu.loadStrip()
 	}
+	cu.refilter()
 }

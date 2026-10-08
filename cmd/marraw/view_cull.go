@@ -10,6 +10,7 @@ import (
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/anim"
 	"github.com/marrasen/gunim/geom"
+	"github.com/marrasen/gunim/icon"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
 	"github.com/marrasen/gunim/widget"
@@ -30,12 +31,21 @@ import (
 // tiles in view.
 type cullView struct {
 	anim.Group
-	st   Cull
-	name *widget.Label
-	note *widget.Label
-	hud  gunim.Node
-	pic  *cullPic
-	hero *widget.Hero
+	// pendingKey is a press waiting for the text it types, as
+	// heldForText says.
+	pendingKey *input.KeyPress
+	// wbBar is the eyedropper's bar, and wbRead what the magnifier
+	// reads; wbAt is where the pointer is over the photo, as wbOver says.
+	wbBar  gunim.Node
+	wbRead *widget.Label
+	wbAt   geom.Point
+	wbOver bool
+	st     Cull
+	name   *widget.Label
+	note   *widget.Label
+	hud    gunim.Node
+	pic    *cullPic
+	hero   *widget.Hero
 
 	// in is how far the view has come in, from 0 to 1, and leaving says it
 	// is on its way out.
@@ -74,6 +84,7 @@ type cullView struct {
 	// navDrag says a press in the navigator moves the view, and origIn
 	// and wbIn bring the labels for the original and the eyedropper in.
 	navDrag      bool
+	wbBarRect    geom.Rect
 	origIn, wbIn *anim.Float
 	labelOrig    *widget.Label
 	labelWB      *widget.Label
@@ -101,8 +112,11 @@ func newCullView(s Cull) *cullView {
 		slot: &gunim.Box{}, side: anim.NewFloat(0), shape: anim.NewSize(fullOf(s)),
 		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0), noticeSeq: s.NoticeSeq,
 		origIn: anim.NewFloat(0), wbIn: anim.NewFloat(0),
-		labelOrig: widget.NewLabel("Original"), labelWB: widget.NewLabel("Eyedropper: click something neutral")}
-	v.labelOrig.Size, v.labelWB.Size = noteSize, noteSize
+		labelOrig: widget.NewLabel("Original"), labelWB: widget.NewLabel("Click something neutral grey or white"),
+		wbRead: widget.NewLabel("")}
+	v.labelOrig.Size, v.labelWB.Size, v.wbRead.Size = noteSize, noteSize, noteSize
+	v.labelWB.Color = noteInk
+	v.wbBar = v.newWBBar()
 	v.notice.Size = noteSize
 	if s.Panel {
 		v.side.Jump(1)
@@ -164,12 +178,12 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 	if s.TileNote != "" {
 		note += "\n" + s.TileNote + fmt.Sprintf(" (%d in memory)", len(s.Tiles))
 	}
-	v.note.SetText(note)
+	v.note.Text = note
 	u.Invalidate()
 }
 
 func (v *cullView) readout(z float32) {
-	v.name.SetText(fmt.Sprintf("%s   %d / %d   %.0f%%", v.st.Name, v.st.Index+1, v.st.Total, v.percent(z)))
+	v.name.Text = fmt.Sprintf("%s   %d / %d   %.0f%%", v.st.Name, v.st.Index+1, v.st.Total, v.percent(z))
 }
 
 // Transition implements [gunim.Transitioner]: the backdrop fades and the
@@ -377,13 +391,13 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 
 // Children implements [gunim.Composite].
 func (v *cullView) Children() []gunim.Node {
-	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.labelWB}
+	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead}
 }
 
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
 // eyedropper is on.
 func (v *cullView) Cursor(p geom.Point) input.Cursor {
-	if v.st.WBPick && p.Y < v.box.H-stripHeight && !v.inPanel(p) {
+	if v.st.WBPick && p.Y < v.box.H-stripHeight && !v.inPanel(p) && !v.wbBarRect.Contains(p) {
 		return input.CursorCrosshair
 	}
 	return input.CursorArrow
@@ -458,6 +472,10 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 	}
 	switch e := e.(type) {
 	case input.KeyPress:
+		if heldForText(e) {
+			v.pendingKey = &e
+			return true
+		}
 		// Ctrl and Z undoes the edit, with Shift or as Ctrl and Y redoes.
 		if e.Mods.Has(input.ModControl) {
 			switch e.Key {
@@ -504,17 +522,17 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			}
 			return true
 		}
-		if e.Char == '?' {
-			u.Send(v, ShowShortcuts{})
-			return true
-		}
 		if e.Key == input.KeyDelete {
 			u.Send(v, AskDelete{})
 			return true
 		}
 		// W turns the white-balance eyedropper on and off, and Escape off.
-		if v.st.Panel && !e.Mods.Has(input.ModShift) && (e.Key == input.KeyW || e.Key == input.KeyEscape && v.st.WBPick) {
-			u.Send(v, DevWBPick{On: e.Key == input.KeyW && !v.st.WBPick})
+		if v.st.WBPick && (e.Key == input.KeyEscape || e.Key == input.KeyEnter) {
+			u.Send(v, DevWBBar{Act: map[bool]string{false: "cancel", true: "done"}[e.Key == input.KeyEnter]})
+			return true
+		}
+		if v.st.Panel && !e.Mods.Has(input.ModShift) && e.Key == input.KeyW {
+			u.Send(v, DevWBPick{On: !v.st.WBPick})
 			return true
 		}
 		if e.Mods.Has(input.ModShift) && v.panKey(e.Key, u) {
@@ -565,6 +583,19 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			v.zoomTo(v.z.Target()*float32(math.Pow(1.25, float64(d))), e.Pos, u)
 		}
 		return true
+	case input.TextInput:
+		held := v.pendingKey
+		v.pendingKey = nil
+		if e.Text == "?" {
+			u.Send(v, ShowShortcuts{})
+			return true
+		}
+		if held != nil {
+			k := *held
+			k.Typed = false
+			return v.Handle(k, u)
+		}
+		return false
 	case input.KeyRelease:
 		if e.Key == input.KeyBackspace && v.st.Original {
 			u.Send(v, ShowOriginal{})
@@ -580,6 +611,17 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		if e.Button != input.ButtonPrimary || v.inPanel(e.Pos) {
 			return false
 		}
+		// A click on a star rates the photo, again takes the rating off,
+		// and one on a flag sets it, again takes it off.
+		if v.marksRect().Contains(e.Pos) {
+			mp := v.markPlace()
+			if k := mp.starAt(e.Pos); k > 0 {
+				u.Send(v, Rate{Stars: k, Toggle: true})
+			} else if f := mp.flagAt(e.Pos); f != "" {
+				u.Send(v, Mark{Flag: f})
+			}
+			return true
+		}
 		// The navigator: a press there moves the view to it.
 		if v.navOn() && v.navRect().Contains(e.Pos) {
 			v.navDrag = true
@@ -587,7 +629,7 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			return true
 		}
 		// The eyedropper: a click picks where it lands on the photo.
-		if v.st.WBPick && e.Pos.Y < v.box.H-stripHeight {
+		if v.st.WBPick && e.Pos.Y < v.box.H-stripHeight && !v.wbBarRect.Contains(e.Pos) {
 			if at, ok := v.photoPoint(e.Pos); ok {
 				u.Send(v, DevWBAt{X: float64(at.X), Y: float64(at.Y)})
 			}
@@ -611,6 +653,11 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		v.trail.Add(e.Pos, e.Time)
 		return true
 	case input.PointerMove:
+		if !v.dragging {
+			v.marks.hover(e.Pos, v.marksRect().Contains(e.Pos), v.markPlace(), u.Theme())
+			v.wbHover(e.Pos)
+			u.Invalidate()
+		}
 		if v.navDrag {
 			v.navTo(e.Pos)
 			u.Invalidate()
@@ -627,6 +674,11 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		v.last = e.Pos
 		u.Invalidate()
 		return true
+	case input.PointerLeave:
+		v.marks.hover(geom.Point{}, false, v.markPlace(), u.Theme())
+		v.wbOver = false
+		u.Invalidate()
+		return false
 	case input.PointerUp:
 		if v.navDrag {
 			v.navDrag = false
@@ -646,6 +698,14 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		}
 	}
 	return false
+}
+
+// heldForText reports whether press e waits for the text it types to say
+// what it means: Shift with the key of + or -, which types ? on a Swedish
+// keyboard, where a US one types + or _.
+func heldForText(e input.KeyPress) bool {
+	return e.Typed && e.Mods.Has(input.ModShift) && !e.Mods.Has(input.ModControl) && !e.Mods.Has(input.ModAlt) &&
+		plusMinus(e) != 0
 }
 
 // plusMinus is +1 for a key that types + or =, -1 for one that types -,
@@ -709,17 +769,23 @@ func (v *cullView) developKey(e input.KeyPress, u *gunim.UI) bool {
 	return false
 }
 
-// noticeFor is how long a note stays over the photo.
+// noticeFor is how long a short note stays over the photo.
 const noticeFor = 1400 * time.Millisecond
+
+// noticeTime is how long note stays: a longer one, as why a spot cannot
+// be picked, stays long enough to read.
+func noticeTime(note string) time.Duration {
+	return noticeFor + time.Duration(max(0, len(note)-30))*45*time.Millisecond
+}
 
 // showNotice pops note in over the photo, and lets it fade after a moment;
 // a note on the heels of the last pops again.
 func (v *cullView) showNotice(note string, seq int, u *gunim.UI) {
 	v.noticeSeq = seq
-	v.notice.SetText(note)
+	v.notice.Text = note
 	v.noticeIn.Jump(min(v.noticeIn.Value(), 0.6))
 	v.noticeIn.Animate(1, widget.Bounce.Get(u.Theme()))
-	u.After(noticeFor, func(u *gunim.UI) {
+	u.After(noticeTime(note), func(u *gunim.UI) {
 		if v.noticeSeq == seq {
 			v.noticeIn.Animate(0, widget.Settle.Get(u.Theme()))
 		}
@@ -816,16 +882,27 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	slot.Place(geom.Pt(box.W-panelWidth, 0))
 	// The note, in the middle at the top of the photo's room.
 	note := kids.At(3)
-	ns := note.Layout(gunim.Loose(geom.Sz(box.W/2, 60)))
 	room := v.room()
+	// It keeps clear of the marks at the top right, wrapping if need be.
+	nw := max(200, min(box.W/2, room.Size().W-2*(v.marksRect().Size().W+40)))
+	ns := note.Layout(gunim.Loose(geom.Sz(nw, 80)))
 	v.noteRect = geom.Rc(room.Center().X-ns.W/2, room.Min.Y+14, ns.W, ns.H)
 	note.Place(v.noteRect.Min)
-	for i := 4; i <= 5; i++ {
-		l := kids.At(i)
-		s := l.Layout(gunim.Loose(geom.Sz(box.W/2, 40)))
-		l.Place(geom.Pt(room.Min.X+16, room.Min.Y+14+float32(i-4)*34))
-		_ = s
+	orig := kids.At(4)
+	orig.Layout(gunim.Loose(geom.Sz(box.W/2, 40)))
+	orig.Place(geom.Pt(room.Min.X+16, room.Min.Y+14))
+	// The eyedropper's bar, at the foot of the photo while it is out,
+	// and nowhere for the pointer otherwise.
+	bar := kids.At(5)
+	bs := bar.Layout(gunim.Loose(geom.Sz(room.Size().W, 60)))
+	v.wbBarRect = geom.Rc(room.Center().X-bs.W/2-14, box.H-stripHeight-sz.H-bs.H-28, bs.W+28, bs.H+16)
+	if v.wbIn.Value() > 0.01 {
+		bar.Place(v.wbBarRect.Min.Add(geom.Pt(14, 8)))
+	} else {
+		bar.Place(geom.Pt(-10000, -10000))
 	}
+	ro := kids.At(6)
+	ro.Layout(gunim.Loose(geom.Sz(300, 40)))
 	if cur := v.current(); cur != nil {
 		v.ring.Animate(thumbWidth(*cur), widget.Quick.Get(f.Theme))
 		if v.ring.Value() == 0 {
@@ -847,7 +924,7 @@ func (v *cullView) current() *Thumb {
 
 // Paint implements [gunim.Node]: the backdrop, the picture at its zoom,
 // and the filmstrip, the marks and the readout over it.
-func (v *cullView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
+func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
 	in := min(max(v.in.Value(), 0), 1)
 	p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(withAlpha(backdrop, in)))
 	func() {
@@ -875,9 +952,9 @@ func (v *cullView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 		defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: in})()
 	}
 	v.paintStrip(p, box)
-	r := v.room()
-	v.marks.paintStars(p, geom.Pt(r.Max.X-12-5*16, r.Min.Y+17), 11, 5, 0xc0)
-	v.marks.paintFlag(p, geom.Pt(r.Max.X-12-5*16-20, r.Min.Y+17), 17)
+	mp := v.markPlace()
+	p.RRect(v.marksRect(), 18, paint.Solid(color.NRGBA{R: 0x10, G: 0x12, B: 0x16, A: 0xb0}))
+	v.marks.paint(p, f.Theme, mp, 0xc0, true)
 	hud := kids.At(1)
 	hs := hud.Size()
 	p.RRect(geom.Rc(0, box.H-stripHeight-hs.H, hs.W, hs.H), 0, paint.Solid(color.NRGBA{A: 0xa0}))
@@ -885,13 +962,24 @@ func (v *cullView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	v.paintNav(p)
 	kids.At(2).Paint(p)
 	v.paintNotice(p, kids.At(3))
-	// The labels for the original and the eyedropper, in the corner.
-	for i, k := range []float32{v.origIn.Value(), v.wbIn.Value()} {
-		l := kids.At(4 + i)
-		r := v.room()
-		at := geom.Rc(r.Min.X+16, r.Min.Y+14+float32(i)*34, l.Size().W, l.Size().H)
-		paintNote(p, l, at, k)
-	}
+	// The label for the original, in the corner.
+	l, rm := kids.At(4), v.room()
+	paintNote(p, l, geom.Rc(rm.Min.X+16, rm.Min.Y+14, l.Size().W, l.Size().H), v.origIn.Value())
+	v.paintWB(p, kids.At(5), kids.At(6))
+}
+
+// markPlace is where the photo's marks are: its flags and stars, at the
+// top right of the room for the photo, to be clicked.
+func (v *cullView) markPlace() markPlace {
+	r := v.room()
+	x, y := r.Max.X-16-5*18-4*5, r.Min.Y+20
+	return markPlace{stars: geom.Pt(x, y), star: 18, gap: 5, reject: geom.Pt(x-24, y), pick: geom.Pt(x-56, y), flag: 20}
+}
+
+// marksRect is the pill behind the marks.
+func (v *cullView) marksRect() geom.Rect {
+	mp, r := v.markPlace(), v.room()
+	return geom.Rc(mp.pick.X-20, mp.stars.Y-18, r.Max.X-4-(mp.pick.X-20), 36)
 }
 
 // paintNotice draws the note in a pill, popping in and fading out.
@@ -937,14 +1025,22 @@ func (v *cullView) paintStrip(p *paint.Painter, box geom.Size) {
 		} else {
 			p.RRect(t.r, 3, paint.Solid(color.NRGBA{R: 0x22, G: 0x25, B: 0x2d, A: 0xff}))
 		}
-		switch t.th.Flag {
-		case "pick":
-			p.RRect(geom.Rc(t.r.Min.X+4, t.r.Min.Y+4, 8, 8), 4, paint.Solid(pickInk))
-		case "exclude":
-			p.RRect(geom.Rc(t.r.Min.X+4, t.r.Min.Y+4, 8, 8), 4, paint.Solid(rejectInk))
+		// The flag and the stars as small icons, on a shade to read on
+		// any picture.
+		if flagged(t.th.Flag) {
+			ic, w := flagSet, float32(2)
+			if t.th.Flag == "exclude" {
+				ic, w = rejectMark, 3
+			}
+			fr := geom.Rc(t.r.Min.X+3, t.r.Min.Y+3, 13, 13)
+			p.RRect(fr.Inset(geom.Uniform(-2)), 4, paint.Solid(color.NRGBA{A: 0x90}))
+			p.Mask(icon.Stroke{Icon: ic, Width: w, Progress: 1}, fr, flagInk(t.th.Flag))
 		}
-		for i := range t.th.Rating {
-			p.RRect(geom.Rc(t.r.Min.X+4+float32(i)*7, t.r.Max.Y-9, 5, 5), 2.5, paint.Solid(starInk))
+		if n := t.th.Rating; n > 0 {
+			p.RRect(geom.Rc(t.r.Min.X+2, t.r.Max.Y-12, float32(n)*9+3, 11), 3, paint.Solid(color.NRGBA{A: 0x90}))
+			for i := range n {
+				p.Mask(icon.Stroke{Icon: starLit, Width: 2, Progress: 1}, geom.Rc(t.r.Min.X+4+float32(i)*9, t.r.Max.Y-11, 9, 9), starInk)
+			}
 		}
 	}
 	if w := v.ring.Value(); w > 0 {

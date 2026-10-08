@@ -21,6 +21,7 @@ func registerViews(w *gunim.Window) {
 	gunim.RegisterPatch(w, "grid", (*gridView).thumbIn)
 	gunim.RegisterPatch(w, "grid", (*gridView).photoMarked)
 	gunim.RegisterPatch(w, "grid", (*gridView).gridAt)
+	gunim.RegisterPatch(w, "grid", (*gridView).gridSel)
 	gunim.RegisterPatch(w, "grid", (*gridView).photoAspect)
 	gunim.RegisterPatch(w, "grid", (*gridView).railIn)
 	gunim.RegisterPatch(w, "grid", (*gridView).gridNotice)

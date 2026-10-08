@@ -14,8 +14,9 @@
 // It opens on the folder's grid, or without -folder on an empty one, with
 // the library's shoots in a sidebar: a click on one opens it. The arrow keys
 // and the mouse select, 0 to 5 rate the photos selected, P picks, X rejects
-// and U clears the flag, as marraw's keys do, Ctrl and the wheel size the
-// tiles, and Enter or a double click opens the cull view. There Left and
+// and U clears the flag, as marraw's keys do, or a click on a tile's stars,
+// flag or cross, Ctrl and the wheel size the tiles, and Enter or a double
+// click opens the cull view. There Left and
 // Right step through the folder, Home and End go to its ends, the same keys
 // rate and flag, Z or Space goes between fit and one to one, + and - zoom,
 // Shift and the arrows pan, D opens the develop panel, where Up and Down
@@ -58,7 +59,7 @@ func main() {
 	skim := flag.Int("skim", 0, "step right this many times on its own, -every apart, report the timings, and quit")
 	every := flag.Duration("every", 150*time.Millisecond, "how far apart -skim steps")
 	shot := flag.String("shot", "", "write the window to this PNG file once the script is done, and quit")
-	keys := flag.String("keys", "", "once -skim is done, press these keys, a comma-separated list such as 3,p,right,x")
+	keys := flag.String("keys", "", "once -skim is done, press these keys, a comma-separated list such as 3,p,right,x; also click:x:y, move:x:y, type:text, shift+plus, ctrl+z, w, wait:ms and shot:name")
 	wait := flag.Duration("wait", time.Second, "how long the window shows the grid before the script starts")
 	burst := flag.Int("burst", 0, "write this many pictures, from the last of -keys on, to -shot's name with -01, -02 and on, instead of one")
 	edit := flag.String("edit", "", "once -keys are pressed, with the develop panel open, set adjustments as the panel does, such as contrast=0.6,expEV=2, choices by their option, such as wbMode=2 for Kelvin, or auto=tone or auto=wb+color, and save them")

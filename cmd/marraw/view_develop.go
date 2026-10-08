@@ -335,6 +335,8 @@ type developView struct {
 	lensNote *widget.Label
 	history  *widget.List
 	info     *infoRows
+	// pipette puts the white-balance eyedropper out, lit while it is.
+	pipette *widget.IconButton
 }
 
 func newDevelopView(s DevelopState) *developView {
@@ -371,8 +373,8 @@ func newDevelopView(s DevelopState) *developView {
 			body = append([]gunim.Node{v.lensNote}, body...)
 		case "History":
 			v.history = widget.NewList()
-			v.history.NoFocus, v.history.ClickOnce = true, true
-			v.history.OnClick = func(k widget.Key) gunim.Intent {
+			v.history.SkipFocus, v.history.ClickOnce = true, true
+			v.history.OnActivate = func(k widget.Key, _ *gunim.UI) gunim.Intent {
 				i, _ := strconv.Atoi(string(k))
 				return DevJump{Index: i}
 			}
@@ -382,11 +384,11 @@ func newDevelopView(s DevelopState) *developView {
 			body = append(body, v.info)
 		case "Tone curve":
 			v.channel.KeepFocus = true
-			v.channel.OnChange = func(i int) gunim.Intent { return DevChannel{Channel: i} }
-			v.curve.OnChange = func(pts []geom.Point) gunim.Intent {
+			v.channel.OnChange = func(i int, _ *gunim.UI) gunim.Intent { return DevChannel{Channel: i} }
+			v.curve.OnChange = func(pts []geom.Point, _ *gunim.UI) gunim.Intent {
 				return DevCurve{Channel: v.st.Channel, Points: pts}
 			}
-			v.curve.OnCommit = func(pts []geom.Point) gunim.Intent {
+			v.curve.OnCommit = func(pts []geom.Point, _ *gunim.UI) gunim.Intent {
 				return DevCurve{Channel: v.st.Channel, Points: pts, Commit: true}
 			}
 			body = append(body, v.channel, v.curve)
@@ -416,8 +418,8 @@ func (v *developView) row(sp devSpec) *widget.SliderRow {
 	sl.Snap, sl.KeepFocus, sl.Gradient = sp.snap, true, sp.gradient
 	sl.HasRest = !sp.noRest
 	key := sp.key
-	sl.OnChange = func(x float32) gunim.Intent { return DevSet{Key: key, Value: float64(x)} }
-	sl.OnCommit = func(x float32) gunim.Intent { return DevSet{Key: key, Value: float64(x), Commit: true} }
+	sl.OnChange = func(x float32, _ *gunim.UI) gunim.Intent { return DevSet{Key: key, Value: float64(x)} }
+	sl.OnCommit = func(x float32, _ *gunim.UI) gunim.Intent { return DevSet{Key: key, Value: float64(x), Commit: true} }
 	r := widget.NewSliderRow(sp.label, sl)
 	r.Format = sp.format
 	v.rows[key] = r
@@ -429,10 +431,18 @@ func (v *developView) choiceRow(key string) gunim.Node {
 	ch := devChoices[key]
 	seg := widget.NewSegmented(ch.options...)
 	seg.KeepFocus = true
-	seg.OnChange = func(i int) gunim.Intent { return DevChoice{Key: key, Index: i} }
+	seg.OnChange = func(i int, _ *gunim.UI) gunim.Intent { return DevChoice{Key: key, Index: i} }
 	v.choices[key] = seg
 	l := &labeled{label: newSmallLabel(ch.label), child: seg, active: anim.NewFloat(0)}
 	l.Add(l.active)
+	if key == "wbMode" {
+		// The modes have the row, and the eyedropper's button ends it.
+		l.wide, l.label.Text = true, ""
+		v.pipette = widget.NewIconButton(icon.Pipette, "White balance eyedropper (W)")
+		v.pipette.KeepFocus = true
+		v.pipette.OnClick = func(*gunim.UI) gunim.Intent { return DevWBPick{On: !v.st.WBPick} }
+		l.tail = v.pipette
+	}
 	v.choiceRows[key] = l
 	return l
 }
@@ -447,10 +457,10 @@ func (v *developView) mixer() []gunim.Node {
 		sl := widget.NewSlider(sp.min, sp.max)
 		sl.Snap, sl.KeepFocus, sl.HasRest = sp.snap, true, true
 		// The band the slider moves is the one chosen when it moves.
-		sl.OnChange = func(x float32) gunim.Intent {
+		sl.OnChange = func(x float32, _ *gunim.UI) gunim.Intent {
 			return DevSet{Key: mixerKeys[k] + ":" + strconv.Itoa(v.band), Value: float64(x)}
 		}
-		sl.OnCommit = func(x float32) gunim.Intent {
+		sl.OnCommit = func(x float32, _ *gunim.UI) gunim.Intent {
 			return DevSet{Key: mixerKeys[k] + ":" + strconv.Itoa(v.band), Value: float64(x), Commit: true}
 		}
 		r := widget.NewSliderRow(sp.label, sl)
@@ -477,7 +487,7 @@ func (v *developView) showMixer(first bool, u *gunim.UI) {
 		sp := devSpecs[mixerKeys[k]+":"+strconv.Itoa(v.band)]
 		x := float32(sp.get(&v.st.Params))
 		if first {
-			r.Slider.Set(x)
+			r.Slider.SetValue(x, u)
 		} else if !r.Slider.Held() {
 			r.Slider.SetValue(x, u)
 		}
@@ -490,6 +500,9 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 	first := !v.shown
 	v.shown = true
 	v.st = s
+	if v.pipette != nil {
+		v.pipette.Active = s.WBPick
+	}
 	p := &s.Params
 	for key, r := range v.rows {
 		sp := devSpecs[key]
@@ -498,7 +511,7 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 		if !sl.Held() {
 			x := float32(sp.get(p))
 			if first {
-				sl.Set(x)
+				sl.SetValue(x, u)
 			} else {
 				// Another photo's edit, or a step of its history: each
 				// slider glides to it.
@@ -545,13 +558,17 @@ func (v *developView) showLens(s DevelopState, u *gunim.UI) {
 	l := s.Lens
 	switch {
 	case l.Matched && l.Lens != "":
-		v.lensNote.SetText(l.Lens + " · profile " + l.Profile)
+		v.lensNote.Text = l.Lens + " · profile " + l.Profile
 	case l.Matched:
-		v.lensNote.SetText("Profile " + l.Profile)
+		v.lensNote.Text = "Profile " + l.Profile
+	case !l.Loaded:
+		v.lensNote.Text = "Looking for the lens profile…"
+	case !l.CameraKnown:
+		v.lensNote.Text = "This camera is not in the lens database, so no profile can be matched"
 	case l.Lens != "":
-		v.lensNote.SetText(l.Lens + " · no profile for this lens")
+		v.lensNote.Text = "No profile for “" + l.Lens + "” in the lens database"
 	default:
-		v.lensNote.SetText("No lens profile for this photo")
+		v.lensNote.Text = "The photo does not say which lens took it"
 	}
 	off := s.Params.LensMode == "off"
 	v.rows["lensDistortion"].Slider.Disabled = off || !l.Distortion
@@ -592,7 +609,7 @@ func newHistoryItem(r historyRow) *labeled {
 }
 
 func setHistoryItem(l *labeled, r historyRow, u *gunim.UI) {
-	l.label.SetText(r.Label)
+	l.label.Text = r.Label
 	l.setActive(r.Current, u)
 }
 
@@ -651,7 +668,7 @@ func (r *infoRows) show(in PhotoInfo) {
 	}
 	for i, v := range []string{in.File, in.Folder, res, size, camera, val(in.ISO, "ISO %.0f"),
 		val(in.Aperture, "f/%.1f"), shutter, val(in.Focal, "%.0f mm"), taken} {
-		r.values[i].SetText(v)
+		r.values[i].Text = v
 	}
 }
 
@@ -798,7 +815,7 @@ func newDevHeading(sec devSection, fold *widget.Fold) *devHeading {
 	h.title.Color, h.title.Size = headingInk, headingSize
 	h.auto.Color, h.auto.Size = autoInk, headingSize
 	if len(sec.auto) > 0 {
-		h.auto.SetText("Auto")
+		h.auto.Text = "Auto"
 	}
 	if fold.Open() {
 		h.turn.Jump(1)
@@ -903,6 +920,10 @@ type labeled struct {
 	child  gunim.Node
 	active *anim.Float
 	on     bool
+	// wide gives the child the label's room too, and tail is a button
+	// after it, or nil.
+	wide bool
+	tail gunim.Node
 }
 
 // setActive marks the row as the one the keys act on, as a slider row
@@ -917,18 +938,35 @@ func (l *labeled) setActive(on bool, u *gunim.UI) {
 }
 
 // Children implements [gunim.Composite].
-func (l *labeled) Children() []gunim.Node { return []gunim.Node{l.label, l.child} }
+func (l *labeled) Children() []gunim.Node {
+	if l.tail != nil {
+		return []gunim.Node{l.label, l.child, l.tail}
+	}
+	return []gunim.Node{l.label, l.child}
+}
 
 // Layout implements [gunim.Node].
 func (l *labeled) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children) geom.Size {
 	w := c.Max.W
 	lw := widget.SliderRowLabel.Get(f.Theme)
+	if l.wide {
+		lw = 0
+	}
 	label, child := kids.At(0), kids.At(1)
-	cs := child.Layout(gunim.Tight(geom.Sz(max(0, w-lw), widget.SegmentedHeight.Get(f.Theme))))
-	h := max(cs.H, 28) + 4
+	var tw float32
+	var ts geom.Size
+	if l.tail != nil {
+		ts = kids.At(2).Layout(gunim.Loose(geom.Sz(40, 40)))
+		tw = ts.W + 6
+	}
+	cs := child.Layout(gunim.Tight(geom.Sz(max(0, w-lw-tw), widget.SegmentedHeight.Get(f.Theme))))
+	h := max(cs.H, ts.H, 28) + 4
 	ls := label.Layout(gunim.Loose(geom.Sz(lw, h)))
 	label.Place(geom.Pt(0, (h-ls.H)/2))
 	child.Place(geom.Pt(lw, (h-cs.H)/2))
+	if l.tail != nil {
+		kids.At(2).Place(geom.Pt(w-ts.W, (h-ts.H)/2))
+	}
 	return geom.Sz(w, h)
 }
 

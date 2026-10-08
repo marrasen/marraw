@@ -4,51 +4,62 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
-Faster develop drafts (also in marraw itself)
-  - On the concert photos (blue stage light), drag Brightness, Gamma and
-    Shadow slope: the photo should now follow as smoothly as Exposure.
-    Temperature and Tint stay slower on those photos; that is expected.
+Filter bar (over the grid)
+  - Sort is two buttons, Time and Name. The one in use is lit, with an
+    arrow for its way. Click it again to turn the order about: the arrow
+    turns. Click the other to sort by that.
+  - The least rating is five stars: click one to show photos rated that
+    or more, click the lit one again to show all. The pointer over them
+    lights the ones a click would.
+  - Changing the sort or a filter: photos that stay glide to their new
+    places, photos that go fade out, photos that come fade in.
+  - Switching shoots in the library: the zoom out and in is twice as
+    fast as before.
+  - A filter that shows nothing says "No photos match the filter".
 
-Grid
-  - The filter bar under the heading: sort (capture time or file name,
-    either way), flags (All / Picks / Not rejected / Rejected), least
-    rating. The tiles leave and come back in the new order. The heading
-    says "12 of 40 photos" while a filter hides some. Each folder
-    remembers its own, as in marraw.
-  - The Size slider in the bar, and Ctrl with the wheel, move together.
-  - Delete moves the photos selected to the Recycle Bin, after asking.
+Stars and flags
+  - Stars, the pick flag and the reject cross are icons now, on the
+    tiles, in the photo view, in the filmstrip and in the heading's
+    counts.
+  - Click them, in the grid and in the photo view. A star rates the
+    photo; the same star again takes the rating off. The flag picks it,
+    the cross rejects it; again takes it off. On a tile, the flag and
+    cross show when the pointer is over the tile.
+  - Under "Not rejected", reject a photo: it goes from the grid at once,
+    as in marraw. Likewise un-picking under "Picks", and a lower rating
+    under a star filter. Ctrl+Z brings it back.
+  - The same in the photo view: the photo goes and the next one shows.
+    The last one gone takes you back to the grid.
 
-Rating and flags
-  - P on a photo picked already takes the pick off; X likewise.
-  - Ctrl+Z / Ctrl+Shift+Z undo and redo ratings and flags, in the grid
-    and in the cull view with the develop panel closed. A note says what.
+White balance
+  - The mode buttons (As shot, Auto, Kelvin, Picked) have the whole row,
+    with no "Mode" label, and an eyedropper button at the end of it.
+  - The eyedropper (W or that button) now works as in marraw:
+    - A magnifier follows the pointer over the photo, with the spot's
+      R G B underneath. Before you click, it warns in red when a spot
+      cannot be picked, and why: "No red or green here", "Too dark".
+    - A click shows the pick, but saves nothing yet. Click other spots
+      to compare.
+    - A bar at the bottom: As shot, Auto, Reset, Cancel (Escape) and
+      Done (Enter). Done keeps the pick as one step in History; Cancel
+      goes back to the white balance before.
+    - A spot the backend refuses now says why, at the top of the photo.
+      On the concert photos most spots are lit by pure blue or red LEDs
+      and have no other colour in them: no white balance can make those
+      grey. Try the white spotlights, or the Canon photos.
+  - Focused on the mode buttons, "?" (Shift and + on a Swedish
+    keyboard) shows the shortcuts and leaves the mode alone. Shift and +
+    no longer zooms out in the photo view either.
 
-Cull view
-  - Hold Backspace: the photo as it was before any edit, "Original" in
-    the corner. Let go: the edit again.
-  - Zoom past fit (Z): a navigator in the lower right corner. Click or
-    drag in it to move around.
-  - Delete moves the photo showing to the Recycle Bin, after asking.
+Lens section
+  - The concert photos say: No profile for "85mm F1.4 DG HSM | Art 016"
+    in the lens database. That is right: the 2016 Sigma 85mm Art has no
+    profile in marraw's database, nor in Lensfun's. The Canon photos
+    have one. A camera the database does not know says so.
 
-Develop panel (D)
-  - Lens section: the lens and the profile matched, Auto or Off, and
-    distortion, vignetting and chromatic aberration as 0 to 200%.
-  - History section: every step of the edit; click one to go back to it.
-  - Info section: file, size, camera, ISO, aperture, shutter, focal
-    length and when it was taken.
-  - W: white balance eyedropper. Click something neutral; the mode turns
-    to Picked. W or Escape ends it.
-  - Ctrl+0 resets the edit. Ctrl+U auto tone, Ctrl+Shift+U auto white
-    balance and colour, Ctrl+Alt+U auto everything.
-
-Everywhere
-  - Ctrl+K: command palette. Type to find an action, a sort or filter, or
-    a shoot in the library to open.
-  - ?: the keyboard shortcuts.
-  - Ctrl+E: export the photos selected (or the one showing, or all the
-    grid shows): destination, JPEG/TIFF/PNG/RAW+XMP, quality, size, file
-    names. Notes say how it goes and where the files went. It starts
-    from the choices you used last time, in marraw too.
+Still to try from the last build
+  - Faster develop drafts on the concert photos: drag Brightness, Gamma
+    and Shadow slope: the photo should follow as smoothly as Exposure.
 
 Not here yet (from marraw): crop and straighten, masks and local
 adjustments, retouch, presets, before/after split, burst grouping and

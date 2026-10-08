@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"time"
@@ -36,6 +35,9 @@ type LensInfo struct {
 	Lens, Profile              string
 	Matched                    bool
 	Distortion, Vignetting, CA bool
+	// Loaded says the backend answered, and CameraKnown that it knows
+	// the camera.
+	Loaded, CameraKnown bool
 }
 
 // photoInfo is what the panel says of photo p.
@@ -141,55 +143,6 @@ func (cu *culler) historyOfShowing() ([]string, int) {
 	return out, h.index
 }
 
-// devWBPick turns the eyedropper on, pinning the edit it samples, or off.
-func (cu *culler) devWBPick(on bool) {
-	d := &cu.dev
-	if on && (!d.open || !cu.culling) {
-		return
-	}
-	if on == cu.wbPicking {
-		return
-	}
-	cu.wbPicking = on
-	if on {
-		// Sampled as the edit was when the eyedropper came, for every pick.
-		cu.wbBase = d.params
-		cu.tell("Click something neutral grey or white")
-	}
-	cu.showCull()
-}
-
-// devWBAt picks the white balance that makes the photo neutral at x, y.
-func (cu *culler) devWBAt(x, y float64) {
-	d := &cu.dev
-	if !cu.wbPicking || !d.open || d.id != cu.photos[cu.at].ID {
-		return
-	}
-	id, params, base := d.id, d.params, cu.wbBase
-	go func() {
-		ctx, cancel := context.WithTimeout(cu.ctx, 30*time.Second)
-		defer cancel()
-		res, err := cu.api.Edits.PickWhiteBalance(ctx, id, params, base, x, y)
-		select {
-		case cu.do <- func() {
-			if err != nil || res == nil {
-				log.Printf("white balance pick: %v", err)
-				cu.tell("That spot could not be picked")
-				return
-			}
-			if d.id != id {
-				return
-			}
-			d.params = *res
-			_ = cu.c.Update("develop", cu.developState())
-			cu.edited(true)
-			cu.remember("White balance pick")
-		}:
-		case <-cu.ctx.Done():
-		}
-	}()
-}
-
 // loadLens fetches the lens profile matched for photo id, for the Lens
 // section.
 func (cu *culler) loadLens(id int64) {
@@ -197,11 +150,16 @@ func (cu *culler) loadLens(id int64) {
 		info, err := cu.api.Edits.LensProfile(cu.ctx, id)
 		select {
 		case cu.do <- func() {
-			if err != nil || info == nil || cu.dev.id != id {
+			if err != nil || info == nil {
+				log.Printf("lens: %v", err)
+				return
+			}
+			if cu.dev.id != id {
 				return
 			}
 			cu.dev.lens = LensInfo{Lens: info.Lens, Profile: info.Profile, Matched: info.Profile != "",
-				Distortion: info.HasDistortion, Vignetting: info.HasVignetting, CA: info.HasCA}
+				Distortion: info.HasDistortion, Vignetting: info.HasVignetting, CA: info.HasCA,
+				Loaded: true, CameraKnown: info.CameraKnown}
 			if cu.dev.mounted {
 				_ = cu.c.Update("develop", cu.developState())
 			}

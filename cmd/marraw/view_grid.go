@@ -9,6 +9,7 @@ import (
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/anim"
 	"github.com/marrasen/gunim/geom"
+	"github.com/marrasen/gunim/icon"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
 	"github.com/marrasen/gunim/theme"
@@ -42,6 +43,10 @@ type gridView struct {
 	noticeIn  *anim.Float
 	noticeSeq int
 	noteRect  geom.Rect
+	// empty says the filter shows none of the folder's photos, coming
+	// in as noneIn does.
+	empty  *widget.Label
+	noneIn *anim.Float
 }
 
 const (
@@ -50,8 +55,8 @@ const (
 	// The tiles' widths, from Ctrl and the wheel.
 	tileMin, tileMax = 110, 440
 	// captionHeight is the band under a tile's picture, for its stars
-	// and flag.
-	captionHeight = 20
+	// and flags.
+	captionHeight = 24
 )
 
 // cellSize is a tile's size for its width.
@@ -59,13 +64,17 @@ func cellSize(w float32) geom.Size { return geom.Sz(w, w*0.78+captionHeight) }
 
 func newGridView(GridState) *gridView {
 	v := &gridView{thumbs: map[int]*paint.Image{}, tiles: map[int]*photoTile{}, head: newGridHead(), rail: newRailView(),
-		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0)}
+		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0),
+		empty: widget.NewLabel("No photos match the filter"), noneIn: anim.NewFloat(0)}
+	v.empty.Color = noteInk
 	v.bar = newGridBar(v)
 	v.notice.Size = noteSize
 	v.grid = widget.NewTileGrid(cellSize(200))
+	// A folder's tiles come and go at twice gunim's pace.
+	v.grid.Pace = 2
 	v.grid.Tile = v.newTile
-	v.grid.OnView = func(first, count int) gunim.Intent { return NeedThumbs{First: first, Count: count} }
-	v.grid.OnSelect = func(sel [][2]int, cursor int) gunim.Intent {
+	v.grid.OnView = func(first, count int, _ *gunim.UI) gunim.Intent { return NeedThumbs{First: first, Count: count} }
+	v.grid.OnSelect = func(sel [][2]int, cursor int, _ *gunim.UI) gunim.Intent {
 		n := 0
 		for _, r := range sel {
 			n += r[1] - r[0]
@@ -73,12 +82,13 @@ func newGridView(GridState) *gridView {
 		v.head.selected(n)
 		return Selected{Runs: sel, Cursor: cursor}
 	}
-	v.grid.OnActivate = func(i int) gunim.Intent { return OpenCull{Index: i} }
-	v.grid.OnZoom = func(notches float32, u *gunim.UI) {
+	v.grid.OnActivate = func(i int, _ *gunim.UI) gunim.Intent { return OpenCull{Index: i} }
+	v.grid.OnZoom = func(notches float32, u *gunim.UI) gunim.Intent {
 		w := v.grid.Size.W * float32(math.Pow(1.15, float64(notches)))
 		v.grid.Size = cellSize(max(tileMin, min(w, tileMax)))
 		v.bar.size.SetValue(v.grid.Size.W, u)
 		u.Invalidate()
+		return nil
 	}
 	return v
 }
@@ -86,7 +96,16 @@ func newGridView(GridState) *gridView {
 func (v *gridView) show(s GridState, u *gunim.UI) {
 	lastGrid = s
 	v.bar.set(s.View, u)
-	if v.shown && (s.FolderID != v.folder || s.ViewSeq != v.viewSeq) {
+	if v.shown && s.FolderID != v.folder {
+		v.swapTo(s, u)
+		return
+	}
+	if v.shown && s.ViewSeq != v.viewSeq && v.swapStop == nil {
+		v.reorder(s, u)
+		return
+	}
+	if v.shown && s.ViewSeq != v.viewSeq {
+		// A swap under way takes the new view.
 		v.swapTo(s, u)
 		return
 	}
@@ -99,6 +118,7 @@ func (v *gridView) show(s GridState, u *gunim.UI) {
 		}
 	}
 	v.head.set(s, v.shown, u.Theme())
+	v.showNone(s, u)
 	if !v.shown {
 		// The folder opens: its tiles grow in, one after another.
 		v.shown = true
@@ -106,9 +126,63 @@ func (v *gridView) show(s GridState, u *gunim.UI) {
 	}
 }
 
+// reorder shows the folder in a new view, as a sort or a filter changes:
+// the tiles of photos that stay glide to their new places, those of photos
+// gone fade out, and those of photos come fade in.
+func (v *gridView) reorder(s GridState, u *gunim.UI) {
+	was := make(map[int64]int, len(v.st.Photos))
+	for i, p := range v.st.Photos {
+		was[p.ID] = i
+	}
+	from := make([]int, len(s.Photos))
+	tiles, thumbs := map[int]*photoTile{}, map[int]*paint.Image{}
+	for j, p := range s.Photos {
+		i, ok := was[p.ID]
+		if !ok {
+			from[j] = -1
+			continue
+		}
+		from[j] = i
+		if t := v.tiles[i]; t != nil {
+			tiles[j] = t
+			t.marks.set(p.Rating, p.Flag, u.Theme())
+		}
+		if img := v.thumbs[i]; img != nil {
+			thumbs[j] = img
+		}
+	}
+	v.tiles, v.thumbs = tiles, thumbs
+	v.viewSeq, v.st = s.ViewSeq, s
+	v.grid.Reorder(from, u)
+	v.head.set(s, true, u.Theme())
+	v.head.selected(0)
+	v.showNone(s, u)
+}
+
+// showNone brings the note in that the filter shows nothing, or out.
+func (v *gridView) showNone(s GridState, u *gunim.UI) {
+	none := s.FolderID != 0 && len(s.Photos) == 0 && s.Total > 0
+	v.noneIn.Animate(on(none), widget.Settle.Get(u.Theme()))
+	u.Invalidate()
+}
+
+// gridSel selects tiles, as a filter takes photos from among them.
+func (v *gridView) gridSel(g GridSel, u *gunim.UI) {
+	if g.Folder != v.folder {
+		return
+	}
+	v.grid.SetSelected(g.Runs, g.Cursor, u)
+	n := 0
+	for _, r := range g.Runs {
+		n += r[1] - r[0]
+	}
+	v.head.selected(n)
+	u.Invalidate()
+}
+
 // swapDelay is how long the last folder's tiles have to leave before the
 // next folder's come.
-const swapDelay = 240 * time.Millisecond
+const swapDelay = 120 * time.Millisecond
 
 // swapTo shows another folder: the tiles there are sink a little and fade,
 // and the new folder's grow in, one after another, from the top.
@@ -141,6 +215,7 @@ func (v *gridView) enter(s GridState, u *gunim.UI) {
 	v.grid.Rebuild(u)
 	v.head.set(s, false, u.Theme())
 	v.head.selected(0)
+	v.showNone(s, u)
 	v.grid.Arrive(func(int) (geom.Rect, bool) { return geom.Rect{}, false }, u)
 }
 
@@ -214,7 +289,7 @@ func (v *gridView) gridAt(a GridAt, u *gunim.UI) {
 
 func (v *gridView) newTile(i int) gunim.Node {
 	p := v.st.Photos[i]
-	t := &photoTile{aspect: anim.NewFloat(p.Aspect), pic: newThumbPic(v.thumbs[i])}
+	t := &photoTile{id: p.ID, aspect: anim.NewFloat(p.Aspect), pic: newThumbPic(v.thumbs[i])}
 	t.Add(t.aspect)
 	t.hero = widget.NewHero(heroTag(p.ID), t.pic)
 	// The tile is where the cull view's picture flies from and back to.
@@ -226,20 +301,24 @@ func (v *gridView) newTile(i int) gunim.Node {
 
 // Children implements [gunim.Composite].
 func (v *gridView) Children() []gunim.Node {
-	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.bar}
+	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.bar, v.empty}
 }
 
 // Step implements [gunim.Animator]: the note's coming and going.
-func (v *gridView) Step(dt time.Duration) bool { return v.noticeIn.Step(dt) }
+func (v *gridView) Step(dt time.Duration) bool {
+	a := v.noticeIn.Step(dt)
+	b := v.noneIn.Step(dt)
+	return a || b
+}
 
 // gridNotice pops a note in over the grid, and lets it fade after a
 // moment.
 func (v *gridView) gridNotice(n GridNotice, u *gunim.UI) {
 	v.noticeSeq = n.Seq
-	v.notice.SetText(n.Text)
+	v.notice.Text = n.Text
 	v.noticeIn.Jump(min(v.noticeIn.Value(), 0.6))
 	v.noticeIn.Animate(1, widget.Bounce.Get(u.Theme()))
-	u.After(noticeFor, func(u *gunim.UI) {
+	u.After(noticeTime(n.Text), func(u *gunim.UI) {
 		if v.noticeSeq == n.Seq {
 			v.noticeIn.Animate(0, widget.Settle.Get(u.Theme()))
 		}
@@ -288,15 +367,17 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 			u.Send(v, AskDelete{})
 			return true
 		}
-		if e.Char == '?' {
-			u.Send(v, ShowShortcuts{})
-			return true
-		}
 		if e.Mods.Has(input.ModAlt) {
 			return false
 		}
 		if in, ok := markKey(e.Key); ok {
 			u.Send(v, in)
+			return true
+		}
+	case input.TextInput:
+		// By what the keys type: ? is Shift and + on a Swedish keyboard.
+		if e.Text == "?" {
+			u.Send(v, ShowShortcuts{})
 			return true
 		}
 	}
@@ -322,6 +403,9 @@ func (v *gridView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	ns := note.Layout(gunim.Loose(geom.Sz(w/2, 60)))
 	v.noteRect = geom.Rc(railWidth+w/2-ns.W/2, gridTop+16, ns.W, ns.H)
 	note.Place(v.noteRect.Min)
+	empty := kids.At(5)
+	es := empty.Layout(gunim.Loose(geom.Sz(w, 40)))
+	empty.Place(geom.Pt(railWidth+w/2-es.W/2, gridTop+80))
 	return box
 }
 
@@ -333,12 +417,24 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	kids.At(4).Paint(p)
 	kids.At(2).Paint(p)
 	paintNote(p, kids.At(3), v.noteRect, v.noticeIn.Value())
+	if k := v.noneIn.Value(); k > 0.01 {
+		e := kids.At(5)
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: k})()
+			defer p.Push(paint.Translate(geom.Pt(0, (1-k)*8)))()
+			e.Paint(p)
+		}()
+	}
 }
 
 // photoTile is one photo in the grid: its picture, fitted, as a hero, and
 // its stars and flag beneath.
 type photoTile struct {
 	anim.Group
+	// id is the photo's: a tile keeps to its photo as the view's order
+	// changes.
+	id  int64
+	box geom.Size
 	// aspect is the picture's shape, gliding to the one its pixels have
 	// once they come.
 	aspect *anim.Float
@@ -358,6 +454,7 @@ func picRoom(box geom.Size) geom.Rect {
 // Layout implements [gunim.Node].
 func (t *photoTile) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
+	t.box = box
 	r := fitIn(picRoom(box), t.aspect.Value())
 	k := kids.At(0)
 	k.Layout(gunim.Tight(r.Size()))
@@ -366,12 +463,49 @@ func (t *photoTile) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 }
 
 // Paint implements [gunim.Node].
-func (t *photoTile) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
+func (t *photoTile) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
 	t.pic.dim = t.marks.dim.Value()
 	kids.At(0).Paint(p)
-	y := box.H - captionHeight/2 - 5
-	t.marks.paintStars(p, geom.Pt(10, y), 6, 4, 0x48)
-	t.marks.paintFlag(p, geom.Pt(box.W-14, y), 9)
+	t.marks.paint(p, f.Theme, tilePlace(box), 0x60, false)
+}
+
+// tilePlace is where a tile of size box has its marks: the stars at the
+// left of the band under the picture, and the flags at the right.
+func tilePlace(box geom.Size) markPlace {
+	y := box.H - captionHeight/2 - 6
+	return markPlace{stars: geom.Pt(10, y), star: 12, gap: 3, pick: geom.Pt(box.W-38, y), reject: geom.Pt(box.W-16, y), flag: 13}
+}
+
+// Handle implements [gunim.Handler]: the pointer over the marks shows what
+// a click gives, and a click on a star rates the photo, again takes the
+// rating off, and one on a flag sets it, again takes it off. The rest is
+// the grid's.
+func (t *photoTile) Handle(e input.Event, u *gunim.UI) bool {
+	place := tilePlace(t.box)
+	switch e := e.(type) {
+	case input.PointerEnter:
+		t.marks.hover(e.Pos, true, place, u.Theme())
+		u.Invalidate()
+	case input.PointerMove:
+		t.marks.hover(e.Pos, true, place, u.Theme())
+		u.Invalidate()
+	case input.PointerLeave:
+		t.marks.hover(geom.Point{}, false, place, u.Theme())
+		u.Invalidate()
+	case input.PointerDown:
+		if e.Button != input.ButtonPrimary || e.Mods != 0 {
+			return false
+		}
+		if k := place.starAt(e.Pos); k > 0 {
+			u.Send(t, Rate{Stars: k, ID: t.id, Toggle: true})
+			return true
+		}
+		if f := place.flagAt(e.Pos); f != "" {
+			u.Send(t, Mark{Flag: f, ID: t.id})
+			return true
+		}
+	}
+	return false
 }
 
 // thumbPic is a tile's picture: its frame until the small picture comes,
@@ -431,108 +565,6 @@ func pixelFit(r geom.Rect, img *paint.Image) geom.Rect {
 	return fitIn(r, float32(w)/float32(h))
 }
 
-// marks are a photo's stars and flag as they show, animated: the stars
-// sweep from the old rating to the new, each swelling as the sweep
-// passes, the flag pops in with a ring going out from it, and a rejected
-// photo dims.
-type marks struct {
-	fill, badge, ring, dim *anim.Float
-	ink                    *anim.Color
-	rating                 int
-	flag                   string
-}
-
-// sweep carries the stars to a new rating, straight on, so no star past it
-// lights for a moment.
-var sweep = anim.Spring{Response: 0.32, Damping: 1}
-
-func flagged(f string) bool { return f == "pick" || f == "exclude" }
-
-func flagInk(f string) color.NRGBA {
-	if f == "exclude" {
-		return rejectInk
-	}
-	return pickInk
-}
-
-func newMarks(g *anim.Group, rating int, flag string) *marks {
-	m := &marks{fill: anim.NewFloat(0), badge: anim.NewFloat(0), ring: anim.NewFloat(1), dim: anim.NewFloat(0),
-		ink: anim.NewColor(pickInk)}
-	m.jump(rating, flag)
-	g.Add(m.fill, m.badge, m.ring, m.dim, m.ink)
-	return m
-}
-
-// jump shows rating and flag at once, for another photo.
-func (m *marks) jump(rating int, flag string) {
-	m.rating, m.flag = rating, flag
-	m.fill.Jump(float32(rating))
-	m.ink.Jump(flagInk(flag))
-	m.badge.Jump(map[bool]float32{false: 0, true: 1}[flagged(flag)])
-	m.dim.Jump(map[bool]float32{false: 0, true: 1}[flag == "exclude"])
-	m.ring.Jump(1)
-}
-
-// set animates to rating and flag.
-func (m *marks) set(rating int, flag string, th *theme.Live) {
-	if rating != m.rating {
-		m.rating = rating
-		m.fill.Animate(float32(rating), sweep)
-	}
-	if flag == m.flag {
-		return
-	}
-	was := m.flag
-	m.flag = flag
-	if flagged(flag) {
-		if flagged(was) {
-			m.ink.Animate(flagInk(flag), widget.Quick.Get(th))
-			m.badge.Jump(0.6)
-		} else {
-			m.ink.Jump(flagInk(flag))
-			m.badge.Jump(0)
-		}
-		m.badge.Animate(1, widget.Bounce.Get(th))
-		m.ring.Jump(0)
-		m.ring.Animate(1, anim.Tween{Duration: 450 * time.Millisecond})
-	} else {
-		m.badge.Animate(0, widget.Quick.Get(th))
-	}
-	m.dim.Animate(map[bool]float32{false: 0, true: 1}[flag == "exclude"], widget.Settle.Get(th))
-}
-
-// paintStars draws the five stars as dots of size d, gap apart, from the
-// left middle at; offAlpha is how strongly the unlit ones show.
-func (m *marks) paintStars(p *paint.Painter, at geom.Point, d, gap float32, offAlpha uint8) {
-	fill := m.fill.Value()
-	off := starOff
-	off.A = offAlpha
-	for k := range 5 {
-		t := min(max(fill-float32(k), 0), 1)
-		swell := 1 + 0.5*float32(math.Sin(math.Pi*float64(t)))
-		c := anim.Mix(anim.ColorCodec, off, starInk, t)
-		s := d * swell
-		cx := at.X + float32(k)*(d+gap) + d/2
-		p.RRect(geom.Rc(cx-s/2, at.Y-s/2, s, s), s/2, paint.Solid(c))
-	}
-}
-
-// paintFlag draws the flag as a dot of size d about at, and the ring
-// going out from it as it is set.
-func (m *marks) paintFlag(p *paint.Painter, at geom.Point, d float32) {
-	ink := m.ink.Value()
-	if r := m.ring.Value(); r < 0.999 {
-		s := d * (1 + 1.6*r)
-		c := ink
-		c.A = uint8(float32(c.A) * (1 - r) * 0.8)
-		p.RRectStroke(geom.Rc(at.X-s/2, at.Y-s/2, s, s), s/2, paint.Fill{}, paint.Stroke{Width: 1.5, Color: c})
-	}
-	if b := m.badge.Value(); b > 0.01 {
-		s := d * b
-		p.RRect(geom.Rc(at.X-s/2, at.Y-s/2, s, s), s/2, paint.Solid(ink))
-	}
-}
-
 // gridHead is the band above the tiles: the folder's name, how many
 // photos it holds or are selected, and the counts of picks, rejects and
 // rated photos, each popping as it changes.
@@ -555,16 +587,17 @@ func newGridHead() *gridHead {
 	h := &gridHead{title: widget.NewLabel(""), sub: widget.NewLabel("")}
 	h.title.Size = headTitleSize
 	h.sub.Color, h.sub.Size = noteInk, noteSize
-	h.pills = [3]*countPill{newCountPill(pickInk, "picked"), newCountPill(rejectInk, "rejected"), newCountPill(ratedInk, "rated")}
+	h.pills = [3]*countPill{newCountPill(pickInk, flagSet, "picked"), newCountPill(rejectInk, rejectMark, "rejected"),
+		newCountPill(ratedInk, starLit, "rated")}
 	return h
 }
 
 // set shows s's counts, popping those that changed when animate is set.
 func (h *gridHead) set(s GridState, animate bool, th *theme.Live) {
-	h.title.SetText(s.Folder)
+	h.title.Text = s.Folder
 	h.none, h.folderTotal = s.FolderID == 0, s.Total
 	if h.none {
-		h.title.SetText("Choose a shoot in the library")
+		h.title.Text = "Choose a shoot in the library"
 	}
 	h.total = len(s.Photos)
 	h.subText()
@@ -593,7 +626,7 @@ func (h *gridHead) selected(n int) {
 
 func (h *gridHead) subText() {
 	if h.none {
-		h.sub.SetText("")
+		h.sub.Text = ""
 		return
 	}
 	s := fmt.Sprintf("%d photos", h.total)
@@ -603,7 +636,7 @@ func (h *gridHead) subText() {
 	if h.sel > 1 {
 		s += fmt.Sprintf(" · %d selected", h.sel)
 	}
-	h.sub.SetText(s)
+	h.sub.Text = s
 }
 
 // Children implements [gunim.Composite].
@@ -641,8 +674,8 @@ func (h *gridHead) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids guni
 	}
 }
 
-// countPill is a count with a coloured dot, such as the picks: it pops as
-// the count changes, and fades back while it is nought.
+// countPill is a count with its mark's icon, such as the picks' flag: it
+// pops as the count changes, and fades back while it is nought.
 type countPill struct {
 	anim.Group
 	label   *widget.Label
@@ -650,10 +683,11 @@ type countPill struct {
 	n       int
 	pop, on *anim.Float
 	ink     color.NRGBA
+	icon    *icon.Icon
 }
 
-func newCountPill(ink color.NRGBA, what string) *countPill {
-	c := &countPill{label: widget.NewLabel("0 " + what), what: what, ink: ink, pop: anim.NewFloat(1), on: anim.NewFloat(0.4)}
+func newCountPill(ink color.NRGBA, ic *icon.Icon, what string) *countPill {
+	c := &countPill{label: widget.NewLabel("0 " + what), what: what, ink: ink, icon: ic, pop: anim.NewFloat(1), on: anim.NewFloat(0.4)}
 	c.label.Size = noteSize
 	c.Add(c.pop, c.on)
 	return c
@@ -663,7 +697,7 @@ func (c *countPill) set(n int, animate bool, th *theme.Live) {
 	on := map[bool]float32{false: 0.4, true: 1}[n > 0]
 	if !animate {
 		c.n = n
-		c.label.SetText(fmt.Sprintf("%d %s", n, c.what))
+		c.label.Text = fmt.Sprintf("%d %s", n, c.what)
 		c.on.Jump(on)
 		return
 	}
@@ -671,7 +705,7 @@ func (c *countPill) set(n int, animate bool, th *theme.Live) {
 		return
 	}
 	c.n = n
-	c.label.SetText(fmt.Sprintf("%d %s", n, c.what))
+	c.label.Text = fmt.Sprintf("%d %s", n, c.what)
 	c.pop.Jump(1.18)
 	c.pop.Animate(1, widget.Bounce.Get(th))
 	c.on.Animate(on, widget.Quick.Get(th))
@@ -697,6 +731,7 @@ func (c *countPill) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids g
 		defer p.Layer(paint.LayerOpts{Bounds: r.Inset(geom.Uniform(-4)), Opacity: on})()
 	}
 	p.RRect(r, box.H/2, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x10}))
-	p.RRect(geom.Rc(11, box.H/2-4, 8, 8), 4, paint.Solid(c.ink))
+	w := map[bool]float32{false: 2, true: 3}[c.icon == rejectMark]
+	p.Mask(icon.Stroke{Icon: c.icon, Width: w, Progress: 1}, geom.Rc(9, box.H/2-6, 12, 12), c.ink)
 	kids.At(0).Paint(p)
 }

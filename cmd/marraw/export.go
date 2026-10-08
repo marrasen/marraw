@@ -54,15 +54,15 @@ func newExportDialog(s ExportAsk) *widget.Dialog {
 	}
 	d := widget.NewDialog("Export " + what)
 	dest := widget.NewTextField()
-	dest.SetText(s.Dest)
-	format := widget.NewDropdown(exportFormats...)
-	format.Selected = s.Format
+	dest.SetText(s.Dest, nil)
+	format := widget.NewDropdown(menuItems(exportFormats...))
+	format.SetSelected(s.Format, nil)
 	quality := widget.NewNumberField(50, 100)
-	quality.SetValue(float64(s.Quality))
-	edge := widget.NewDropdown(exportEdges...)
-	edge.Selected = s.Edge
+	quality.SetValue(float64(s.Quality), nil)
+	edge := widget.NewDropdown(menuItems(exportEdges...))
+	edge.SetSelected(s.Edge, nil)
 	name := widget.NewTextField()
-	name.SetText(s.Template)
+	name.SetText(s.Template, nil)
 	hint := widget.NewLabel("{name} the file's name, {seq} a number, {date} and {time} when it was taken")
 	hint.Color, hint.Size, hint.MaxLines = widget.PaletteHint, noteSize, 2
 	form := widget.NewForm().Add("Destination", dest).Add("Format", format).Add("JPEG quality", quality).
@@ -76,11 +76,11 @@ func newExportDialog(s ExportAsk) *widget.Dialog {
 		}
 		return ""
 	}
-	d.OnAccept = func() gunim.Intent {
-		return ExportGo{OK: true, Dest: strings.TrimSpace(dest.Text()), Format: format.Selected,
-			Quality: int(quality.Value()), Edge: edge.Selected, Template: strings.TrimSpace(name.Text())}
+	d.OnAccept = func(*gunim.UI) gunim.Intent {
+		return ExportGo{OK: true, Dest: strings.TrimSpace(dest.Text()), Format: format.Selected(),
+			Quality: int(quality.Value()), Edge: edge.Selected(), Template: strings.TrimSpace(name.Text())}
 	}
-	d.Dismiss = ExportGo{}
+	d.OnDismiss = widget.Sends(ExportGo{})
 	return d
 }
 
@@ -221,4 +221,13 @@ func (cu *culler) taskProgress(id string, current, total int) {
 	run.lastShown = current
 	cu.exports[id] = run
 	cu.notify(fmt.Sprintf("Exporting %d of %d…", current, total))
+}
+
+// menuItems are labels as a drop-down's items.
+func menuItems(labels ...string) []widget.MenuItem {
+	out := make([]widget.MenuItem, len(labels))
+	for i, l := range labels {
+		out[i] = widget.MenuItem{Label: l}
+	}
+	return out
 }

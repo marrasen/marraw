@@ -45,6 +45,13 @@ type (
 		Rating int
 		Flag   string
 	}
+	// GridSel selects Runs of the grid's tiles, with its keyboard on
+	// Cursor, as a filter takes photos out from among them.
+	GridSel struct {
+		Folder int64
+		Runs   [][2]int
+		Cursor int
+	}
 	// GridAt puts the grid's keyboard on the photo at Index, in view, as
 	// the cull view steps through the folder over it.
 	GridAt struct {
@@ -128,6 +135,7 @@ func (cu *culler) leaveCull() {
 	if !cu.culling {
 		return
 	}
+	cu.wbFinish(true)
 	if cu.dev.mounted {
 		cu.dev.mounted = false
 		_ = cu.c.Unmount("develop")

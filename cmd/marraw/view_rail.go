@@ -42,8 +42,8 @@ func newRailView() *railView {
 	v := &railView{title: widget.NewLabel("Library"), empty: widget.NewLabel(""), list: widget.NewList()}
 	v.title.Color, v.title.Size = headingInk, headingSize
 	v.empty.Color, v.empty.Size = noteInk, noteSize
-	v.list.NoFocus, v.list.ClickOnce = true, true
-	v.list.OnClick = func(k widget.Key) gunim.Intent { return OpenShoot{Path: string(k)} }
+	v.list.SkipFocus, v.list.ClickOnce = true, true
+	v.list.OnActivate = func(k widget.Key, _ *gunim.UI) gunim.Intent { return OpenShoot{Path: string(k)} }
 	v.body = widget.NewScroll(v.list)
 	return v
 }
@@ -65,9 +65,9 @@ func (v *railView) show(s RailState, u *gunim.UI) {
 		newRailRow, (*railRow).set)
 	switch {
 	case s.Loaded && len(s.Items) == 0:
-		v.empty.SetText("No library folders yet. Add them in marraw, or open one with -folder.")
+		v.empty.Text = "No library folders yet. Add them in marraw, or open one with -folder."
 	default:
-		v.empty.SetText("")
+		v.empty.Text = ""
 	}
 	u.Invalidate()
 }
@@ -123,13 +123,13 @@ func newRailRow(e railEntry) *railRow {
 // left.
 func (r *railRow) set(e railEntry, u *gunim.UI) {
 	r.item = e
-	r.name.SetText(e.Name)
+	r.name.Text = e.Name
 	if e.Group {
 		r.name.Color, r.name.Size = headingInk, headingSize
-		r.n.SetText("")
+		r.n.Text = ""
 	} else {
 		r.name.Color, r.name.Size = widget.Ink, railSize
-		r.n.SetText(fmt.Sprint(e.Count))
+		r.n.Text = fmt.Sprint(e.Count)
 	}
 	to := map[bool]float32{false: 0, true: 1}[e.current]
 	if u == nil {

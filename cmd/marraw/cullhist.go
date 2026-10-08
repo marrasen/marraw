@@ -103,6 +103,7 @@ func (cu *culler) undoCull(redo bool) {
 		verb = "Redid"
 	}
 	cu.notify(fmt.Sprintf("%s %s", verb, s.what))
+	cu.refilter()
 }
 
 // undo steps back or on: in the edit's history while the develop panel is

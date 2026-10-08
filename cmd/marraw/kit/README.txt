@@ -41,8 +41,9 @@ To fill it, add this kit's photos folder once, and its shoots appear:
 
 The arrow keys, a click, Ctrl and Shift
 select; Ctrl and the wheel change the tiles' size. 0 to 5 rate the photos
-selected, P picks, X rejects and U clears the flag, as in marraw. Enter
-or a double click opens a photo in the cull view.
+selected, P picks, X rejects and U clears the flag, as in marraw; a
+click on a tile's stars, flag or cross does the same for that photo.
+Enter or a double click opens a photo in the cull view.
 
 In the cull view, Left and Right step through the folder, Home and End
 go to its ends, and a click on the filmstrip goes to that photo. The

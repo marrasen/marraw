@@ -77,9 +77,9 @@ func (cu *culler) syncAll() {
 	}
 }
 
-// applyView makes the photos showing from the folder's whole list, as the
-// view filters and sorts them.
-func (cu *culler) applyView() {
+// viewList is the photos the view shows, from the folder's whole list,
+// filtered and sorted.
+func (cu *culler) viewList() []marrawclient.Photo {
 	cu.syncAll()
 	var out []marrawclient.Photo
 	for _, p := range cu.all {
@@ -88,12 +88,92 @@ func (cu *culler) applyView() {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return cu.libView.less(out[i], out[j]) })
+	return out
+}
+
+// applyView makes the photos showing from the folder's whole list, as the
+// view filters and sorts them.
+func (cu *culler) applyView() { cu.showList(cu.viewList()) }
+
+// showList makes out the photos showing.
+func (cu *culler) showList(out []marrawclient.Photo) {
 	cu.photos = out
 	cu.index = make(map[int64]int, len(out))
 	for i, p := range out {
 		cu.index[p.ID] = i
 	}
 	cu.viewSeq++
+}
+
+// refilter takes the photos that no longer pass the view's filter out of
+// it, and those that pass it again back in, at once, as marraw does: a
+// photo rejected under Not rejected goes. The grid's tiles make room, the
+// keyboard keeps to its photo or, the photo gone, to the one in its place,
+// and the cull view shows that one.
+func (cu *culler) refilter() {
+	if cu.folder == 0 {
+		return
+	}
+	out := cu.viewList()
+	same := len(out) == len(cu.photos)
+	for i := 0; same && i < len(out); i++ {
+		same = out[i].ID == cu.photos[i].ID
+	}
+	if same {
+		return
+	}
+	// What the keyboard is on and what is selected, by photo.
+	at, cursor := cu.at, cu.cursor
+	var atID, cursorID int64
+	if at >= 0 && at < len(cu.photos) {
+		atID = cu.photos[at].ID
+	}
+	if cursor >= 0 && cursor < len(cu.photos) {
+		cursorID = cu.photos[cursor].ID
+	}
+	selected := map[int64]bool{}
+	for _, i := range cu.targets() {
+		selected[cu.photos[i].ID] = true
+	}
+	cu.showList(out)
+	slot := func(id int64, was int) int {
+		if i, ok := cu.index[id]; ok {
+			return i
+		}
+		return min(was, len(out)-1)
+	}
+	cu.cursor = -1
+	if cursor >= 0 {
+		cu.cursor = slot(cursorID, cursor)
+	}
+	cu.sel = nil
+	for i, p := range out {
+		if selected[p.ID] {
+			cu.sel = append(cu.sel, [2]int{i, i + 1})
+		}
+	}
+	if len(cu.sel) == 0 && cu.cursor >= 0 {
+		cu.sel = [][2]int{{cu.cursor, cu.cursor + 1}}
+	}
+	_ = cu.c.Update("grid", cu.gridState())
+	_ = cu.c.Patch("grid", GridSel{Folder: cu.folder, Runs: cu.sel, Cursor: cu.cursor})
+	if !cu.culling {
+		return
+	}
+	if len(out) == 0 {
+		cu.leaveCull()
+		return
+	}
+	i := slot(atID, at)
+	if i < len(out) && out[i].ID == atID {
+		// The photo showing stays: only its place changed.
+		cu.at = i
+		cu.showCull()
+		cu.loadStrip()
+		return
+	}
+	cu.at, cu.load = -1, nil
+	cu.goTo(i)
 }
 
 // setAll takes a folder's whole list.

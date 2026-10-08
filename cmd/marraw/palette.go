@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/marrasen/gunim"
-	"github.com/marrasen/gunim/anim"
 	"github.com/marrasen/gunim/geom"
+	"github.com/marrasen/gunim/paint"
 	"github.com/marrasen/gunim/widget"
 )
 
@@ -60,6 +60,9 @@ func paletteEntries(at paletteFor) []paletteEntry {
 	add("Keyboard shortcuts", "?", ShowShortcuts{}, "keys", "help")
 	if lastGrid.FolderID != 0 {
 		v := lastGrid.View
+		sortNames := []string{"capture time, oldest first", "capture time, newest first", "file name, A to Z", "file name, Z to A"}
+		sortKeys := []string{"captureAsc", "captureDesc", "nameAsc", "nameDesc"}
+		ratingKeys := []string{"any rating", "★ and up", "★★ and up", "★★★ and up", "★★★★ and up", "★★★★★"}
 		for i, name := range sortNames {
 			nv := v
 			nv.Sort = sortKeys[i]
@@ -96,10 +99,11 @@ func openPalette(opener gunim.Node, room geom.Rect, u *gunim.UI, at paletteFor) 
 	for _, e := range entries {
 		p.Items = append(p.Items, e.item)
 	}
-	p.Pick = func(i int, u *gunim.UI) {
+	p.OnPick = func(i int, u *gunim.UI) gunim.Intent {
 		if i >= 0 && i < len(entries) {
 			u.Send(opener, entries[i].do)
 		}
+		return nil
 	}
 	p.Open(opener, geom.Rc(room.Center().X-1, room.Min.Y+40, 2, 2), u)
 }
@@ -143,14 +147,14 @@ func newShortcutsDialog(struct{}) *widget.Dialog {
 			key := newSmallLabel(k[0])
 			key.Color = autoInk
 			what := newSmallLabel(k[1])
-			rows = append(rows, &labeled{label: key, child: what, active: anim.NewFloat(0)})
+			rows = append(rows, &keyRow{key: key, what: what})
 		}
 	}
 	d.Body = widget.Column(rows...)
 	d.Width = 560
 	d.SetButtons("Close", "")
-	d.Accept = Confirmed{Kind: "shortcuts"}
-	d.Dismiss = Confirmed{Kind: "shortcuts"}
+	d.OnAccept = widget.Sends(Confirmed{Kind: "shortcuts"})
+	d.OnDismiss = widget.Sends(Confirmed{Kind: "shortcuts"})
 	return d
 }
 
@@ -161,4 +165,29 @@ func (cu *culler) showShortcuts() {
 	}
 	cu.asking = true
 	_ = cu.c.Mount(gunim.Root, "confirm", "shortcuts", struct{}{})
+}
+
+// keyRow is a shortcut in the list of them: its keys, and what they do.
+type keyRow struct{ key, what *widget.Label }
+
+// keyColumn is how wide the keys' column is.
+const keyColumn = 190
+
+// Children implements [gunim.Composite].
+func (r *keyRow) Children() []gunim.Node { return []gunim.Node{r.key, r.what} }
+
+// Layout implements [gunim.Node].
+func (r *keyRow) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	ks := kids.At(0).Layout(gunim.Loose(geom.Sz(keyColumn-12, c.Max.H)))
+	ws := kids.At(1).Layout(gunim.Loose(geom.Sz(max(0, c.Max.W-keyColumn), c.Max.H)))
+	h := max(ks.H, ws.H) + 8
+	kids.At(0).Place(geom.Pt(0, (h-ks.H)/2))
+	kids.At(1).Place(geom.Pt(keyColumn, (h-ws.H)/2))
+	return geom.Sz(c.Max.W, h)
+}
+
+// Paint implements [gunim.Node].
+func (r *keyRow) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
+	kids.At(1).Paint(p)
 }
