@@ -256,6 +256,12 @@ func (p *LensProfiles) For(photo store.Photo) *lens.Correction {
 	if p == nil || photo.CacheKey == "" {
 		return nil
 	}
+	if !photo.MetaLoaded {
+		// The scanner adds a photo before it reads its body and lens, so a
+		// render that reaches it first finds none. Remembered, that miss
+		// would leave it uncorrected after they come, until a restart.
+		return lens.Resolve(photo.Make, photo.Model, photo.Lens, photo.FocalLen, photo.Aperture)
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if c, ok := p.byKey[photo.CacheKey]; ok {

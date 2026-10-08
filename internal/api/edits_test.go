@@ -267,3 +267,21 @@ func TestAClippedReferenceFoldsOnlyWhileTheEditKeepsItsWhiteBalance(t *testing.T
 		t.Fatal("a clipped reference took a white-balance change it cannot carry")
 	}
 }
+
+func TestUnpickableSaysWhy(t *testing.T) {
+	cases := []struct {
+		r, g, b float64
+		want    string
+	}{
+		{0.2, 0.3, 0.25, ""},
+		{1e-6, 2e-6, 1e-6, "picked area is too dark — pick a brighter neutral area"},
+		// A spot under a blue stage light: bright, with no red or green.
+		{1.1e-6, 1.1e-6, 0.67, "picked area has no red or green light — one strong colour lights it, with no grey to find"},
+		{0.5, 0.2, 1e-6, "picked area has no blue light — one strong colour lights it, with no grey to find"},
+	}
+	for _, c := range cases {
+		if got := unpickable(c.r, c.g, c.b); got != c.want {
+			t.Errorf("unpickable(%g, %g, %g) = %q, want %q", c.r, c.g, c.b, got, c.want)
+		}
+	}
+}

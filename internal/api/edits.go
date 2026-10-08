@@ -9,6 +9,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -641,10 +642,10 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params, bas
 	}
 	satFactor := math.Max(0.2, 1.15*(1+base.Saturation))
 	rl, gl, bl := samplePatchLinear(frame.rgba, x, y, lookGamma, satFactor)
-	if rl < 1e-4 || gl < 1e-4 || bl < 1e-4 {
+	if why := unpickable(rl, gl, bl); why != "" {
 		log.Printf("wb pick: no-signal patch at (%.3f,%.3f) linear rl=%.4g gl=%.4g bl=%.4g on %dx%d pinned frame",
 			x, y, rl, gl, bl, frame.rgba.Bounds().Dx(), frame.rgba.Bounds().Dy())
-		return nil, aprot.ErrInvalidParams("picked area is too dark — pick a brighter neutral area")
+		return nil, aprot.ErrInvalidParams(why)
 	}
 
 	// The multipliers act on the camera's own channels, before the colour
@@ -689,6 +690,30 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params, bas
 	out.WBMul = mul
 	out.WBTemp, out.WBTint, out.WBKelvin = 0, 0, 0
 	return &out, nil
+}
+
+// pickFloor is the least linear light a channel of a picked patch needs:
+// about 13/255 in the 8-bit frame.
+const pickFloor = 1e-4
+
+// unpickable says why a patch of linear light r, g, b cannot be made grey,
+// or "" when it can. A patch with every channel empty is too dark; one with
+// light in some channels but none in another is lit by strongly coloured
+// light, as a stage's blue or red LEDs, and no gain can make it grey.
+func unpickable(r, g, b float64) string {
+	if r >= pickFloor && g >= pickFloor && b >= pickFloor {
+		return ""
+	}
+	if max(r, g, b) < pickFloor {
+		return "picked area is too dark — pick a brighter neutral area"
+	}
+	var none []string
+	for i, v := range []float64{r, g, b} {
+		if v < pickFloor {
+			none = append(none, [3]string{"red", "green", "blue"}[i])
+		}
+	}
+	return "picked area has no " + strings.Join(none, " or ") + " light — one strong colour lights it, with no grey to find"
 }
 
 // WBPickFrame returns the frame PickWhiteBalance samples for this base, as a

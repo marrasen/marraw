@@ -7,6 +7,7 @@ import (
 
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/lens"
+	"github.com/marrasen/marraw/internal/store"
 )
 
 // fixtureCorrection is the profile of the dev fixture's body — a fixed-lens
@@ -178,5 +179,19 @@ func TestLensWarpDefaultsToCorrecting(t *testing.T) {
 		if w := LensWarp(c, e, 320, 240); w == nil {
 			t.Errorf("LensWarp(%v) = nil, want the profile applied by default", e)
 		}
+	}
+}
+
+// A photo the scanner has added but not yet read the body of finds no
+// profile, and that miss must not stick once its body and lens are read.
+func TestLensProfilesForgetAMissBeforeTheMetadata(t *testing.T) {
+	p := NewLensProfiles()
+	photo := store.Photo{CacheKey: "k"}
+	if c := p.For(photo); c != nil {
+		t.Fatal("a photo with no body yet has a profile")
+	}
+	photo.Make, photo.Model, photo.FocalLen, photo.Aperture, photo.MetaLoaded = "Panasonic", "DC-LX100M2", 10.9, 1.7, true
+	if c := p.For(photo); c == nil {
+		t.Fatal("the miss before the body was read stuck")
 	}
 }
