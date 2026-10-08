@@ -22,6 +22,9 @@ type (
 		View    LibView
 		ViewSeq int
 		Total   int
+		// Groups are the runs of photos taken close together, as View's
+		// Gap groups them, or none.
+		Groups []GapGroup
 	}
 	// GridPhoto is one photo as a tile shows it.
 	GridPhoto struct {
@@ -30,6 +33,7 @@ type (
 		Aspect float32
 		Rating int
 		Flag   string
+		Aids   Aids
 	}
 	// ThumbIn is the small picture of the photo at Index, arrived, or,
 	// with no Img, let go.
@@ -79,8 +83,10 @@ func (cu *culler) gridState() GridState {
 	if cu.folder == 0 {
 		st.Folder = ""
 	}
+	st.Groups = gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)
 	for _, p := range cu.photos {
-		st.Photos = append(st.Photos, GridPhoto{ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Rating: p.Rating, Flag: string(p.Flag)})
+		st.Photos = append(st.Photos, GridPhoto{ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Rating: p.Rating, Flag: string(p.Flag),
+			Aids: cu.aids.of(p)})
 	}
 	return st
 }
@@ -136,6 +142,7 @@ func (cu *culler) leaveCull() {
 		return
 	}
 	cu.wbFinish(true)
+	cu.cropDone()
 	if cu.dev.mounted {
 		cu.dev.mounted = false
 		_ = cu.c.Unmount("develop")

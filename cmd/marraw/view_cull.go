@@ -88,7 +88,10 @@ type cullView struct {
 	wbBarRect geom.Rect
 	// top is the title bar's height: the photo runs under the bar, and
 	// the panel and what floats over the photo keep below it.
-	top          float32
+	top float32
+	// crop is cropping's own, and cropIn how far its overlay is in.
+	crop         cropUI
+	cropIn       *anim.Float
 	origIn, wbIn *anim.Float
 	labelOrig    *widget.Label
 	labelWB      *widget.Label
@@ -123,11 +126,13 @@ func newCullView(s Cull) *cullView {
 	v.wbWarn.Size, v.wbWarn.Color = readoutSize, warnInk
 	v.labelWB.Color = noteInk
 	v.wbBar = v.newWBBar()
+	v.cropIn = anim.NewFloat(0)
+	v.crop.bar = v.newCropBar()
 	v.notice.Size = noteSize
 	if s.Panel {
 		v.side.Jump(1)
 	}
-	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn)
+	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -176,6 +181,7 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 	v.side.Animate(map[bool]float32{false: 0, true: 1}[s.Panel], panelSlide)
 	v.origIn.Animate(map[bool]float32{false: 0, true: 1}[s.Original], widget.Quick.Get(th))
 	v.wbIn.Animate(map[bool]float32{false: 0, true: 1}[s.WBPick], widget.Quick.Get(th))
+	v.cropShow(s, prev, u)
 	if s.NoticeSeq != v.noticeSeq {
 		v.showNotice(s.Notice, s.NoticeSeq, u)
 	}
@@ -190,6 +196,9 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 
 func (v *cullView) readout(z float32) {
 	v.name.Text = fmt.Sprintf("%s   %d / %d   %.0f%%", v.st.Name, v.st.Index+1, v.st.Total, v.percent(z))
+	if n := aidsNote(v.st.Aids); n != "" {
+		v.name.Text += "   " + n
+	}
 }
 
 // Transition implements [gunim.Transitioner]: the backdrop fades and the
@@ -218,6 +227,9 @@ func fullOf(s Cull) geom.Size {
 	}
 	return geom.Sz(3000*s.Aspect, 3000)
 }
+
+// gapMarkRoom is the room a time gap's mark takes in the filmstrip.
+const gapMarkRoom = 16
 
 // stripHeight is the filmstrip's band along the bottom, and thumbHeight its
 // pictures'.
@@ -279,18 +291,28 @@ func (v *cullView) stripRects() []stripThumb {
 	shift := (float32(v.st.Index) - v.strip.Value()) * (thumbHeight*1.5 + thumbGap)
 	x := v.box.W/2 - thumbWidth(v.st.Strip[cur])/2 + shift
 	out[cur] = stripThumb{index: v.st.Strip[cur].Index, r: geom.Rc(x, y, thumbWidth(v.st.Strip[cur]), thumbHeight), th: v.st.Strip[cur]}
+	// A time gap between groups takes a mark's room of its own.
 	right := x + thumbWidth(v.st.Strip[cur]) + thumbGap
 	for i := cur + 1; i < len(v.st.Strip); i++ {
 		t := v.st.Strip[i]
+		if t.GapBefore >= 0 {
+			right += gapMarkRoom
+		}
 		out[i] = stripThumb{index: t.Index, r: geom.Rc(right, y, thumbWidth(t), thumbHeight), th: t}
 		right += thumbWidth(t) + thumbGap
 	}
 	left := x - thumbGap
+	if v.st.Strip[cur].GapBefore >= 0 {
+		left -= gapMarkRoom
+	}
 	for i := cur - 1; i >= 0; i-- {
 		t := v.st.Strip[i]
 		left -= thumbWidth(t)
 		out[i] = stripThumb{index: t.Index, r: geom.Rc(left, y, thumbWidth(t), thumbHeight), th: t}
 		left -= thumbGap
+		if t.GapBefore >= 0 {
+			left -= gapMarkRoom
+		}
 	}
 	return out
 }
@@ -401,12 +423,18 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 
 // Children implements [gunim.Composite].
 func (v *cullView) Children() []gunim.Node {
-	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead, v.wbWarn}
+	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead, v.wbWarn, v.crop.bar, v.crop.info}
 }
 
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
 // eyedropper is on.
 func (v *cullView) Cursor(p geom.Point) input.Cursor {
+	if v.cropping() && p.Y < v.box.H-stripHeight && !v.inPanel(p) && !v.crop.barRect.Contains(p) {
+		if v.crop.dragging {
+			return gripCursor(v.crop.g)
+		}
+		return gripCursor(v.gripAt(p))
+	}
 	if v.st.WBPick && p.Y < v.box.H-stripHeight && !v.inPanel(p) && !v.wbBarRect.Contains(p) {
 		// The magnifier takes the pointer's place once it has a frame.
 		if _, ok := v.photoPoint(p); ok && v.st.WBFrame != nil {
@@ -491,6 +519,12 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		}
 		// Ctrl and Z undoes the edit, with Shift or as Ctrl and Y redoes.
 		if e.Mods.Has(input.ModControl) {
+			// Ctrl and a digit lays a creative auto preset over the edit,
+			// and with Shift one of the user's own, by its place.
+			if e.Key >= input.Key1 && e.Key <= input.Key9 && v.st.Panel && !e.Mods.Has(input.ModAlt) {
+				u.Send(v, PresetApply{Auto: !e.Mods.Has(input.ModShift), Index: int(e.Key - input.Key1)})
+				return true
+			}
 			switch e.Key {
 			case input.KeyZ:
 				u.Send(v, DevUndo{Redo: e.Mods.Has(input.ModShift)})
@@ -540,6 +574,21 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			return true
 		}
 		// W turns the white-balance eyedropper on and off, and Escape off.
+		if v.st.Crop != nil && (e.Key == input.KeyEscape || e.Key == input.KeyEnter || e.Key == input.KeyR) && !e.Mods.Has(input.ModShift) {
+			u.Send(v, CropDone{})
+			return true
+		}
+		if v.st.Panel && e.Key == input.KeyR && !e.Mods.Has(input.ModShift) {
+			u.Send(v, ToggleCrop{})
+			return true
+		}
+		if v.cropping() {
+			switch e.Key {
+			case input.KeyZ, input.KeySpace, input.KeyEqual, input.KeyMinus, input.KeyKPAdd, input.KeyKPSubtract:
+				// The whole frame stays as it is while cropping.
+				return true
+			}
+		}
 		if v.st.WBPick && (e.Key == input.KeyEscape || e.Key == input.KeyEnter) {
 			u.Send(v, DevWBBar{Act: map[bool]string{false: "cancel", true: "done"}[e.Key == input.KeyEnter]})
 			return true
@@ -555,6 +604,10 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		// - step the one chosen, a letter chooses one, and Escape lets it
 		// go, as marraw's keys do.
 		if v.st.Panel && v.developKey(e, u) {
+			return true
+		}
+		if in, ok := burstKey(e); ok {
+			u.Send(v, in)
 			return true
 		}
 		if in, ok := markKey(e.Key); ok {
@@ -587,6 +640,10 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 	case input.Scroll:
 		if v.inPanel(e.Pos) {
 			return false
+		}
+		if v.cropping() {
+			// The whole frame stays as it is while cropping.
+			return true
 		}
 		d := e.Notches.Y
 		if d == 0 {
@@ -621,6 +678,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		}
 		return false
 	case input.PointerDown:
+		if v.cropping() && v.cropHandle(e, u) {
+			return true
+		}
 		if e.Button != input.ButtonPrimary || v.inPanel(e.Pos) {
 			return false
 		}
@@ -666,6 +726,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		v.trail.Add(e.Pos, e.Time)
 		return true
 	case input.PointerMove:
+		if v.cropping() && v.cropHandle(e, u) {
+			return true
+		}
 		if !v.dragging {
 			v.marks.hover(e.Pos, v.marksRect().Contains(e.Pos), v.markPlace(), u.Theme())
 			v.wbHover(e.Pos)
@@ -693,6 +756,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		u.Invalidate()
 		return false
 	case input.PointerUp:
+		if v.cropping() && v.cropHandle(e, u) {
+			return true
+		}
 		if v.navDrag {
 			v.navDrag = false
 			v.askTiles(u)
@@ -921,6 +987,21 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	for i := 6; i <= 7; i++ {
 		kids.At(i).Layout(gunim.Loose(geom.Sz(300, 40)))
 	}
+	// The crop's bar, at the foot of the photo while cropping.
+	cb := kids.At(8)
+	cbs := cb.Layout(gunim.Loose(geom.Sz(max(room.Size().W, 200), 60)))
+	v.crop.barRect = geom.Rc(room.Center().X-cbs.W/2-16, box.H-stripHeight-cbs.H-20-16, cbs.W+32, cbs.H+20)
+	if v.crop.barRect.Min.X < 12+sz.W+12 {
+		// Over the readout's corner: above it instead.
+		v.crop.barRect = v.crop.barRect.Add(geom.Pt(0, -(sz.H + 4)))
+	}
+	if v.cropIn.Value() > 0.01 {
+		cb.Place(v.crop.barRect.Min.Add(geom.Pt(16, 10)))
+	} else {
+		cb.Place(geom.Pt(-10000, -10000))
+	}
+	v.crop.info.Text = v.cropInfo()
+	kids.At(9).Layout(gunim.Loose(geom.Sz(300, 40)))
 	if cur := v.current(); cur != nil {
 		v.ring.Animate(thumbWidth(*cur), widget.Quick.Get(f.Theme))
 		if v.ring.Value() == 0 {
@@ -959,11 +1040,16 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 		o := v.origin(z, v.c.Value())
 		defer p.Push(paint.Translate(geom.Pt(o.X-r.Min.X, o.Y-r.Min.Y)))()
 		defer p.Push(paint.Scale(z, r.Min))()
+		if v.cropping() && v.st.Crop.Angle != 0 {
+			// Straightening, the frame turns about its middle, here.
+			defer p.Push(paint.Rotate(float32(v.st.Crop.Angle*math.Pi/180), r.Center()))()
+		}
 		kids.At(0).Paint(p)
 	}()
 	if in < 0.001 {
 		return
 	}
+	v.paintCrop(p, box, kids.At(8), kids.At(9))
 	// The chrome comes up from below as the view comes in.
 	defer p.Push(paint.Translate(geom.Pt(0, (1-in)*stripHeight)))()
 	if in < 0.999 {
@@ -1033,6 +1119,12 @@ func (v *cullView) paintStrip(p *paint.Painter, box geom.Size) {
 		if t.r.Max.X < 0 || t.r.Min.X > box.W {
 			continue
 		}
+		if t.th.GapBefore >= 0 {
+			// The mark of a time gap: a clock on a pill between the groups.
+			m := geom.Rc(t.r.Min.X-thumbGap-gapMarkRoom/2-6, t.r.Min.Y+6, 12, t.r.Size().H-12)
+			p.RRect(m, 6, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x14}))
+			p.Mask(icon.Stroke{Icon: icon.Clock, Width: 2.4, Progress: 1}, geom.Rc(m.Min.X+1.5, m.Center().Y-4.5, 9, 9), color.NRGBA{R: 0xa4, G: 0xab, B: 0xbb, A: 0xff})
+		}
 		opacity := float32(1)
 		if t.th.Flag == "exclude" {
 			opacity = 0.35
@@ -1053,6 +1145,7 @@ func (v *cullView) paintStrip(p *paint.Painter, box geom.Size) {
 			p.RRect(fr.Inset(geom.Uniform(-2)), 4, paint.Solid(color.NRGBA{A: 0x90}))
 			p.Mask(icon.Stroke{Icon: ic, Width: w, Progress: 1}, fr, flagInk(t.th.Flag))
 		}
+		paintStripAids(p, t.r, t.th.Aids)
 		if n := t.th.Rating; n > 0 {
 			p.RRect(geom.Rc(t.r.Min.X+2, t.r.Max.Y-12, float32(n)*9+3, 11), 3, paint.Solid(color.NRGBA{A: 0x90}))
 			for i := range n {

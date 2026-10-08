@@ -34,6 +34,8 @@ type (
 		HistoryAt int
 		// WBPick says the white-balance eyedropper is out.
 		WBPick bool
+		// Presets are the presets the panel lists.
+		Presets []PresetCard
 	}
 	// DevHist is the histogram of the pixels showing.
 	DevHist struct{ Counts [3][256]uint32 }
@@ -93,6 +95,11 @@ type developer struct {
 	nudge  *time.Timer
 	// lens is the lens profile matched for the photo.
 	lens LensInfo
+	// hover is the edit with a preset laid over it, showing while the
+	// pointer is over the preset's card, or nil.
+	hover *marrawclient.Params
+	// thumbStop stops the presets' small pictures being rendered.
+	thumbStop context.CancelFunc
 }
 
 // editing reports whether photo id has an edit under way the backend has
@@ -124,6 +131,7 @@ func (cu *culler) developState() DevelopState {
 		st.Info = photoInfo(cu.photos[i], cu.folderPath)
 	}
 	st.History, st.HistoryAt = cu.historyOfShowing()
+	st.Presets = cu.presetCards()
 	return st
 }
 
@@ -145,7 +153,13 @@ func (cu *culler) toggleDevelop() {
 // closeDevelop takes the panel away, and stops its preview.
 func (cu *culler) closeDevelop() {
 	cu.wbFinish(true)
+	cu.cropDone()
 	d := &cu.dev
+	if d.thumbStop != nil {
+		d.thumbStop()
+		d.thumbStop = nil
+	}
+	d.hover = nil
 	if d.stop != nil {
 		d.stop()
 	}
@@ -159,6 +173,7 @@ func (cu *culler) closeDevelop() {
 // loadEdit loads photo i's edit for the panel, and mounts the panel with
 // it the first time.
 func (cu *culler) loadEdit(i int) {
+	cu.dev.hover = nil
 	d := &cu.dev
 	d.gen++
 	gen, id := d.gen, cu.photos[i].ID
@@ -197,6 +212,7 @@ func (cu *culler) loadEdit(i int) {
 				_ = cu.c.Update("develop", cu.developState())
 			}
 			cu.histogramShowing()
+			cu.loadPresetThumbs()
 		}:
 		case <-cu.ctx.Done():
 		}
@@ -313,6 +329,16 @@ func (cu *culler) startPreview() {
 	d := &cu.dev
 	d.want = false
 	full, id, params := d.wantFull, d.id, d.params
+	if d.hover != nil {
+		// A preset under the pointer shows as a draft, kept or not.
+		full, params = false, *d.hover
+	}
+	// Cropping, the photo shows its whole frame, the crop off and the
+	// straighten done here, as marraw shows it.
+	flat := cu.crop.on
+	if flat {
+		params.CropX, params.CropY, params.CropW, params.CropH, params.CropAngle = 0, 0, 0, 0, 0
+	}
 	edge := draftEdge
 	if full {
 		edge = 0
@@ -337,14 +363,18 @@ func (cu *culler) startPreview() {
 		select {
 		case cu.do <- func() {
 			d.busy = false
-			if err == nil {
+			if err == nil && !flat {
 				// Its shape, as the edit's crop and rotation give it.
 				cu.learnShape(id, size.X, size.Y)
 			}
-			if err == nil && d.open && id == d.id && id == cu.photos[cu.at].ID {
+			if err == nil && d.open && id == d.id && id == cu.photos[cu.at].ID && flat == cu.crop.on {
 				d.live = img
 				what := "draft"
-				if full {
+				if flat {
+					what = "whole frame"
+					cu.crop.ready, cu.crop.frame = true, size
+				}
+				if full && !flat {
 					what = "full"
 					// The saved edit's pixels, for coming back to the photo.
 					cu.cache.put(id, cacheEntry{img: img, rank: rankSharp, note: "edited"})

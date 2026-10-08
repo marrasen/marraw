@@ -19,23 +19,39 @@ type LibView struct {
 	MinRating int
 	// Flag is "all", "pick", "not-excluded" or "exclude".
 	Flag string
+	// Soft shows only the soft photos, Blinks only those with eyes
+	// closed, and Collapse only each burst's sharpest frame, as marraw's
+	// filter bar's toggles do, for a folder while it is open.
+	Soft, Blinks, Collapse bool
+	// Gap groups the photos wherever more than so many minutes pass
+	// between frames, nought for no groups.
+	Gap int
 }
 
 // SetLibView is the grid's filter bar changed.
 type SetLibView struct{ View LibView }
 
 // defaultView is a folder's view where nothing is remembered.
-func defaultView(sortBy string) LibView {
+func defaultView(sortBy string, gap int) LibView {
 	if sortBy == "" {
 		sortBy = "captureAsc"
 	}
-	return LibView{Sort: sortBy, Flag: "all"}
+	return LibView{Sort: sortBy, Flag: "all", Gap: gap}
 }
 
-// shows reports whether v shows photo p.
-func (v LibView) shows(p marrawclient.Photo) bool {
+// shows reports whether v shows photo p, whose shoot's aids are a.
+func (v LibView) shows(p marrawclient.Photo, a aidsOf) bool {
 	if p.Rating < v.MinRating {
 		return false
+	}
+	pa := a.of(p)
+	if v.Soft && !pa.Soft || v.Blinks && !pa.Eyes {
+		return false
+	}
+	if v.Collapse && p.GroupID != nil {
+		if b := a.bursts[*p.GroupID]; b != nil && b.lead() != p.ID {
+			return false
+		}
 	}
 	switch v.Flag {
 	case "pick":
@@ -81,9 +97,10 @@ func (cu *culler) syncAll() {
 // filtered and sorted.
 func (cu *culler) viewList() []marrawclient.Photo {
 	cu.syncAll()
+	cu.aids = newAids(cu.all, cu.libView)
 	var out []marrawclient.Photo
 	for _, p := range cu.all {
-		if cu.libView.shows(p) {
+		if cu.libView.shows(p, cu.aids) {
 			out = append(out, p)
 		}
 	}
@@ -196,15 +213,33 @@ func (cu *culler) setView(v LibView) {
 	if cu.culling {
 		cu.leaveCull()
 	}
+	gapWas := cu.libView.Gap
 	cu.libView = v
 	cu.applyView()
 	cu.at, cu.sel, cu.cursor = 0, nil, -1
 	_ = cu.c.Update("grid", cu.gridState())
 	path, view := strings.ToLower(cu.folderPath), v
+	// Kept here too, for coming back to the folder while the window is open.
+	if ui := cu.ui; ui != nil {
+		if ui.FolderViews == nil {
+			ui.FolderViews = map[string]marrawclient.FolderView{}
+		}
+		srt, flag := marrawclient.LibrarySort(v.Sort), marrawclient.FlagFilter(v.Flag)
+		ui.FolderViews[path] = marrawclient.FolderView{MinRating: &view.MinRating, FlagFilter: &flag, LibrarySort: &srt, GapMinutes: &view.Gap}
+		if v.Gap != gapWas {
+			ui.GapMinutes = v.Gap
+		}
+	}
 	go func() {
+		// A gap chosen is the one new folders take too, as in marraw.
+		if view.Gap != gapWas {
+			if err := cu.api.Settings.SetGapMinutes(cu.ctx, view.Gap); err != nil {
+				log.Printf("gap: %v", err)
+			}
+		}
 		srt := marrawclient.LibrarySort(view.Sort)
 		flag := marrawclient.FlagFilter(view.Flag)
-		patch := marrawclient.FolderView{MinRating: &view.MinRating, FlagFilter: &flag, LibrarySort: &srt}
+		patch := marrawclient.FolderView{MinRating: &view.MinRating, FlagFilter: &flag, LibrarySort: &srt, GapMinutes: &view.Gap}
 		if err := cu.api.Settings.SetFolderView(cu.ctx, path, patch); err != nil {
 			log.Printf("view: %v", err)
 		}
@@ -214,9 +249,9 @@ func (cu *culler) setView(v LibView) {
 // viewFor is folder path's remembered view, from marraw's settings.
 func viewFor(ui *marrawclient.UISettings, path string) LibView {
 	if ui == nil {
-		return defaultView("")
+		return defaultView("", defaultGap)
 	}
-	v := defaultView(string(ui.LibrarySort))
+	v := defaultView(string(ui.LibrarySort), ui.GapMinutes)
 	fv, ok := ui.FolderViews[strings.ToLower(path)]
 	if !ok {
 		return v
@@ -229,6 +264,9 @@ func viewFor(ui *marrawclient.UISettings, path string) LibView {
 	}
 	if fv.LibrarySort != nil && *fv.LibrarySort != "" {
 		v.Sort = string(*fv.LibrarySort)
+	}
+	if fv.GapMinutes != nil {
+		v.Gap = *fv.GapMinutes
 	}
 	return v
 }

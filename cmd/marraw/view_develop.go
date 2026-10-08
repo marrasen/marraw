@@ -263,6 +263,8 @@ type devSection struct {
 
 // The panel's sections, in order, as marraw's develop panel has them.
 var devSections = []devSection{
+	{title: "Presets", open: false},
+	{title: "Crop", open: true},
 	{title: "Tone", keys: []string{"expEV", "expPreserve", "bright", "gamma", "shadow", "contrast", "toneHighlights", "toneShadows", "whites", "blacks"}, auto: []string{"tone"}, open: true},
 	{title: "Presence", keys: []string{"texture", "clarity", "dehaze"}, open: true},
 	{title: "White balance", keys: []string{"wbTemp", "wbKelvin", "wbTint"}, choices: []string{"wbMode"}, open: true},
@@ -337,6 +339,8 @@ type developView struct {
 	info     *infoRows
 	// pipette puts the white-balance eyedropper out, lit while it is.
 	pipette *widget.IconButton
+	// presets are the presets' cards.
+	presets *presetGrid
 }
 
 func newDevelopView(s DevelopState) *developView {
@@ -371,6 +375,13 @@ func newDevelopView(s DevelopState) *developView {
 			v.lensNote = newSmallLabel("")
 			v.lensNote.Color, v.lensNote.MaxLines = noteInk, 2
 			body = append([]gunim.Node{v.lensNote}, body...)
+		case "Crop":
+			b := widget.NewButton("Crop and straighten   R")
+			b.Icon, b.KeepFocus, b.OnClick = icon.Crop, true, widget.Sends(ToggleCrop{})
+			body = append(body, b)
+		case "Presets":
+			v.presets = newPresetGrid(v)
+			body = append(body, v.presets)
 		case "History":
 			v.history = widget.NewList()
 			v.history.SkipFocus, v.history.ClickOnce = true, true
@@ -502,6 +513,9 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 	v.st = s
 	if v.pipette != nil {
 		v.pipette.Active = s.WBPick
+	}
+	if v.presets != nil {
+		v.presets.show(s, u)
 	}
 	p := &s.Params
 	for key, r := range v.rows {
@@ -827,6 +841,10 @@ func newDevHeading(sec devSection, fold *widget.Fold) *devHeading {
 // setOpen folds the section open or shut, the chevron turning with it.
 func (h *devHeading) setOpen(open bool, u *gunim.UI) {
 	h.fold.SetOpen(open, u)
+	if h.sec.title == "Presets" && open != sectionsOpen[h.sec.title] {
+		// Their small pictures render only while they show.
+		u.Send(h, PresetsShown{On: open})
+	}
 	sectionsOpen[h.sec.title] = open
 	h.turn.Animate(map[bool]float32{false: 0, true: 1}[open], widget.Quick.Get(u.Theme()))
 	u.Invalidate()
@@ -1080,4 +1098,11 @@ func (c *bandChips) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, _ gunim.
 	ink := anim.Mix(anim.ColorCodec, bandInk[max(0, b0)], bandInk[b1], t)
 	r := geom.Rc(at.X-12, at.Y-12, 24, 24)
 	p.RRectStroke(r, 12, paint.Fill{}, paint.Stroke{Width: 2, Color: ink})
+}
+
+// presetThumbIn takes a preset's small picture.
+func (v *developView) presetThumbIn(t PresetThumb, u *gunim.UI) {
+	if v.presets != nil {
+		v.presets.thumbIn(t, u)
+	}
 }

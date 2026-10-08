@@ -190,6 +190,9 @@ type exportRun struct {
 // exports under way go: every tenth of the way, and when they are done.
 func (cu *culler) tasksChanged(ts []marrawclient.SharedTaskState) {
 	for _, t := range ts {
+		if cu.scanState(t) {
+			continue
+		}
 		run, ok := cu.exports[t.ID]
 		if !ok {
 			continue
@@ -214,6 +217,9 @@ func (cu *culler) tasksChanged(ts []marrawclient.SharedTaskState) {
 // taskProgress says how far an export under way has got, every tenth of
 // the way.
 func (cu *culler) taskProgress(id string, current, total int) {
+	if cu.scanProgress(id, current, total) {
+		return
+	}
 	run, ok := cu.exports[id]
 	if !ok || total <= 0 || current >= total || current*10/total <= run.lastShown*10/total {
 		return

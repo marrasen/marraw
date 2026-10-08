@@ -32,7 +32,9 @@ func (cu *culler) followFolder() func() {
 				return cur, nil
 			}
 			hand(func() { cu.patched(ev.Patches) })
-			return cur, nil
+			// The listing the subscription hands on after a patch is the
+			// last full one: it takes the patch too, or it would undo it.
+			return patchedList(cur, ev.Patches), nil
 		}))
 	go func() {
 		for ps := range sub.C {
@@ -56,16 +58,86 @@ func (cu *culler) followFolder() func() {
 	return sub.Close
 }
 
-// listed takes a new listing of the folder: what the backend has measured
-// of each photo since, its size and the exposure it rests at.
+// listed takes a new listing of the folder: what the backend has read and
+// measured of each photo since, as when it was taken, its size and the
+// exposure it rests at, and its culling aids: its sharpness, its burst,
+// its eyes. A change of those orders and groups the photos anew.
 func (cu *culler) listed(ps []marrawclient.Photo) {
+	aided := false
 	for _, f := range ps {
-		i, ok := cu.index[f.ID]
+		for _, p := range []*marrawclient.Photo{cu.listedPhoto(f.ID, true), cu.listedPhoto(f.ID, false)} {
+			if p == nil {
+				continue
+			}
+			if !sameAids(*p, f) || p.TakenAt != f.TakenAt {
+				aided = true
+			}
+			// The listing is the backend's word on all but the marks and
+			// the edit, which change here first and come as patches.
+			n := f
+			n.Rating, n.Flag, n.EditHash = p.Rating, p.Flag, p.EditHash
+			*p = n
+		}
+	}
+	if aided {
+		cu.aidsChanged()
+	}
+}
+
+// listedPhoto is photo id as it shows, or in the folder's whole list.
+func (cu *culler) listedPhoto(id int64, showing bool) *marrawclient.Photo {
+	if showing {
+		if i, ok := cu.index[id]; ok {
+			return &cu.photos[i]
+		}
+		return nil
+	}
+	if i, ok := cu.allIndex[id]; ok {
+		return &cu.all[i]
+	}
+	return nil
+}
+
+// sameAids reports whether a and b say the same of their aids.
+func sameAids(a, b marrawclient.Photo) bool {
+	eq := func(x, y *float64) bool { return x == nil && y == nil || x != nil && y != nil && *x == *y }
+	eqi := func(x, y *int64) bool { return x == nil && y == nil || x != nil && y != nil && *x == *y }
+	return eq(a.Sharpness, b.Sharpness) && eq(a.SubjectSharpness, b.SubjectSharpness) && eqi(a.GroupID, b.GroupID) &&
+		eq(a.EyesClosed, b.EyesClosed) && a.EyesAnalyzed == b.EyesAnalyzed && a.SubjectAnalyzed == b.SubjectAnalyzed
+}
+
+// patchedList is list with patches ps applied, a copy.
+func patchedList(list []marrawclient.Photo, ps []marrawclient.PhotoPatch) []marrawclient.Photo {
+	at := make(map[int64]int, len(list))
+	for i, p := range list {
+		at[p.ID] = i
+	}
+	out := append([]marrawclient.Photo(nil), list...)
+	for _, pp := range ps {
+		i, ok := at[pp.ID]
 		if !ok {
 			continue
 		}
-		p := &cu.photos[i]
-		p.BaseExpEV, p.MetaLoaded = f.BaseExpEV, f.MetaLoaded
-		p.Width, p.Height, p.Orientation = f.Width, f.Height, f.Orientation
+		p := &out[i]
+		if pp.Rating != nil {
+			p.Rating = *pp.Rating
+		}
+		if pp.Flag != nil {
+			p.Flag = *pp.Flag
+		}
+		if pp.EditHash != nil {
+			p.EditHash = *pp.EditHash
+		}
+		if pp.Rotate != nil {
+			p.Rotate = *pp.Rotate
+		}
+		if pp.CropW != nil {
+			p.CropW = *pp.CropW
+		}
+		if pp.CropH != nil {
+			p.CropH = *pp.CropH
+		}
+		takeAids(p, pp)
 	}
+	return out
 }

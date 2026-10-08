@@ -30,7 +30,9 @@ func registerViews(w *gunim.Window) {
 	gunim.RegisterView(w, "confirm", newConfirmDialog, nil)
 	gunim.RegisterView(w, "export", newExportDialog, nil)
 	gunim.RegisterView(w, "shortcuts", newShortcutsDialog, nil)
+	gunim.RegisterView(w, "preset", newPresetDialog, nil)
 	gunim.RegisterPatch(w, "develop", (*developView).histIn)
+	gunim.RegisterPatch(w, "develop", (*developView).presetThumbIn)
 }
 
 // marrawTheme is gunim's dark theme with room for the develop panel's
@@ -108,11 +110,26 @@ func keyZ() input.Event     { return input.KeyPress{Key: input.KeyZ} }
 // namedKeys are the keys -keys can press.
 var namedKeys = map[string]input.Key{
 	"0": input.Key0, "1": input.Key1, "2": input.Key2, "3": input.Key3, "4": input.Key4, "5": input.Key5,
-	"p": input.KeyP, "x": input.KeyX, "u": input.KeyU, "z": input.KeyZ, "space": input.KeySpace, "d": input.KeyD,
+	"r": input.KeyR, "w": input.KeyW, "p": input.KeyP, "x": input.KeyX, "u": input.KeyU, "z": input.KeyZ, "space": input.KeySpace, "d": input.KeyD,
 	"right": input.KeyRight, "left": input.KeyLeft, "escape": input.KeyEscape, "enter": input.KeyEnter,
 }
 
 // markKey is the rating or flag a key gives, as marraw's keys do.
+// burstKey is Shift and P, which picks the photo and rejects the rest of
+// its burst, or Shift and X, which only rejects the rest.
+func burstKey(e input.KeyPress) (gunim.Intent, bool) {
+	if !e.Mods.Has(input.ModShift) || e.Mods.Has(input.ModControl) {
+		return nil, false
+	}
+	switch e.Key {
+	case input.KeyP:
+		return BurstKeep{Pick: true}, true
+	case input.KeyX:
+		return BurstKeep{}, true
+	}
+	return nil, false
+}
+
 func markKey(k input.Key) (gunim.Intent, bool) {
 	switch k {
 	case input.Key0, input.Key1, input.Key2, input.Key3, input.Key4, input.Key5:

@@ -60,6 +60,10 @@ type (
 		// NoticeSeq changes, as an undo says what it undid.
 		Notice    string
 		NoticeSeq int
+		// Aids are the photo's culling aids.
+		Aids Aids
+		// Crop is the crop under way, or nil.
+		Crop *CropView
 		// Rating and Flag are the photo's, and Strip the photos around it,
 		// for the filmstrip.
 		Rating int
@@ -74,6 +78,10 @@ type (
 		Aspect float32
 		Rating int
 		Flag   string
+		Aids   Aids
+		// GapBefore is the minutes since the group before, where the
+		// photo starts a group of the grid's, or below nought.
+		GapBefore int
 	}
 	// Rate rates the photo showing, 0 to 5 stars.
 	// With ID it rates that photo alone, as a click on its stars does,
@@ -187,6 +195,14 @@ type culler struct {
 	cullAt    int
 	// wb is the white-balance eyedropper, while it is out.
 	wb wbPick
+	// aids are the folder's culling aids: its bursts, and what is soft.
+	aids aidsOf
+	// presetGen counts the presets laid or shown, so a late one is let go.
+	presetGen int
+	// crop is cropping, while it goes on, and presetsShown says the
+	// panel's presets show, for their small pictures to render.
+	crop         cropMode
+	presetsShown bool
 	// original says the photo shows as it was before any edit, origImg
 	// those pixels for photo origID, and swapNow that the next picture
 	// shows at once, with no fade.
@@ -202,6 +218,8 @@ type culler struct {
 	// the exports under way, by their tasks.
 	exporting []int64
 	exports   map[string]exportRun
+	// scans are the analyses under way: eyes, subjects.
+	scans map[string]scanRun
 	// clipboard is the edit copied, to paste.
 	clipboard *marrawclient.Params
 	// notice is a note over the photo, shown anew as noticeSeq changes.
@@ -240,7 +258,7 @@ func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
 		tiles: newTileCache(48), tileWarm: map[string]bool{},
 		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), cursor: -1,
-		libView: defaultView("")}
+		libView: defaultView("", defaultGap)}
 	cu.setAll(photos)
 	cu.applyView()
 	return cu
@@ -262,6 +280,7 @@ func (cu *culler) serve() error {
 	}
 	// The backend's tasks as they change, for the exports' notes.
 	cu.exports = map[string]exportRun{}
+	cu.scans = map[string]scanRun{}
 	stopTasks := cu.api.OnTaskStateEvent(func(ev marrawclient.TaskStateEvent) {
 		select {
 		case cu.do <- func() { cu.tasksChanged(ev.Tasks) }:
@@ -368,6 +387,43 @@ func (cu *culler) serve() error {
 				cu.devWBPick(in.On)
 			case DevWBBar:
 				cu.devWBBar(in.Act)
+			case ToggleCrop:
+				cu.toggleCrop()
+			case CropDone:
+				cu.cropDone()
+			case CropSet:
+				cu.cropSet(in.Rect)
+			case CropAngle:
+				cu.cropAngle(in)
+			case CropTurn:
+				cu.cropTurn(in)
+			case CropFlip:
+				cu.cropFlip(in)
+			case CropAspect:
+				cu.cropAspect(in.Index)
+			case CropReset:
+				cu.cropReset()
+			case PresetApply:
+				cu.presetApply(in)
+			case PresetHover:
+				cu.presetHover(in)
+			case PresetsShown:
+				cu.presetsShown = in.On
+				cu.loadPresetThumbs()
+			case AskPreset:
+				cu.askPreset()
+			case PresetSave:
+				cu.presetSave(in)
+			case PresetDelete:
+				cu.presetDelete(in.Index)
+			case BurstKeep:
+				cu.burstKeep(in.Pick)
+			case JudgeBursts:
+				cu.judgeBursts()
+			case CheckEyes:
+				cu.checkEyes(in.Download)
+			case CheckSubjects:
+				cu.checkSubjects(in.Download)
 			case DevWBAt:
 				cu.devWBAt(in.X, in.Y)
 			case Confirmed:
@@ -383,10 +439,21 @@ func (cu *culler) serve() error {
 func (cu *culler) state() Cull {
 	p := cu.photos[cu.at]
 	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
-		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag)}
+		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p)}
+	gapAt := map[int]int{}
+	for k, g := range gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort) {
+		if k > 0 {
+			gapAt[g.Start] = g.GapBefore
+		}
+	}
 	for i := max(0, cu.at-stripReach); i <= min(len(cu.photos)-1, cu.at+stripReach); i++ {
 		q := cu.photos[i]
-		st.Strip = append(st.Strip, Thumb{Index: i, Img: cu.thumbs[q.ID], Aspect: cu.aspectOf(q), Rating: q.Rating, Flag: string(q.Flag)})
+		gap, ok := gapAt[i]
+		if !ok {
+			gap = -1
+		}
+		st.Strip = append(st.Strip, Thumb{Index: i, Img: cu.thumbs[q.ID], Aspect: cu.aspectOf(q), Rating: q.Rating, Flag: string(q.Flag),
+			Aids: cu.aids.of(q), GapBefore: gap})
 	}
 	if e, ok := cu.cache.get(p.ID); ok {
 		st.Img, st.Note = e.img, e.note
@@ -397,6 +464,14 @@ func (cu *culler) state() Cull {
 	}
 	// Backspace held: the photo before any edit, and back again, at once.
 	st.Original, st.WBPick = cu.original, cu.wb.on
+	if st.Crop = cu.cropView(); st.Crop != nil && st.Crop.Ready && cu.crop.frame.X > 0 {
+		// The whole frame shows, in its own shape.
+		st.Aspect = float32(cu.crop.frame.X) / float32(cu.crop.frame.Y)
+		st.Full = st.Crop.Frame
+		if st.Full.X <= 0 || st.Full.Y <= 0 {
+			st.Full = cu.crop.frame
+		}
+	}
 	st.WBFrame, st.WBPix = cu.wb.frame, cu.wb.pix
 	if img := cu.originalShowing(p.ID); img != nil {
 		st.Img, st.Note = img, "original, before any edit"
@@ -420,8 +495,9 @@ func (cu *culler) goTo(i int) {
 	if !cu.culling || i == cu.at && cu.load != nil {
 		return
 	}
-	// The eyedropper goes, keeping what it picked.
+	// The eyedropper goes, keeping what it picked, and cropping ends.
 	cu.wbFinish(true)
+	cu.cropDone()
 	cu.at, cu.gen, cu.stepped = i, cu.gen+1, time.Now()
 	if cu.load != nil {
 		cu.load()
@@ -620,9 +696,10 @@ func (cu *culler) record(what string, sharp bool) {
 // and writes a picture of the window to o.shot, for measuring without
 // hands.
 // scriptStep takes a step of -keys that is not a key: click:x:y and
-// move:x:y move the pointer, in the window, and click there; type:text
+// move:x:y move the pointer, in the window, and click there; drag:x:y:x:y
+// drags from one point to another; type:text
 // types; shift+plus presses Shift and + as a Swedish keyboard does, which
-// types ?; ctrl+z and w press those; wait:ms waits; and shot:name writes the window to name.png. It
+// types ?; shift+ a key presses it with Shift; ctrl+z and w press those; wait:ms waits; and shot:name writes the window to name.png. It
 // reports whether k was one.
 func (cu *culler) scriptStep(k string) bool {
 	verb, arg, ok := strings.Cut(k, ":")
@@ -639,6 +716,21 @@ func (cu *culler) scriptStep(k string) bool {
 			_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonPrimary, Clicks: 1, Time: now})
 			_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: at, Button: input.ButtonPrimary, Time: now})
 		}
+	case ok && verb == "drag":
+		var c [4]float64
+		for i, f := range strings.SplitN(arg, ":", 4) {
+			c[i], _ = strconv.ParseFloat(f, 64)
+		}
+		from, to := geom.Pt(float32(c[0]), float32(c[1])), geom.Pt(float32(c[2]), float32(c[3]))
+		_ = cu.c.Input(cu.ctx, input.PointerMove{Pos: from, Time: now})
+		_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: from, Button: input.ButtonPrimary, Clicks: 1, Time: now})
+		for i := 1; i <= 10; i++ {
+			k := float32(i) / 10
+			at := geom.Pt(from.X+(to.X-from.X)*k, from.Y+(to.Y-from.Y)*k)
+			time.Sleep(30 * time.Millisecond)
+			_ = cu.c.Input(cu.ctx, input.PointerMove{Pos: at, Time: time.Now()})
+		}
+		_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: to, Button: input.ButtonPrimary, Time: time.Now()})
 	case ok && verb == "type":
 		_ = cu.c.Input(cu.ctx, input.TextInput{Text: arg, Time: now})
 	case k == "shift+plus":
@@ -653,6 +745,8 @@ func (cu *culler) scriptStep(k string) bool {
 			log.Print(err)
 		}
 		return true
+	case strings.HasPrefix(k, "shift+") && namedKeys[strings.TrimPrefix(k, "shift+")] != 0:
+		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: namedKeys[strings.TrimPrefix(k, "shift+")], Mods: input.ModShift, Time: now})
 	case k == "ctrl+z":
 		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyZ, Mods: input.ModControl, Time: now})
 	case k == "w":
@@ -1082,12 +1176,16 @@ func (cu *culler) marked(i int) {
 // and an edit, whose new pixels are fetched again.
 func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 	// The folder's whole list takes them too, for the photos not showing.
+	aided := false
 	for _, pp := range ps {
+		aided = aided || pp.SubjectSharpness != nil || pp.EyesClosed != nil || pp.EyesAnalyzed != nil || pp.SubjectAnalyzed != nil
 		ai, ok := cu.allIndex[pp.ID]
 		if !ok {
 			continue
 		}
-		if _, showing := cu.index[pp.ID]; showing {
+		takeAids(&cu.all[ai], pp)
+		if i, showing := cu.index[pp.ID]; showing {
+			takeAids(&cu.photos[i], pp)
 			continue
 		}
 		p := &cu.all[ai]
@@ -1100,6 +1198,9 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 		if pp.EditHash != nil {
 			p.EditHash = *pp.EditHash
 		}
+	}
+	if aided {
+		defer cu.aidsChanged()
 	}
 	changed := false
 	for _, pp := range ps {

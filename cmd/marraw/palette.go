@@ -56,8 +56,14 @@ func paletteEntries(at paletteFor) []paletteEntry {
 		add("Auto white balance and colour", "Ctrl+Shift+U", DevAuto{Sections: []string{"wb", "color"}}, "color")
 		add("Auto everything", "Ctrl+Alt+U", DevAuto{Sections: []string{"all"}})
 		add("White balance eyedropper", "W", DevWBPick{On: true}, "pick", "neutral")
+		add("Crop and straighten", "R", ToggleCrop{}, "rotate", "straighten", "flip")
+		add("Keep this burst frame: pick it, reject the rest", "Shift+P", BurstKeep{Pick: true}, "burst", "sharpest")
+		add("Save the edit as a preset", "", AskPreset{}, "look")
 	}
 	add("Keyboard shortcuts", "?", ShowShortcuts{}, "keys", "help")
+	add("Judge the bursts: pick the sharpest of each, reject the rest", "", JudgeBursts{}, "burst", "auto")
+	add("Look for closed eyes", "", CheckEyes{}, "blink", "eyes", "analyse")
+	add("Find the subjects, to judge their sharpness", "", CheckSubjects{}, "focus", "sharp", "analyse")
 	if lastGrid.FolderID != 0 {
 		v := lastGrid.View
 		sortNames := []string{"capture time, oldest first", "capture time, newest first", "file name, A to Z", "file name, Z to A"}
@@ -72,6 +78,23 @@ func paletteEntries(at paletteFor) []paletteEntry {
 			nv := v
 			nv.Flag = flagKeys[i]
 			add("Show "+name, "", SetLibView{View: nv}, "filter", "flag")
+		}
+		for _, t := range []struct {
+			name string
+			on   bool
+			flip func(*LibView)
+		}{
+			{"soft photos", v.Soft, func(v *LibView) { v.Soft = !v.Soft }},
+			{"photos with closed eyes", v.Blinks, func(v *LibView) { v.Blinks = !v.Blinks }},
+			{"the sharpest frame of each burst", v.Collapse, func(v *LibView) { v.Collapse = !v.Collapse }},
+		} {
+			nv := v
+			t.flip(&nv)
+			title := "Show " + t.name + " only"
+			if t.on {
+				title = "Show all, not only " + t.name
+			}
+			add(title, "", SetLibView{View: nv}, "filter", "aid")
 		}
 		for r, name := range ratingKeys {
 			nv := v
@@ -115,6 +138,7 @@ var shortcutGroups = []struct {
 }{
 	{"Everywhere", [][2]string{
 		{"0–5", "Rate"}, {"P / X / U", "Pick / reject / clear, P and X again take it off"},
+		{"Shift+P / Shift+X", "Pick this burst frame and reject the rest / only reject the rest"},
 		{"Ctrl+Z / Ctrl+Shift+Z", "Undo / redo"}, {"Ctrl+C / Ctrl+V", "Copy / paste edit settings"},
 		{"Ctrl+0", "Reset edit"}, {"Ctrl+E", "Export"}, {"Delete", "Move to the Recycle Bin"},
 		{"Ctrl+K", "Command palette"}, {"?", "These keys"},
@@ -132,6 +156,8 @@ var shortcutGroups = []struct {
 		{"Up / Down", "Choose a control"}, {"+ / − (Shift)", "Step it (further)"},
 		{"E B T I K G S C A V O H N M", "Jump to a control"}, {"W", "White balance eyedropper"},
 		{"Ctrl+U (Shift, Alt)", "Auto tone (colour, everything)"}, {"Esc", "Let the control go"},
+		{"R", "Crop and straighten; Enter, Esc or R again to finish"},
+		{"Ctrl+1–9 / Ctrl+Shift+1–9", "Creative preset / your own preset, by its place"},
 	}},
 }
 

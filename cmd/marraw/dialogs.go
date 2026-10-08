@@ -64,6 +64,16 @@ func (cu *culler) askDelete() {
 func (cu *culler) confirmed(a Confirmed) {
 	cu.asking = false
 	_ = cu.c.Unmount("confirm")
+	switch {
+	case a.Kind == "eyesModel" && a.OK:
+		cu.refocus()
+		cu.checkEyes(true)
+		return
+	case a.Kind == "subjectModel" && a.OK:
+		cu.refocus()
+		cu.checkSubjects(true)
+		return
+	}
 	if a.Kind != "delete" || !a.OK || len(cu.deleting) == 0 {
 		cu.deleting = nil
 		cu.refocus()

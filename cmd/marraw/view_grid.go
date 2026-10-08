@@ -76,6 +76,8 @@ func newGridView(GridState) *gridView {
 	// A folder's tiles come and go at twice gunim's pace.
 	v.grid.Pace = 2
 	v.grid.Tile = v.newTile
+	v.grid.Header = v.newGapHeader
+	v.grid.HeaderHeight = gapHeaderHeight
 	v.grid.OnView = func(first, count int, _ *gunim.UI) gunim.Intent { return NeedThumbs{First: first, Count: count} }
 	v.grid.OnSelect = func(sel [][2]int, cursor int, _ *gunim.UI) gunim.Intent {
 		n := 0
@@ -115,9 +117,11 @@ func (v *gridView) show(s GridState, u *gunim.UI) {
 	v.folder, v.viewSeq = s.FolderID, s.ViewSeq
 	v.st = s
 	v.grid.SetLen(len(s.Photos), u)
+	v.grid.SetGroups(groupStarts(s.Groups), u)
 	for i, t := range v.tiles {
 		if i < len(s.Photos) {
 			t.marks.set(s.Photos[i].Rating, s.Photos[i].Flag, u.Theme())
+			t.setAids(s.Photos[i].Aids, u)
 		}
 	}
 	v.head.set(s, v.shown, u.Theme())
@@ -149,6 +153,7 @@ func (v *gridView) reorder(s GridState, u *gunim.UI) {
 		if t := v.tiles[i]; t != nil {
 			tiles[j] = t
 			t.marks.set(p.Rating, p.Flag, u.Theme())
+			t.setAids(p.Aids, u)
 		}
 		if img := v.thumbs[i]; img != nil {
 			thumbs[j] = img
@@ -157,6 +162,7 @@ func (v *gridView) reorder(s GridState, u *gunim.UI) {
 	v.tiles, v.thumbs = tiles, thumbs
 	v.viewSeq, v.st = s.ViewSeq, s
 	v.grid.Reorder(from, u)
+	v.grid.SetGroups(groupStarts(s.Groups), u)
 	v.head.set(s, true, u.Theme())
 	v.head.selected(0)
 	v.showNone(s, u)
@@ -214,6 +220,7 @@ func (v *gridView) enter(s GridState, u *gunim.UI) {
 	clear(v.tiles)
 	v.grid.SetSelected(nil, -1, u)
 	v.grid.SetLen(len(s.Photos), u)
+	v.grid.SetGroups(groupStarts(s.Groups), u)
 	v.grid.JumpTo(0)
 	v.grid.Rebuild(u)
 	v.head.set(s, false, u.Theme())
@@ -292,8 +299,10 @@ func (v *gridView) gridAt(a GridAt, u *gunim.UI) {
 
 func (v *gridView) newTile(i int) gunim.Node {
 	p := v.st.Photos[i]
-	t := &photoTile{id: p.ID, aspect: anim.NewFloat(p.Aspect), pic: newThumbPic(v.thumbs[i])}
-	t.Add(t.aspect)
+	t := &photoTile{id: p.ID, aspect: anim.NewFloat(p.Aspect), pic: newThumbPic(v.thumbs[i]), burst: newBadgeLabel(),
+		badges: anim.NewFloat(0)}
+	t.Add(t.aspect, t.badges)
+	t.setAids(p.Aids, nil)
 	t.hero = widget.NewHero(heroTag(p.ID), t.pic)
 	// The tile is where the cull view's picture flies from and back to.
 	t.hero.Anchor = true
@@ -373,6 +382,10 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 		if e.Mods.Has(input.ModAlt) {
 			return false
 		}
+		if in, ok := burstKey(e); ok {
+			u.Send(v, in)
+			return true
+		}
 		if in, ok := markKey(e.Key); ok {
 			u.Send(v, in)
 			return true
@@ -441,6 +454,13 @@ type photoTile struct {
 	// changes.
 	id  int64
 	box geom.Size
+	// aids are the photo's culling aids, shown as badges on its picture,
+	// picRect, coming in as badges does, and burst says its place in its
+	// burst.
+	aids    Aids
+	picRect geom.Rect
+	badges  *anim.Float
+	burst   *widget.Label
 	// aspect is the picture's shape, gliding to the one its pixels have
 	// once they come.
 	aspect *anim.Float
@@ -450,7 +470,7 @@ type photoTile struct {
 }
 
 // Children implements [gunim.Composite].
-func (t *photoTile) Children() []gunim.Node { return []gunim.Node{t.hero} }
+func (t *photoTile) Children() []gunim.Node { return []gunim.Node{t.hero, t.burst} }
 
 // picRoom is where a tile's picture fits, in a tile of size box.
 func picRoom(box geom.Size) geom.Rect {
@@ -462,9 +482,13 @@ func (t *photoTile) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 	box := c.Max
 	t.box = box
 	r := fitIn(picRoom(box), t.aspect.Value())
+	t.picRect = r
 	k := kids.At(0)
 	k.Layout(gunim.Tight(r.Size()))
 	k.Place(r.Min)
+	b := kids.At(1)
+	bs := b.Layout(gunim.Loose(geom.Sz(80, 20)))
+	b.Place(geom.Pt(r.Min.X+5+badgeIcon+3, r.Min.Y+3+(badgeH-bs.H)/2))
 	return box
 }
 
@@ -473,6 +497,25 @@ func (t *photoTile) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids g
 	t.pic.dim = t.marks.dim.Value()
 	kids.At(0).Paint(p)
 	t.marks.paint(p, f.Theme, tilePlace(box), 0x60, false)
+	paintBadges(p, t.picRect, t.aids, t.badges.Value(), kids.At(1))
+}
+
+// setAids shows aids a as badges, popping them in as they change.
+func (t *photoTile) setAids(a Aids, u *gunim.UI) {
+	if a == t.aids && u != nil {
+		return
+	}
+	t.aids = a
+	t.burst.Text = ""
+	if a.BurstOf > 0 {
+		t.burst.Text = fmt.Sprintf("%d/%d", a.Burst, a.BurstOf)
+	}
+	if u == nil {
+		t.badges.Jump(1)
+		return
+	}
+	t.badges.Jump(0)
+	t.badges.Animate(1, widget.Bounce.Get(u.Theme()))
 }
 
 // tilePlace is where a tile of size box has its marks: the stars at the
@@ -582,6 +625,10 @@ type gridHead struct {
 	// photos the folder holds, filtered or not.
 	none        bool
 	folderTotal int
+	// size is the tiles' size slider, before the counts, and gap the
+	// time between groups, before it.
+	size gunim.Node
+	gap  gunim.Node
 }
 
 var (
@@ -647,7 +694,7 @@ func (h *gridHead) subText() {
 
 // Children implements [gunim.Composite].
 func (h *gridHead) Children() []gunim.Node {
-	return []gunim.Node{h.title, h.sub, h.pills[0], h.pills[1], h.pills[2]}
+	return []gunim.Node{h.title, h.sub, h.pills[0], h.pills[1], h.pills[2], h.size, h.gap}
 }
 
 // Layout implements [gunim.Node]: the name and the count on the left, the
@@ -670,6 +717,12 @@ func (h *gridHead) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 		k.Place(geom.Pt(right, mid-s.H/2))
 		right -= 8
 	}
+	sz := kids.At(5)
+	ss := sz.Layout(gunim.Loose(geom.Sz(box.W/4, box.H)))
+	sz.Place(geom.Pt(right-16-ss.W, mid-ss.H/2))
+	gp := kids.At(6)
+	gs := gp.Layout(gunim.Loose(geom.Sz(220, box.H)))
+	gp.Place(geom.Pt(right-16-ss.W-16-gs.W, mid-gs.H/2))
 	return box
 }
 

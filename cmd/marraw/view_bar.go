@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
 	"math"
+	"slices"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/anim"
@@ -37,6 +39,15 @@ type gridBar struct {
 	stars *starFilter
 	size  *widget.Slider
 	row   gunim.Node
+	// soft, blinks and bursts show only the soft photos, those with eyes
+	// closed, and each burst's sharpest frame; judge judges the bursts,
+	// and eyes and subjects start the backend looking.
+	soft, blinks, bursts  *widget.IconButton
+	judge, eyes, subjects *widget.IconButton
+	// gap groups the photos by the time between them, and gaps are its
+	// choices, in minutes, nought for none.
+	gap  *widget.Dropdown
+	gaps []int
 }
 
 func newGridBar(g *gridView) *gridBar {
@@ -66,11 +77,45 @@ func newGridBar(g *gridView) *gridBar {
 		u.Invalidate()
 		return nil
 	}
-	label := widget.NewLabel("Size")
-	label.Color, label.Size = noteInk, noteSize
+	toggle := func(ic *icon.Icon, tip string, flip func(*LibView)) *widget.IconButton {
+		bt := widget.NewIconButton(ic, tip)
+		bt.KeepFocus = true
+		bt.OnClick = func(*gunim.UI) gunim.Intent {
+			v := b.view
+			flip(&v)
+			return SetLibView{View: v}
+		}
+		return bt
+	}
+	act := func(ic *icon.Icon, tip string, in gunim.Intent) *widget.IconButton {
+		bt := widget.NewIconButton(ic, tip)
+		bt.KeepFocus, bt.OnClick = true, widget.Sends(in)
+		return bt
+	}
+	b.soft = toggle(icon.Focus, "Soft photos only", func(v *LibView) { v.Soft = !v.Soft })
+	b.blinks = toggle(icon.EyeClosed, "Photos with closed eyes only", func(v *LibView) { v.Blinks = !v.Blinks })
+	b.bursts = toggle(icon.Layers, "The sharpest frame of each burst only", func(v *LibView) { v.Collapse = !v.Collapse })
+	b.judge = act(icon.WandSparkles, "Judge the bursts: pick each one's sharpest frame, reject the rest", JudgeBursts{})
+	b.eyes = act(icon.ScanEye, "Look for closed eyes in the photos not checked yet", CheckEyes{})
+	b.subjects = act(icon.ScanFace, "Find each photo's subject, to judge its sharpness there", CheckSubjects{})
+	aids := widget.Row(b.soft, b.blinks, b.bursts, &divider{}, b.judge, b.eyes, b.subjects)
+	aids.Cross = widget.CrossCenter
 	sp := widget.NewSpacer()
-	sized := &fixedWidth{w: 160, child: b.size}
-	row := widget.Row(b.sorts, b.flags, b.stars, sp, label, sized).Grow(sp, 1)
+	row := widget.Row(b.sorts, b.flags, b.stars, sp, aids).Grow(sp, 1)
+	// The tiles' size is set in the heading, beside the counts, and the
+	// gap the photos are grouped by.
+	g.head.size = &fixedWidth{w: 130, child: b.size}
+	b.gap = widget.NewDropdown(nil)
+	b.gap.KeepFocus = true
+	b.gap.OnChange = func(i int, _ *gunim.UI) gunim.Intent {
+		if i < 0 || i >= len(b.gaps) {
+			return nil
+		}
+		v := b.view
+		v.Gap = b.gaps[i]
+		return SetLibView{View: v}
+	}
+	g.head.gap = b.gap
 	row.Cross = widget.CrossCenter
 	b.row = row
 	return b
@@ -86,6 +131,24 @@ func (b *gridBar) set(v LibView, u *gunim.UI) {
 		}
 	}
 	b.stars.set(v.MinRating, u)
+	b.soft.Active, b.blinks.Active, b.bursts.Active = v.Soft, v.Blinks, v.Collapse
+	// The choices, and the folder's own where it is another.
+	b.gaps = append([]int(nil), gapChoices...)
+	if !slices.Contains(b.gaps, v.Gap) {
+		b.gaps = append(b.gaps, v.Gap)
+		slices.Sort(b.gaps)
+	}
+	var items []widget.MenuItem
+	for _, m := range b.gaps {
+		label := "No time groups"
+		if m > 0 {
+			label = fmt.Sprintf("Group by %d min gaps", m)
+		}
+		items = append(items, widget.MenuItem{Label: label})
+	}
+	b.gap.SetItems(items)
+	b.gap.SetSelected(slices.Index(b.gaps, v.Gap), u)
+	b.gap.Disabled = v.Sort == "nameAsc" || v.Sort == "nameDesc"
 	u.Invalidate()
 }
 
