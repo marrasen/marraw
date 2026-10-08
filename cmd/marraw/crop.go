@@ -44,6 +44,10 @@ type CropView struct {
 	Ratio  float64
 	Frame  image.Point
 	Ready  bool
+	// Turn is the quarter turns, clockwise, the picture showing is behind
+	// the frame, turned since: the view turns it on, while the pixels of
+	// the turned frame come.
+	Turn int
 }
 
 // cropMode is cropping, while it goes on: the shape chosen, and whether
@@ -53,6 +57,9 @@ type cropMode struct {
 	aspect int
 	ready  bool
 	frame  image.Point
+	// turn is the quarter turns, clockwise, the picture showing is
+	// behind the frame.
+	turn int
 }
 
 // frameSize is photo p's whole frame, at full size, as the edit's quarter
@@ -75,7 +82,8 @@ func (cu *culler) cropView() *CropView {
 		return nil
 	}
 	d := &cu.dev
-	v := &CropView{Rect: rectOf(d.params), Angle: d.params.CropAngle, Aspect: cu.crop.aspect, Ready: cu.crop.ready}
+	v := &CropView{Rect: rectOf(d.params), Angle: d.params.CropAngle, Aspect: cu.crop.aspect, Ready: cu.crop.ready,
+		Turn: cu.crop.turn}
 	if i, ok := cu.index[d.id]; ok {
 		v.Frame = frameSize(cu.photos[i], d.params)
 	}
@@ -88,6 +96,9 @@ func (cu *culler) cropView() *CropView {
 func (cu *culler) frameAspect() float64 {
 	d := &cu.dev
 	if f := cu.crop.frame; f.X > 0 && f.Y > 0 {
+		if cu.crop.turn%2 != 0 {
+			return float64(f.Y) / float64(f.X)
+		}
 		return float64(f.X) / float64(f.Y)
 	}
 	if i, ok := cu.index[d.id]; ok {
@@ -179,8 +190,26 @@ func (cu *culler) cropAngle(in CropAngle) {
 	cu.showCull()
 }
 
-// cropTurn and cropFlip turn and mirror the frame: its pixels come anew.
-func (cu *culler) cropTurn(in CropTurn) { cu.cropFrame(turnCrop(cu.dev.params, in.CW), "Rotate") }
+// cropTurn turns the frame a quarter: the picture showing turns with it
+// at once, in the view, while the turned frame's pixels come.
+func (cu *culler) cropTurn(in CropTurn) {
+	if !cu.crop.on {
+		return
+	}
+	if !cu.crop.ready {
+		cu.cropFrame(turnCrop(cu.dev.params, in.CW), "Rotate")
+		return
+	}
+	d := &cu.dev
+	d.params = turnCrop(d.params, in.CW)
+	cu.crop.turn += map[bool]int{false: -1, true: 1}[in.CW]
+	cu.edited(true)
+	cu.remember("Rotate")
+	_ = cu.c.Update("develop", cu.developState())
+	cu.showCull()
+}
+
+// cropFlip mirrors the frame: its pixels come anew.
 
 func (cu *culler) cropFlip(in CropFlip) { cu.cropFrame(flipCrop(cu.dev.params, in.Vertical), "Flip") }
 
@@ -191,7 +220,7 @@ func (cu *culler) cropFrame(p marrawclient.Params, label string) {
 	}
 	d := &cu.dev
 	d.params = p
-	cu.crop.ready, cu.crop.frame = false, image.Point{}
+	cu.crop.ready, cu.crop.frame, cu.crop.turn = false, image.Point{}, 0
 	cu.edited(true)
 	cu.remember(label)
 	_ = cu.c.Update("develop", cu.developState())

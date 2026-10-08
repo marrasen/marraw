@@ -58,6 +58,7 @@ func main() {
 	skim := flag.Int("skim", 0, "step right this many times on its own, -every apart, report the timings, and quit")
 	every := flag.Duration("every", 150*time.Millisecond, "how far apart -skim steps")
 	shot := flag.String("shot", "", "write the window to this PNG file once the script is done, and quit")
+	winSize := flag.String("size", "1400x900", "the window's size, as 3840x2050, for a test run as large as a big screen")
 	keys := flag.String("keys", "", "once -skim is done, press these keys, a comma-separated list such as 3,p,right,x; also click:x:y, move:x:y, type:text, shift+plus, ctrl+z, w, wait:ms and shot:name")
 	wait := flag.Duration("wait", time.Second, "how long the window shows the grid before the script starts")
 	burst := flag.Int("burst", 0, "write this many pictures, from the last of -keys on, to -shot's name with -01, -02 and on, instead of one")
@@ -65,7 +66,7 @@ func main() {
 	zoom := flag.Bool("zoom", false, "once -skim is done, zoom to one to one with Z, and wait for the full resolution before the shot")
 	flag.Parse()
 	if err := run(options{folder: *folder, connect: *connect, token: *token, dataDir: *dataDir,
-		skim: *skim, every: *every, wait: *wait, burst: *burst, edit: *edit, addLibrary: *addLibrary, shot: *shot, zoom: *zoom, keys: *keys}); err != nil {
+		skim: *skim, every: *every, wait: *wait, burst: *burst, edit: *edit, addLibrary: *addLibrary, shot: *shot, zoom: *zoom, keys: *keys, size: *winSize}); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -79,6 +80,7 @@ type options struct {
 	keys                            string
 	edit                            string
 	addLibrary                      string
+	size                            string
 }
 
 func run(o options) error {
@@ -136,7 +138,7 @@ func run(o options) error {
 	log.Printf("marraw: build %s; %d photos in %q, backend at %s", build(), len(photos), path, host)
 
 	err = gunim.Main(ctx, func(a *gunim.App) error {
-		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: geom.Sz(1400, 900), Root: newFullSurface(),
+		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: parseSize(o.size), Root: newFullSurface(),
 			// The photo runs under the title bar, as in marraw.
 			UnderTitleBar: true})
 		if err != nil {
@@ -187,4 +189,13 @@ func build() string {
 		return "unknown"
 	}
 	return rev[:min(7, len(rev))] + dirty
+}
+
+// parseSize reads a window's size as 1400x900, or the usual for none.
+func parseSize(s string) geom.Size {
+	var w, h float32
+	if _, err := fmt.Sscanf(s, "%gx%g", &w, &h); err != nil || w < 200 || h < 200 {
+		return geom.Sz(1400, 900)
+	}
+	return geom.Sz(w, h)
 }

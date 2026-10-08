@@ -4,6 +4,15 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
+Fixed since build b89595a
+  - Cropping no longer shows the cropped edit's sharp tiles over the
+    whole frame (the blocks in your screenshot), and holding Backspace no
+    longer shows the edit's tiles over the original.
+  - The turn buttons in the crop bar now turn the photo on screen at
+    once, animated, while the turned frame renders; the crop fades out
+    for the turn and back once the pixels come. Mirroring still waits
+    for the render.
+
 Crop and straighten (new)
   - With the develop panel open (D), press R, or click "Crop and
     straighten" in the panel's Crop section. The photo zooms out to show

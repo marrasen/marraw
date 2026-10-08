@@ -106,7 +106,9 @@ type developer struct {
 // not confirmed: its tiles would show the edit before.
 func (cu *culler) editing(id int64) bool {
 	d := &cu.dev
-	return d.open && d.id == id && d.edits != d.confirmed
+	// Cropping, the photo shows its whole frame, which has no tiles: the
+	// saved edit's are cropped.
+	return d.open && d.id == id && (d.edits != d.confirmed || cu.crop.on)
 }
 
 // tilesShowing are the tiles to show of p: of its saved edit, and none
@@ -367,12 +369,15 @@ func (cu *culler) startPreview() {
 				// Its shape, as the edit's crop and rotation give it.
 				cu.learnShape(id, size.X, size.Y)
 			}
-			if err == nil && d.open && id == d.id && id == cu.photos[cu.at].ID && flat == cu.crop.on {
+			// A whole frame turned or mirrored otherwise than the edit is now
+			// is let go: the one asked for since comes next.
+			stale := flat && (turns(params) != turns(d.params) || params.FlipH != d.params.FlipH)
+			if err == nil && d.open && id == d.id && id == cu.photos[cu.at].ID && flat == cu.crop.on && !stale {
 				d.live = img
 				what := "draft"
 				if flat {
 					what = "whole frame"
-					cu.crop.ready, cu.crop.frame = true, size
+					cu.crop.ready, cu.crop.frame, cu.crop.turn = true, size, 0
 				}
 				if full && !flat {
 					what = "full"

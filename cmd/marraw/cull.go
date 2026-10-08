@@ -466,7 +466,7 @@ func (cu *culler) state() Cull {
 	st.Original, st.WBPick = cu.original, cu.wb.on
 	if st.Crop = cu.cropView(); st.Crop != nil && st.Crop.Ready && cu.crop.frame.X > 0 {
 		// The whole frame shows, in its own shape.
-		st.Aspect = float32(cu.crop.frame.X) / float32(cu.crop.frame.Y)
+		st.Aspect = float32(cu.frameAspect())
 		st.Full = st.Crop.Frame
 		if st.Full.X <= 0 || st.Full.Y <= 0 {
 			st.Full = cu.crop.frame
@@ -474,7 +474,8 @@ func (cu *culler) state() Cull {
 	}
 	st.WBFrame, st.WBPix = cu.wb.frame, cu.wb.pix
 	if img := cu.originalShowing(p.ID); img != nil {
-		st.Img, st.Note = img, "original, before any edit"
+		// The edit's tiles are not the original's.
+		st.Img, st.Note, st.Tiles = img, "original, before any edit", nil
 	}
 	if cu.swapNow {
 		st.Live, cu.swapNow = true, false

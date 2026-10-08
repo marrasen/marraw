@@ -89,9 +89,14 @@ type cullView struct {
 	// top is the title bar's height: the photo runs under the bar, and
 	// the panel and what floats over the photo keep below it.
 	top float32
-	// crop is cropping's own, and cropIn how far its overlay is in.
+	// crop is cropping's own, cropIn how far its bar is in, cropOver how
+	// far the crop over the photo is, which fades while the frame turns,
+	// and spin how far the picture is turned on, in degrees, as the frame
+	// turns ahead of its pixels.
 	crop         cropUI
 	cropIn       *anim.Float
+	cropOver     *anim.Float
+	spin         *anim.Float
 	origIn, wbIn *anim.Float
 	labelOrig    *widget.Label
 	labelWB      *widget.Label
@@ -126,13 +131,13 @@ func newCullView(s Cull) *cullView {
 	v.wbWarn.Size, v.wbWarn.Color = readoutSize, warnInk
 	v.labelWB.Color = noteInk
 	v.wbBar = v.newWBBar()
-	v.cropIn = anim.NewFloat(0)
+	v.cropIn, v.cropOver, v.spin = anim.NewFloat(0), anim.NewFloat(0), anim.NewFloat(0)
 	v.crop.bar = v.newCropBar()
 	v.notice.Size = noteSize
 	if s.Panel {
 		v.side.Jump(1)
 	}
-	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn)
+	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -1040,9 +1045,10 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 		o := v.origin(z, v.c.Value())
 		defer p.Push(paint.Translate(geom.Pt(o.X-r.Min.X, o.Y-r.Min.Y)))()
 		defer p.Push(paint.Scale(z, r.Min))()
-		if v.cropping() && v.st.Crop.Angle != 0 {
-			// Straightening, the frame turns about its middle, here.
-			defer p.Push(paint.Rotate(float32(v.st.Crop.Angle*math.Pi/180), r.Center()))()
+		if deg := v.cropTurnDeg(); deg != 0 {
+			// Straightening, the frame turns about its middle, here, and
+			// a quarter turn turns the picture on ahead of its pixels.
+			defer p.Push(paint.Rotate(float32(deg*math.Pi/180), r.Center()))()
 		}
 		kids.At(0).Paint(p)
 	}()
@@ -1371,6 +1377,12 @@ func (q *cullPic) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, _ gunim.
 	// through another as they fade.
 	frame := r.Add(geom.Pt(q.slide*(1-k), 0))
 	base := pixelFit(frame, q.img)
+	if deg := float64(q.v.spin.Value()); math.Abs(deg) > 0.01 {
+		// Turning a quarter, the picture keeps to the frame as it turns.
+		if w, h := q.img.Size(); w > 0 && h > 0 {
+			base = spinFit(frame, float32(w)/float32(h), deg)
+		}
+	}
 	faded(p, frame, min(1, k*1.6), func() {
 		p.Image(q.img, base, paint.ImageOpts{Opacity: 1})
 		q.paintTiles(p, q.tiles, frame, q.full, 1)

@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/marrasen/gunim"
+	"github.com/marrasen/gunim/anim"
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/icon"
 	"github.com/marrasen/gunim/input"
@@ -103,6 +104,26 @@ func (v *cullView) cropShow(s, prev Cull, u *gunim.UI) {
 		v.c.Animate(geom.Pt(0.5, 0.5), widget.Settle.Get(th))
 	}
 	v.cropIn.Animate(on(now), widget.Quick.Get(th))
+	// A quarter turn: the picture turns on to the frame's new way, and
+	// once the turned frame's pixels come, they take its place where it
+	// has got to, and it goes on to rest.
+	turn, was2 := 0, 0
+	if s.Crop != nil {
+		turn = s.Crop.Turn
+	}
+	if prev.Crop != nil {
+		was2 = prev.Crop.Turn
+	}
+	if turn != was2 {
+		if turn == 0 && was2 != 0 {
+			anim.Shift(v.spin, -float32(was2)*90)
+		}
+		v.spin.Animate(float32(turn)*90, cropSpin)
+	}
+	if s.Crop == nil {
+		v.spin.Jump(0)
+	}
+	v.cropOver.Animate(on(now && turn == 0), widget.Quick.Get(th))
 	if s.Crop == nil {
 		c.hasLocal, c.dragging = false, false
 		return
@@ -115,6 +136,31 @@ func (v *cullView) cropShow(s, prev Cull, u *gunim.UI) {
 		c.angle.SetValue(float32(s.Crop.Angle), u)
 	}
 	c.degrees.Text = fmt.Sprintf("%+.1f°", s.Crop.Angle)
+}
+
+// cropSpin turns the picture a quarter, as the frame turns.
+var cropSpin = anim.Spring{Response: 0.32, Damping: 0.86}
+
+// cropTurnDeg is how far the picture is turned, in degrees: the
+// straighten, and a quarter turn under way.
+func (v *cullView) cropTurnDeg() float64 {
+	deg := float64(v.spin.Value())
+	if v.cropping() {
+		deg += v.st.Crop.Angle
+	}
+	return deg
+}
+
+// spinFit is the picture of shape aspect, width over height, turned by deg
+// degrees, as large as fits in box, about its middle.
+func spinFit(box geom.Rect, aspect float32, deg float64) geom.Rect {
+	rad := deg * math.Pi / 180
+	c, s := float32(math.Abs(math.Cos(rad))), float32(math.Abs(math.Sin(rad)))
+	w, h := aspect, float32(1)
+	bw, bh := w*c+h*s, w*s+h*c
+	k := min(box.Size().W/bw, box.Size().H/bh)
+	m := box.Center()
+	return geom.Rc(m.X-w*k/2, m.Y-h*k/2, w*k, h*k)
 }
 
 // cropping reports whether the crop shows, its frame's pixels come.
@@ -247,7 +293,24 @@ func (v *cullView) paintCrop(p *paint.Painter, box geom.Size, bar, info gunim.Ch
 	if k < 0.01 || v.st.Crop == nil {
 		return
 	}
+	func() {
+		o := v.cropOver.Value()
+		if o < 0.01 {
+			return
+		}
+		defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(o, 1)})()
+		v.paintCropRect(p, box, info)
+	}()
 	defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(k, 1)})()
+	r := v.crop.barRect
+	defer p.Push(paint.Translate(geom.Pt(0, (1-k)*24)))()
+	paintGlass(p, r, 13)
+	bar.Paint(p)
+}
+
+// paintCropRect draws the crop over the frame: the rest dimmed, its edge,
+// thirds and handles, and its pill.
+func (v *cullView) paintCropRect(p *paint.Painter, box geom.Size, info gunim.Child) {
 	cr := v.cropScreen(v.cropShown())
 	room := geom.Rc(0, 0, box.W-panelWidth*v.side.Value(), box.H-stripHeight)
 	dim := paint.Solid(color.NRGBA{R: 4, G: 6, B: 9, A: 0x9e})
@@ -293,12 +356,6 @@ func (v *cullView) paintCrop(p *paint.Painter, box geom.Size, bar, info gunim.Ch
 			info.Paint(p)
 		}()
 	}
-	func() {
-		r := v.crop.barRect
-		defer p.Push(paint.Translate(geom.Pt(0, (1-k)*24)))()
-		paintGlass(p, r, 13)
-		bar.Paint(p)
-	}()
 }
 
 // cropInfo is the crop's shape and size as its pill says them.
