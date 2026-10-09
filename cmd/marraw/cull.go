@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"log"
@@ -31,7 +32,9 @@ type (
 		// Exif is the photo's camera and exposure, in a line, for the
 		// panel's header.
 		Exif string
-		Img  *paint.Image
+		// Errors are the errors the user has not cleared.
+		Errors []ErrorNote
+		Img    *paint.Image
 		// Thumb is the photo's small picture, to show until Img comes.
 		Thumb *paint.Image
 		// Aspect is the photo's width over its height, for its frame before
@@ -178,6 +181,10 @@ type culler struct {
 	probing   int64
 	probeStop context.CancelFunc
 	tileNote  string
+	// errs are the errors the user has not cleared, and errSeq the last
+	// one's number.
+	errs   []ErrorNote
+	errSeq int
 
 	// thumbs are the small pictures of the grid and the filmstrip by
 	// photo, the last thumbKeep of them, and thumbsWanted those asked for
@@ -386,6 +393,8 @@ func (cu *culler) serve() error {
 				}
 			case DevAuto:
 				cu.devAuto(in)
+			case ErrClear:
+				cu.clearError(in)
 			case Notify:
 				cu.notify(in.Text)
 			case InfoLocate:
@@ -496,7 +505,7 @@ func (cu *culler) serve() error {
 // state is what the window shows now.
 func (cu *culler) state() Cull {
 	p := cu.photos[cu.at]
-	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Exif: exifLine(p), Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
+	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Exif: exifLine(p), Errors: cu.errs, Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
 		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p)}
 	gapAt := map[int]int{}
 	groups := gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)
@@ -808,6 +817,9 @@ func (cu *culler) scriptStep(k string) bool {
 		_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: to, Button: input.ButtonPrimary, Time: time.Now()})
 	case ok && verb == "type":
 		_ = cu.c.Input(cu.ctx, input.TextInput{Text: arg, Time: now})
+	case ok && verb == "fail":
+		// A made-up failure, to see the error tray.
+		cu.do <- func() { cu.fail(arg, errors.New("made up by the test script for "+arg)) }
 	case k == "shift+plus":
 		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyMinus, Mods: input.ModShift, Typed: true, Char: '+', Time: now})
 		_ = cu.c.Input(cu.ctx, input.TextInput{Text: "?", Time: now})

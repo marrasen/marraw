@@ -145,8 +145,12 @@ func (cu *culler) probeTiles(p marrawclient.Photo) {
 				cu.probing, cu.probeStop = 0, nil
 			}
 			if err != nil {
+				// Called off, as a step or an edit does, it is no error.
+				if !canceled(err) {
+					cu.fail("Could not show the photo at full resolution", err)
+				}
 				if cu.gen == gen {
-					cu.setTileNote("tiles: " + err.Error())
+					cu.setTileNote("")
 				}
 				return
 			}

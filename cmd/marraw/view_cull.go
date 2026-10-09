@@ -132,6 +132,8 @@ type cullView struct {
 	headName, headExif *widget.Label
 	// hudRect is where the readout is.
 	hudRect geom.Rect
+	// errors are the errors not cleared yet, in the corner.
+	errors *errorTray
 }
 
 // idleAfter is how long with no input before what floats over the photo
@@ -158,7 +160,8 @@ func newCullView(s Cull) *cullView {
 		labelOrig: widget.NewLabel("Original"), labelWB: widget.NewLabel("Click something neutral grey or white"),
 		wbRead: widget.NewLabel(""), wbWarn: widget.NewLabel(""),
 		filmIn: anim.NewFloat(1), idle: anim.NewFloat(1), lastInput: time.Now(),
-		headName: widget.NewLabel(s.Name), headExif: widget.NewLabel(s.Exif)}
+		headName: widget.NewLabel(s.Name), headExif: widget.NewLabel(s.Exif), errors: newErrorTray()}
+	v.errors.list = s.Errors
 	v.headName.Face, v.headName.Size, v.headName.MaxLines = widget.MonoFont, headNameSize, 1
 	v.headExif.Face, v.headExif.Size, v.headExif.Color, v.headExif.MaxLines = widget.MonoFont, headExifSize, mutedInkTok, 1
 	if s.Crop != nil || s.WBPick {
@@ -228,6 +231,7 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 		v.filmIn.Animate(film, panelSlide)
 	}
 	v.headName.Text, v.headExif.Text = s.Name, s.Exif
+	v.errors.set(s.Errors, u)
 	if v.idleStop == nil {
 		v.idleStop = u.After(idleAfter, v.idleCheck)
 	}
@@ -436,7 +440,7 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 // Children implements [gunim.Composite].
 func (v *cullView) Children() []gunim.Node {
 	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead, v.wbWarn, v.crop.bar, v.crop.info, v.film,
-		v.headName, v.headExif}
+		v.headName, v.headExif, v.errors}
 }
 
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
@@ -1076,6 +1080,11 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	}
 	v.crop.info.Text = v.cropInfo()
 	kids.At(9).Layout(gunim.Loose(geom.Sz(300, 40)))
+	// The errors, at the bottom right of the photo's room, above the
+	// filmstrip.
+	v.errors.corner = geom.Pt(v.openRoom().Max.X, foot-8)
+	kids.At(13).Layout(gunim.Tight(box))
+	kids.At(13).Place(geom.Point{})
 
 	return box
 }
@@ -1165,6 +1174,7 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	l, rm := kids.At(4), v.room()
 	paintNote(p, l, geom.Rc(rm.Min.X+16, v.chromeTop()+14, l.Size().W, l.Size().H), v.origIn.Value())
 	v.paintWB(p, f.Theme, kids.At(5), kids.At(6), kids.At(7))
+	kids.At(13).Paint(p)
 }
 
 // markPlace is where the photo's marks are: its flags and stars, at the

@@ -24,6 +24,8 @@ import (
 // photo dims. Enter or a double click opens the cull view, the picture
 // growing out of its tile.
 type gridView struct {
+	// errors are the errors not cleared yet, in the corner.
+	errors *errorTray
 	st     GridState
 	grid   *widget.TileGrid
 	head   *gridHead
@@ -66,7 +68,7 @@ const (
 func cellSize(w float32) geom.Size { return geom.Sz(w, w*0.78+captionHeight) }
 
 func newGridView(GridState) *gridView {
-	v := &gridView{thumbs: map[int]*paint.Image{}, tiles: map[int]*photoTile{}, head: newGridHead(), rail: newRailView(),
+	v := &gridView{errors: newErrorTray(), thumbs: map[int]*paint.Image{}, tiles: map[int]*photoTile{}, head: newGridHead(), rail: newRailView(),
 		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0),
 		empty: widget.NewLabel("No photos match the filter"), noneIn: anim.NewFloat(0)}
 	v.empty.Color = noteInk
@@ -313,7 +315,7 @@ func (v *gridView) newTile(i int) gunim.Node {
 
 // Children implements [gunim.Composite].
 func (v *gridView) Children() []gunim.Node {
-	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.bar, v.empty}
+	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.bar, v.empty, v.errors}
 }
 
 // Step implements [gunim.Animator]: the note's coming and going.
@@ -425,8 +427,14 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	empty := kids.At(5)
 	es := empty.Layout(gunim.Loose(geom.Sz(w, 40)))
 	empty.Place(geom.Pt(railWidth+w/2-es.W/2, gridTop+top+80))
+	v.errors.corner = geom.Pt(box.W-16, box.H-16)
+	kids.At(6).Layout(gunim.Tight(box))
+	kids.At(6).Place(geom.Point{})
 	return box
 }
+
+// errorsIn shows the errors not cleared yet.
+func (v *gridView) errorsIn(e ErrorsIn, u *gunim.UI) { v.errors.set(e.List, u) }
 
 // Paint implements [gunim.Node].
 func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
@@ -444,6 +452,7 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 			e.Paint(p)
 		}()
 	}
+	kids.At(6).Paint(p)
 }
 
 // photoTile is one photo in the grid: its picture, fitted, as a hero, and

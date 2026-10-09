@@ -151,8 +151,7 @@ func (cu *culler) devAuto(in DevAuto) {
 		select {
 		case cu.do <- func() {
 			if err != nil || res == nil {
-				log.Printf("develop: auto: %v", err)
-				cu.tell("Auto did not work")
+				cu.fail("Auto did not work", orNoAnswer(err))
 				return
 			}
 			if !d.open || d.id != id {

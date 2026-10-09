@@ -197,8 +197,7 @@ func (cu *culler) maskAI(in MaskAI) {
 		case cu.do <- func() {
 			cu.masks.aiBusy = ""
 			if err != nil || res == nil {
-				log.Printf("ai mask: %v", err)
-				cu.tell(whyNot(err))
+				cu.fail("The AI mask could not be made", orNoAnswer(err))
 				cu.masksChanged()
 				return
 			}

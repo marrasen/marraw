@@ -33,18 +33,22 @@ const (
 	stripGap     = 4
 	stripGroupSp = 8
 	stripPadX    = 14
-	stripPadY    = 10
+	stripPadY    = 12
 	stripHeadH   = 15
 	stripBottom  = 16
-	stripCurrent = 1.22
 	stripPillW   = 16
+	// stripCurrent is how large the photo showing grows: more than
+	// marraw's 1.22, to stand out. The room around the photos, stripPadY
+	// and stripHeadGap under the groups' headings, holds it grown.
+	stripCurrent = 1.5
+	stripHeadGap = 12
 	// stripBoxH is the strip's height.
-	stripBoxH = stripPadY*2 + stripHeadH + 5 + stripThumbH
+	stripBoxH = stripPadY*2 + stripHeadH + stripHeadGap + stripThumbH
 )
 
 // The filmstrip's inks, as marraw's.
 var (
-	stripFill    = color.NRGBA{R: 10, G: 12, B: 16, A: 0x99}
+	stripFill    = color.NRGBA{R: 10, G: 12, B: 16, A: 0x66}
 	stripEdge    = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x1f}
 	stripRing    = color.NRGBA{R: 0x7c, G: 0x83, B: 0xff, A: 0xff}
 	stripMono    = theme.Length("marraw.strip.mono", 10)
@@ -161,7 +165,7 @@ func (s *filmstrip) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 	x := float32(0)
 	y := float32(stripPadY)
 	if grouped {
-		y += stripHeadH + 5
+		y += stripHeadH + stripHeadGap
 	}
 	type headAt struct {
 		x   float32
@@ -191,9 +195,15 @@ func (s *filmstrip) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 			}
 			heads = append(heads, headAt{x: x, g: g, gap: gapX})
 		}
-		w := stripW(t)
-		s.laid[t.Index] = geom.Rc(x, y, w, stripThumbH)
-		x += w + stripGap
+		// The photo showing makes room for itself as it grows, its
+		// neighbours gliding aside: it stays its own size here, in the
+		// middle of its room, and is drawn grown.
+		w, k := stripW(t), float32(1)
+		if g := s.grow[t.Index]; g != nil {
+			k = g.Value()
+		}
+		s.laid[t.Index] = geom.Rc(x+(w*k-w)/2, y, w, stripThumbH)
+		x += w*k + stripGap
 	}
 	content := max(0, x-stripGap)
 	// The groups' count at the left, where the folder is grouped.
@@ -267,7 +277,7 @@ func (s *filmstrip) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 		if h.gap >= 0 && sh.gap.Text != "" {
 			// Written on its side, in the pill between the groups: placed
 			// about the pill's middle, and turned about it as it is drawn.
-			c := geom.Pt(s.left+h.gap-off+3+(stripPillW)/2, stripPadY+stripHeadH+5+stripThumbH/2)
+			c := geom.Pt(s.left+h.gap-off+3+(stripPillW)/2, stripPadY+stripHeadH+stripHeadGap+stripThumbH/2)
 			children[sh.gap].Place(geom.Pt(c.X-gs.W/2, c.Y-gs.H/2))
 			s.gapAt[sh.gap] = c
 		} else {
@@ -395,7 +405,7 @@ func (s *filmstrip) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids g
 		}
 	}
 	for _, x := range s.gapPills {
-		pill := geom.Rc(x+3, stripPadY+stripHeadH+5-2, stripPillW-6+6, stripThumbH+4)
+		pill := geom.Rc(x+3, stripPadY+stripHeadH+stripHeadGap-2, stripPillW-6+6, stripThumbH+4)
 		p.RRect(pill, 4, paint.Solid(color.NRGBA{R: 0x7c, G: 0x83, B: 0xff, A: 0x26}))
 		p.RRectStroke(pill, 4, paint.Fill{}, paint.Stroke{Width: 1, Color: color.NRGBA{R: 0x7c, G: 0x83, B: 0xff, A: 0x4c}})
 	}

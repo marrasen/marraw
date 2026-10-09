@@ -11,9 +11,9 @@ import (
 // that blurs what is behind it, with a hairline edge and a deep, soft
 // shadow.
 var (
-	glassFill   = color.NRGBA{R: 12, G: 14, B: 18, A: 0xae}
+	glassFill   = color.NRGBA{R: 12, G: 14, B: 18, A: 0x73}
 	glassEdge   = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x1f}
-	glassShadow = paint.Shadow{Offset: geom.Pt(0, 24), Blur: 42, Spread: -18, Color: color.NRGBA{A: 0xb3}}
+	glassShadow = paint.Shadow{Offset: geom.Pt(0, 24), Blur: 42, Spread: -18, Color: color.NRGBA{A: 0xb3}, Outside: true}
 	glassBlur   = float32(18)
 )
 

@@ -302,8 +302,7 @@ func (cu *culler) presetApply(in PresetApply) {
 		select {
 		case cu.do <- func() {
 			if err != nil {
-				log.Printf("preset: %v", err)
-				cu.tell("The preset could not be applied")
+				cu.fail("The preset could not be applied", err)
 				return
 			}
 			if cu.presetGen != gen || d.id != id {

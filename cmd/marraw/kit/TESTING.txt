@@ -4,7 +4,22 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
-More of marraw's panel and chrome (new)
+Errors, glass and the filmstrip (new in this build)
+  - The readout at the bottom left no longer shows errors. Moving on
+    from a photo while its full resolution loads was never an error and
+    now says nothing.
+  - Real failures (an export, a preset, Auto, an AI mask, deleting, the
+    full resolution) come as cards at the bottom right, over the grid
+    and over the photo. They stay until you clear them: the cross on
+    each, or Clear all over two or more. The same failure again counts
+    up (x2) rather than adding a card.
+  - The glass is clearer: the panel, the filmstrip and the other cards
+    show more of the photo through them. Their shadows no longer darken
+    what shows through.
+  - The photo showing in the filmstrip grows half as large again, and
+    its neighbours move aside for it.
+
+More of marraw's panel and chrome
   - The panel's header, as marraw's: the photo's name with its flag and
     reject in squares at the right, its stars under it, and its camera
     and exposure. Click them to mark the photo. While the panel is open

@@ -1,8 +1,8 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"log"
 	"path/filepath"
 	"strings"
 
@@ -168,8 +168,7 @@ func (cu *culler) exportGo(a ExportGo) {
 		select {
 		case cu.do <- func() {
 			if err != nil || ref == nil {
-				log.Printf("export: %v", err)
-				cu.notify("The export could not start")
+				cu.fail("The export could not start", orNoAnswer(err))
 				return
 			}
 			cu.exports[ref.TaskID] = exportRun{dest: a.Dest, count: len(ids)}
@@ -203,11 +202,11 @@ func (cu *culler) tasksChanged(ts []marrawclient.SharedTaskState) {
 			cu.notify(fmt.Sprintf("Exported %d %s to %s", run.count, map[bool]string{false: "photos", true: "photo"}[run.count == 1], run.dest))
 		case "failed":
 			delete(cu.exports, t.ID)
-			msg := "The export failed"
-			if t.Error != "" {
-				msg += ": " + t.Error
+			why := t.Error
+			if why == "" {
+				why = "no reason given"
 			}
-			cu.notify(msg)
+			cu.fail("The export failed", errors.New(why))
 		default:
 			cu.taskProgress(t.ID, t.Current, t.Total)
 		}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/marrasen/gunim"
@@ -92,8 +91,7 @@ func (cu *culler) confirmed(a Confirmed) {
 		select {
 		case cu.do <- func() {
 			if err != nil {
-				log.Printf("delete: %v", err)
-				cu.notify("The photos could not be deleted")
+				cu.fail("The photos could not be deleted", err)
 				return
 			}
 			cu.removed(ids)
