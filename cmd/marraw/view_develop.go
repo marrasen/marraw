@@ -259,13 +259,27 @@ type devSection struct {
 	choices []string
 	auto    []string
 	open    bool
+	// tab is the panel's tab the section is in, and bare says it shows
+	// with no heading, the only section of its tab.
+	tab  int
+	bare bool
 }
+
+// devTabs are the panel's tabs, as marraw's develop drawer has them.
+var devTabs = []string{"Develop", "Curve", "Local", "Presets", "Info"}
+
+// The tabs, by name.
+const (
+	tabDevelop = iota
+	tabCurve
+	tabLocal
+	tabPresets
+	tabInfo
+)
 
 // The panel's sections, in order, as marraw's develop panel has them.
 var devSections = []devSection{
-	{title: "Presets", open: false},
-	{title: "Crop", open: true},
-	{title: "Masks", open: true},
+	{title: "Geometry", open: true},
 	{title: "Tone", keys: []string{"expEV", "expPreserve", "bright", "gamma", "shadow", "contrast", "toneHighlights", "toneShadows", "whites", "blacks"}, auto: []string{"tone"}, open: true},
 	{title: "Presence", keys: []string{"texture", "clarity", "dehaze"}, open: true},
 	{title: "White balance", keys: []string{"wbTemp", "wbKelvin", "wbTint"}, choices: []string{"wbMode"}, open: true},
@@ -274,9 +288,12 @@ var devSections = []devSection{
 	{title: "Effects", keys: []string{"vignette"}, open: true},
 	{title: "Detail", keys: []string{"sharpen", "nrThreshold", "medPasses", "caRed", "caBlue"}, choices: []string{"highlight", "fbddNoiseRd", "demosaic"}, open: false},
 	{title: "Lens", keys: []string{"lensDistortion", "lensVignetting", "lensCA"}, choices: []string{"lensMode"}, open: false},
-	{title: "Tone curve", open: true},
-	{title: "History", open: false},
-	{title: "Info", open: false},
+	{title: "Tone curve", open: true, tab: tabCurve, bare: true},
+	{title: "Masks", open: true, tab: tabLocal, bare: true},
+	{title: "Auto", open: true, tab: tabPresets},
+	{title: "Presets", open: true, tab: tabPresets},
+	{title: "History", open: true, tab: tabPresets},
+	{title: "Info", open: true, tab: tabInfo, bare: true},
 }
 
 // sectionsOpen are the sections open, by title, kept as the panel comes
@@ -311,10 +328,12 @@ var (
 // one mode has folds in and out as the mode changes.
 type developView struct {
 	anim.Group
-	st      DevelopState
-	shown   bool
-	in      *anim.Float
-	hist    *widget.Histogram
+	st    DevelopState
+	shown bool
+	in    *anim.Float
+	// hists are the histogram at the head of each tab that has one, as
+	// marraw's: Develop, Curve and Local.
+	hists   []*widget.Histogram
 	rows    map[string]*widget.SliderRow
 	choices map[string]*widget.Segmented
 	// folds hold the rows a mode shows or not, by key.
@@ -343,15 +362,17 @@ type developView struct {
 	// presets are the presets' cards, and masks the masks.
 	presets *presetGrid
 	masks   *maskPanel
+	// tabs are the panel's tabs.
+	tabs *widget.Tabs
 }
 
 func newDevelopView(s DevelopState) *developView {
-	v := &developView{in: anim.NewFloat(0), hist: widget.NewHistogram(), rows: map[string]*widget.SliderRow{},
+	v := &developView{in: anim.NewFloat(0), rows: map[string]*widget.SliderRow{},
 		choices: map[string]*widget.Segmented{}, folds: map[string]*widget.Fold{},
 		choiceRows: map[string]*labeled{}, sectionOf: map[string]int{}, nodeOf: map[string]gunim.Node{},
 		curve: widget.NewToneCurve(), channel: widget.NewSegmented(curveChannels...)}
 	v.Add(v.in)
-	kids := []gunim.Node{v.hist}
+	pages := make([][]gunim.Node, len(devTabs))
 	for si, sec := range devSections {
 		var body []gunim.Node
 		for _, key := range sec.choices {
@@ -377,13 +398,24 @@ func newDevelopView(s DevelopState) *developView {
 			v.lensNote = newSmallLabel("")
 			v.lensNote.Color, v.lensNote.MaxLines = noteInk, 2
 			body = append([]gunim.Node{v.lensNote}, body...)
-		case "Crop":
+		case "Geometry":
 			b := widget.NewButton("Crop and straighten   R")
 			b.Icon, b.KeepFocus, b.OnClick = icon.Crop, true, widget.Sends(ToggleCrop{})
 			body = append(body, b)
 		case "Masks":
 			v.masks = newMaskPanel(v)
 			body = append(body, v.masks)
+		case "Auto":
+			var bs []gunim.Node
+			for _, a := range []struct {
+				label    string
+				sections []string
+			}{{"Everything", []string{"all"}}, {"Tone", []string{"tone"}}, {"Colour", []string{"wb", "color"}}} {
+				b := widget.NewButton(a.label)
+				b.KeepFocus, b.OnClick = true, widget.Sends(DevAuto{Sections: a.sections})
+				bs = append(bs, b)
+			}
+			body = append(body, widget.Row(bs...))
 		case "Presets":
 			v.presets = newPresetGrid(v)
 			body = append(body, v.presets)
@@ -409,22 +441,40 @@ func newDevelopView(s DevelopState) *developView {
 			}
 			body = append(body, v.channel, v.curve)
 		}
+		col := widget.Column(body...)
+		if sec.bare {
+			// The only section of its tab: open, with no heading.
+			pages[sec.tab] = append(pages[sec.tab], col)
+			v.heads = append(v.heads, nil)
+			v.folds2 = append(v.folds2, nil)
+			continue
+		}
 		open, ok := sectionsOpen[sec.title]
 		if !ok {
 			open = sec.open
 		}
-		col := widget.Column(body...)
 		fold := widget.NewFold(widget.NewPad(col), open)
 		fold.Children()[0].(*widget.Pad).Padding = theme.Insets("marraw.section.pad", geom.Insets{Bottom: 6})
 		h := newDevHeading(sec, fold)
 		v.heads = append(v.heads, h)
 		v.folds2 = append(v.folds2, fold)
-		kids = append(kids, h, fold)
+		pages[sec.tab] = append(pages[sec.tab], h, fold)
 	}
-	col := widget.Column(kids...)
-	pad := widget.NewPad(col)
-	pad.Padding = developInset
-	v.body = widget.NewScroll(pad)
+	var scrolls []gunim.Node
+	for i, nodes := range pages {
+		if i == tabDevelop || i == tabCurve || i == tabLocal {
+			h := widget.NewHistogram()
+			v.hists = append(v.hists, h)
+			hp := widget.NewPad(h)
+			hp.Padding = theme.Insets("marraw.develop.histpad", geom.Insets{Bottom: 8})
+			nodes = append([]gunim.Node{hp}, nodes...)
+		}
+		pad := widget.NewPad(widget.Column(nodes...))
+		pad.Padding = developInset
+		scrolls = append(scrolls, widget.NewScroll(pad))
+	}
+	v.tabs = widget.NewTabs(devTabs, scrolls...)
+	v.tabs.OnChange = func(i int, _ *gunim.UI) gunim.Intent { return DevTab{Index: i} }
 	return v
 }
 
@@ -454,6 +504,9 @@ func (v *developView) choiceRow(key string) gunim.Node {
 	if key == "wbMode" {
 		// The modes have the row, and the eyedropper's button ends it.
 		l.wide, l.label.Text = true, ""
+		// Four modes and the button only just fit: "As shot" keeps its
+		// name with less room either side of each.
+		l.child = widget.NewThemed(seg, marrawTheme().With(theme.Set(widget.SegmentedPadding, 7)))
 		v.pipette = widget.NewIconButton(icon.Pipette, "White balance eyedropper (W)")
 		v.pipette.KeepFocus = true
 		v.pipette.OnClick = func(*gunim.UI) gunim.Intent { return DevWBPick{On: !v.st.WBPick} }
@@ -556,7 +609,12 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 	v.rows["saturation"].Slider.Disabled = p.BW
 	v.showMixer(first, u)
 	for _, h := range v.heads {
-		h.setChanged(sectionChanged(h.sec, s), u)
+		if h != nil {
+			h.setChanged(sectionChanged(h.sec, s), u)
+		}
+	}
+	if v.tabs.Selected() != s.Tab {
+		v.tabs.SetSelected(s.Tab, u)
 	}
 	v.channel.SetSelected(s.Channel, u)
 	v.curve.Color = curveInk[s.Channel]
@@ -652,10 +710,36 @@ func newInfoRows() *infoRows {
 		name.Color = noteInk
 		value.MaxLines = 2
 		r.names, r.values = append(r.names, name), append(r.values, value)
-		rows = append(rows, &labeled{label: name, child: value, active: anim.NewFloat(0)})
+		rows = append(rows, &infoRow{name: name, value: value})
 	}
 	r.col = widget.Column(rows...)
 	return r
+}
+
+// infoRow is a name and its value on one line, the value wrapping under
+// itself when long.
+type infoRow struct {
+	name, value *widget.Label
+}
+
+// Children implements [gunim.Composite].
+func (r *infoRow) Children() []gunim.Node { return []gunim.Node{r.name, r.value} }
+
+// Layout implements [gunim.Node].
+func (r *infoRow) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	const nameW, pad = 120, 6
+	w := c.Max.W
+	ns := kids.At(0).Layout(gunim.Loose(geom.Sz(nameW, 40)))
+	vs := kids.At(1).Layout(gunim.Loose(geom.Sz(max(0, w-nameW), 80)))
+	kids.At(0).Place(geom.Pt(0, pad))
+	kids.At(1).Place(geom.Pt(nameW, pad))
+	return geom.Sz(w, max(ns.H, vs.H)+2*pad)
+}
+
+// Paint implements [gunim.Node].
+func (r *infoRow) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
+	kids.At(1).Paint(p)
 }
 
 // show says what photo in is.
@@ -728,7 +812,12 @@ func (v *developView) showActive(key string, u *gunim.UI) {
 		return
 	}
 	n := v.nodeOf[key]
-	if f := v.folds2[si]; !f.Open() {
+	// The controls the keys walk are in the Develop tab.
+	if devSections[si].tab != v.tabs.Selected() {
+		v.tabs.SetSelected(devSections[si].tab, u)
+		u.After(foldTime, func(u *gunim.UI) { u.Reveal(n) })
+	}
+	if f := v.folds2[si]; f != nil && !f.Open() {
 		v.heads[si].setOpen(true, u)
 		// Once it has opened.
 		u.After(foldTime, func(u *gunim.UI) { u.Reveal(n) })
@@ -780,7 +869,11 @@ func points(c []marrawclient.CurvePoint) []geom.Point {
 }
 
 // histIn shows a new histogram.
-func (v *developView) histIn(h DevHist, u *gunim.UI) { v.hist.SetCounts(h.Counts, u) }
+func (v *developView) histIn(h DevHist, u *gunim.UI) {
+	for _, hi := range v.hists {
+		hi.SetCounts(h.Counts, u)
+	}
+}
 
 // Transition implements [gunim.Transitioner]: it slides in from the
 // right, and out again.
@@ -796,25 +889,29 @@ func (v *developView) Transition(p gunim.Presence, _ gunim.Frame) bool {
 }
 
 // Children implements [gunim.Composite].
-func (v *developView) Children() []gunim.Node { return []gunim.Node{v.body} }
+func (v *developView) Children() []gunim.Node { return []gunim.Node{v.tabs} }
 
-// Layout implements [gunim.Node].
+// Layout implements [gunim.Node]: the tabs fill the panel, their pages
+// scrolling under the tab bar.
 func (v *developView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
-	k := kids.At(0)
-	k.Layout(gunim.Tight(c.Max))
-	k.Place(geom.Point{})
+	tabs := kids.At(0)
+	tabs.Layout(gunim.Tight(geom.Sz(c.Max.W, max(0, c.Max.H-6))))
+	tabs.Place(geom.Pt(0, 6))
 	return c.Max
 }
 
-// Paint implements [gunim.Node].
+// Paint implements [gunim.Node]: a card of glass, as marraw's develop
+// drawer, the photo showing through it blurred; it slides in from the
+// right.
 func (v *developView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
 	in := min(max(v.in.Value(), 0), 1)
 	if in < 0.001 {
 		return
 	}
-	defer p.Push(paint.Translate(geom.Pt((1-in)*box.W, 0)))()
-	p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(panelFill))
-	p.RRect(geom.Rc(0, 0, 1, box.H), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x10}))
+	defer p.Push(paint.Translate(geom.Pt((1-in)*(box.W+32), 0)))()
+	r := geom.Rect{Max: box.Point()}
+	paintGlass(p, r, 13)
+	defer p.Layer(paint.LayerOpts{Bounds: r, Opacity: 1, Clip: true, Radius: 13})()
 	kids.At(0).Paint(p)
 }
 
@@ -849,10 +946,6 @@ func newDevHeading(sec devSection, fold *widget.Fold) *devHeading {
 // setOpen folds the section open or shut, the chevron turning with it.
 func (h *devHeading) setOpen(open bool, u *gunim.UI) {
 	h.fold.SetOpen(open, u)
-	if h.sec.title == "Presets" && open != sectionsOpen[h.sec.title] {
-		// Their small pictures render only while they show.
-		u.Send(h, PresetsShown{On: open})
-	}
 	sectionsOpen[h.sec.title] = open
 	h.turn.Animate(map[bool]float32{false: 0, true: 1}[open], widget.Quick.Get(u.Theme()))
 	u.Invalidate()

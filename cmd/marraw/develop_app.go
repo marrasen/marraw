@@ -43,6 +43,8 @@ type (
 		Brush     BrushTool
 		RangePick bool
 		AIBusy    string
+		// Tab is the panel's tab showing.
+		Tab int
 	}
 	// DevHist is the histogram of the pixels showing.
 	DevHist struct{ Counts [3][256]uint32 }
@@ -142,6 +144,7 @@ func (cu *culler) developState() DevelopState {
 	st.History, st.HistoryAt = cu.historyOfShowing()
 	st.Presets = cu.presetCards()
 	st.MaskSel, st.Brush, st.RangePick, st.AIBusy = cu.masks.sel, cu.masks.brush, cu.masks.rangePick, cu.masks.aiBusy
+	st.Tab = cu.devTab
 	if st.MaskSel >= len(d.params.Masks) {
 		st.MaskSel = -1
 	}

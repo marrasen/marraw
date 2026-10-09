@@ -41,6 +41,11 @@ func paletteEntries(at paletteFor) []paletteEntry {
 	if at.culling {
 		add("Back to the grid", "Esc", LeaveCull{}, "library", "grid")
 		add("Develop panel", "D", ToggleDevelop{}, "edit", "adjust")
+		add("Develop tab", "Tab", DevTab{Index: tabDevelop, Open: true}, "panel")
+		add("Curve tab", "", DevTab{Index: tabCurve, Open: true}, "panel", "tone curve")
+		add("Local tab (masks)", "", DevTab{Index: tabLocal, Open: true}, "panel", "mask")
+		add("Presets tab", "", DevTab{Index: tabPresets, Open: true}, "panel")
+		add("Info tab", "", DevTab{Index: tabInfo, Open: true}, "panel", "metadata", "exif")
 	} else if at.cursor >= 0 {
 		add("Open in the cull view", "Enter", OpenCull{Index: at.cursor}, "loupe", "cull")
 	}
@@ -162,6 +167,7 @@ var shortcutGroups = []struct {
 		{"Up / Down", "Choose a control"}, {"+ / − (Shift)", "Step it (further)"},
 		{"E B T I K G S C A V O H N M", "Jump to a control"}, {"W", "White balance eyedropper"},
 		{"Ctrl+U (Shift, Alt)", "Auto tone (colour, everything)"}, {"Esc", "Let the control go"},
+		{"Tab / Shift+Tab", "Next / previous panel tab"},
 		{"R", "Crop and straighten; Enter, Esc or R again to finish"},
 		{"Ctrl+1–9 / Ctrl+Shift+1–9", "Creative preset / your own preset, by its place"},
 	}},

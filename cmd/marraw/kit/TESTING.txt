@@ -4,8 +4,27 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
-Masks (new, with the develop panel open)
-  - A Masks section in the panel, as marraw's Local tab: Linear, Radial,
+The panel and the filmstrip float on glass (new)
+  - The develop panel (D) is a card of frosted glass at the right, the
+    photo showing through it blurred, as marraw's drawer. It slides in
+    and out, and slides away for the crop and the eyedropper.
+  - Tabs along its top: Develop, Curve, Local (the masks), Presets
+    (Auto everything/tone/colour, the presets, History) and Info. Click
+    one, or press Tab and Shift+Tab to walk them. The command palette
+    (Ctrl+K) has each tab too, and opens the panel for it.
+  - The histogram heads Develop, Curve and Local, as in marraw.
+  - The stars, flags and navigator keep clear of the panel.
+  - The filmstrip at the foot is glass too, centred in the room the panel
+    leaves, and as wide as that room: at 4K it holds as many photos as
+    fit, not eight. The current photo grows larger, with a ring; the strip
+    glides to keep it in the middle. Groups have their times and count
+    above them (a group's heading stays at the strip's left edge while
+    the group shows), with the time gap on its side between groups, and
+    the number of groups at the left. Click a photo to go to it; the
+    wheel scrolls the strip.
+
+Masks (with the develop panel open)
+  - Masks are on the panel's Local tab, as marraw's: Linear, Radial,
     Brush and Range add a mask; Subject, Background, Depth and Tilt shift
     add an AI mask (the first time asks to download the model).
   - Each mask has a row: click it to choose it or let it go. Its pills:
@@ -41,7 +60,7 @@ Fixed since build b89595a
 
 Crop and straighten (new)
   - With the develop panel open (D), press R, or click "Crop and
-    straighten" in the panel's Crop section. The photo zooms out to show
+    straighten" in the panel's Geometry section. The photo zooms out to show
     its whole frame, with the crop over it: the rest dimmed, thirds, and
     handles at the corners and the sides' middles. The crop's shape and
     size in pixels show in its middle.
@@ -54,7 +73,7 @@ Crop and straighten (new)
   - Each drag is a step in History; Ctrl+Z undoes it.
 
 Presets (new)
-  - A Presets section at the top of the panel. "Creative" holds marraw's
+  - A Presets section on the panel's Presets tab. "Creative" holds marraw's
     six (Cinematic, Faded film, Noir B&W, Punchy, Moody, Golden hour);
     "My presets" your own, shared with marraw.
   - Each card shows the photo as the preset would make it. Rest the
@@ -65,7 +84,7 @@ Presets (new)
     deletes them.
   - Ctrl+1 to 9 apply a creative preset by its place, Ctrl+Shift+1 to 9
     one of your own.
-  - The pictures render only while the section is open.
+  - The pictures render only while the Presets tab shows.
 
 Bursts and culling aids (new)
   - Burst frames have a badge at the top left of their picture: "2/4",

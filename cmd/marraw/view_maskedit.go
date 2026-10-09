@@ -149,7 +149,7 @@ func (v *cullView) maskHandle(e input.Event, u *gunim.UI) bool {
 	ms := v.st.Masks
 	mu := &v.mask
 	inPhoto := func(p geom.Point) bool {
-		return !v.inPanel(p) && p.Y < v.box.H-stripHeight && !v.marksRect().Contains(p)
+		return !v.inPanel(p) && !v.stripRect.Contains(p) && !v.marksRect().Contains(p)
 	}
 	switch e := e.(type) {
 	case input.PointerMove:

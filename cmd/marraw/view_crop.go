@@ -254,7 +254,7 @@ func (v *cullView) cropHandle(e input.Event, u *gunim.UI) bool {
 	asp := float64(v.full().W / max(v.full().H, 1))
 	switch e := e.(type) {
 	case input.PointerDown:
-		if e.Button != input.ButtonPrimary || v.inPanel(e.Pos) || e.Pos.Y >= v.box.H-stripHeight || c.barRect.Contains(e.Pos) {
+		if e.Button != input.ButtonPrimary || v.inPanel(e.Pos) || v.stripRect.Contains(e.Pos) || c.barRect.Contains(e.Pos) {
 			return false
 		}
 		g := v.gripAt(e.Pos)
@@ -312,7 +312,7 @@ func (v *cullView) paintCrop(p *paint.Painter, box geom.Size, bar, info gunim.Ch
 // thirds and handles, and its pill.
 func (v *cullView) paintCropRect(p *paint.Painter, box geom.Size, info gunim.Child) {
 	cr := v.cropScreen(v.cropShown())
-	room := geom.Rc(0, 0, box.W-panelWidth*v.side.Value(), box.H-stripHeight)
+	room := geom.Rect{Max: box.Point()}
 	dim := paint.Solid(color.NRGBA{R: 4, G: 6, B: 9, A: 0x9e})
 	p.RRect(geom.Rc(room.Min.X, room.Min.Y, room.Size().W, max(0, cr.Min.Y-room.Min.Y)), 0, dim)
 	p.RRect(geom.Rc(room.Min.X, cr.Max.Y, room.Size().W, max(0, room.Max.Y-cr.Max.Y)), 0, dim)

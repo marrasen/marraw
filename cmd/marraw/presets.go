@@ -561,3 +561,24 @@ func (cu *culler) loadPresetThumbs() {
 		}
 	}()
 }
+
+// DevTab shows the panel's tab at Index, or By tabs on from the one
+// showing, as Tab and Shift+Tab do.
+type DevTab struct {
+	Index, By int
+	Open      bool // opens the panel first, if it is shut
+}
+
+// showTab shows the panel's tab i: the presets' small pictures render
+// while theirs shows.
+func (cu *culler) showTab(i int) {
+	if i < 0 || i >= len(devTabs) || i == cu.devTab {
+		return
+	}
+	cu.devTab = i
+	cu.presetsShown = i == tabPresets
+	cu.loadPresetThumbs()
+	if cu.dev.mounted {
+		_ = cu.c.Update("develop", cu.developState())
+	}
+}

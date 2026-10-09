@@ -62,6 +62,10 @@ type (
 		NoticeSeq int
 		// Aids are the photo's culling aids.
 		Aids Aids
+		// Groups are the time-gap groups the filmstrip shows of, and
+		// GroupCount how many the folder has, none where it is not grouped.
+		Groups     []StripGroup
+		GroupCount int
 		// Crop is the crop under way, or nil, and Masks the masks being
 		// worked on, or nil.
 		Crop  *CropView
@@ -201,8 +205,10 @@ type culler struct {
 	aids aidsOf
 	// presetGen counts the presets laid or shown, so a late one is let go.
 	presetGen int
-	// masks are the develop panel's masks: the one chosen, the brush.
-	masks maskState
+	// masks are the develop panel's masks: the one chosen, the brush; and
+	// devTab is the panel's tab showing.
+	masks  maskState
+	devTab int
 	// crop is cropping, while it goes on, and presetsShown says the
 	// panel's presets show, for their small pictures to render.
 	crop         cropMode
@@ -238,7 +244,7 @@ type culler struct {
 
 // stripReach is how many photos the filmstrip shows on each side of the
 // one showing.
-const stripReach = 7
+const stripReach = 80
 
 // arrival is a rendition decoded for photo at index, in generation gen.
 type arrival struct {
@@ -362,7 +368,19 @@ func (cu *culler) serve() error {
 			case DevNudge:
 				cu.devNudge(in)
 			case DevPick:
+				if in.Key != "" && cu.devTab != tabDevelop {
+					cu.showTab(tabDevelop)
+				}
 				cu.setActive(in.Key)
+			case DevTab:
+				if in.Open && !cu.dev.open {
+					cu.toggleDevelop()
+				}
+				if in.By != 0 {
+					cu.showTab((cu.devTab + in.By + len(devTabs)) % len(devTabs))
+				} else {
+					cu.showTab(in.Index)
+				}
 			case DevAuto:
 				cu.devAuto(in)
 			case EditCopy:
@@ -474,11 +492,22 @@ func (cu *culler) state() Cull {
 	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
 		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p)}
 	gapAt := map[int]int{}
-	for k, g := range gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort) {
+	groups := gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)
+	days := spansDays(groups)
+	lo, hi := max(0, cu.at-stripReach), min(len(cu.photos)-1, cu.at+stripReach)
+	for k, g := range groups {
 		if k > 0 {
 			gapAt[g.Start] = g.GapBefore
 		}
+		if g.Start+g.Count-1 >= lo && g.Start <= hi {
+			sg := StripGroup{Start: g.Start, Count: g.Count, Label: rangeLabel(g, days)}
+			if g.GapBefore >= 0 {
+				sg.Gap = gapLabel(g.GapBefore, cu.libView.Sort == "captureDesc")
+			}
+			st.Groups = append(st.Groups, sg)
+		}
 	}
+	st.GroupCount = len(groups)
 	for i := max(0, cu.at-stripReach); i <= min(len(cu.photos)-1, cu.at+stripReach); i++ {
 		q := cu.photos[i]
 		gap, ok := gapAt[i]

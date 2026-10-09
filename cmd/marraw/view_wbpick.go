@@ -83,7 +83,7 @@ func (*divider) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, _ gunim.Ch
 func (v *cullView) wbHover(p geom.Point) {
 	v.wbAt = p
 	at, ok := v.photoPoint(p)
-	v.wbOver = v.st.WBPick && ok && p.Y < v.box.H-stripHeight && !v.inPanel(p) && !v.wbBarRect.Contains(p)
+	v.wbOver = v.st.WBPick && ok && !v.stripRect.Contains(p) && !v.inPanel(p) && !v.wbBarRect.Contains(p)
 	if !v.wbOver || v.st.WBPix == nil {
 		v.wbRead.Text, v.wbWarn.Text = "", ""
 		return
