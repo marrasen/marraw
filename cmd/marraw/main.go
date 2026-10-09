@@ -50,7 +50,7 @@ import (
 )
 
 func main() {
-	addLibrary := flag.String("add-library", "", "add this folder to the library as a library folder, its subfolders shoots, as marraw's Add library folder does, unless it is there")
+	addLibrary := flag.String("add-library", "", "add this folder to the library: as a library folder, its subfolders shoots, as marraw's Add library folder does, or as a shoot where its photos are in it")
 	folder := flag.String("folder", "", "the folder of photos to open; without it, the library opens, to choose one")
 	connect := flag.String("connect", "", "another marraw to cull on, as host:port; by default this program runs its own backend")
 	token := flag.String("token", "", "the token for -connect")

@@ -220,6 +220,13 @@ func turnCrop(p marrawclient.Params, cw bool) marrawclient.Params {
 		}
 		out.CropW, out.CropH = p.CropH, p.CropW
 	}
+	// The masks keep to what they cover: a clockwise turn takes x, y to
+	// 1-y, x.
+	if cw {
+		out.Masks = remapMasks(p.Masks, func(x, y float64) (float64, float64) { return 1 - y, x }, true)
+	} else {
+		out.Masks = remapMasks(p.Masks, func(x, y float64) (float64, float64) { return y, 1 - x }, true)
+	}
 	return out
 }
 
@@ -240,6 +247,11 @@ func flipCrop(p marrawclient.Params, vertical bool) marrawclient.Params {
 		}
 	}
 	out.CropAngle = -p.CropAngle
+	if vertical {
+		out.Masks = remapMasks(p.Masks, func(x, y float64) (float64, float64) { return x, 1 - y }, false)
+	} else {
+		out.Masks = remapMasks(p.Masks, func(x, y float64) (float64, float64) { return 1 - x, y }, false)
+	}
 	return out
 }
 

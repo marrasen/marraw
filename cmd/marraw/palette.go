@@ -57,6 +57,12 @@ func paletteEntries(at paletteFor) []paletteEntry {
 		add("Auto everything", "Ctrl+Alt+U", DevAuto{Sections: []string{"all"}})
 		add("White balance eyedropper", "W", DevWBPick{On: true}, "pick", "neutral")
 		add("Crop and straighten", "R", ToggleCrop{}, "rotate", "straighten", "flip")
+		add("Add a linear gradient mask", "", MaskAdd{Kind: "linear"}, "local", "mask")
+		add("Add a radial mask", "", MaskAdd{Kind: "radial"}, "local", "mask")
+		add("Add a brush mask", "", MaskAdd{Kind: "brush"}, "local", "mask", "paint")
+		add("Add a range mask", "", MaskAdd{Kind: "range"}, "local", "mask", "colour", "luminance")
+		add("Add an AI subject mask", "", MaskAI{Kind: "subject"}, "local", "mask")
+		add("Add an AI background mask", "", MaskAI{Kind: "background"}, "local", "mask")
 		add("Keep this burst frame: pick it, reject the rest", "Shift+P", BurstKeep{Pick: true}, "burst", "sharpest")
 		add("Save the edit as a preset", "", AskPreset{}, "look")
 	}

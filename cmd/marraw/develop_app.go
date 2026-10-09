@@ -36,6 +36,13 @@ type (
 		WBPick bool
 		// Presets are the presets the panel lists.
 		Presets []PresetCard
+		// MaskSel is the mask chosen, below nought none; Brush the brush;
+		// RangePick says the range mask's colour picker is out, and AIBusy
+		// the AI mask being made.
+		MaskSel   int
+		Brush     BrushTool
+		RangePick bool
+		AIBusy    string
 	}
 	// DevHist is the histogram of the pixels showing.
 	DevHist struct{ Counts [3][256]uint32 }
@@ -134,6 +141,10 @@ func (cu *culler) developState() DevelopState {
 	}
 	st.History, st.HistoryAt = cu.historyOfShowing()
 	st.Presets = cu.presetCards()
+	st.MaskSel, st.Brush, st.RangePick, st.AIBusy = cu.masks.sel, cu.masks.brush, cu.masks.rangePick, cu.masks.aiBusy
+	if st.MaskSel >= len(d.params.Masks) {
+		st.MaskSel = -1
+	}
 	return st
 }
 
@@ -176,6 +187,11 @@ func (cu *culler) closeDevelop() {
 // it the first time.
 func (cu *culler) loadEdit(i int) {
 	cu.dev.hover = nil
+	if cu.dev.id != cu.photos[i].ID {
+		// Another photo: its masks start with none chosen.
+		cu.masks = maskState{sel: -1, brush: cu.masks.brush, hover: -1, tintOf: -1}
+		cu.masks.brush.Painting = false
+	}
 	d := &cu.dev
 	d.gen++
 	gen, id := d.gen, cu.photos[i].ID

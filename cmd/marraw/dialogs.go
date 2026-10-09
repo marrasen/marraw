@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/widget"
@@ -68,6 +69,10 @@ func (cu *culler) confirmed(a Confirmed) {
 	case a.Kind == "eyesModel" && a.OK:
 		cu.refocus()
 		cu.checkEyes(true)
+		return
+	case strings.HasPrefix(a.Kind, "aiModel:") && a.OK:
+		cu.refocus()
+		cu.maskAI(MaskAI{Kind: strings.TrimPrefix(a.Kind, "aiModel:"), Download: true})
 		return
 	case a.Kind == "subjectModel" && a.OK:
 		cu.refocus()

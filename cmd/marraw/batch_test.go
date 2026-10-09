@@ -132,3 +132,48 @@ func TestSizeIsTheCroppedFullResolution(t *testing.T) {
 		t.Fatalf("turned and cropped %v, want 2500x2000", got)
 	}
 }
+
+func TestMaskPointsMapBothWays(t *testing.T) {
+	p := marrawclient.Params{CropX: 0.1, CropY: 0.2, CropW: 0.6, CropH: 0.5, CropAngle: 7}
+	for _, pt := range [][2]float64{{0.3, 0.4}, {0, 0}, {1, 1}, {0.5, 0.5}} {
+		fx, fy := frameFromShown(pt[0], pt[1], p, 6000, 4000)
+		bx, by := shownFromFrame(fx, fy, p, 6000, 4000)
+		if math.Abs(bx-pt[0]) > 1e-9 || math.Abs(by-pt[1]) > 1e-9 {
+			t.Fatalf("%v went to %v,%v and back to %v,%v", pt, fx, fy, bx, by)
+		}
+	}
+	// With no crop and no straighten, the photo is the frame.
+	if fx, fy := frameFromShown(0.25, 0.75, marrawclient.Params{}, 6000, 4000); math.Abs(fx-0.25) > 1e-9 || math.Abs(fy-0.75) > 1e-9 {
+		t.Fatalf("plain frame mapped to %v,%v", fx, fy)
+	}
+}
+
+func TestTurnsCarryTheMasks(t *testing.T) {
+	p := marrawclient.Params{Masks: []marrawclient.Mask{
+		{Type: "radial", CX: 0.2, CY: 0.3, RX: 0.1, RY: 0.4},
+		{Type: "linear", X0: 0.1, Y0: 0.2, X1: 0.3, Y1: 0.4},
+	}}
+	q := turnCrop(p, true)
+	if r := q.Masks[0]; math.Abs(r.CX-0.7) > 1e-9 || math.Abs(r.CY-0.2) > 1e-9 || r.RX != 0.4 || r.RY != 0.1 {
+		t.Fatalf("a clockwise turn took the radial to %+v", r)
+	}
+	if p.Masks[0].CX != 0.2 {
+		t.Fatal("the turn changed the edit it was given")
+	}
+	for range 3 {
+		q = turnCrop(q, true)
+	}
+	if l := q.Masks[1]; math.Abs(l.X0-0.1) > 1e-9 || math.Abs(l.Y1-0.4) > 1e-9 {
+		t.Fatalf("four turns took the gradient to %+v", l)
+	}
+}
+
+func TestHueWindowWraps(t *testing.T) {
+	m := marrawclient.Mask{RangeHueLo: 0.95, RangeHueHi: 0.05}
+	if c, w := hueWindow(m); math.Abs(c) > 1e-9 && math.Abs(c-1) > 1e-9 || math.Abs(w-0.05) > 1e-9 {
+		t.Fatalf("a window over red reads centre %v, half-width %v", c, w)
+	}
+	if _, w := hueWindow(marrawclient.Mask{RangeHueLo: 0, RangeHueHi: 1}); w != 0.5 {
+		t.Fatalf("the whole wheel reads half-width %v", w)
+	}
+}

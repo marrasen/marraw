@@ -265,6 +265,7 @@ type devSection struct {
 var devSections = []devSection{
 	{title: "Presets", open: false},
 	{title: "Crop", open: true},
+	{title: "Masks", open: true},
 	{title: "Tone", keys: []string{"expEV", "expPreserve", "bright", "gamma", "shadow", "contrast", "toneHighlights", "toneShadows", "whites", "blacks"}, auto: []string{"tone"}, open: true},
 	{title: "Presence", keys: []string{"texture", "clarity", "dehaze"}, open: true},
 	{title: "White balance", keys: []string{"wbTemp", "wbKelvin", "wbTint"}, choices: []string{"wbMode"}, open: true},
@@ -339,8 +340,9 @@ type developView struct {
 	info     *infoRows
 	// pipette puts the white-balance eyedropper out, lit while it is.
 	pipette *widget.IconButton
-	// presets are the presets' cards.
+	// presets are the presets' cards, and masks the masks.
 	presets *presetGrid
+	masks   *maskPanel
 }
 
 func newDevelopView(s DevelopState) *developView {
@@ -379,6 +381,9 @@ func newDevelopView(s DevelopState) *developView {
 			b := widget.NewButton("Crop and straighten   R")
 			b.Icon, b.KeepFocus, b.OnClick = icon.Crop, true, widget.Sends(ToggleCrop{})
 			body = append(body, b)
+		case "Masks":
+			v.masks = newMaskPanel(v)
+			body = append(body, v.masks)
 		case "Presets":
 			v.presets = newPresetGrid(v)
 			body = append(body, v.presets)
@@ -516,6 +521,9 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 	}
 	if v.presets != nil {
 		v.presets.show(s, u)
+	}
+	if v.masks != nil {
+		v.masks.show(s, u)
 	}
 	p := &s.Params
 	for key, r := range v.rows {

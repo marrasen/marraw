@@ -97,8 +97,10 @@ func (cu *culler) loadLibrary() {
 	}
 }
 
-// addLibraryFolder adds dir to the library as a library folder, its
-// subfolders its shoots, unless the library holds it already.
+// addLibraryFolder adds dir to the library: as a library folder, its
+// subfolders its shoots, where its photos are in subfolders, and as a shoot
+// of its own where they are in it. A folder the library holds already is
+// set right the same way.
 func addLibraryFolder(ctx context.Context, api *marrawclient.Client, dir string) error {
 	dir, err := filepath.Abs(dir)
 	if err != nil {
@@ -108,12 +110,22 @@ func addLibraryFolder(ctx context.Context, api *marrawclient.Client, dir string)
 	if err != nil {
 		return err
 	}
-	for _, r := range roots {
+	parent := true
+	own, err1 := api.Library.CountRaws(ctx, []string{dir}, false)
+	all, err2 := api.Library.CountRaws(ctx, []string{dir}, true)
+	if err1 == nil && err2 == nil && own != nil && all != nil && own.Files > 0 && all.Files == own.Files {
+		parent = false
+	}
+	for i, r := range roots {
 		if strings.EqualFold(filepath.Clean(r.Path), dir) {
-			return nil
+			if r.IsParent == parent {
+				return nil
+			}
+			roots[i].IsParent = parent
+			return api.Library.SetLibraryRoots(ctx, roots)
 		}
 	}
-	return api.Library.SetLibraryRoots(ctx, append(roots, marrawclient.LibraryRoot{Path: dir, IsParent: true}))
+	return api.Library.SetLibraryRoots(ctx, append(roots, marrawclient.LibraryRoot{Path: dir, IsParent: parent}))
 }
 
 // loadSettings reads marraw's settings, for the folders' remembered views,

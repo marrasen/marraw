@@ -62,8 +62,10 @@ type (
 		NoticeSeq int
 		// Aids are the photo's culling aids.
 		Aids Aids
-		// Crop is the crop under way, or nil.
-		Crop *CropView
+		// Crop is the crop under way, or nil, and Masks the masks being
+		// worked on, or nil.
+		Crop  *CropView
+		Masks *MaskView
 		// Rating and Flag are the photo's, and Strip the photos around it,
 		// for the filmstrip.
 		Rating int
@@ -199,6 +201,8 @@ type culler struct {
 	aids aidsOf
 	// presetGen counts the presets laid or shown, so a late one is let go.
 	presetGen int
+	// masks are the develop panel's masks: the one chosen, the brush.
+	masks maskState
 	// crop is cropping, while it goes on, and presetsShown says the
 	// panel's presets show, for their small pictures to render.
 	crop         cropMode
@@ -258,7 +262,7 @@ func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
 		tiles: newTileCache(48), tileWarm: map[string]bool{},
 		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), cursor: -1,
-		libView: defaultView("", defaultGap)}
+		libView: defaultView("", defaultGap), masks: maskState{sel: -1, brush: defaultBrush, hover: -1, tintOf: -1}}
 	cu.setAll(photos)
 	cu.applyView()
 	return cu
@@ -387,6 +391,35 @@ func (cu *culler) serve() error {
 				cu.devWBPick(in.On)
 			case DevWBBar:
 				cu.devWBBar(in.Act)
+			case MaskAdd:
+				cu.maskAdd(in.Kind)
+			case MaskAI:
+				cu.maskAI(in)
+			case MaskSelect:
+				cu.maskSelect(in.Index)
+			case MaskSet:
+				cu.maskSet(in)
+			case MaskFlag:
+				cu.maskFlag(in)
+			case MaskDelete:
+				cu.maskDelete(in.Index)
+			case MaskGeom:
+				cu.maskGeom(in)
+			case BrushSet:
+				cu.masks.brush = in.Tool
+				cu.masksChanged()
+			case BrushClear:
+				cu.brushClear(in.Index)
+			case RangePick:
+				cu.masks.rangePick = in.On && cu.maskOK(cu.masks.sel)
+				cu.masks.brush.Painting = false
+				cu.masksChanged()
+			case RangeAt:
+				cu.rangeAt(in.X, in.Y)
+			case MaskHover:
+				cu.maskHover(in.Index)
+			case MaskEscape:
+				cu.masksEscape()
 			case ToggleCrop:
 				cu.toggleCrop()
 			case CropDone:
@@ -464,6 +497,9 @@ func (cu *culler) state() Cull {
 	}
 	// Backspace held: the photo before any edit, and back again, at once.
 	st.Original, st.WBPick = cu.original, cu.wb.on
+	if d := &cu.dev; d.open && d.id == p.ID {
+		st.Masks = cu.maskView()
+	}
 	if st.Crop = cu.cropView(); st.Crop != nil && st.Crop.Ready && cu.crop.frame.X > 0 {
 		// The whole frame shows, in its own shape.
 		st.Aspect = float32(cu.frameAspect())

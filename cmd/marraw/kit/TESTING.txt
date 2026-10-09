@@ -4,6 +4,32 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
+Masks (new, with the develop panel open)
+  - A Masks section in the panel, as marraw's Local tab: Linear, Radial,
+    Brush and Range add a mask; Subject, Background, Depth and Tilt shift
+    add an AI mask (the first time asks to download the model).
+  - Each mask has a row: click it to choose it or let it go. Its pills:
+    Remove (fill what it covers, for brush and AI masks), Invert; then
+    show or hide, and delete. The pointer over a row tints the mask red
+    on the photo.
+  - The chosen mask's settings open under its row: its shape's (feather,
+    threshold, focus distance and depth, the range's luminance, hue and
+    saturation), its nine tone sliders, and Effects (blur, bokeh, motion
+    and zoom blur, glow, light streaks, prism, mosaic, direction).
+  - On the photo: a linear gradient's two ends and its line drag; a
+    radial's middle, width, height and turn handles drag. While dragging,
+    the mask shows tinted.
+  - Brush: Paint (or a new brush mask) paints on the photo, with the
+    brush's circle in place of the pointer; the eraser erases; Clear
+    takes all strokes off; Size, Feather and Flow set the brush.
+  - Range: Pick colour, then click the photo: the hue window narrows to
+    that colour.
+  - Escape stops painting or picking, then lets the mask go.
+  - Turning or mirroring in the crop now carries the masks with it.
+  - Not yet: Scene and People picking (click a region on the photo),
+    moving masks up and down the list, and the keys to walk the masks'
+    sliders.
+
 Fixed since build b89595a
   - Cropping no longer shows the cropped edit's sharp tiles over the
     whole frame (the blocks in your screenshot), and holding Backspace no
@@ -75,6 +101,6 @@ From earlier builds, if you have not tried them yet
   - Clickable stars and flags; filters with glide and fade; Time/Name
     sort buttons; star filter.
 
-Not here yet (from marraw): masks and local adjustments, retouch,
+Not here yet (from marraw): retouch,
 watermarks, share links, remote connections, the second-display viewer,
 the preset Amount scrubber, the crop's Auto (subject) button.

@@ -93,10 +93,15 @@ type cullView struct {
 	// far the crop over the photo is, which fades while the frame turns,
 	// and spin how far the picture is turned on, in degrees, as the frame
 	// turns ahead of its pixels.
-	crop         cropUI
-	cropIn       *anim.Float
-	cropOver     *anim.Float
-	spin         *anim.Float
+	crop     cropUI
+	cropIn   *anim.Float
+	cropOver *anim.Float
+	spin     *anim.Float
+	// mask is mask editing's own; maskTintIn brings the backend's tint of
+	// a mask, tintImg, in and out.
+	mask         maskUI
+	maskTintIn   *anim.Float
+	tintImg      *paint.Image
 	origIn, wbIn *anim.Float
 	labelOrig    *widget.Label
 	labelWB      *widget.Label
@@ -132,12 +137,13 @@ func newCullView(s Cull) *cullView {
 	v.labelWB.Color = noteInk
 	v.wbBar = v.newWBBar()
 	v.cropIn, v.cropOver, v.spin = anim.NewFloat(0), anim.NewFloat(0), anim.NewFloat(0)
+	v.maskTintIn = anim.NewFloat(0)
 	v.crop.bar = v.newCropBar()
 	v.notice.Size = noteSize
 	if s.Panel {
 		v.side.Jump(1)
 	}
-	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin)
+	v.Add(v.z, v.c, v.in, v.strip, v.ring, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin, v.maskTintIn)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -187,6 +193,7 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 	v.origIn.Animate(map[bool]float32{false: 0, true: 1}[s.Original], widget.Quick.Get(th))
 	v.wbIn.Animate(map[bool]float32{false: 0, true: 1}[s.WBPick], widget.Quick.Get(th))
 	v.cropShow(s, prev, u)
+	v.maskShow(s, u)
 	if s.NoticeSeq != v.noticeSeq {
 		v.showNotice(s.Notice, s.NoticeSeq, u)
 	}
@@ -434,6 +441,20 @@ func (v *cullView) Children() []gunim.Node {
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
 // eyedropper is on.
 func (v *cullView) Cursor(p geom.Point) input.Cursor {
+	if v.maskOn() && p.Y < v.box.H-stripHeight && !v.inPanel(p) {
+		ms := v.st.Masks
+		switch {
+		case ms.RangePick:
+			return input.CursorCrosshair
+		case ms.Brush.Painting && v.theMask().Type == "brush":
+			// The brush's circle takes the pointer's place.
+			return input.CursorNone
+		case v.mask.dragging:
+			return input.CursorMove
+		case v.maskGripAt(v.theMask(), p) != "":
+			return input.CursorHand
+		}
+	}
 	if v.cropping() && p.Y < v.box.H-stripHeight && !v.inPanel(p) && !v.crop.barRect.Contains(p) {
 		if v.crop.dragging {
 			return gripCursor(v.crop.g)
@@ -579,6 +600,10 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			return true
 		}
 		// W turns the white-balance eyedropper on and off, and Escape off.
+		if ms := v.st.Masks; e.Key == input.KeyEscape && ms != nil && (ms.Selected >= 0 || ms.Brush.Painting || ms.RangePick) {
+			u.Send(v, MaskEscape{})
+			return true
+		}
 		if v.st.Crop != nil && (e.Key == input.KeyEscape || e.Key == input.KeyEnter || e.Key == input.KeyR) && !e.Mods.Has(input.ModShift) {
 			u.Send(v, CropDone{})
 			return true
@@ -686,6 +711,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		if v.cropping() && v.cropHandle(e, u) {
 			return true
 		}
+		if v.maskOn() && v.maskHandle(e, u) {
+			return true
+		}
 		if e.Button != input.ButtonPrimary || v.inPanel(e.Pos) {
 			return false
 		}
@@ -734,6 +762,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		if v.cropping() && v.cropHandle(e, u) {
 			return true
 		}
+		if v.maskOn() && v.maskHandle(e, u) {
+			return true
+		}
 		if !v.dragging {
 			v.marks.hover(e.Pos, v.marksRect().Contains(e.Pos), v.markPlace(), u.Theme())
 			v.wbHover(e.Pos)
@@ -756,12 +787,16 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		u.Invalidate()
 		return true
 	case input.PointerLeave:
+		v.mask.over = false
 		v.marks.hover(geom.Point{}, false, v.markPlace(), u.Theme())
 		v.wbOver = false
 		u.Invalidate()
 		return false
 	case input.PointerUp:
 		if v.cropping() && v.cropHandle(e, u) {
+			return true
+		}
+		if v.maskOn() && v.maskHandle(e, u) {
 			return true
 		}
 		if v.navDrag {
@@ -1055,6 +1090,7 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	if in < 0.001 {
 		return
 	}
+	v.paintMask(p)
 	v.paintCrop(p, box, kids.At(8), kids.At(9))
 	// The chrome comes up from below as the view comes in.
 	defer p.Push(paint.Translate(geom.Pt(0, (1-in)*stripHeight)))()
