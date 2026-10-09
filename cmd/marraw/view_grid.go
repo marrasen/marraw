@@ -436,6 +436,9 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 // errorsIn shows the errors not cleared yet.
 func (v *gridView) errorsIn(e ErrorsIn, u *gunim.UI) { v.errors.set(e.List, u) }
 
+// tasksIn shows the background tasks under way.
+func (v *gridView) tasksIn(t TasksIn, u *gunim.UI) { v.errors.setTasks(t.List, u) }
+
 // Paint implements [gunim.Node].
 func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
 	kids.At(1).Paint(p)

@@ -32,8 +32,10 @@ type (
 		// Exif is the photo's camera and exposure, in a line, for the
 		// panel's header.
 		Exif string
-		// Errors are the errors the user has not cleared.
+		// Errors are the errors the user has not cleared, and Tasks the
+		// background tasks under way.
 		Errors []ErrorNote
+		Tasks  []TaskNote
 		Img    *paint.Image
 		// Thumb is the photo's small picture, to show until Img comes.
 		Thumb *paint.Image
@@ -185,6 +187,10 @@ type culler struct {
 	// one's number.
 	errs   []ErrorNote
 	errSeq int
+	// tasks are the backend's tasks, for the tray, and taskOf the task
+	// each subtask showing is under.
+	tasks  map[string]*taskRun
+	taskOf map[string]string
 
 	// thumbs are the small pictures of the grid and the filmstrip by
 	// photo, the last thumbKeep of them, and thumbsWanted those asked for
@@ -395,6 +401,8 @@ func (cu *culler) serve() error {
 				cu.devAuto(in)
 			case ErrClear:
 				cu.clearError(in)
+			case TaskCancel:
+				cu.cancelTask(in.ID)
 			case Notify:
 				cu.notify(in.Text)
 			case InfoLocate:
@@ -505,7 +513,7 @@ func (cu *culler) serve() error {
 // state is what the window shows now.
 func (cu *culler) state() Cull {
 	p := cu.photos[cu.at]
-	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Exif: exifLine(p), Errors: cu.errs, Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
+	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Exif: exifLine(p), Errors: cu.errs, Tasks: cu.shownTasks(), Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
 		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p)}
 	gapAt := map[int]int{}
 	groups := gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)

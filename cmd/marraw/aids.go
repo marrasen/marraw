@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -315,9 +316,8 @@ func (cu *culler) aidsChanged() {
 // scanRun is an analysis under way, for the notes of how it goes: what
 // it does, and to how many photos.
 type scanRun struct {
-	what      string
-	count     int
-	lastShown int
+	what  string
+	count int
 }
 
 // checkEyes has the backend look for closed eyes in the folder's photos
@@ -401,8 +401,7 @@ func (cu *culler) scanStarted(what string, n int, ref *marrawclient.TaskRef, err
 	select {
 	case cu.do <- func() {
 		if err != nil {
-			log.Printf("%s: %v", what, err)
-			cu.notify(what + " could not start")
+			cu.fail(what+" could not start", err)
 			return
 		}
 		if ref == nil {
@@ -415,8 +414,8 @@ func (cu *culler) scanStarted(what string, n int, ref *marrawclient.TaskRef, err
 	}
 }
 
-// scanState takes an analysis's state, saying how it goes, every tenth of
-// the way, and as it ends; it reports whether t was one.
+// scanState takes an analysis's state as it ends, the tray showing how
+// it goes; it reports whether t was one.
 func (cu *culler) scanState(t marrawclient.SharedTaskState) bool {
 	run, ok := cu.scans[t.ID]
 	if !ok {
@@ -428,28 +427,11 @@ func (cu *culler) scanState(t marrawclient.SharedTaskState) bool {
 		cu.notify(run.what + ": done")
 	case "failed":
 		delete(cu.scans, t.ID)
-		msg := run.what + " failed"
-		if t.Error != "" {
-			msg += ": " + t.Error
+		why := t.Error
+		if why == "" {
+			why = "no reason given"
 		}
-		cu.notify(msg)
-	default:
-		cu.scanProgress(t.ID, t.Current, t.Total)
+		cu.fail(run.what+" failed", errors.New(why))
 	}
-	return true
-}
-
-// scanProgress says how far an analysis has got, every tenth of the way.
-func (cu *culler) scanProgress(id string, current, total int) bool {
-	run, ok := cu.scans[id]
-	if !ok {
-		return false
-	}
-	if total <= 0 || current >= total || current*10/total <= run.lastShown*10/total {
-		return true
-	}
-	run.lastShown = current
-	cu.scans[id] = run
-	cu.notify(fmt.Sprintf("%s: %d of %d…", run.what, current, total))
 	return true
 }

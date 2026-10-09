@@ -4,7 +4,17 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
-Errors, glass and the filmstrip (new in this build)
+Background tasks (new in this build)
+  - Background work shows as chips at the bottom right, above any error
+    cards, over the grid and over the photo: a spinner, what it is, how
+    far it has got, a bar, and a cross to cancel it. Done, a chip ticks
+    and goes. Work that ends within half a second shows nothing.
+  - A model download shows its own progress in megabytes: "Downloading
+    the subject model 87/170 MB", then the scan's count of photos.
+  - Exports and scans no longer post "3 of 20…" notes over the photo:
+    the chip shows it.
+
+Errors, glass and the filmstrip
   - The readout at the bottom left no longer shows errors. Moving on
     from a photo while its full resolution loads was never an error and
     now says nothing.

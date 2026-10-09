@@ -180,14 +180,14 @@ func (cu *culler) exportGo(a ExportGo) {
 
 // exportRun is an export under way, for the notes of how it goes.
 type exportRun struct {
-	dest      string
-	count     int
-	lastShown int
+	dest  string
+	count int
 }
 
 // tasksChanged takes the backend's tasks as they change, and says how the
 // exports under way go: every tenth of the way, and when they are done.
 func (cu *culler) tasksChanged(ts []marrawclient.SharedTaskState) {
+	cu.trackTasks(ts)
 	for _, t := range ts {
 		if cu.scanState(t) {
 			continue
@@ -207,25 +207,13 @@ func (cu *culler) tasksChanged(ts []marrawclient.SharedTaskState) {
 				why = "no reason given"
 			}
 			cu.fail("The export failed", errors.New(why))
-		default:
-			cu.taskProgress(t.ID, t.Current, t.Total)
 		}
 	}
 }
 
-// taskProgress says how far an export under way has got, every tenth of
-// the way.
+// taskProgress takes how far a task has got: the tray shows it.
 func (cu *culler) taskProgress(id string, current, total int) {
-	if cu.scanProgress(id, current, total) {
-		return
-	}
-	run, ok := cu.exports[id]
-	if !ok || total <= 0 || current >= total || current*10/total <= run.lastShown*10/total {
-		return
-	}
-	run.lastShown = current
-	cu.exports[id] = run
-	cu.notify(fmt.Sprintf("Exporting %d of %d…", current, total))
+	cu.taskMoved(id, current, total)
 }
 
 // menuItems are labels as a drop-down's items.

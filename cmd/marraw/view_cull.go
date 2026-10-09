@@ -161,7 +161,7 @@ func newCullView(s Cull) *cullView {
 		wbRead: widget.NewLabel(""), wbWarn: widget.NewLabel(""),
 		filmIn: anim.NewFloat(1), idle: anim.NewFloat(1), lastInput: time.Now(),
 		headName: widget.NewLabel(s.Name), headExif: widget.NewLabel(s.Exif), errors: newErrorTray()}
-	v.errors.list = s.Errors
+	v.errors.list, v.errors.tasks = s.Errors, s.Tasks
 	v.headName.Face, v.headName.Size, v.headName.MaxLines = widget.MonoFont, headNameSize, 1
 	v.headExif.Face, v.headExif.Size, v.headExif.Color, v.headExif.MaxLines = widget.MonoFont, headExifSize, mutedInkTok, 1
 	if s.Crop != nil || s.WBPick {
@@ -232,6 +232,7 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 	}
 	v.headName.Text, v.headExif.Text = s.Name, s.Exif
 	v.errors.set(s.Errors, u)
+	v.errors.setTasks(s.Tasks, u)
 	if v.idleStop == nil {
 		v.idleStop = u.After(idleAfter, v.idleCheck)
 	}
