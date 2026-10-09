@@ -93,7 +93,7 @@ func (e *Edits) GenerateFill(ctx context.Context, photoID int64, params edit.Par
 	}
 
 	tctx, task := tasks.StartTask[TaskMeta](ctx, "Fill: "+photo.FileName, tasks.Shared())
-	task.SetMeta(TaskMeta{Kind: "fill"})
+	task.SetMeta(TaskMeta{Kind: "fill", Unit: "MB"})
 	res, err := e.generateFillPatch(tctx, photo, &params, key,
 		func(frameW, frameH float64) (float64, float64, float64, float64) {
 			return pyramid.SpotFillWindow(frameW/frameH, spot)
@@ -157,7 +157,7 @@ func (e *Edits) GenerateMaskFill(ctx context.Context, photoID int64, params edit
 	}
 
 	tctx, task := tasks.StartTask[TaskMeta](ctx, "Remove: "+photo.FileName, tasks.Shared())
-	task.SetMeta(TaskMeta{Kind: "fill"})
+	task.SetMeta(TaskMeta{Kind: "fill", Unit: "MB"})
 	res, err := e.generateFillPatch(tctx, photo, &params, key,
 		func(frameW, frameH float64) (float64, float64, float64, float64) {
 			// Re-derive at the real frame aspect: the brush plane and the map

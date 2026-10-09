@@ -37,6 +37,9 @@ type TaskMeta struct {
 	// tied to a single album.
 	FolderPath string `json:"folderPath,omitempty"`
 	DestDir    string `json:"destDir,omitempty"`
+	// Unit is what the task's progress counts, where it is not items:
+	// "MB" while a model downloads.
+	Unit string `json:"unit,omitempty"`
 }
 
 // startFolderJobs cancels the previous folder's background work and starts
