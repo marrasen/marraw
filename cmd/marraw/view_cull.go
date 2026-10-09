@@ -12,6 +12,7 @@ import (
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
+	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
 )
 
@@ -114,7 +115,30 @@ type cullView struct {
 	fling    geom.Point
 	flinging bool
 	glided   bool
+	// filmIn is how far the filmstrip is in: it goes for the crop and the
+	// eyedropper, as marraw's does.
+	filmIn *anim.Float
+	// idle is how far what floats over the photo shows: it fades after a
+	// while with no input, as marraw's does, all but keep, the piece the
+	// pointer rests on. lastInput is when input last came, pointer where
+	// the pointer last was, and idleStop stops the wait for idleness.
+	idle      *anim.Float
+	keep      string
+	lastInput time.Time
+	pointer   geom.Point
+	idleStop  func()
+	// headName and headExif are the photo's name and camera in the
+	// panel's header.
+	headName, headExif *widget.Label
+	// hudRect is where the readout is.
+	hudRect geom.Rect
 }
+
+// idleAfter is how long with no input before what floats over the photo
+// fades, and chromeFade how it fades, as marraw's do.
+const idleAfter = 2800 * time.Millisecond
+
+var chromeFade = anim.Tween{Duration: 300 * time.Millisecond}
 
 // The cull view's motions: in, out, a step's slide and a sharper
 // rendition's fade.
@@ -132,7 +156,14 @@ func newCullView(s Cull) *cullView {
 		notice: widget.NewLabel(""), noticeIn: anim.NewFloat(0), noticeSeq: s.NoticeSeq,
 		origIn: anim.NewFloat(0), wbIn: anim.NewFloat(0),
 		labelOrig: widget.NewLabel("Original"), labelWB: widget.NewLabel("Click something neutral grey or white"),
-		wbRead: widget.NewLabel(""), wbWarn: widget.NewLabel("")}
+		wbRead: widget.NewLabel(""), wbWarn: widget.NewLabel(""),
+		filmIn: anim.NewFloat(1), idle: anim.NewFloat(1), lastInput: time.Now(),
+		headName: widget.NewLabel(s.Name), headExif: widget.NewLabel(s.Exif)}
+	v.headName.Face, v.headName.Size, v.headName.MaxLines = widget.MonoFont, headNameSize, 1
+	v.headExif.Face, v.headExif.Size, v.headExif.Color, v.headExif.MaxLines = widget.MonoFont, headExifSize, mutedInkTok, 1
+	if s.Crop != nil || s.WBPick {
+		v.filmIn.Jump(0)
+	}
 	v.labelOrig.Size, v.labelWB.Size = noteSize, noteSize
 	v.wbRead.Face, v.wbRead.Size, v.wbRead.Color = widget.MonoFont, readoutSize, readoutInk
 	v.wbWarn.Size, v.wbWarn.Color = readoutSize, warnInk
@@ -146,7 +177,7 @@ func newCullView(s Cull) *cullView {
 	if s.Panel {
 		v.side.Jump(1)
 	}
-	v.Add(v.z, v.c, v.in, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin, v.maskTintIn)
+	v.Add(v.z, v.c, v.in, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin, v.maskTintIn, v.filmIn, v.idle)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -193,6 +224,13 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 		v.marks.set(s.Rating, s.Flag, th)
 	}
 	v.side.Animate(on(s.Panel && s.Crop == nil && !s.WBPick), panelSlide)
+	if film := on(s.Crop == nil && !s.WBPick); v.filmIn.Target() != film {
+		v.filmIn.Animate(film, panelSlide)
+	}
+	v.headName.Text, v.headExif.Text = s.Name, s.Exif
+	if v.idleStop == nil {
+		v.idleStop = u.After(idleAfter, v.idleCheck)
+	}
 	v.origIn.Animate(map[bool]float32{false: 0, true: 1}[s.Original], widget.Quick.Get(th))
 	v.wbIn.Animate(map[bool]float32{false: 0, true: 1}[s.WBPick], widget.Quick.Get(th))
 	v.cropShow(s, prev, u)
@@ -397,7 +435,8 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 
 // Children implements [gunim.Composite].
 func (v *cullView) Children() []gunim.Node {
-	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead, v.wbWarn, v.crop.bar, v.crop.info, v.film}
+	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead, v.wbWarn, v.crop.bar, v.crop.info, v.film,
+		v.headName, v.headExif}
 }
 
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
@@ -689,11 +728,12 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		if v.maskOn() && v.maskHandle(e, u) {
 			return true
 		}
-		if e.Button != input.ButtonPrimary || v.inPanel(e.Pos) {
+		if e.Button != input.ButtonPrimary {
 			return false
 		}
 		// A click on a star rates the photo, again takes the rating off,
-		// and one on a flag sets it, again takes it off.
+		// and one on a flag sets it, again takes it off: over the photo or
+		// in the panel's header.
 		if v.marksRect().Contains(e.Pos) {
 			mp := v.markPlace()
 			if k := mp.starAt(e.Pos); k > 0 {
@@ -702,6 +742,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 				u.Send(v, Mark{Flag: f})
 			}
 			return true
+		}
+		if v.inPanel(e.Pos) {
+			return false
 		}
 		// The navigator: a press there moves the view to it.
 		if v.navOn() && v.navRect().Contains(e.Pos) {
@@ -962,19 +1005,34 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	hero := kids.At(0)
 	hero.Layout(gunim.Tight(r.Size()))
 	hero.Place(r.Min)
+	// foot is where what sits above the filmstrip ends: lower while the
+	// strip is away.
+	foot := box.H - stripBottom - v.filmIn.Value()*(stripBoxH+12)
 	hud := kids.At(1)
 	sz := hud.Layout(gunim.Loose(box))
-	hud.Place(geom.Pt(16, max(0, box.H-stripBottom-stripBoxH-12-sz.H)))
+	v.hudRect = geom.Rc(16, max(0, foot-sz.H), sz.W, sz.H)
+	hud.Place(v.hudRect.Min)
 	slot := kids.At(2)
 	dr := v.drawerRect()
 	slot.Layout(gunim.Tight(dr.Size()))
 	slot.Place(dr.Min)
+	// The photo's header, at the top of the panel: its name beside the
+	// flags, and its camera under the stars.
+	hn, he := kids.At(11), kids.At(12)
+	hns := hn.Layout(gunim.Loose(geom.Sz(dr.Size().W-32-60, 24)))
+	hn.Place(dr.Min.Add(geom.Pt(16, headTop+(24-hns.H)/2)))
+	he.Layout(gunim.Loose(geom.Sz(dr.Size().W-32, 20)))
+	he.Place(dr.Min.Add(geom.Pt(16, headTop+24+8+16+8)))
 	// The filmstrip, at the foot, in the room the panel leaves.
 	film := kids.At(10)
 	free := v.freeRect()
 	fs := film.Layout(gunim.Loose(geom.Sz(free.Size().W, stripBoxH)))
 	v.stripRect = geom.Rc(free.Min.X+(free.Size().W-fs.W)/2, box.H-stripBottom-fs.H, fs.W, fs.H)
 	film.Place(v.stripRect.Min)
+	if v.filmIn.Value() < 0.5 {
+		// Away, it takes no pointer.
+		v.stripRect = geom.Rect{}
+	}
 	// The note, in the middle at the top of the photo's room.
 	note := kids.At(3)
 	room := v.openRoom()
@@ -990,7 +1048,7 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	// and nowhere for the pointer otherwise.
 	bar := kids.At(5)
 	bs := bar.Layout(gunim.Loose(geom.Sz(room.Size().W, 60)))
-	v.wbBarRect = geom.Rc(v.freeRect().Center().X-bs.W/2-16, box.H-stripBottom-stripBoxH-14-bs.H-20, bs.W+32, bs.H+20)
+	v.wbBarRect = geom.Rc(v.freeRect().Center().X-bs.W/2-16, foot-2-bs.H-20, bs.W+32, bs.H+20)
 	if v.wbBarRect.Min.X < 12+sz.W+12 {
 		// Over the readout's corner: above it instead.
 		v.wbBarRect = v.wbBarRect.Add(geom.Pt(0, -(sz.H + 4)))
@@ -1006,7 +1064,7 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	// The crop's bar, at the foot of the photo while cropping.
 	cb := kids.At(8)
 	cbs := cb.Layout(gunim.Loose(geom.Sz(max(room.Size().W, 200), 60)))
-	v.crop.barRect = geom.Rc(v.freeRect().Center().X-cbs.W/2-16, box.H-stripBottom-stripBoxH-14-cbs.H-20, cbs.W+32, cbs.H+20)
+	v.crop.barRect = geom.Rc(v.freeRect().Center().X-cbs.W/2-16, foot-2-cbs.H-20, cbs.W+32, cbs.H+20)
 	if v.crop.barRect.Min.X < 12+sz.W+12 {
 		// Over the readout's corner: above it instead.
 		v.crop.barRect = v.crop.barRect.Add(geom.Pt(0, -(sz.H + 4)))
@@ -1066,20 +1124,42 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	if in < 0.999 {
 		defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: in})()
 	}
-	kids.At(10).Paint(p)
-	mp := v.markPlace()
-	paintGlass(p, v.marksRect(), 18)
-	v.marks.paint(p, f.Theme, mp, 0xc0, true)
+	if v.filmIn.Value() > 0.01 {
+		v.faded(p, "film", func() {
+			// It sinks away for the crop and the eyedropper.
+			k := v.filmIn.Value()
+			defer p.Push(paint.Translate(geom.Pt(0, (1-k)*(stripBoxH+stripBottom))))()
+			if k < 0.999 {
+				defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: k})()
+			}
+			kids.At(10).Paint(p)
+		})
+	}
+	// The marks float at the top of the photo, and go into the panel's
+	// header as the panel comes.
+	if chip := 1 - v.side.Value(); chip > 0.01 {
+		v.faded(p, "marks", func() {
+			if chip < 0.999 {
+				defer p.Layer(paint.LayerOpts{Bounds: v.floatMarksRect().Inset(geom.Uniform(-30)), Opacity: chip})()
+			}
+			paintGlass(p, v.floatMarksRect(), 18)
+			v.marks.paint(p, f.Theme, v.floatPlace(), 0xc0, true)
+		})
+	}
 	hud := kids.At(1)
-	hs := hud.Size()
-	paintGlass(p, geom.Rc(16, box.H-stripBottom-stripBoxH-12-hs.H, hs.W, hs.H), 10)
-	hud.Paint(p)
-	v.paintNav(p)
-	func() {
+	v.faded(p, "hud", func() {
+		paintGlass(p, v.hudRect, 10)
+		hud.Paint(p)
+	})
+	v.faded(p, "nav", func() { v.paintNav(p) })
+	v.faded(p, "panel", func() {
 		// The panel slides away for the crop and the eyedropper.
 		defer p.Push(paint.Translate(geom.Pt((1-v.side.Value())*(drawerWidth+32), 0)))()
 		kids.At(2).Paint(p)
-	}()
+		if v.st.Panel {
+			v.paintHead(p, f.Theme, kids.At(11), kids.At(12))
+		}
+	})
 	v.paintNotice(p, kids.At(3))
 	// The label for the original, in the corner.
 	l, rm := kids.At(4), v.room()
@@ -1090,15 +1170,147 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 // markPlace is where the photo's marks are: its flags and stars, at the
 // top right of the room for the photo, to be clicked.
 func (v *cullView) markPlace() markPlace {
+	if v.headOn() {
+		return v.headPlace(v.drawerShift())
+	}
+	return v.floatPlace()
+}
+
+// floatPlace is where the marks float over the photo, while the panel is
+// away.
+func (v *cullView) floatPlace() markPlace {
 	r := v.openRoom()
 	x, y := r.Max.X-16-5*18-4*5, v.chromeTop()+20
 	return markPlace{stars: geom.Pt(x, y), star: 18, gap: 5, reject: geom.Pt(x-24, y), pick: geom.Pt(x-56, y), flag: 20}
 }
 
-// marksRect is the pill behind the marks.
+// marksRect is where the marks take the pointer: their pill over the
+// photo, or their part of the panel's header.
 func (v *cullView) marksRect() geom.Rect {
-	mp, r := v.markPlace(), v.openRoom()
+	if v.headOn() {
+		d := v.drawerRect().Add(geom.Pt(v.drawerShift(), 0))
+		return geom.Rc(d.Min.X+8, d.Min.Y+headTop-4, d.Size().W-16, 24+8+16+8)
+	}
+	return v.floatMarksRect()
+}
+
+// floatMarksRect is the pill behind the marks over the photo.
+func (v *cullView) floatMarksRect() geom.Rect {
+	mp, r := v.floatPlace(), v.openRoom()
 	return geom.Rc(mp.pick.X-20, mp.stars.Y-18, r.Max.X-4-(mp.pick.X-20), 36)
+}
+
+// headOn says the marks are in the panel's header.
+func (v *cullView) headOn() bool { return v.st.Panel && v.side.Value() > 0.5 }
+
+// drawerShift is how far the panel is slid out to the right.
+func (v *cullView) drawerShift() float32 { return (1 - v.side.Value()) * (drawerWidth + 32) }
+
+// headTop is the top of the header's first row in the panel.
+const headTop = 15
+
+// headPlace is where the marks are in the panel's header, slid dx to the
+// right: the flags in squares at the right of the name's row, the stars
+// under the name, as marraw's header has them.
+func (v *cullView) headPlace(dx float32) markPlace {
+	d := v.drawerRect()
+	y := d.Min.Y + headTop + 12
+	right := d.Max.X - 16 + dx
+	return markPlace{stars: geom.Pt(d.Min.X+16+dx, y+12+8+8), star: 16, gap: 4,
+		reject: geom.Pt(right-12, y), pick: geom.Pt(right-12-6-24, y), flag: 14}
+}
+
+// paintHead draws the panel's header: the photo's name and its flags in
+// their squares, its stars, and its camera.
+func (v *cullView) paintHead(p *paint.Painter, th *theme.Live, name, exif gunim.Child) {
+	mp := v.headPlace(0)
+	for _, sq := range []struct {
+		at  geom.Point
+		set float32
+		ink color.NRGBA
+	}{{mp.pick, v.marks.pick.Value(), pickInk}, {mp.reject, v.marks.reject.Value(), rejectInk}} {
+		r := geom.Rc(sq.at.X-12, sq.at.Y-12, 24, 24)
+		p.RRect(r, 6, paint.Solid(withAlpha(sq.ink, 0.15*sq.set)))
+		edge := anim.Mix(anim.ColorCodec, panelLine, withAlpha(sq.ink, 0.45), min(sq.set, 1))
+		p.RRectStroke(r.Inset(geom.Uniform(0.5)), 5.5, paint.Fill{}, paint.Stroke{Width: 1, Color: edge})
+	}
+	v.marks.paint(p, th, mp, 0x40, true)
+	name.Paint(p)
+	exif.Paint(p)
+}
+
+// Overhear implements [gunim.Overhearer]: any input brings what floats
+// over the photo back.
+func (v *cullView) Overhear(e input.Event, u *gunim.UI) {
+	switch e := e.(type) {
+	case input.PointerMove:
+		v.pointer = e.Pos
+	case input.PointerDown:
+		v.pointer = e.Pos
+	}
+	v.lastInput = time.Now()
+	if v.idle.Target() != 1 {
+		v.idle.Animate(1, chromeFade)
+		u.Invalidate()
+	}
+	if v.idleStop == nil {
+		v.idleStop = u.After(idleAfter, v.idleCheck)
+	}
+}
+
+// idleCheck fades what floats over the photo once no input has come for
+// idleAfter, but for the piece the pointer rests on, and not while the
+// crop, the eyedropper or a mask is being worked.
+func (v *cullView) idleCheck(u *gunim.UI) {
+	v.idleStop = nil
+	if v.leaving {
+		return
+	}
+	if since := time.Since(v.lastInput); since < idleAfter {
+		v.idleStop = u.After(idleAfter-since, v.idleCheck)
+		return
+	}
+	if v.cropping() || v.st.WBPick || v.maskOn() || v.dragging || v.navDrag {
+		v.idleStop = u.After(idleAfter, v.idleCheck)
+		return
+	}
+	v.keep = v.pieceAt(v.pointer)
+	v.idle.Animate(0, chromeFade)
+	u.Invalidate()
+}
+
+// pieceAt is the piece of what floats over the photo at p, or "".
+func (v *cullView) pieceAt(p geom.Point) string {
+	switch {
+	case v.side.Value() > 0.5 && v.drawerRect().Contains(p):
+		return "panel"
+	case v.stripRect.Contains(p):
+		return "film"
+	case v.hudRect.Contains(p):
+		return "hud"
+	case v.marksRect().Contains(p):
+		return "marks"
+	case v.navOn() && v.navRect().Contains(p):
+		return "nav"
+	}
+	return ""
+}
+
+// faded paints piece, faded as idleness and the original showing have
+// it: marraw's chrome goes while the original shows.
+func (v *cullView) faded(p *paint.Painter, piece string, paintIt func()) {
+	a := v.idle.Value()
+	if piece == v.keep {
+		a = 1
+	}
+	a *= 1 - v.origIn.Value()
+	if a < 0.01 {
+		return
+	}
+	if a < 0.999 {
+		defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: v.box.Point()}.Inset(geom.Uniform(-40)), Opacity: a})()
+	}
+	paintIt()
 }
 
 // paintNotice draws the note in a pill, popping in and fading out.
@@ -1383,7 +1595,8 @@ func (q *cullPic) paintTiles(p *paint.Painter, tiles map[image.Point]*paint.Imag
 // drawerRect is where the develop panel floats, as marraw's drawer: 352
 // wide at the right, 16 from the window's edges, below the title bar.
 func (v *cullView) drawerRect() geom.Rect {
-	top := v.top + 12
+	// As marraw's: 64 pixels from the top, clear of the title bar.
+	top := max(float32(64), v.top+12)
 	return geom.Rc(v.box.W-16-drawerWidth, top, drawerWidth, max(0, v.box.H-top-16))
 }
 

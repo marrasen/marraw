@@ -15,9 +15,36 @@ import (
 	"github.com/marrasen/gunim/widget"
 )
 
-// cropZoom is how far the whole frame shows while cropping, of the room,
-// so the crop's handles keep clear of the window's edges.
+// cropZoom is the most of the room the whole frame takes while
+// cropping, so the crop's handles keep clear of the window's edges.
 const cropZoom = 0.8
+
+// cropPlace is the zoom and middle that show the whole frame while
+// cropping: as large as fits between the top and the crop's bar, the
+// handles clear of both, and no larger than cropZoom.
+func (v *cullView) cropPlace() (float32, geom.Point) {
+	room, f := v.room(), v.shape.Target()
+	if f.W <= 0 || f.H <= 0 {
+		return cropZoom, geom.Pt(0.5, 0.5)
+	}
+	// The bar's top once the filmstrip is away, as it is while cropping.
+	barTop := v.crop.barRect.Min.Y + v.filmIn.Value()*(stripBoxH+12)
+	if v.crop.barRect.Empty() {
+		barTop = v.box.H - stripBottom - 90
+	}
+	area := geom.Rect{Min: geom.Pt(room.Min.X+24, v.chromeTop()+28), Max: geom.Pt(room.Max.X-24, barTop-14)}
+	s0 := min(room.Size().W/f.W, room.Size().H/f.H)
+	z := min(cropZoom, min(area.Size().W/f.W, area.Size().H/f.H)/s0)
+	s, mid, to := s0*z, room.Center(), area.Center()
+	return z, geom.Pt(0.5-(to.X-mid.X)/(f.W*s), 0.5-(to.Y-mid.Y)/(f.H*s))
+}
+
+func abs32(x float32) float32 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
 
 // cropUI is the cull view's crop: the bar at the foot, and a drag of the
 // crop under way, from start at from, as grip, showing local.
@@ -94,10 +121,15 @@ func (v *cullView) cropShow(s, prev Cull, u *gunim.UI) {
 	was := prev.Crop != nil && prev.Crop.Ready
 	now := s.Crop != nil && s.Crop.Ready
 	th := u.Theme()
-	if now && !was {
-		v.flinging = false
-		v.z.Animate(cropZoom, widget.Settle.Get(th))
-		v.c.Animate(geom.Pt(0.5, 0.5), widget.Settle.Get(th))
+	if now {
+		// The whole frame, as large as fits above the bar: again as a
+		// turn gives the frame another shape.
+		z, mid := v.cropPlace()
+		if !was || abs32(v.z.Target()-z) > 0.001 || v.c.Target() != mid {
+			v.flinging = false
+			v.z.Animate(z, widget.Settle.Get(th))
+			v.c.Animate(mid, widget.Settle.Get(th))
+		}
 	}
 	if !now && was {
 		v.z.Animate(1, widget.Settle.Get(th))

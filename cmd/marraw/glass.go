@@ -13,7 +13,7 @@ import (
 var (
 	glassFill   = color.NRGBA{R: 12, G: 14, B: 18, A: 0xae}
 	glassEdge   = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x1f}
-	glassShadow = paint.Shadow{Offset: geom.Pt(0, 14), Blur: 28, Color: color.NRGBA{A: 0x90}}
+	glassShadow = paint.Shadow{Offset: geom.Pt(0, 24), Blur: 42, Spread: -18, Color: color.NRGBA{A: 0xb3}}
 	glassBlur   = float32(18)
 )
 

@@ -269,6 +269,11 @@ func (cu *culler) devSet(in DevSet) {
 		return
 	}
 	sp.set(&d.params, in.Value)
+	if in.Key == "cropAngle" {
+		// Straightened outside the crop, the crop shrinks to stay on the
+		// photo, as the crop's own slider has it.
+		setRect(&d.params, fitToTurn(rectOf(d.params), d.params.CropAngle, cu.frameAspect()))
+	}
 	// The control dragged is the one the keys act on now.
 	if in.Key != d.active && !strings.Contains(in.Key, ":") {
 		cu.setActive(in.Key)

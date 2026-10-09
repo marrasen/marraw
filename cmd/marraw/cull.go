@@ -28,7 +28,10 @@ type (
 		Index, Total int
 		ID           int64
 		Name         string
-		Img          *paint.Image
+		// Exif is the photo's camera and exposure, in a line, for the
+		// panel's header.
+		Exif string
+		Img  *paint.Image
 		// Thumb is the photo's small picture, to show until Img comes.
 		Thumb *paint.Image
 		// Aspect is the photo's width over its height, for its frame before
@@ -383,6 +386,10 @@ func (cu *culler) serve() error {
 				}
 			case DevAuto:
 				cu.devAuto(in)
+			case Notify:
+				cu.notify(in.Text)
+			case InfoLocate:
+				cu.locate()
 			case EditCopy:
 				cu.editCopy()
 			case EditPaste:
@@ -489,7 +496,7 @@ func (cu *culler) serve() error {
 // state is what the window shows now.
 func (cu *culler) state() Cull {
 	p := cu.photos[cu.at]
-	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
+	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Exif: exifLine(p), Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
 		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p)}
 	gapAt := map[int]int{}
 	groups := gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)

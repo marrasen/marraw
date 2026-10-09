@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
@@ -55,6 +57,34 @@ func photoInfo(p marrawclient.Photo, folder string) PhotoInfo {
 		in.Taken = time.Unix(p.TakenAt, 0).Format("2 Jan 2006, 15:04:05")
 	}
 	return in
+}
+
+// exifLine is p's camera and exposure in a line, as marraw's panel header
+// has it: model · ƒ/x · shutter · ISO n · nnmm.
+func exifLine(p marrawclient.Photo) string {
+	if !p.MetaLoaded {
+		return ""
+	}
+	var parts []string
+	if p.Model != "" {
+		parts = append(parts, p.Model)
+	}
+	if p.Aperture > 0 {
+		parts = append(parts, strings.TrimSuffix(strings.TrimSuffix(fmt.Sprintf("ƒ/%.1f", p.Aperture), "0"), "."))
+	}
+	switch {
+	case p.Shutter >= 1:
+		parts = append(parts, fmt.Sprintf("%gs", math.Round(p.Shutter*10)/10))
+	case p.Shutter > 0:
+		parts = append(parts, fmt.Sprintf("1/%ds", int(math.Round(1/p.Shutter))))
+	}
+	if p.ISO > 0 {
+		parts = append(parts, fmt.Sprintf("ISO %.0f", p.ISO))
+	}
+	if p.FocalLen > 0 {
+		parts = append(parts, fmt.Sprintf("%.0fmm", p.FocalLen))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // devReset resets the edit: of the photo showing as a step of its history,

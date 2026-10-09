@@ -481,5 +481,10 @@ func (s *filmstrip) paintThumb(p *paint.Painter, th *theme.Live, t Thumb, off fl
 			p.Mask(icon.Stroke{Icon: starLit, Width: 2, Progress: 1}, geom.Rc(r.Min.X+3+float32(i)*6, r.Max.Y-8.5, 6, 6), starInk)
 		}
 	}
-	paintStripAids(p, r, t.Aids)
+	aids := t.Aids
+	if s.v.st.Panel {
+		// Developing, softness is no news, as in marraw.
+		aids.Soft = false
+	}
+	paintStripAids(p, r, aids)
 }

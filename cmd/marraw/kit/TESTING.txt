@@ -4,6 +4,29 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
+More of marraw's panel and chrome (new)
+  - The panel's header, as marraw's: the photo's name with its flag and
+    reject in squares at the right, its stars under it, and its camera
+    and exposure. Click them to mark the photo. While the panel is open
+    the marks live there; the pill at the top of the photo comes back
+    when it shuts.
+  - The tabs are marraw's small pill row. The Curve tab has a dot while
+    a curve is set.
+  - Develop, Curve and Local start with the histogram and the tab's name
+    with Undo and Redo buttons.
+  - Geometry has a Straighten slider, -15 to +15 degrees, working
+    without the crop: the photo turns and its crop shrinks to stay on it.
+  - Presets has Clipboard: Copy, Paste and Reset.
+  - Info: a tall histogram, the photo's details in mono, then Locate on
+    disk, Copy (all the details), Copy folder path and Copy filename.
+  - A section's chevron shows only while the pointer is over its heading.
+  - After 2.8 seconds with no mouse or keys, everything over the photo
+    fades out, but the piece the pointer rests on. Any move brings it
+    back. Holding Backspace for the original hides it too.
+  - The filmstrip sinks away for the crop and the eyedropper, and their
+    bars drop to the foot. The crop's frame fits above its bar.
+  - The panel starts 64 pixels from the top, as marraw's.
+
 The panel and the filmstrip float on glass (new)
   - The develop panel (D) is a card of frosted glass at the right, the
     photo showing through it blurred, as marraw's drawer. It slides in

@@ -150,6 +150,15 @@ var devSpecs = func() map[string]devSpec {
 			func(p *marrawclient.Params) *float64 { return &p.Gamma }),
 		stored("shadow", "Shadow slope", 1, 12, 0.5, 4.5, func(v float32) string { return fmt.Sprintf("%.1f", v) },
 			func(p *marrawclient.Params) *float64 { return &p.Shadow }),
+		{key: "cropAngle", label: "Straighten", min: -15, max: 15, snap: 0.1,
+			format: func(v float32) string {
+				if v == 0 {
+					return "0°"
+				}
+				return fmt.Sprintf("%+.1f°", v)
+			},
+			get: func(p *marrawclient.Params) float64 { return p.CropAngle },
+			set: func(p *marrawclient.Params, v float64) { p.CropAngle = q4(min(15, max(-15, v))) }},
 		unit("contrast", "Contrast", func(p *marrawclient.Params) *float64 { return &p.Contrast }),
 		unit("toneHighlights", "Highlights", func(p *marrawclient.Params) *float64 { return &p.ToneHighlights }),
 		unit("toneShadows", "Shadows", func(p *marrawclient.Params) *float64 { return &p.ToneShadows }),
@@ -279,7 +288,7 @@ const (
 
 // The panel's sections, in order, as marraw's develop panel has them.
 var devSections = []devSection{
-	{title: "Geometry", open: true},
+	{title: "Geometry", keys: []string{"cropAngle"}, open: true},
 	{title: "Tone", keys: []string{"expEV", "expPreserve", "bright", "gamma", "shadow", "contrast", "toneHighlights", "toneShadows", "whites", "blacks"}, auto: []string{"tone"}, open: true},
 	{title: "Presence", keys: []string{"texture", "clarity", "dehaze"}, open: true},
 	{title: "White balance", keys: []string{"wbTemp", "wbKelvin", "wbTint"}, choices: []string{"wbMode"}, open: true},
@@ -292,6 +301,7 @@ var devSections = []devSection{
 	{title: "Masks", open: true, tab: tabLocal, bare: true},
 	{title: "Auto", open: true, tab: tabPresets},
 	{title: "Presets", open: true, tab: tabPresets},
+	{title: "Clipboard", open: true, tab: tabPresets},
 	{title: "History", open: true, tab: tabPresets},
 	{title: "Info", open: true, tab: tabInfo, bare: true},
 }
@@ -316,6 +326,7 @@ var (
 	panelFill    = color.NRGBA{R: 0x15, G: 0x17, B: 0x1c, A: 0xff}
 	headingInk   = theme.Color("marraw.heading", color.NRGBA{R: 0x8a, G: 0x90, B: 0x9c, A: 0xff})
 	headingSize  = theme.Length("marraw.heading.size", 11.5)
+	headingHot   = theme.Color("marraw.heading.hot", color.NRGBA{R: 0xe6, G: 0xe7, B: 0xea, A: 0xff})
 	autoInk      = theme.Color("marraw.auto", color.NRGBA{R: 0x7f, G: 0xb0, B: 0xff, A: 0xff})
 	developInset = theme.Insets("marraw.develop.inset", geom.Insets{Top: 14, Right: 14, Bottom: 18, Left: 16})
 )
@@ -363,7 +374,7 @@ type developView struct {
 	presets *presetGrid
 	masks   *maskPanel
 	// tabs are the panel's tabs.
-	tabs *widget.Tabs
+	tabs *devPager
 }
 
 func newDevelopView(s DevelopState) *developView {
@@ -401,7 +412,7 @@ func newDevelopView(s DevelopState) *developView {
 		case "Geometry":
 			b := widget.NewButton("Crop and straighten   R")
 			b.Icon, b.KeepFocus, b.OnClick = icon.Crop, true, widget.Sends(ToggleCrop{})
-			body = append(body, b)
+			body = append([]gunim.Node{b}, body...)
 		case "Masks":
 			v.masks = newMaskPanel(v)
 			body = append(body, v.masks)
@@ -427,9 +438,28 @@ func newDevelopView(s DevelopState) *developView {
 				return DevJump{Index: i}
 			}
 			body = append(body, v.history)
+		case "Clipboard":
+			copyB, pasteB, resetB := widget.NewButton("Copy"), widget.NewButton("Paste"), widget.NewButton("Reset")
+			copyB.Icon, copyB.Tooltip, copyB.OnClick = icon.Copy, "Copy the edit (Ctrl+C)", widget.Sends(EditCopy{})
+			pasteB.Icon, pasteB.Tooltip, pasteB.OnClick = icon.ClipboardPaste, "Paste an edit (Ctrl+V)", widget.Sends(EditPaste{})
+			resetB.Icon, resetB.Tooltip, resetB.OnClick = icon.RotateCcw, "Reset the edit (Ctrl+0)", widget.Sends(DevReset{})
+			body = append(body, smallButtons(copyB, pasteB, resetB))
 		case "Info":
+			// As marraw's Info tab: a tall histogram, then what the photo
+			// is, and buttons to take that elsewhere.
+			h := widget.NewHistogram()
+			v.hists = append(v.hists, h)
 			v.info = newInfoRows()
-			body = append(body, v.info)
+			locate, copyAll := widget.NewButton("Locate on disk"), widget.NewButton("Copy")
+			copyDir, copyName := widget.NewButton("Copy folder path"), widget.NewButton("Copy filename")
+			locate.Icon, copyAll.Icon, copyDir.Icon, copyName.Icon = icon.ExternalLink, icon.Copy, icon.Folder, icon.FileText
+			locate.OnClick = func(*gunim.UI) gunim.Intent { return InfoLocate{} }
+			copyAll.OnClick = func(u *gunim.UI) gunim.Intent { return v.copyText(u, v.info.text(), "Info") }
+			copyDir.OnClick = func(u *gunim.UI) gunim.Intent { return v.copyText(u, v.st.Info.Folder, "Folder path") }
+			copyName.OnClick = func(u *gunim.UI) gunim.Intent { return v.copyText(u, v.st.Info.File, "File name") }
+			body = append(body, sectionLabel("Histogram"),
+				widget.NewThemed(h, marrawTheme().With(theme.Set(widget.HistogramHeight, 120))),
+				sectionLabel("Info"), v.info, spacer(8), smallButtons(locate, copyAll, copyDir, copyName))
 		case "Tone curve":
 			v.channel.KeepFocus = true
 			v.channel.OnChange = func(i int, _ *gunim.UI) gunim.Intent { return DevChannel{Channel: i} }
@@ -463,18 +493,19 @@ func newDevelopView(s DevelopState) *developView {
 	var scrolls []gunim.Node
 	for i, nodes := range pages {
 		if i == tabDevelop || i == tabCurve || i == tabLocal {
+			// The histogram heads these tabs, then the tab's title with
+			// Undo and Redo, as in marraw.
 			h := widget.NewHistogram()
 			v.hists = append(v.hists, h)
-			hp := widget.NewPad(h)
-			hp.Padding = theme.Insets("marraw.develop.histpad", geom.Insets{Bottom: 8})
-			nodes = append([]gunim.Node{hp}, nodes...)
+			hp := widget.NewPad(widget.NewThemed(h, marrawTheme().With(theme.Set(widget.HistogramHeight, 52))))
+			hp.Padding = theme.Insets("marraw.develop.histpad", geom.Insets{Bottom: 6})
+			nodes = append([]gunim.Node{hp, newTitleRow(devTabs[i])}, nodes...)
 		}
 		pad := widget.NewPad(widget.Column(nodes...))
 		pad.Padding = developInset
 		scrolls = append(scrolls, widget.NewScroll(pad))
 	}
-	v.tabs = widget.NewTabs(devTabs, scrolls...)
-	v.tabs.OnChange = func(i int, _ *gunim.UI) gunim.Intent { return DevTab{Index: i} }
+	v.tabs = newDevPager(devTabs, scrolls, func(i int, _ *gunim.UI) gunim.Intent { return DevTab{Index: i} })
 	return v
 }
 
@@ -616,6 +647,7 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 	if v.tabs.Selected() != s.Tab {
 		v.tabs.SetSelected(s.Tab, u)
 	}
+	v.tabs.setDot(curveSet(*p), u)
 	v.channel.SetSelected(s.Channel, u)
 	v.curve.Color = curveInk[s.Channel]
 	var guides []widget.CurveGuide
@@ -707,8 +739,8 @@ func newInfoRows() *infoRows {
 	var rows []gunim.Node
 	for _, n := range infoNames {
 		name, value := newSmallLabel(n), newSmallLabel("")
-		name.Color = noteInk
-		value.MaxLines = 2
+		name.Color, name.Size = mutedInkTok, infoNameSize
+		value.Face, value.Size, value.MaxLines = widget.MonoFont, infoValueSize, 2
 		r.names, r.values = append(r.names, name), append(r.values, value)
 		rows = append(rows, &infoRow{name: name, value: value})
 	}
@@ -727,7 +759,7 @@ func (r *infoRow) Children() []gunim.Node { return []gunim.Node{r.name, r.value}
 
 // Layout implements [gunim.Node].
 func (r *infoRow) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
-	const nameW, pad = 120, 6
+	const nameW, pad = 110, 4
 	w := c.Max.W
 	ns := kids.At(0).Layout(gunim.Loose(geom.Sz(nameW, 40)))
 	vs := kids.At(1).Layout(gunim.Loose(geom.Sz(max(0, w-nameW), 80)))
@@ -776,6 +808,16 @@ func (r *infoRows) show(in PhotoInfo) {
 		val(in.Aperture, "f/%.1f"), shutter, val(in.Focal, "%.0f mm"), taken} {
 		r.values[i].Text = v
 	}
+}
+
+// text is the rows as they show, a name and its value a line, for the
+// clipboard.
+func (r *infoRows) text() string {
+	var b strings.Builder
+	for i, n := range infoNames {
+		fmt.Fprintf(&b, "%s: %s\n", n, r.values[i].Text)
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // Children implements [gunim.Composite].
@@ -895,8 +937,9 @@ func (v *developView) Children() []gunim.Node { return []gunim.Node{v.tabs} }
 // scrolling under the tab bar.
 func (v *developView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	tabs := kids.At(0)
-	tabs.Layout(gunim.Tight(geom.Sz(c.Max.W, max(0, c.Max.H-6))))
-	tabs.Place(geom.Pt(0, 6))
+	// The photo's header is the cull view's to draw, at the top.
+	tabs.Layout(gunim.Tight(geom.Sz(c.Max.W, max(0, c.Max.H-panelHeadH))))
+	tabs.Place(geom.Pt(0, panelHeadH))
 	return c.Max
 }
 
@@ -912,6 +955,7 @@ func (v *developView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids
 	r := geom.Rect{Max: box.Point()}
 	paintGlass(p, r, 13)
 	defer p.Layer(paint.LayerOpts{Bounds: r, Opacity: 1, Clip: true, Radius: 13})()
+	p.RRect(geom.Rc(0, panelHeadH-1, box.W, 1), 0, paint.Solid(panelLine))
 	kids.At(0).Paint(p)
 }
 
@@ -924,13 +968,16 @@ type devHeading struct {
 	fold           *widget.Fold
 	title, auto    *widget.Label
 	turn, dot, hot *anim.Float
-	autoRect       geom.Rect
-	box            geom.Size
+	// over is how far the pointer is over the heading: the chevron shows
+	// and the title brightens, as in marraw.
+	over     *anim.Float
+	autoRect geom.Rect
+	box      geom.Size
 }
 
 func newDevHeading(sec devSection, fold *widget.Fold) *devHeading {
 	h := &devHeading{sec: sec, fold: fold, title: widget.NewLabel(strings.ToUpper(sec.title)), auto: widget.NewLabel(""),
-		turn: anim.NewFloat(0), dot: anim.NewFloat(0), hot: anim.NewFloat(0)}
+		turn: anim.NewFloat(0), dot: anim.NewFloat(0), hot: anim.NewFloat(0), over: anim.NewFloat(0)}
 	h.title.Color, h.title.Size = headingInk, headingSize
 	h.auto.Color, h.auto.Size = autoInk, headingSize
 	if len(sec.auto) > 0 {
@@ -939,7 +986,7 @@ func newDevHeading(sec devSection, fold *widget.Fold) *devHeading {
 	if fold.Open() {
 		h.turn.Jump(1)
 	}
-	h.Add(h.turn, h.dot, h.hot)
+	h.Add(h.turn, h.dot, h.hot, h.over)
 	return h
 }
 
@@ -966,10 +1013,14 @@ func (h *devHeading) Handle(e input.Event, u *gunim.UI) bool {
 	case input.PointerMove:
 		hot := len(h.sec.auto) > 0 && h.autoRect.Inset(geom.Uniform(-4)).Contains(e.Pos)
 		h.hot.Animate(map[bool]float32{false: 0, true: 1}[hot], widget.Quick.Get(th))
+		if h.over.Target() != 1 {
+			h.over.Animate(1, widget.Quick.Get(th))
+		}
 		u.Invalidate()
 		return false
 	case input.PointerLeave:
 		h.hot.Animate(0, widget.Settle.Get(th))
+		h.over.Animate(0, widget.Settle.Get(th))
 		return false
 	case input.PointerDown:
 		if e.Button != input.ButtonPrimary {
@@ -991,7 +1042,7 @@ func (h *devHeading) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Child
 	hh := float32(34)
 	title, auto := kids.At(0), kids.At(1)
 	ts := title.Layout(gunim.Loose(geom.Sz(w, hh)))
-	title.Place(geom.Pt(18, hh-ts.H-6))
+	title.Place(geom.Pt(0, hh-ts.H-6))
 	as := auto.Layout(gunim.Loose(geom.Sz(80, hh)))
 	h.autoRect = geom.Rc(w-as.W-2, hh-as.H-6, as.W, as.H)
 	auto.Place(h.autoRect.Min)
@@ -1003,16 +1054,27 @@ func (h *devHeading) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Child
 func (h *devHeading) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
 	th := f.Theme
 	ink := headingInk.Get(th)
-	// The chevron, pointing down when open and right when shut.
-	c := geom.Pt(6, box.H-12)
-	func() {
-		defer p.Push(paint.Rotate(float32(-math.Pi/2)*(1-h.turn.Value()), c))()
-		widget.PaintIcon(p, th, icon.ChevronDown, geom.Rc(c.X-6, c.Y-6, 12, 12), ink)
-	}()
+	over := h.over.Value()
+	// The chevron, after the title and its dot, pointing down when open
+	// and right when shut, shows while the pointer is over the heading.
+	ts := kids.At(0).Size()
+	c := geom.Pt(ts.W+6+6, box.H-6-ts.H/2)
+	if h.dot.Value() > 0.01 {
+		c.X += 12
+	}
+	if over > 0.01 {
+		func() {
+			defer p.Push(paint.Rotate(float32(-math.Pi/2)*(1-h.turn.Value()), c))()
+			widget.PaintIcon(p, th, icon.ChevronDown, geom.Rc(c.X-6, c.Y-6, 12, 12), withAlpha(ink, over))
+		}()
+	}
+	h.title.Color = headingInk
+	if over > 0.5 {
+		h.title.Color = headingHot
+	}
 	if d := h.dot.Value(); d > 0.01 {
-		ts := kids.At(0).Size()
-		s := 6 * d
-		at := geom.Pt(18+ts.W+8, box.H-6-ts.H/2)
+		s := 5 * d
+		at := geom.Pt(ts.W+8, box.H-6-ts.H/2)
 		p.RRect(geom.Rc(at.X-s/2, at.Y-s/2, s, s), s/2, paint.Solid(withAlpha(autoInk.Get(th), d)))
 	}
 	if hot := h.hot.Value(); hot > 0.01 && len(h.sec.auto) > 0 {
@@ -1207,3 +1269,37 @@ func (v *developView) presetThumbIn(t PresetThumb, u *gunim.UI) {
 		v.presets.thumbIn(t, u)
 	}
 }
+
+// curveSet reports whether any of p's tone curves bends.
+func curveSet(p marrawclient.Params) bool {
+	for ch := range 4 {
+		pts := *curveOf(&p, ch)
+		if len(pts) > 2 || len(pts) == 2 && (pts[0] != marrawclient.CurvePoint{} || pts[1] != marrawclient.CurvePoint{X: 1, Y: 1}) {
+			return true
+		}
+	}
+	return false
+}
+
+// copyText puts text on the clipboard and says so, as what it is.
+func (v *developView) copyText(u *gunim.UI, text, what string) gunim.Intent {
+	if text == "" {
+		return nil
+	}
+	u.SetClipboard(text)
+	return Notify{Text: what + " copied"}
+}
+
+// spacer is empty room h tall.
+func spacer(h float32) gunim.Node { return &vgap{h: h} }
+
+// vgap is empty room, h tall.
+type vgap struct{ h float32 }
+
+// Layout implements [gunim.Node].
+func (g *vgap) Layout(c gunim.Constraints, _ gunim.Frame, _ gunim.Children) geom.Size {
+	return geom.Sz(c.Max.W, g.h)
+}
+
+// Paint implements [gunim.Node].
+func (g *vgap) Paint(*paint.Painter, gunim.Frame, geom.Size, gunim.Children) {}
