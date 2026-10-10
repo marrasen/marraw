@@ -113,6 +113,7 @@ func (cu *culler) devNudge(in DevNudge) {
 		}
 		i := (min(ch.get(&d.params), n-1) + in.Dir + n) % n
 		cu.devChoose(DevChoice{Key: d.active, Index: i})
+		_ = cu.c.Patch("cull", DevAdjust{Label: ch.label, Text: ch.options[i], Choice: true})
 		return
 	}
 	sp, ok := devSpecs[d.active]
@@ -129,6 +130,11 @@ func (cu *culler) devNudge(in DevNudge) {
 	sp.set(&d.params, v)
 	_ = cu.c.Update("develop", cu.developState())
 	cu.edited(false)
+	adj := DevAdjust{Label: sp.label, Min: sp.min, Max: sp.max, Value: float32(v), Text: sp.format(float32(v)), HasRest: !sp.noRest}
+	if sp.rest != nil {
+		adj.Rest = sp.rest(cu.developState())
+	}
+	_ = cu.c.Patch("cull", adj)
 	key := d.active
 	if d.nudge != nil {
 		d.nudge.Stop()

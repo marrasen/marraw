@@ -125,7 +125,13 @@ type cullView struct {
 	// while with no input, as marraw's does, all but keep, the piece the
 	// pointer rests on. lastInput is when input last came, pointer where
 	// the pointer last was, and idleStop stops the wait for idleness.
-	idle      *anim.Float
+	idle *anim.Float
+	// adjust is the heads-up readout of the control + and - step,
+	// adjusting says they are stepping it, and adjustIn carries the
+	// chrome aside and the readout in.
+	adjust    *adjustHUD
+	adjusting bool
+	adjustIn  *anim.Float
 	keep      string
 	lastInput time.Time
 	pointer   geom.Point
@@ -169,7 +175,7 @@ func newCullView(s Cull) *cullView {
 		origIn: anim.NewFloat(0), wbIn: anim.NewFloat(0),
 		labelOrig: widget.NewLabel("Original"), labelWB: widget.NewLabel("Click something neutral grey or white"),
 		wbRead: widget.NewLabel(""), wbWarn: widget.NewLabel(""),
-		filmIn: anim.NewFloat(1), idle: anim.NewFloat(1), lastInput: time.Now(),
+		filmIn: anim.NewFloat(1), idle: anim.NewFloat(1), lastInput: time.Now(), adjust: newAdjustHUD(), adjustIn: anim.NewFloat(0),
 		headName: widget.NewLabel(s.Name), headExif: widget.NewLabel(s.Exif), errors: newErrorTray()}
 	v.errors.list, v.errors.tasks = s.Errors, s.Tasks
 	v.headName.Face, v.headName.Size, v.headName.MaxLines = widget.MonoFont, headNameSize, 1
@@ -191,7 +197,7 @@ func newCullView(s Cull) *cullView {
 	if s.Panel {
 		v.side.Jump(1)
 	}
-	v.Add(v.z, v.c, v.in, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin, v.maskTintIn, v.filmIn, v.idle, v.flipX, v.flipY)
+	v.Add(v.z, v.c, v.in, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin, v.maskTintIn, v.filmIn, v.idle, v.flipX, v.flipY, v.adjustIn)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -452,7 +458,7 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 // Children implements [gunim.Composite].
 func (v *cullView) Children() []gunim.Node {
 	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead, v.wbWarn, v.crop.bar, v.crop.info, v.film,
-		v.headName, v.headExif, v.errors}
+		v.headName, v.headExif, v.errors, v.adjust}
 }
 
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
@@ -1122,6 +1128,8 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	v.errors.corner = geom.Pt(v.openRoom().Max.X, foot-8)
 	kids.At(13).Layout(gunim.Tight(box))
 	kids.At(13).Place(geom.Point{})
+	as := kids.At(14).Layout(gunim.Loose(box))
+	kids.At(14).Place(geom.Pt(box.W/2-as.W/2, box.H-as.H-24))
 
 	return box
 }
@@ -1218,6 +1226,13 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	paintNote(p, l, geom.Rc(rm.Min.X+16, v.chromeTop()+14, l.Size().W, l.Size().H), v.origIn.Value())
 	v.paintWB(p, f.Theme, kids.At(5), kids.At(6), kids.At(7))
 	kids.At(13).Paint(p)
+	if k := v.adjustIn.Value(); k > 0.01 {
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(k, 1)})()
+			defer p.Push(paint.Translate(geom.Pt(0, (1-k)*12)))()
+			kids.At(14).Paint(p)
+		}()
+	}
 }
 
 // markPlace is where the photo's marks are: its flags and stars, at the
@@ -1297,9 +1312,13 @@ func (v *cullView) paintHead(p *paint.Painter, th *theme.Live, name, exif gunim.
 func (v *cullView) Overhear(e input.Event, u *gunim.UI) {
 	switch e := e.(type) {
 	case input.PointerMove:
+		if d := e.Pos.Sub(v.pointer); d.X*d.X+d.Y*d.Y > 9 {
+			v.endAdjust(u)
+		}
 		v.pointer = e.Pos
 	case input.PointerDown:
 		v.pointer = e.Pos
+		v.endAdjust(u)
 	}
 	v.lastInput = time.Now()
 	if v.idle.Target() != 1 {
@@ -1357,6 +1376,7 @@ func (v *cullView) faded(p *paint.Painter, piece string, paintIt func()) {
 		a = 1
 	}
 	a *= 1 - v.origIn.Value()
+	a *= 1 - min(max(v.adjustIn.Value(), 0), 1)
 	if a < 0.01 {
 		return
 	}
