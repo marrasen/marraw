@@ -426,6 +426,9 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 			case input.KeyE:
 				u.Send(v, AskExport{})
 				return true
+			case input.KeyN:
+				u.Send(v, ToggleViewer{})
+				return true
 			case input.KeyK:
 				_, cursor := v.grid.Selected()
 				openPalette(v, geom.Rc(v.railX(), v.top, v.box.W-v.railX(), v.box.H-v.top), u, paletteFor{cursor: cursor})

@@ -199,10 +199,11 @@ type culler struct {
 	// on its way to opening in the cull view.
 	lib      library
 	cullNext string
-	// addf is the Add folder dialog's state, and share the share
-	// dialog's.
-	addf  addFolder
-	share sharer
+	// addf is the Add folder dialog's state, share the share dialog's,
+	// and viewer the pop-out viewer's.
+	addf   addFolder
+	share  sharer
+	viewer popViewer
 	// heal is the heal tool, for retouching spots.
 	heal healState
 	// settings is what the settings dialog shows, while settingsOpen.
@@ -358,6 +359,8 @@ func (cu *culler) serve() error {
 	}()
 	cu.followLibrary()
 	for {
+		// The pop-out viewer follows the photo in hand.
+		cu.viewerTick()
 		select {
 		case <-cu.ctx.Done():
 			return nil
@@ -473,6 +476,8 @@ func (cu *culler) serve() error {
 				cu.shareCreate(in)
 			case ShareDone:
 				cu.shareDone()
+			case ToggleViewer:
+				cu.toggleViewer()
 			case HealVisual:
 				cu.healVisual(in.On)
 			case HealSens:
@@ -991,6 +996,16 @@ func (cu *culler) scriptStep(k string) bool {
 	case ok && verb == "wait":
 		ms, _ := strconv.Atoi(arg)
 		time.Sleep(time.Duration(ms) * time.Millisecond)
+		return true
+	case ok && verb == "vshot":
+		// A picture of the pop-out viewer.
+		got := make(chan gunim.Client, 1)
+		cu.do <- func() { got <- cu.viewer.c }
+		if vc := <-got; vc != (gunim.Client{}) {
+			if err := writeShot(cu.ctx, vc, arg+".png"); err != nil {
+				log.Print(err)
+			}
+		}
 		return true
 	case ok && verb == "shot":
 		if err := writeShot(cu.ctx, cu.c, arg+".png"); err != nil {

@@ -613,6 +613,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			case input.KeyE:
 				u.Send(v, AskExport{})
 				return true
+			case input.KeyN:
+				u.Send(v, ToggleViewer{})
+				return true
 			case input.KeyK:
 				openPalette(v, v.room(), u, paletteFor{culling: true, panel: v.st.Panel})
 				return true

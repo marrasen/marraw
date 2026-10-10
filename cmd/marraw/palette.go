@@ -50,6 +50,7 @@ func paletteEntries(at paletteFor) []paletteEntry {
 		add("Open in the cull view", "Enter", OpenCull{Index: at.cursor}, "loupe", "cull")
 	}
 	add("Export…", "Ctrl+E", AskExport{}, "save", "jpeg")
+	add("Pop-out viewer", "Ctrl+N", ToggleViewer{}, "window", "second screen", "monitor")
 	add("Copy the photo as an image", "Ctrl+Shift+C", CopyImage{}, "clipboard", "paste")
 	add("Watermarks…", "", AskWatermarks{}, "logo", "signature", "frame")
 	add("Add a folder to the library…", "", AskAddFolder{}, "import", "library", "shoot")

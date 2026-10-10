@@ -147,6 +147,7 @@ func run(o options) error {
 		registerViews(w)
 		c := w.Client()
 		cu := newCuller(ctx, c, api, newImages("http://"+host, token), info.FolderID, path, photos)
+		cu.viewer.app = a
 		if o.skim > 0 || o.shot != "" || o.zoom || o.keys != "" {
 			go cu.script(o)
 		}
