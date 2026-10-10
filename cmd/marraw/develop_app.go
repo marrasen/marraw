@@ -48,6 +48,8 @@ type (
 		PickChips []PickChip
 		PickKind  string
 		PickArmed bool
+		// Heal is the heal tool.
+		Heal      *HealView
 		Brush     BrushTool
 		RangePick bool
 		AIBusy    string
@@ -156,6 +158,7 @@ func (cu *culler) developState() DevelopState {
 	st.MaskSel, st.Brush, st.RangePick, st.AIBusy = cu.masks.sel, cu.masks.brush, cu.masks.rangePick, cu.masks.aiBusy
 	st.MaskActive = cu.masks.active
 	st.PickChips, st.PickKind, st.PickArmed = cu.pickChips(), cu.masks.pick.kind, cu.masks.pick.armed
+	st.Heal = cu.healView()
 	st.Tab = cu.devTab
 	st.Amount = cu.amountView()
 	if st.MaskSel >= len(d.params.Masks) {
@@ -208,6 +211,7 @@ func (cu *culler) loadEdit(i int) {
 		// preset's Amount is the last photo's.
 		cu.masks = maskState{sel: -1, brush: cu.masks.brush, hover: -1, tintOf: -1}
 		cu.presetAmt = nil
+		cu.heal.sel, cu.heal.busy = -1, nil
 		cu.masks.brush.Painting = false
 	}
 	d := &cu.dev

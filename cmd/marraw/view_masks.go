@@ -30,8 +30,8 @@ type maskPanel struct {
 	editor *maskEditor
 	// chips are the scene's or the people's regions found, to pick.
 	chips *pickChips
-	rows   []*maskRow
-	st     DevelopState
+	rows  []*maskRow
+	st    DevelopState
 	// places glides each row to its place as masks come, go and open.
 	places map[*maskRow]*anim.Float
 	// drag is a row being dragged to another place, or nil; rowsTop is

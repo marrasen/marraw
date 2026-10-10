@@ -137,6 +137,8 @@ type cullView struct {
 	hudRect geom.Rect
 	// errors are the errors not cleared yet, in the corner.
 	errors *errorTray
+	// heal is the heal tool's: a spot placed or dragged.
+	heal healUI
 	// pickHot is the region under the pointer while picking, and
 	// pickPress where a press began, to tell a click from a drag.
 	pickHot     int
@@ -456,7 +458,7 @@ func (v *cullView) Children() []gunim.Node {
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
 // eyedropper is on.
 func (v *cullView) Cursor(p geom.Point) input.Cursor {
-	if v.picking() && v.inPhotoArea(p) {
+	if v.picking() && v.inPhotoArea(p) || v.healOn() != nil && v.inPhotoArea(p) {
 		return input.CursorCrosshair
 	}
 	if v.maskOn() && !v.stripRect.Contains(p) && !v.inPanel(p) {
@@ -626,12 +628,16 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			}
 			return true
 		}
+		if v.healKey(e, u) {
+			return true
+		}
 		if e.Key == input.KeyDelete {
 			u.Send(v, AskDelete{})
 			return true
 		}
 		// W turns the white-balance eyedropper on and off, and Escape off.
-		if ms := v.st.Masks; e.Key == input.KeyEscape && ms != nil && (ms.Selected >= 0 || ms.Brush.Painting || ms.RangePick) {
+		if ms := v.st.Masks; e.Key == input.KeyEscape && ms != nil && (ms.Selected >= 0 || ms.Brush.Painting || ms.RangePick ||
+			ms.Pick != nil || ms.Heal != nil && ms.Heal.On) {
 			u.Send(v, MaskEscape{})
 			return true
 		}
@@ -743,6 +749,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			return true
 		}
 		v.pickHandle(e, u)
+		if v.healHandle(e, u) {
+			return true
+		}
 		if v.maskOn() && v.maskHandle(e, u) {
 			return true
 		}
@@ -795,6 +804,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			return true
 		}
 		v.pickHandle(e, u)
+		if v.healHandle(e, u) {
+			return true
+		}
 		if v.maskOn() && v.maskHandle(e, u) {
 			return true
 		}
@@ -830,6 +842,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			return true
 		}
 		v.pickHandle(e, u)
+		if v.healHandle(e, u) {
+			return true
+		}
 		if v.maskOn() && v.maskHandle(e, u) {
 			return true
 		}
@@ -1150,6 +1165,7 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 		return
 	}
 	v.paintMask(p)
+	v.paintHeal(p)
 	v.paintCrop(p, box, kids.At(8), kids.At(9))
 	// The chrome comes up from below as the view comes in.
 	defer p.Push(paint.Translate(geom.Pt(0, (1-in)*stripHeight)))()

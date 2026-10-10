@@ -45,15 +45,15 @@ type PickChip struct {
 // map's version, its regions, whether the tool is armed, the map for the
 // pointer, and the photo it is of.
 type maskPick struct {
-	kind      string
-	mapVer    string
-	cats      []marrawclient.AICategory
-	people    []marrawclient.AIInstance
-	armed     bool
-	plane     *image.Gray
-	planeKey  string
-	photo int64
-	hover int
+	kind     string
+	mapVer   string
+	cats     []marrawclient.AICategory
+	people   []marrawclient.AIInstance
+	armed    bool
+	plane    *image.Gray
+	planeKey string
+	photo    int64
+	hover    int
 }
 
 // ids are the regions that can be picked.

@@ -88,8 +88,10 @@ type MaskView struct {
 	RangePick bool
 	Tint      *paint.Image
 	TintOf    int
-	// Pick is the scene's or the people's picking, while it is armed.
+	// Pick is the scene's or the people's picking, while it is armed,
+	// and Heal the heal tool, while it is on.
 	Pick *PickView
+	Heal *HealView
 }
 
 // maskState is the develop side's masks: the one chosen, the brush, the
@@ -118,7 +120,7 @@ type maskState struct {
 func (cu *culler) maskView() *MaskView {
 	d := &cu.dev
 	m := &cu.masks
-	if !d.open || cu.crop.on || (m.sel < 0 && m.tint == nil && !m.pick.armed) {
+	if !d.open || cu.crop.on || (m.sel < 0 && m.tint == nil && !m.pick.armed && !cu.heal.on) {
 		return nil
 	}
 	v := &MaskView{Params: d.params, Selected: m.sel, Brush: m.brush, RangePick: m.rangePick, TintOf: -1}
@@ -127,6 +129,9 @@ func (cu *culler) maskView() *MaskView {
 	}
 	if m.tint != nil && m.tintOf == m.hover {
 		v.Tint, v.TintOf = m.tint, m.tintOf
+	}
+	if cu.heal.on {
+		v.Heal = cu.healView()
 	}
 	if m.pick.armed && m.pick.plane != nil {
 		v.Pick = &PickView{Kind: m.pick.kind, Plane: m.pick.plane, IDs: m.pick.ids()}

@@ -299,6 +299,7 @@ var devSections = []devSection{
 	{title: "Lens", keys: []string{"lensDistortion", "lensVignetting", "lensCA"}, choices: []string{"lensMode"}, open: false},
 	{title: "Tone curve", open: true, tab: tabCurve, bare: true},
 	{title: "Masks", open: true, tab: tabLocal, bare: true},
+	{title: "Retouch", open: true, tab: tabLocal},
 	{title: "Auto", open: true, tab: tabPresets},
 	{title: "Presets", open: true, tab: tabPresets},
 	{title: "Clipboard", open: true, tab: tabPresets},
@@ -371,6 +372,7 @@ type developView struct {
 	// presets are the presets' cards, and masks the masks.
 	presets *presetGrid
 	masks   *maskPanel
+	retouch *retouchPanel
 	// amount is the preset applied last's Amount, folded open while there
 	// is one.
 	amount     *widget.SliderRow
@@ -418,6 +420,9 @@ func newDevelopView(s DevelopState) *developView {
 		case "Masks":
 			v.masks = newMaskPanel(v)
 			body = append(body, v.masks)
+		case "Retouch":
+			v.retouch = newRetouchPanel()
+			body = append(body, v.retouch)
 		case "Auto":
 			var bs []*widget.Button
 			for _, a := range []struct {
@@ -616,6 +621,9 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 	v.showAmount(s, u)
 	if v.masks != nil {
 		v.masks.show(s, u)
+	}
+	if v.retouch != nil {
+		v.retouch.show(s, u)
 	}
 	p := &s.Params
 	for key, r := range v.rows {

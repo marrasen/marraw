@@ -187,6 +187,8 @@ type culler struct {
 	// one's number.
 	errs   []ErrorNote
 	errSeq int
+	// heal is the heal tool, for retouching spots.
+	heal healState
 	// presetAmt is the preset applied last, for its Amount, and
 	// amountScrub says the Amount is making the edit, which keeps it.
 	presetAmt   *presetAmount
@@ -288,7 +290,7 @@ func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
 		tiles: newTileCache(48), tileWarm: map[string]bool{},
 		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), cursor: -1,
-		libView: defaultView("", defaultGap), masks: maskState{sel: -1, brush: defaultBrush, hover: -1, tintOf: -1}}
+		libView: defaultView("", defaultGap), masks: maskState{sel: -1, brush: defaultBrush, hover: -1, tintOf: -1}, heal: newHealState()}
 	cu.setAll(photos)
 	cu.applyView()
 	return cu
@@ -479,7 +481,21 @@ func (cu *culler) serve() error {
 			case MaskHover:
 				cu.maskHover(in.Index)
 			case MaskEscape:
-				cu.masksEscape()
+				if !cu.healEscape() {
+					cu.masksEscape()
+				}
+			case HealToggle:
+				cu.healToggle()
+			case HealSet:
+				cu.healSet(in)
+			case SpotAdd:
+				cu.spotAdd(in.Spot)
+			case SpotSet:
+				cu.spotSet(in)
+			case SpotSelect:
+				cu.spotSelect(in.Index)
+			case SpotDelete:
+				cu.spotDelete(in.Index)
 			case ToggleCrop:
 				cu.toggleCrop()
 			case CropDone:
