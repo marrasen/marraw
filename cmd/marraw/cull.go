@@ -199,8 +199,10 @@ type culler struct {
 	// on its way to opening in the cull view.
 	lib      library
 	cullNext string
-	// addf is the Add folder dialog's state.
-	addf addFolder
+	// addf is the Add folder dialog's state, and share the share
+	// dialog's.
+	addf  addFolder
+	share sharer
 	// heal is the heal tool, for retouching spots.
 	heal healState
 	// settings is what the settings dialog shows, while settingsOpen.
@@ -467,6 +469,10 @@ func (cu *culler) serve() error {
 				cu.addFolderGo(in)
 			case AddFolderSystem:
 				cu.addFolderSystem()
+			case ShareCreate:
+				cu.shareCreate(in)
+			case ShareDone:
+				cu.shareDone()
 			case PromptDone:
 				cu.promptDone(in)
 			case AskSettings:

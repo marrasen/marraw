@@ -216,7 +216,9 @@ func (cu *culler) railItems() []RailItem {
 	}
 	q := strings.ToLower(strings.TrimSpace(l.filter))
 	match := func(s string) bool { return q == "" || strings.Contains(strings.ToLower(s), q) }
-	open := func(key string) bool { return q != "" || ui.RailGroups[strings.ToLower(key)] || !hasKey(ui.RailGroups, strings.ToLower(key)) }
+	open := func(key string) bool {
+		return q != "" || ui.RailGroups[strings.ToLower(key)] || !hasKey(ui.RailGroups, strings.ToLower(key))
+	}
 	alias := func(key, fallback string) string {
 		if a := ui.GroupAliases[strings.ToLower(key)]; a != "" {
 			return a
@@ -440,7 +442,9 @@ func rootName(r marrawclient.LibraryRoot) string {
 // with none last; a library folder's own loose photos stay first.
 func sortShoots(shoots []marrawclient.Shoot, by string) []marrawclient.Shoot {
 	out := slices.Clone(shoots)
-	byName := func(a, b marrawclient.Shoot) int { return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)) }
+	byName := func(a, b marrawclient.Shoot) int {
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	}
 	slices.SortStableFunc(out, func(a, b marrawclient.Shoot) int {
 		if a.IsSelf != b.IsSelf {
 			if a.IsSelf {
@@ -997,11 +1001,6 @@ func (cu *culler) showFolder(id int64, path string, photos []marrawclient.Photo)
 	cu.stopLive = cu.followFolder()
 	_ = cu.c.Update("grid", cu.gridState())
 	cu.railChanged()
-}
-
-// askShare opens the dialog for sharing the shoot at path.
-func (cu *culler) askShare(path, name string) {
-	cu.notify("Sharing " + name + " comes in the share dialog")
 }
 
 // AskAddFolder opens the dialog for adding a folder to the library.

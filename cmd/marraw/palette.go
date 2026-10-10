@@ -53,6 +53,9 @@ func paletteEntries(at paletteFor) []paletteEntry {
 	add("Copy the photo as an image", "Ctrl+Shift+C", CopyImage{}, "clipboard", "paste")
 	add("Watermarks…", "", AskWatermarks{}, "logo", "signature", "frame")
 	add("Add a folder to the library…", "", AskAddFolder{}, "import", "library", "shoot")
+	if lastRail.Current != "" {
+		add("Share this shoot…", "", RailAct{Key: lastRail.Current, Act: "share"}, "link", "album", "guest")
+	}
 	add("Undo", "Ctrl+Z", DevUndo{})
 	add("Redo", "Ctrl+Shift+Z", DevUndo{Redo: true})
 	add("Copy edit settings", "Ctrl+C", EditCopy{})

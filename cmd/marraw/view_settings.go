@@ -695,7 +695,7 @@ func newLinkRow(l marrawclient.ShareLink) gunim.Node {
 	case l.ExpiresAt == 0:
 		line = append(line, "no expiry")
 	default:
-		line = append(line, "expires "+time.Unix(l.ExpiresAt, 0).Format("2 Jan 15:04"))
+		line = append(line, "expires "+time.UnixMilli(l.ExpiresAt).Format("2 Jan 15:04"))
 	}
 	if l.Reach == marrawclient.ShareReachTailnet {
 		line = append(line, "my devices")
@@ -735,12 +735,13 @@ func newLinkRow(l marrawclient.ShareLink) gunim.Node {
 
 var onlineInk = theme.Color("marraw.online", color.NRGBA{R: 0x5e, G: 0xe0, B: 0xb0, A: 0xff})
 
-// relativeTime is when unix time t was, in words, as marraw says it.
+// relativeTime is when t, in Unix milliseconds as share links keep
+// times, was, in words, as marraw says it.
 func relativeTime(t int64) string {
 	if t == 0 {
 		return "never"
 	}
-	d := time.Since(time.Unix(t, 0))
+	d := time.Since(time.UnixMilli(t))
 	switch {
 	case d < 90*time.Second:
 		return "just now"

@@ -32,6 +32,8 @@ func registerViews(w *gunim.Window) {
 	gunim.RegisterView(w, "confirm", newConfirmDialog, nil)
 	gunim.RegisterView(w, "prompt", newPromptDialog, (*promptView).show)
 	gunim.RegisterView(w, "addfolder", newAddFolderView, (*addFolderView).show)
+	gunim.RegisterView(w, "share", newShareView, (*shareView).show)
+	gunim.RegisterView(w, "sharelink", newShareLinkView, (*shareLinkView).show)
 	gunim.RegisterView(w, "export", newExportView, (*exportView).show)
 	gunim.RegisterView(w, "settings", newSettingsView, (*settingsView).show)
 	gunim.RegisterView(w, "watermarks", newWatermarkView, (*wmView).show)
