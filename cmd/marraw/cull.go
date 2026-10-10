@@ -187,6 +187,12 @@ type culler struct {
 	// one's number.
 	errs   []ErrorNote
 	errSeq int
+	// exportAsk is what the export dialog shows, and pendingExport an
+	// export waiting for its folder to be made.
+	exportAsk     ExportAsk
+	pendingExport *ExportGo
+	// stopCopy cancels the render for the clipboard under way.
+	stopCopy context.CancelFunc
 	// heal is the heal tool, for retouching spots.
 	heal healState
 	// settings is what the settings dialog shows, while settingsOpen.
@@ -408,6 +414,14 @@ func (cu *culler) serve() error {
 				}
 			case DevAuto:
 				cu.devAuto(in)
+			case ExportPresetOp:
+				cu.exportPresetOp(in)
+			case ExportChooseDir:
+				cu.exportChooseDir()
+			case ExportCopy:
+				cu.exportCopy(in)
+			case CopyImage:
+				cu.copyImage()
 			case AskSettings:
 				cu.askSettings(in.Section)
 			case SettingsDone:
@@ -919,8 +933,9 @@ func (cu *culler) scriptStep(k string) bool {
 		return true
 	case strings.HasPrefix(k, "shift+") && namedKeys[strings.TrimPrefix(k, "shift+")] != 0:
 		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: namedKeys[strings.TrimPrefix(k, "shift+")], Mods: input.ModShift, Time: now})
-	case k == "ctrl+z":
-		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyZ, Mods: input.ModControl, Time: now})
+	case strings.HasPrefix(k, "ctrl+") && len(k) == 6 && k[5] >= 'a' && k[5] <= 'z':
+		// Ctrl and a letter.
+		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyA + input.Key(k[5]-'a'), Mods: input.ModControl, Time: now})
 	case k == "w":
 		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyW, Time: now})
 	default:

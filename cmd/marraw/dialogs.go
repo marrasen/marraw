@@ -64,6 +64,11 @@ func (cu *culler) askDelete() {
 func (cu *culler) confirmed(a Confirmed) {
 	cu.asking = false
 	_ = cu.c.Unmount("confirm")
+	if a.Kind == "exportCreate" {
+		cu.refocus()
+		cu.exportCreate(a.OK)
+		return
+	}
 	if a.Kind == "fillModel" {
 		cu.refocus()
 		cu.fillAnswered(a.OK)

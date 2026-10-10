@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/widget"
@@ -17,71 +19,57 @@ type (
 	// AskExport opens the export dialog for the photos selected, or the
 	// one showing, or all the grid shows.
 	AskExport struct{}
-	// ExportAsk is what the export dialog starts from.
+	// ExportAsk is what the export dialog shows: how many photos, from
+	// what folder, where they go, the choices to start from, the presets
+	// and watermarks to choose among, the preset chosen, and the first
+	// photo's name and when it was taken, for an example file name.
 	ExportAsk struct {
-		Count    int
-		Dest     string
-		Format   int
-		Quality  int
-		Edge     int
-		Template string
+		Count        int
+		Folder       string
+		Dest         string
+		Options      marrawclient.ExportOptions
+		Presets      []marrawclient.ExportPreset
+		Watermarks   []PresetChoice
+		Active       string
+		ExampleName  string
+		ExampleTaken int64
+		Single       bool
 	}
-	// ExportGo is the dialog's answer: export with these, or not.
+	// ExportGo is the dialog's answer: export with these, or not; Create
+	// makes the destination where it is not there yet.
 	ExportGo struct {
-		OK       bool
-		Dest     string
-		Format   int
-		Quality  int
-		Edge     int
-		Template string
+		OK      bool
+		Dest    string
+		Options marrawclient.ExportOptions
+		Create  bool
 	}
+	// ExportPresetOp saves the export's choices as a preset named Name,
+	// updates the preset ID with them, renames it, or deletes it, as Op
+	// says: "save", "update", "rename" or "delete".
+	ExportPresetOp struct {
+		Op, ID, Name string
+		Options      marrawclient.ExportOptions
+	}
+	// ExportChooseDir asks for the destination with the system's dialog.
+	ExportChooseDir struct{}
+	// ExportCopy renders the photo with Options and puts it on the
+	// clipboard.
+	ExportCopy struct{ Options marrawclient.ExportOptions }
+	// AskWatermarks opens the watermark editor.
+	AskWatermarks struct{}
+	// CopyImage puts the photo in hand on the clipboard as a picture,
+	// rendered as the export last chose.
+	CopyImage struct{}
 )
 
-// The export dialog's choices, as marraw's export dialog offers them.
-var (
-	exportFormats     = []string{"JPEG", "TIFF", "PNG", "RAW + XMP"}
-	exportFormatKeys  = []marrawclient.ExportFormat{"jpeg", "tiff8", "png", "rawXmp"}
-	exportEdges       = []string{"Full size", "4000 px", "3000 px", "2048 px", "1600 px"}
-	exportEdgeValues  = []int{0, 4000, 3000, 2048, 1600}
-	exportDefaultName = "{name}"
-)
-
-// newExportDialog is the export dialog, starting from s.
-func newExportDialog(s ExportAsk) *widget.Dialog {
-	what := "this photo"
-	if s.Count > 1 {
-		what = fmt.Sprintf("%d photos", s.Count)
-	}
-	d := widget.NewDialog("Export " + what)
-	dest := widget.NewTextField()
-	dest.SetText(s.Dest, nil)
-	format := widget.NewDropdown(menuItems(exportFormats...))
-	format.SetSelected(s.Format, nil)
-	quality := widget.NewNumberField(50, 100)
-	quality.SetValue(float64(s.Quality), nil)
-	edge := widget.NewDropdown(menuItems(exportEdges...))
-	edge.SetSelected(s.Edge, nil)
-	name := widget.NewTextField()
-	name.SetText(s.Template, nil)
-	hint := widget.NewLabel("{name} the file's name, {seq} a number, {date} and {time} when it was taken")
-	hint.Color, hint.Size, hint.MaxLines = widget.PaletteHint, noteSize, 2
-	form := widget.NewForm().Add("Destination", dest).Add("Format", format).Add("JPEG quality", quality).
-		Add("Size", edge).Add("File names", name)
-	d.Body = widget.Column(form, hint)
-	d.Width = 520
-	d.SetButtons("Export", "Cancel")
-	d.Check = func() string {
-		if strings.TrimSpace(dest.Text()) == "" {
-			return "Where should the photos go?"
+// WatermarkName is the name of the watermark id, or "".
+func (a ExportAsk) WatermarkName(id string) string {
+	for _, w := range a.Watermarks {
+		if w.ID == id {
+			return w.Name
 		}
-		return ""
 	}
-	d.OnAccept = func(*gunim.UI) gunim.Intent {
-		return ExportGo{OK: true, Dest: strings.TrimSpace(dest.Text()), Format: format.Selected(),
-			Quality: int(quality.Value()), Edge: edge.Selected(), Template: strings.TrimSpace(name.Text())}
-	}
-	d.OnDismiss = widget.Sends(ExportGo{})
-	return d
+	return ""
 }
 
 // exportTargets are the photos an export takes: the selection, or the one
@@ -108,65 +96,99 @@ func (cu *culler) askExport() {
 		return
 	}
 	cu.asking, cu.exporting = true, ids
-	ask := ExportAsk{Count: len(ids), Dest: filepath.Join(cu.folderPath, "Exports"), Quality: 90, Template: exportDefaultName}
-	if ui := cu.ui; ui != nil {
-		o := ui.ExportOptions
-		for i, f := range exportFormatKeys {
-			if f == o.Format {
-				ask.Format = i
-			}
-		}
-		if o.JpegQuality > 0 {
-			ask.Quality = o.JpegQuality
-		}
-		for i, e := range exportEdgeValues {
-			if o.ResizeMode != "" && o.ResizeMode != "full" && e == o.EdgePx {
-				ask.Edge = i
-			}
-		}
-		if o.FileNameTemplate != "" {
-			ask.Template = o.FileNameTemplate
-		}
-		if ui.ExportDir != "" && filepath.IsAbs(ui.ExportDir) {
-			ask.Dest = ui.ExportDir
-		}
-	}
-	_ = cu.c.Mount(gunim.Root, "export", "export", ask)
+	cu.exportAsk = cu.newExportAsk(ids)
+	_ = cu.c.Mount(gunim.Root, "export", "export", cu.exportAsk)
 }
 
-// exportGo takes the export dialog's answer, and starts the export: the
-// note over the photos says how it goes.
+// newExportAsk is what the export dialog starts from, for ids.
+func (cu *culler) newExportAsk(ids []int64) ExportAsk {
+	sep := "\\"
+	if strings.Contains(cu.folderPath, "/") {
+		sep = "/"
+	}
+	ask := ExportAsk{Count: len(ids), Folder: cu.folderPath, Dest: cu.folderPath + sep + "Exports",
+		Options: defaultExportOptions, Single: len(ids) == 1}
+	if i, ok := cu.index[ids[0]]; ok {
+		ask.ExampleName, ask.ExampleTaken = cu.photos[i].FileName, cu.photos[i].TakenAt
+	}
+	if ui := cu.ui; ui != nil {
+		if ui.ExportOptions.Format != "" {
+			ask.Options = normalExportOptions(ui.ExportOptions)
+		}
+		if ui.ExportDir != "" {
+			ask.Dest = ui.ExportDir
+		}
+		ask.Presets = ui.ExportPresets
+		for _, w := range ui.Watermarks {
+			ask.Watermarks = append(ask.Watermarks, PresetChoice{ID: w.ID, Name: w.Name})
+		}
+		if ask.WatermarkName(ask.Options.WatermarkID) == "" {
+			ask.Options.WatermarkID = ""
+		}
+		for _, p := range ui.ExportPresets {
+			if normalExportOptions(p.Options) == ask.Options {
+				ask.Active = p.ID
+				break
+			}
+		}
+	}
+	return ask
+}
+
+// exportGo takes the export dialog's answer: the destination checked,
+// and asked about where it is not there yet, then the export started; the
+// chip at the corner says how it goes.
 func (cu *culler) exportGo(a ExportGo) {
-	cu.asking = false
-	_ = cu.c.Unmount("export")
-	cu.refocus()
+	if !a.Create {
+		cu.asking = false
+		_ = cu.c.Unmount("export")
+		cu.refocus()
+	}
 	ids := cu.exporting
-	cu.exporting = nil
 	if !a.OK || len(ids) == 0 {
+		cu.exporting = nil
 		return
 	}
-	req := marrawclient.ExportRequest{PhotoIDs: ids, DestDir: a.Dest, Format: exportFormatKeys[a.Format],
-		JpegQuality: a.Quality, LongEdge: exportEdgeValues[a.Edge], ColorSpace: "srgb", SharpenTarget: "off",
-		SharpenAmount: "standard", FileNameTemplate: a.Template, ExifMode: "all", CreateDir: true}
-	if req.FileNameTemplate == "" {
-		req.FileNameTemplate = exportDefaultName
-	}
-	opts := marrawclient.ExportOptions{Format: req.Format, JpegQuality: req.JpegQuality, ResizeMode: "full",
-		EdgePx: req.LongEdge, ColorSpace: req.ColorSpace, SharpenTarget: req.SharpenTarget,
-		SharpenAmount: req.SharpenAmount, FileNameTemplate: req.FileNameTemplate, ExifMode: req.ExifMode}
-	if req.LongEdge > 0 {
-		opts.ResizeMode = "long"
-	}
+	o := normalExportOptions(a.Options)
 	if cu.ui != nil {
-		cu.ui.ExportOptions, cu.ui.ExportDir = opts, a.Dest
+		cu.ui.ExportOptions, cu.ui.ExportDir = o, a.Dest
 	}
-	cu.notify(fmt.Sprintf("Exporting %d %s…", len(ids), map[bool]string{false: "photos", true: "photo"}[len(ids) == 1]))
 	go func() {
-		_ = cu.api.Settings.SetExportOptions(cu.ctx, opts)
+		ctx, cancel := context.WithTimeout(cu.ctx, 30*time.Second)
+		defer cancel()
+		if !a.Create {
+			if d, err := cu.api.Export.CheckDest(ctx, a.Dest); err == nil && d != nil && !d.Exists {
+				select {
+				case cu.do <- func() {
+					cu.pendingExport = &a
+					cu.asking = true
+					_ = cu.c.Mount(gunim.Root, "confirm", "confirm", ConfirmAsk{Kind: "exportCreate", Title: "Create the folder?",
+						Body: "The folder " + a.Dest + " is not there yet. Create it, and export into it?", OK: "Create and export"})
+				}:
+				case <-cu.ctx.Done():
+				}
+				return
+			}
+		}
+		_ = cu.api.Settings.SetExportOptions(cu.ctx, o)
 		_ = cu.api.Settings.SetExportDir(cu.ctx, a.Dest)
+		removeLocation := o.ExifMode == "all" && o.RemoveLocation
+		mark := o.WatermarkID
+		if o.Format == "rawXmp" {
+			mark = ""
+		}
+		edge := 0
+		if o.ResizeMode == "edge" {
+			edge = o.EdgePx
+		}
+		req := marrawclient.ExportRequest{PhotoIDs: ids, DestDir: a.Dest, Format: o.Format, JpegQuality: o.JpegQuality,
+			LongEdge: edge, ColorSpace: o.ColorSpace, SharpenTarget: o.SharpenTarget, SharpenAmount: o.SharpenAmount,
+			FileNameTemplate: o.FileNameTemplate, ExifMode: o.ExifMode, RemoveLocation: removeLocation,
+			Artist: o.Artist, Copyright: o.Copyright, WatermarkID: mark, CreateDir: a.Create}
 		ref, err := cu.api.Export.StartExport(cu.ctx, req)
 		select {
 		case cu.do <- func() {
+			cu.exporting = nil
 			if err != nil || ref == nil {
 				cu.fail("The export could not start", orNoAnswer(err))
 				return
@@ -176,6 +198,105 @@ func (cu *culler) exportGo(a ExportGo) {
 		case <-cu.ctx.Done():
 		}
 	}()
+}
+
+// exportCreate takes the answer to whether to make the destination.
+func (cu *culler) exportCreate(ok bool) {
+	a := cu.pendingExport
+	cu.pendingExport = nil
+	if a == nil {
+		return
+	}
+	if !ok {
+		cu.exporting = nil
+		return
+	}
+	a.Create = true
+	cu.exportGo(*a)
+}
+
+// exportChooseDir asks for the destination with the system's dialog, and
+// shows it in the export dialog.
+func (cu *culler) exportChooseDir() {
+	go func() {
+		paths, err := cu.c.ChooseFiles(cu.ctx, chooseFolder("Choose where the photos go"))
+		if err != nil || len(paths) == 0 {
+			return
+		}
+		select {
+		case cu.do <- func() {
+			cu.exportAsk.Dest = paths[0]
+			_ = cu.c.Update("export", cu.exportAsk)
+		}:
+		case <-cu.ctx.Done():
+		}
+	}()
+}
+
+// exportPresetOp saves, updates, renames or deletes an export preset,
+// and shows the presets anew in the dialog.
+func (cu *culler) exportPresetOp(in ExportPresetOp) {
+	if cu.ui == nil {
+		cu.ui = &marrawclient.UISettings{}
+	}
+	ps := slices.Clone(cu.ui.ExportPresets)
+	at := slices.IndexFunc(ps, func(p marrawclient.ExportPreset) bool { return p.ID == in.ID })
+	note := ""
+	switch in.Op {
+	case "save":
+		name := uniqueName(in.Name, ps)
+		p := marrawclient.ExportPreset{ID: newPresetID(), Name: name, Options: normalExportOptions(in.Options)}
+		ps = append(ps, p)
+		cu.exportAsk.Active = p.ID
+		note = "Saved the export preset “" + name + "”"
+	case "update":
+		if at < 0 {
+			return
+		}
+		ps[at].Options = normalExportOptions(in.Options)
+		note = "“" + ps[at].Name + "” has the choices as they are now"
+	case "rename":
+		if at < 0 || strings.TrimSpace(in.Name) == "" {
+			return
+		}
+		ps[at].Name = strings.TrimSpace(in.Name)
+	case "delete":
+		if at < 0 {
+			return
+		}
+		note = "Deleted the export preset “" + ps[at].Name + "”"
+		ps = slices.Delete(ps, at, at+1)
+		cu.exportAsk.Active = ""
+	}
+	cu.ui.ExportPresets = ps
+	cu.exportAsk.Presets = ps
+	_ = cu.c.Update("export", cu.exportAsk)
+	if note != "" {
+		cu.notify(note)
+	}
+	cu.call("The export presets could not be saved", func(ctx context.Context) error {
+		return cu.api.Settings.SetExportPresets(ctx, ps)
+	}, nil)
+}
+
+// uniqueName is name, or with (2), (3) and so on after it, so no preset
+// in ps has it.
+func uniqueName(name string, ps []marrawclient.ExportPreset) string {
+	name = strings.TrimSpace(name)
+	if len(name) > 80 {
+		name = name[:80]
+	}
+	taken := func(n string) bool {
+		return slices.ContainsFunc(ps, func(p marrawclient.ExportPreset) bool { return p.Name == n })
+	}
+	if !taken(name) {
+		return name
+	}
+	for i := 2; ; i++ {
+		if n := fmt.Sprintf("%s (%d)", name, i); !taken(n) {
+			return n
+		}
+	}
 }
 
 // exportRun is an export under way, for the notes of how it goes.

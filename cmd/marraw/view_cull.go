@@ -592,7 +592,11 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 				u.Send(v, DevUndo{Redo: true})
 				return true
 			case input.KeyC:
-				u.Send(v, EditCopy{})
+				if e.Mods.Has(input.ModShift) {
+					u.Send(v, CopyImage{})
+				} else {
+					u.Send(v, EditCopy{})
+				}
 				return true
 			case input.KeyV:
 				u.Send(v, EditPaste{})

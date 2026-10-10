@@ -359,7 +359,11 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 		if e.Mods.Has(input.ModControl) && !e.Mods.Has(input.ModAlt) {
 			switch e.Key {
 			case input.KeyC:
-				u.Send(v, EditCopy{})
+				if e.Mods.Has(input.ModShift) {
+					u.Send(v, CopyImage{})
+				} else {
+					u.Send(v, EditCopy{})
+				}
 				return true
 			case input.KeyV:
 				u.Send(v, EditPaste{})

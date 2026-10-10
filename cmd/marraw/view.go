@@ -30,7 +30,7 @@ func registerViews(w *gunim.Window) {
 	gunim.RegisterView(w, "cull", newCullView, (*cullView).show)
 	gunim.RegisterView(w, "develop", newDevelopView, (*developView).show)
 	gunim.RegisterView(w, "confirm", newConfirmDialog, nil)
-	gunim.RegisterView(w, "export", newExportDialog, nil)
+	gunim.RegisterView(w, "export", newExportView, (*exportView).show)
 	gunim.RegisterView(w, "settings", newSettingsView, (*settingsView).show)
 	gunim.RegisterView(w, "shortcuts", newShortcutsDialog, nil)
 	gunim.RegisterView(w, "preset", newPresetDialog, nil)
