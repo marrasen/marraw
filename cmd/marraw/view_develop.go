@@ -371,6 +371,10 @@ type developView struct {
 	// presets are the presets' cards, and masks the masks.
 	presets *presetGrid
 	masks   *maskPanel
+	// amount is the preset applied last's Amount, folded open while there
+	// is one.
+	amount     *widget.SliderRow
+	amountFold *widget.Fold
 	// tabs are the panel's tabs.
 	tabs *devPager
 }
@@ -427,7 +431,7 @@ func newDevelopView(s DevelopState) *developView {
 			body = append(body, smallButtons(bs...))
 		case "Presets":
 			v.presets = newPresetGrid(v)
-			body = append(body, v.presets)
+			body = append(body, v.presets, v.amountRow())
 		case "History":
 			v.history = widget.NewList()
 			v.history.SkipFocus, v.history.ClickOnce = true, true
@@ -609,6 +613,7 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 	if v.presets != nil {
 		v.presets.show(s, u)
 	}
+	v.showAmount(s, u)
 	if v.masks != nil {
 		v.masks.show(s, u)
 	}
@@ -1360,4 +1365,33 @@ func (w *wbModes) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children
 // Paint implements [gunim.Node].
 func (w *wbModes) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
 	kids.At(0).Paint(p)
+}
+
+// amountRow is the Amount of the preset applied last: its name and a
+// slider from 0 to 200%, as marraw's, folded away until a preset is
+// applied.
+func (v *developView) amountRow() gunim.Node {
+	sl := widget.NewSlider(0, 200)
+	sl.Snap, sl.KeepFocus, sl.HasRest, sl.Rest = 5, true, true, 100
+	sl.OnChange = func(x float32, _ *gunim.UI) gunim.Intent { return PresetAmount{Value: float64(x) / 100} }
+	sl.OnCommit = func(x float32, _ *gunim.UI) gunim.Intent { return PresetAmount{Value: float64(x) / 100, Commit: true} }
+	v.amount = widget.NewSliderRow("", sl)
+	v.amount.Format = func(x float32) string { return fmt.Sprintf("%.0f%%", x) }
+	v.amountFold = widget.NewFold(widget.Column(sectionLabel("Amount"), v.amount), false)
+	return v.amountFold
+}
+
+// showAmount shows the Amount of s, or folds it away.
+func (v *developView) showAmount(s DevelopState, u *gunim.UI) {
+	if v.amount == nil {
+		return
+	}
+	v.amountFold.SetOpen(s.Amount != nil, u)
+	if s.Amount == nil {
+		return
+	}
+	v.amount.Label = s.Amount.Name
+	if !v.amount.Slider.Held() {
+		v.amount.Slider.SetValue(float32(s.Amount.Amount*100), u)
+	}
 }

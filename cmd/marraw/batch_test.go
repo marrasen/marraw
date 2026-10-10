@@ -177,3 +177,31 @@ func TestHueWindowWraps(t *testing.T) {
 		t.Fatalf("the whole wheel reads half-width %v", w)
 	}
 }
+
+func TestPresetAmountScalesTheLook(t *testing.T) {
+	base := marrawclient.Params{ExpEV: 0.5, Contrast: 0.1, WBMode: "", Bright: 0}
+	result := marrawclient.Params{ExpEV: 1.5, Contrast: 0.3, WBMode: "auto", Bright: 2, BW: true}
+	result.HSLSat[2] = 0.4
+	half := lerpPresetAmount(base, result, 0.5)
+	if half.ExpEV != 1 || math.Abs(half.Contrast-0.2) > 1e-9 {
+		t.Fatalf("at half, exposure %v and contrast %v; want 1 and 0.2", half.ExpEV, half.Contrast)
+	}
+	// Brightness reads 1 from its stored nought: half of 1 to 2 is 1.5.
+	if half.Bright != 1.5 {
+		t.Fatalf("at half, brightness %v; want 1.5, over its read value", half.Bright)
+	}
+	if half.WBMode != "auto" || !half.BW {
+		t.Fatalf("at half the choices are the preset's; got %q and %v", half.WBMode, half.BW)
+	}
+	if half.HSLSat[2] != 0.2 {
+		t.Fatalf("at half a band's saturation is %v; want 0.2", half.HSLSat[2])
+	}
+	none := lerpPresetAmount(base, result, 0)
+	if none.ExpEV != 0.5 || none.WBMode != "" || none.BW || none.Bright != 0 {
+		t.Fatalf("at nought the look is %+v; want the edit before the preset", none)
+	}
+	double := lerpPresetAmount(base, result, 2)
+	if double.ExpEV != 2.5 || math.Abs(double.Contrast-0.5) > 1e-9 {
+		t.Fatalf("doubled, exposure %v and contrast %v; want 2.5 and 0.5", double.ExpEV, double.Contrast)
+	}
+}

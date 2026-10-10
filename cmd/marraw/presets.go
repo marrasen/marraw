@@ -308,10 +308,12 @@ func (cu *culler) presetApply(in PresetApply) {
 			if cu.presetGen != gen || d.id != id {
 				return
 			}
+			base := d.params
 			d.params = p
-			_ = cu.c.Update("develop", cu.developState())
 			cu.edited(true)
 			cu.remember(name)
+			cu.presetAmt = &presetAmount{id: id, base: base, result: p, name: name, amount: 1}
+			_ = cu.c.Update("develop", cu.developState())
 			cu.tell(name)
 		}:
 		case <-cu.ctx.Done():

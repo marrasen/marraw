@@ -45,6 +45,8 @@ type (
 		AIBusy    string
 		// Tab is the panel's tab showing.
 		Tab int
+		// Amount is the preset applied last's Amount, or nil.
+		Amount *AmountView
 	}
 	// DevHist is the histogram of the pixels showing.
 	DevHist struct{ Counts [3][256]uint32 }
@@ -145,6 +147,7 @@ func (cu *culler) developState() DevelopState {
 	st.Presets = cu.presetCards()
 	st.MaskSel, st.Brush, st.RangePick, st.AIBusy = cu.masks.sel, cu.masks.brush, cu.masks.rangePick, cu.masks.aiBusy
 	st.Tab = cu.devTab
+	st.Amount = cu.amountView()
 	if st.MaskSel >= len(d.params.Masks) {
 		st.MaskSel = -1
 	}
@@ -191,8 +194,10 @@ func (cu *culler) closeDevelop() {
 func (cu *culler) loadEdit(i int) {
 	cu.dev.hover = nil
 	if cu.dev.id != cu.photos[i].ID {
-		// Another photo: its masks start with none chosen.
+		// Another photo: its masks start with none chosen, and the last
+		// preset's Amount is the last photo's.
 		cu.masks = maskState{sel: -1, brush: cu.masks.brush, hover: -1, tintOf: -1}
+		cu.presetAmt = nil
 		cu.masks.brush.Painting = false
 	}
 	d := &cu.dev
@@ -320,6 +325,10 @@ func curveOf(p *marrawclient.Params, ch int) *[]marrawclient.CurvePoint {
 // The photo's full-resolution tiles are of the edit before, so they go.
 func (cu *culler) edited(commit bool) {
 	d := &cu.dev
+	if !cu.amountScrub {
+		// Any other edit ends the preset's Amount.
+		cu.presetAmt = nil
+	}
 	d.edits++
 	cu.stopTiles()
 	cu.tileNote = "tiles: once the edit is saved"

@@ -187,6 +187,10 @@ type culler struct {
 	// one's number.
 	errs   []ErrorNote
 	errSeq int
+	// presetAmt is the preset applied last, for its Amount, and
+	// amountScrub says the Amount is making the edit, which keeps it.
+	presetAmt   *presetAmount
+	amountScrub bool
 	// tasks are the backend's tasks, for the tray, and taskOf the task
 	// each subtask showing is under.
 	tasks  map[string]*taskRun
@@ -399,6 +403,8 @@ func (cu *culler) serve() error {
 				}
 			case DevAuto:
 				cu.devAuto(in)
+			case PresetAmount:
+				cu.setPresetAmount(in)
 			case ErrClear:
 				cu.clearError(in)
 			case TaskCancel:
