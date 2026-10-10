@@ -473,6 +473,10 @@ func (cu *culler) serve() error {
 				cu.shareCreate(in)
 			case ShareDone:
 				cu.shareDone()
+			case HealVisual:
+				cu.healVisual(in.On)
+			case HealSens:
+				cu.healSens(in.Value)
 			case PromptDone:
 				cu.promptDone(in)
 			case AskSettings:

@@ -271,6 +271,9 @@ func (v *cullView) paintMask(p *paint.Painter) {
 		return
 	}
 	pr := v.photoRect()
+	if h := ms.Heal; h != nil && h.Visual && h.Seen != nil {
+		p.Image(h.Seen, pr, paint.ImageOpts{Opacity: 1})
+	}
 	if k := v.maskTintIn.Value(); k > 0.01 && v.tintImg != nil {
 		p.Image(v.tintImg, pr, paint.ImageOpts{Opacity: min(k, 1)})
 	}

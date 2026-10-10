@@ -97,7 +97,9 @@ type developer struct {
 	stop                           context.CancelFunc
 	// live is the last preview of the photo showing, and note what it is.
 	live *paint.Image
-	note string
+	// liveM is the live picture's pixels, for the dust-hunting view.
+	liveM *image.RGBA
+	note  string
 	// saved are the photos whose own saves are on their way back as
 	// patches, not to be fetched again.
 	saved map[int64]bool
@@ -398,6 +400,7 @@ func (cu *culler) startPreview() {
 		defer cancel()
 		start := time.Now()
 		var img *paint.Image
+		var rgba *image.RGBA
 		var counts [3][256]uint32
 		var size image.Point
 		blob, err := cu.api.Edits.PreviewEdit(ctx, id, params, edge)
@@ -405,7 +408,7 @@ func (cu *culler) startPreview() {
 		if err == nil {
 			var m *image.RGBA
 			if m, err = jpegturbo.DecodeRGBA(blob.Data); err == nil {
-				img, size = paint.NewImage(m), m.Rect.Size()
+				img, size, rgba = paint.NewImage(m), m.Rect.Size(), m
 				counts = histogram(m.Pix, size.X, size.Y)
 			}
 		}
@@ -421,6 +424,10 @@ func (cu *culler) startPreview() {
 			stale := flat && (turns(params) != turns(d.params) || params.FlipH != d.params.FlipH)
 			if err == nil && d.open && id == d.id && id == cu.photos[cu.at].ID && flat == cu.crop.on && !stale {
 				d.live = img
+				if !flat {
+					d.liveM = rgba
+					cu.healVisualize()
+				}
 				what := "draft"
 				if flat {
 					what = "whole frame"

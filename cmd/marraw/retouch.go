@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"image"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/marrasen/gunim/paint"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
 )
@@ -39,6 +42,10 @@ type (
 	SpotDelete struct{ Index int }
 	// HealEscape lets the chosen spot go, or the tool.
 	HealEscape struct{}
+	// HealVisual turns the dust-hunting view on or off, as A does while
+	// healing; HealSens sets how keen it is, nought to one.
+	HealVisual struct{ On bool }
+	HealSens   struct{ Value float64 }
 )
 
 // HealView is the heal tool as the panel and the photo show it: whether
@@ -50,6 +57,11 @@ type HealView struct {
 	Radius, Feather float64
 	Sel             int
 	Busy            map[int]bool
+	// Visual says the dust-hunting view is on, Sens how keen it is, and
+	// Seen the picture of it.
+	Visual bool
+	Sens   float64
+	Seen   *paint.Image
 }
 
 // healState is the culler's heal tool.
@@ -61,17 +73,28 @@ type healState struct {
 	busy            map[int]bool
 	// fillAsk is the fill spot waiting for the model's download, or -1.
 	fillAsk int
+	// visual says the dust-hunting view is on, sens how keen it is, img
+	// its picture, and visGen which drawing of it is the latest.
+	visual bool
+	sens   float64
+	img    *paint.Image
+	visGen int
 }
 
 // newHealState is the heal tool as it starts, as marraw's.
 func newHealState() healState {
-	return healState{tool: "spot", radius: 0.02, feather: 0.5, sel: -1, fillAsk: -1}
+	return healState{tool: "spot", radius: 0.02, feather: 0.5, sel: -1, fillAsk: -1, sens: 0.4}
 }
 
 // healView is the heal tool as shown.
 func (cu *culler) healView() *HealView {
 	h := &cu.heal
-	return &HealView{On: h.on, Tool: h.tool, Mode: h.mode, Radius: h.radius, Feather: h.feather, Sel: h.sel, Busy: h.busy}
+	v := &HealView{On: h.on, Tool: h.tool, Mode: h.mode, Radius: h.radius, Feather: h.feather, Sel: h.sel, Busy: h.busy,
+		Visual: h.visual, Sens: h.sens}
+	if h.visual {
+		v.Seen = h.img
+	}
+	return v
 }
 
 // healChanged shows the heal tool anew, in the panel and over the photo.
@@ -97,9 +120,95 @@ func (cu *culler) healToggle() {
 		cu.showTab(tabLocal)
 	} else {
 		h.sel = -1
+		h.visual, h.img = false, nil
 	}
 	cu.masksChanged()
 	cu.healChanged()
+}
+
+// healVisual turns the dust-hunting view on or off.
+func (cu *culler) healVisual(on bool) {
+	h := &cu.heal
+	if !h.on || h.visual == on {
+		return
+	}
+	h.visual = on
+	if !on {
+		h.img = nil
+	}
+	cu.healVisualize()
+	cu.masksChanged()
+	cu.healChanged()
+}
+
+// healSens sets how keen the dust-hunting view is.
+func (cu *culler) healSens(v float64) {
+	h := &cu.heal
+	h.sens = max(0, min(v, 1))
+	cu.healVisualize()
+	cu.healChanged()
+}
+
+// healVisualize draws the dust-hunting view from the photo's live pixels:
+// a high-pass relief, white on black, where dust and blemishes show as
+// small rings, as marraw's Visualize spots draws it. With no live pixels
+// yet, it asks for them, and draws as they come.
+func (cu *culler) healVisualize() {
+	h := &cu.heal
+	if !h.on || !h.visual {
+		return
+	}
+	m := cu.dev.liveM
+	if m == nil {
+		cu.preview(false)
+		return
+	}
+	h.visGen++
+	gen, sens := h.visGen, h.sens
+	go func() {
+		img := paint.NewImage(spotRelief(fitRGBA(m, image.Pt(1024, 1024)), sens))
+		cu.onDo(func() {
+			if h.visGen == gen && h.on && h.visual {
+				h.img = img
+				cu.masksChanged()
+			}
+		})
+	}()
+}
+
+// spotRelief is m as marraw's Visualize spots shows it: the magnitude of
+// a four-neighbour Laplacian of its grey, cut and lifted as sens says,
+// white on opaque black.
+func spotRelief(m *image.RGBA, sens float64) *image.RGBA {
+	b := m.Bounds()
+	w, hh := b.Dx(), b.Dy()
+	gray := make([]float32, w*hh)
+	for y := range hh {
+		row := m.Pix[y*m.Stride:]
+		for x := range w {
+			p := row[x*4:]
+			gray[y*w+x] = 0.299*float32(p[0]) + 0.587*float32(p[1]) + 0.114*float32(p[2])
+		}
+	}
+	cut := float32(20 * (1 - sens))
+	gain := float32(2 + 10*sens)
+	out := image.NewRGBA(image.Rect(0, 0, w, hh))
+	for i := 3; i < len(out.Pix); i += 4 {
+		out.Pix[i] = 0xff
+	}
+	for y := 1; y < hh-1; y++ {
+		for x := 1; x < w-1; x++ {
+			i := y*w + x
+			lap := 4*gray[i] - gray[i-1] - gray[i+1] - gray[i-w] - gray[i+w]
+			if lap < 0 {
+				lap = -lap
+			}
+			v := min(255, max(0, (lap-cut)*gain))
+			j := y*out.Stride + x*4
+			out.Pix[j], out.Pix[j+1], out.Pix[j+2] = uint8(v), uint8(v), uint8(v)
+		}
+	}
+	return out
 }
 
 // healSet takes how new spots are made.

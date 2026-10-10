@@ -50,6 +50,10 @@ func (v *cullView) healKey(e input.KeyPress, u *gunim.UI) bool {
 	if hv == nil {
 		return false
 	}
+	if e.Key == input.KeyA && !e.Mods.Has(input.ModShift) {
+		u.Send(v, HealVisual{On: !hv.Visual})
+		return true
+	}
 	spots := v.st.Masks.Params.Spots
 	if hv.Sel < 0 || hv.Sel >= len(spots) {
 		return false

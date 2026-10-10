@@ -29,6 +29,9 @@ type retouchPanel struct {
 	size     *widget.SliderRow
 	feather  *widget.SliderRow
 	brushOn  *widget.Fold
+	visual   *widget.Switch
+	sens     *widget.SliderRow
+	sensOn   *widget.Fold
 	hint     *widget.Label
 	editor   *spotEditor
 	rows     []*spotRow
@@ -87,10 +90,20 @@ func newRetouchPanel() *retouchPanel {
 	p.feather = widget.NewSliderRow("Feather", feather)
 	p.feather.Format = func(x float32) string { return fmt.Sprintf("%.0f", x) }
 	p.brushOn = widget.NewFold(widget.Column(p.size, p.feather), false)
+	p.visual = widget.NewSwitch("Visualize spots (A)")
+	p.visual.KeepFocus = true
+	p.visual.OnChange = func(on bool, _ *gunim.UI) gunim.Intent { return HealVisual{On: on} }
+	sens := widget.NewSlider(0, 100)
+	sens.Snap, sens.KeepFocus = 1, true
+	sens.OnChange = func(x float32, _ *gunim.UI) gunim.Intent { return HealSens{Value: float64(x) / 100} }
+	p.sens = widget.NewSliderRow("Sensitivity", sens)
+	p.sens.Format = func(x float32) string { return fmt.Sprintf("%.0f", x) }
+	p.sensOn = widget.NewFold(p.sens, false)
 	p.hint = newSmallLabel("Click a spot on the photo to heal it, or drag to make it larger. The brush paints one along a stroke.")
 	p.hint.Color, p.hint.MaxLines = noteInk, 3
 	p.toolFold = widget.NewFold(widget.Column(
-		labelledRow("Tool", glassSegmented(p.tool)), labelledRow("New spots", glassSegmented(p.mode)), p.brushOn), false)
+		labelledRow("Tool", glassSegmented(p.tool)), labelledRow("New spots", glassSegmented(p.mode)), p.brushOn,
+		spacer(6), p.visual, p.sensOn), false)
 	p.editor = newSpotEditor()
 	p.kids = []gunim.Node{glassButton(p.toggle), p.toolFold, p.hint, p.editor}
 	return p
@@ -99,7 +112,7 @@ func newRetouchPanel() *retouchPanel {
 // heal is the heal tool showing, never nil.
 func (p *retouchPanel) heal() HealView {
 	if p.st.Heal == nil {
-		return HealView{Tool: "spot", Radius: 0.02, Feather: 0.5, Sel: -1}
+		return HealView{Tool: "spot", Radius: 0.02, Feather: 0.5, Sel: -1, Sens: 0.4}
 	}
 	return *p.st.Heal
 }
@@ -123,6 +136,11 @@ func (p *retouchPanel) show(s DevelopState, u *gunim.UI) {
 	}
 	if !p.feather.Slider.Held() {
 		p.feather.Slider.SetValue(float32(h.Feather*100), u)
+	}
+	p.visual.SetChecked(h.Visual, u)
+	p.sensOn.SetOpen(h.Visual, u)
+	if !p.sens.Slider.Held() {
+		p.sens.Slider.SetValue(float32(h.Sens*100), u)
 	}
 	if h.Sel >= 0 && h.Sel < n {
 		p.editor.show(h.Sel, s.Params.Spots[h.Sel], u)
