@@ -199,6 +199,11 @@ type culler struct {
 	// on its way to opening in the cull view.
 	lib      library
 	cullNext string
+	// aimaps is what has been done about AI masks' missing maps, and
+	// editThumbSlots holds the renders of edited photos' small pictures
+	// to two at a time.
+	aimaps         aiMaps
+	editThumbSlots chan struct{}
 	// addf is the Add folder dialog's state, share the share dialog's,
 	// and viewer the pop-out viewer's.
 	addf   addFolder
@@ -309,7 +314,7 @@ func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im
 	cu := &culler{aspects: map[int64]float32{}, ctx: ctx, c: c, api: api, im: im, folder: folder, folderPath: folderPath,
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
 		tiles: newTileCache(48), tileWarm: map[string]bool{},
-		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), cursor: -1,
+		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), editThumbSlots: make(chan struct{}, 2), cursor: -1,
 		libView: defaultView("", defaultGap), masks: maskState{sel: -1, brush: defaultBrush, hover: -1, tintOf: -1}, heal: newHealState()}
 	cu.setAll(photos)
 	cu.applyView()
@@ -728,6 +733,7 @@ func (cu *culler) goTo(i int) {
 	cu.wbFinish(true)
 	cu.cropDone()
 	cu.at, cu.gen, cu.stepped = i, cu.gen+1, time.Now()
+	cu.ensureAIMapsSoon(i)
 	if cu.load != nil {
 		cu.load()
 	}
@@ -1262,6 +1268,10 @@ func (cu *culler) loadThumb(ctx context.Context, i int) {
 			i, ok := cu.index[p.ID]
 			if !ok {
 				return
+			}
+			if g.provisional && p.EditHash != "" && p.EditHash != "base" {
+				// A stand-in for an edited photo: its own comes after.
+				cu.upgradeThumb(p)
 			}
 			_ = cu.c.Patch("grid", ThumbIn{Folder: cu.folder, Index: i, Img: g.img})
 			if cu.culling && i >= cu.at-stripReach && i <= cu.at+stripReach {

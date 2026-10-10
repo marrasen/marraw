@@ -5,6 +5,14 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - Edits from marraw now show in full. An AI mask (subject, depth,
+    scene, people) needs a map the model makes for each photo, and marraw
+    keeps those in its own data folder, so this build had none: the
+    masks did nothing, and only the plainer parts of an edit showed. Now
+    the photo you stop on in the cull view gets its missing maps made,
+    and redraws. The first time for each kind it asks to download the
+    model. The grid's small pictures of edited photos now show the edit
+    too, not the camera's own JPEG.
   - Settings (the gear at the foot of the library, or the palette):
     General (crop or fit the grid's pictures), Features (turn the
     culling aids off; their buttons go), Default presets, Cache (size,
