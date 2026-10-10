@@ -55,6 +55,15 @@ type gridView struct {
 	// top is the title bar's height, which the window's background runs
 	// under and the rest keeps below.
 	top float32
+	// sel takes the bar's place while selN, more than one, are selected,
+	// coming in as selIn does; batch is the selection's card, out as
+	// batchIn says, unless the user hid it.
+	sel                         *selBar
+	barGate, selGate, batchGate *gate
+	batch                       *batchCard
+	selN                        int
+	selIn, batchIn              *anim.Float
+	batchHidden                 bool
 }
 
 const (
@@ -76,6 +85,10 @@ func newGridView(GridState) *gridView {
 		empty: widget.NewLabel("No photos match the filter"), noneIn: anim.NewFloat(0)}
 	v.empty.Color = noteInk
 	v.bar = newGridBar(v)
+	v.selIn, v.batchIn = anim.NewFloat(0), anim.NewFloat(0)
+	v.sel = newSelBar(func(u *gunim.UI) { v.batchHidden = !v.batchHidden; v.selCount(v.selN, u) })
+	v.batch = newBatchCard(func(u *gunim.UI) { v.batchHidden = true; v.selCount(v.selN, u) })
+	v.barGate, v.selGate, v.batchGate = &gate{child: v.bar, open: true}, &gate{child: v.sel}, &gate{child: v.batch}
 	v.notice.Size = noteSize
 	v.grid = widget.NewTileGrid(cellSize(200))
 	// A folder's tiles come and go at twice gunim's pace.
@@ -84,12 +97,13 @@ func newGridView(GridState) *gridView {
 	v.grid.Header = v.newGapHeader
 	v.grid.HeaderHeight = gapHeaderHeight
 	v.grid.OnView = func(first, count int, _ *gunim.UI) gunim.Intent { return NeedThumbs{First: first, Count: count} }
-	v.grid.OnSelect = func(sel [][2]int, cursor int, _ *gunim.UI) gunim.Intent {
+	v.grid.OnSelect = func(sel [][2]int, cursor int, u *gunim.UI) gunim.Intent {
 		n := 0
 		for _, r := range sel {
 			n += r[1] - r[0]
 		}
 		v.head.selected(n)
+		v.selCount(n, u)
 		return Selected{Runs: sel, Cursor: cursor}
 	}
 	v.grid.OnActivate = func(i int, _ *gunim.UI) gunim.Intent { return OpenCull{Index: i} }
@@ -108,6 +122,7 @@ func (v *gridView) show(s GridState, u *gunim.UI) {
 	v.bar.set(s.View, u)
 	v.bar.setOff(s.Off, u)
 	v.setCrop(s.Crop, u)
+	v.batch.set(max(v.selN, 0), s.Presets, u)
 	if v.shown && s.FolderID != v.folder {
 		v.swapTo(s, u)
 		return
@@ -193,6 +208,7 @@ func (v *gridView) gridSel(g GridSel, u *gunim.UI) {
 		n += r[1] - r[0]
 	}
 	v.head.selected(n)
+	v.selCount(n, u)
 	u.Invalidate()
 }
 
@@ -321,14 +337,34 @@ func (v *gridView) newTile(i int) gunim.Node {
 
 // Children implements [gunim.Composite].
 func (v *gridView) Children() []gunim.Node {
-	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.bar, v.empty, v.errors}
+	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.errors, v.selGate, v.batchGate}
+}
+
+// selCount shows n photos selected: with more than one, the selection's
+// bar in the bar's place, and its card unless the user hid it.
+func (v *gridView) selCount(n int, u *gunim.UI) {
+	many := n > 1
+	if n != v.selN && many {
+		v.batch.fresh(u)
+	}
+	v.selN = n
+	out := many && !v.batchHidden
+	v.barGate.open, v.selGate.open, v.batchGate.open = !many, many, out
+	v.sel.set(n, out, u)
+	v.batch.set(n, v.st.Presets, u)
+	th := u.Theme()
+	v.selIn.Animate(map[bool]float32{false: 0, true: 1}[many], widget.Quick.Get(th))
+	v.batchIn.Animate(map[bool]float32{false: 0, true: 1}[out], widget.Quick.Get(th))
+	u.Invalidate()
 }
 
 // Step implements [gunim.Animator]: the note's coming and going.
 func (v *gridView) Step(dt time.Duration) bool {
 	a := v.noticeIn.Step(dt)
 	b := v.noneIn.Step(dt)
-	return a || b
+	c := v.selIn.Step(dt)
+	d := v.batchIn.Step(dt)
+	return a || b || c || d
 }
 
 // gridNotice pops a note in over the grid, and lets it fade after a
@@ -425,7 +461,11 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	w := max(0, box.W-railWidth)
 	head.Layout(gunim.Tight(geom.Sz(w, gridHeadHeight)))
 	head.Place(geom.Pt(railWidth, top))
-	grid.Layout(gunim.Tight(geom.Sz(w, max(0, box.H-gridTop-top))))
+	gw := w
+	if v.batchGate.open {
+		gw = max(0, w-batchCardW-24)
+	}
+	grid.Layout(gunim.Tight(geom.Sz(gw, max(0, box.H-gridTop-top))))
 	grid.Place(geom.Pt(railWidth, gridTop+top))
 	bar := kids.At(4)
 	bar.Layout(gunim.Tight(geom.Sz(w, barHeight)))
@@ -440,6 +480,12 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	v.errors.corner = geom.Pt(box.W-16, box.H-16)
 	kids.At(6).Layout(gunim.Tight(box))
 	kids.At(6).Place(geom.Point{})
+	sel := kids.At(7)
+	sel.Layout(gunim.Tight(geom.Sz(w, barHeight)))
+	sel.Place(geom.Pt(railWidth, gridHeadHeight+top))
+	card := kids.At(8)
+	card.Layout(gunim.Loose(geom.Sz(batchCardW, max(0, box.H-gridTop-top-24))))
+	card.Place(geom.Pt(box.W-batchCardW-16, gridTop+top+12))
 	return box
 }
 
@@ -454,7 +500,20 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	kids.At(1).Paint(p)
 	kids.At(0).Paint(p)
 	p.RRect(geom.Rc(railWidth, v.top+gridHeadHeight-1, box.W-railWidth, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
-	kids.At(4).Paint(p)
+	if k := v.selIn.Value(); k < 0.99 {
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(max(1-k, 0), 1)})()
+			defer p.Push(paint.Translate(geom.Pt(0, -6*k)))()
+			kids.At(4).Paint(p)
+		}()
+	}
+	if k := v.selIn.Value(); k > 0.01 {
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(max(k, 0), 1)})()
+			defer p.Push(paint.Translate(geom.Pt(0, 6*(1-k))))()
+			kids.At(7).Paint(p)
+		}()
+	}
 	kids.At(2).Paint(p)
 	paintNote(p, kids.At(3), v.noteRect, v.noticeIn.Value())
 	if k := v.noneIn.Value(); k > 0.01 {
@@ -463,6 +522,13 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: k})()
 			defer p.Push(paint.Translate(geom.Pt(0, (1-k)*8)))()
 			e.Paint(p)
+		}()
+	}
+	if k := v.batchIn.Value(); k > 0.01 {
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(max(k, 0), 1)})()
+			defer p.Push(paint.Translate(geom.Pt((1-k)*(batchCardW+24), 0)))()
+			kids.At(8).Paint(p)
 		}()
 	}
 	kids.At(6).Paint(p)

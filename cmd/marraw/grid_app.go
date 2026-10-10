@@ -29,6 +29,9 @@ type (
 		// says the tiles fill their cells, cropped.
 		Off  map[string]bool
 		Crop bool
+		// Presets are the presets the batch card can lay over a
+		// selection.
+		Presets []PresetCard
 	}
 	// GridPhoto is one photo as a tile shows it.
 	GridPhoto struct {
@@ -90,6 +93,7 @@ func (cu *culler) gridState() GridState {
 	st.Groups = gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)
 	st.Off = cu.featuresOff()
 	st.Crop = cu.ui != nil && cu.ui.ThumbFit == "crop"
+	st.Presets = cu.presetCards()
 	for _, p := range cu.photos {
 		st.Photos = append(st.Photos, GridPhoto{ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Rating: p.Rating, Flag: string(p.Flag),
 			Aids: cu.aids.of(p)})

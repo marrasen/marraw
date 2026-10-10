@@ -432,6 +432,10 @@ func (cu *culler) serve() error {
 				cu.wmAddImage()
 			case WMDone:
 				cu.wmDone()
+			case BatchDelta:
+				cu.batchDelta(in)
+			case BatchPreset:
+				cu.batchPreset(in)
 			case AskSettings:
 				cu.askSettings(in.Section)
 			case SettingsDone:

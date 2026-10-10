@@ -12,6 +12,7 @@ import (
 	"github.com/marrasen/gunim/icon"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
+	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
@@ -251,7 +252,8 @@ func newWatermarkView(s WatermarkState) *wmView {
 	v.hasEls = widget.NewFold(widget.Column(sectionLabel("On the photo"), v.els, v.noElsFold, spacer(6), smallButtons(addText, addImage, addBar), v.editor), false)
 	v.right = v.hasEls
 
-	d.Body = &wmBody{left: left, middle: widget.NewScroll(v.middle), right: widget.NewScroll(v.right)}
+	narrow := marrawTheme().With(theme.Set(widget.SliderRowLabel, 90))
+	d.Body = &wmBody{left: left, middle: widget.NewScroll(widget.NewThemed(v.middle, narrow)), right: widget.NewScroll(widget.NewThemed(v.right, narrow))}
 	v.take(s, nil)
 	return v
 }
