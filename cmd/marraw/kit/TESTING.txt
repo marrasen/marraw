@@ -4,7 +4,46 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
-Fixes and polish (new in this build)
+New in this build
+  - The panel's tabs are a bar across it: each an icon over its name.
+    The chosen one stands on a pane of brighter glass with a glowing
+    line under it; changing tabs, the line runs to the next, stretching
+    as it goes, and the pane follows.
+  - Presets: after applying a preset, Amount (under the presets) scales
+    it from 0% (as before it) to 200% (doubled). Let go, the preset's
+    step in History takes the new name, as "Cinematic · 150%". Any other
+    edit or another photo ends it.
+  - Crop: Auto crops around the subject, with room round it, in the
+    shape chosen (Free, 1:1, 3:2 ...). It asks to download the subject
+    model the first time. Mirroring turns the picture over at once, as a
+    card, while the mirrored frame renders.
+  - Masks on the Local tab:
+    - Scene and People find the photo's kinds of thing (sky, people,
+      foliage ...) or its people, as chips. The pointer over a chip, or
+      over the photo, tints the region; a click adds a mask of it, and
+      the picking stays armed for more. Escape puts it away. Each asks
+      to download its model the first time.
+    - Drag a mask's row by the grip at its left to move it up or down
+      the list: a mask applies over the ones above it.
+    - Up and Down walk the masks' controls, into the next mask past the
+      last of one; + and - step the one chosen, Shift further; Escape
+      lets it go.
+  - Retouch, on the Local tab, under the masks: Heal spots, or Q.
+    - Click the photo to heal a spot, drag to make it larger; or choose
+      Brush and paint along a blemish. New spots heal, clone or fill, as
+      chosen.
+    - The chosen spot shows its source, dashed: drag its middle, its
+      source or its edge. Click another spot to choose it.
+    - Fill asks to download the fill model the first time; Cancel makes
+      the spot a heal instead.
+    - The list shows each spot; the chosen one's mode, feather and
+      opacity under its row. Delete deletes it, 1-9 and 0 set its
+      opacity, Escape lets it go, then the tool.
+  - Not here: marraw's "Visualize spots" view (A), and the navigator in
+    the Info tab (the navigator floats over the photo instead, clear of
+    the panel).
+
+Fixes and polish
   - A double click zooms in, and the next double click zooms out at
     once, without moving the pointer first.
   - Task progress glides: the bar and its count run smoothly between
