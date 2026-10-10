@@ -5,10 +5,11 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
-  - Settings (the palette, or the gear): General (crop or fit the grid's
-    pictures), Features (turn the culling aids off; their buttons go),
-    Defaults, Cache (size, limit, move, clear), Models (delete), Sidecars,
-    and Sharing (the links, with when each was last opened; revoke).
+  - Settings (the gear at the foot of the library, or the palette):
+    General (crop or fit the grid's pictures), Features (turn the
+    culling aids off; their buttons go), Default presets, Cache (size,
+    limit, move, clear), Models (delete), Sidecars, and Shared albums
+    (the links, with when each was last opened; revoke).
   - Export (Ctrl+E) is marraw's whole dialog: presets (Save as new,
     Update, Rename, Delete), destination with Choose…, a file name
     template with an example, format, quality, resize by long edge,

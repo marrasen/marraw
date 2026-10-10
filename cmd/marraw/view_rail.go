@@ -126,7 +126,9 @@ func newRailView() *railView {
 	v.body = v.menu
 	add := widget.NewButton("Add folder")
 	add.Icon, add.KeepFocus, add.OnClick = icon.FolderPlus, true, widget.Sends(AskAddFolder{})
-	v.add = glassButton(add)
+	gear := widget.NewButton("")
+	gear.Icon, gear.KeepFocus, gear.Tooltip, gear.OnClick = icon.Settings, true, "Settings", widget.Sends(AskSettings{})
+	v.add = &hflow{items: []gunim.Node{glassButton(add), glassButton(gear)}, gap: 8}
 	return v
 }
 
