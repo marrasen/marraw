@@ -5,6 +5,68 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - Settings (the palette, or the gear): General (crop or fit the grid's
+    pictures), Features (turn the culling aids off; their buttons go),
+    Defaults, Cache (size, limit, move, clear), Models (delete), Sidecars,
+    and Sharing (the links, with when each was last opened; revoke).
+  - Export (Ctrl+E) is marraw's whole dialog: presets (Save as new,
+    Update, Rename, Delete), destination with Choose…, a file name
+    template with an example, format, quality, resize by long edge,
+    colour space, sharpening, watermark, metadata, credit, and a summary.
+    A destination that is not there asks before it is made.
+  - Copy to clipboard (in Export, Ctrl+Shift+C, or the palette) renders
+    the photo and puts the picture on the clipboard. Paste it into
+    another program. Please check this one on Windows.
+  - Watermarks: Edit… beside Watermark in Export, or the palette. Make
+    watermarks of text, a logo (Logo… picks a PNG or JPEG) and bars,
+    each placed on a 3 x 3 grid with size, margin and opacity; a bar
+    can fade. A frame round the photo, with a deeper bottom if you like.
+    The middle shows it over the photo in hand as you change it. Drag
+    the elements' rows to reorder them.
+  - Select two photos or more in the grid: the bar becomes the
+    selection's (count, stars to rate, Pick, Reject, Delete, Adjust,
+    "Esc to clear"), and a glass card at the right adjusts them all:
+    exposure, contrast and saturation add to each photo's own edit when
+    you let go. Paste settings, Restore original, and Apply a preset
+    too. Its cross hides it; Adjust brings it back.
+  - The library sidebar, as marraw's:
+    - Library folders show their shoots; the arrows button sorts them by
+      name or date and groups them by year, month or day ("Collapse
+      previous years" too). Shoots added by hand sit under the folder
+      they share. Headers fold and unfold.
+    - Right-click a row for its menu: Open in Cull, Rename (a name in
+      the sidebar) or Rename on disk, Locate, Copy path, Share album,
+      Include subfolders, Rescan, Render 1:1, Revoke sharing, Hide or
+      Remove (the files stay on disk), Move up and down for a block.
+    - Filter folders narrows the list. A disconnected drive shows
+      Offline. A shared shoot has a green mark.
+    - Drag the sidebar's right edge to resize it. The button at its top
+      right hides it; the one at the left of the grid's bar brings it
+      back.
+    - Add folder (at the foot) adds a single shoot or a library folder
+      of shoots, browsing the drives and folders with their RAW counts.
+      Dropping folders from Explorer on the sidebar adds them too.
+  - Share album… (a shoot's menu, or the palette): who can open the link
+    (anyone, over Tailscale Funnel, or only your own devices), what they
+    can do, download size, and how long it lives. The note at the foot
+    says whether this computer can be reached. A link that would publish
+    the computer for the first time asks once more before it is made.
+    The link is copied when it is made.
+  - + and - on a develop control (pick one with its letter, as E for
+    Exposure) now show a small pill at the foot of the photo with just
+    that control, the panel out of the way. Move the mouse to bring the
+    panel back.
+  - Visualize spots: while healing (Q), press A, or the switch in
+    Retouch. Dust and blemishes stand out as small rings on black.
+    Sensitivity sets how keen it is.
+  - The pop-out viewer: Ctrl+N (or the palette) opens a second window
+    with the photo in hand, following it. Its own zoom and pan: wheel,
+    + and -, drag, Z or Space or a double click for fit and 1:1. F11 for
+    full screen, P or the pin to keep it on top. Ctrl+N closes it, and
+    it opens where it last was.
+  - Not here: remote connections.
+
+From the build before
   - The panel's tabs are a bar across it: each an icon over its name.
     The chosen one stands on a pane of brighter glass with a glowing
     line under it; changing tabs, the line runs to the next, stretching
@@ -39,9 +101,8 @@ New in this build
     - The list shows each spot; the chosen one's mode, feather and
       opacity under its row. Delete deletes it, 1-9 and 0 set its
       opacity, Escape lets it go, then the tool.
-  - Not here: marraw's "Visualize spots" view (A), and the navigator in
-    the Info tab (the navigator floats over the photo instead, clear of
-    the panel).
+  - Not here: the navigator in the Info tab (the navigator floats over
+    the photo instead, clear of the panel).
 
 Fixes and polish
   - A double click zooms in, and the next double click zooms out at
@@ -221,6 +282,4 @@ From earlier builds, if you have not tried them yet
   - Clickable stars and flags; filters with glide and fade; Time/Name
     sort buttons; star filter.
 
-Not here yet (from marraw): retouch,
-watermarks, share links, remote connections, the second-display viewer,
-the preset Amount scrubber, the crop's Auto (subject) button.
+Not here yet (from marraw): remote connections.
