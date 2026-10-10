@@ -136,6 +136,7 @@ func (cu *culler) toggleCrop() {
 		return
 	}
 	cu.wbFinish(true)
+	cu.disarmPick()
 	cu.crop = cropMode{on: true}
 	// The whole frame's pixels, with the crop off; the crop shows once
 	// they come.

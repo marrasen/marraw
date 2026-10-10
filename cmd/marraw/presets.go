@@ -578,6 +578,10 @@ func (cu *culler) showTab(i int) {
 	}
 	cu.devTab = i
 	cu.presetsShown = i == tabPresets
+	if i != tabLocal {
+		// The picking is the Local tab's.
+		cu.disarmPick()
+	}
 	cu.loadPresetThumbs()
 	if cu.dev.mounted {
 		_ = cu.c.Update("develop", cu.developState())

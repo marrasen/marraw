@@ -88,6 +88,8 @@ type MaskView struct {
 	RangePick bool
 	Tint      *paint.Image
 	TintOf    int
+	// Pick is the scene's or the people's picking, while it is armed.
+	Pick *PickView
 }
 
 // maskState is the develop side's masks: the one chosen, the brush, the
@@ -104,6 +106,11 @@ type maskState struct {
 	tintGen   int
 	// active is the chosen mask's control the keys act on, or "".
 	active string
+	// tints are the tints fetched, by their keys, the oldest first in
+	// tintOrder; pick is the scene's or the people's picking.
+	tints     map[string]*paint.Image
+	tintOrder []string
+	pick      maskPick
 }
 
 // maskView is the masks as the cull view shows them, or nil while none is
@@ -111,7 +118,7 @@ type maskState struct {
 func (cu *culler) maskView() *MaskView {
 	d := &cu.dev
 	m := &cu.masks
-	if !d.open || cu.crop.on || (m.sel < 0 && m.tint == nil) {
+	if !d.open || cu.crop.on || (m.sel < 0 && m.tint == nil && !m.pick.armed) {
 		return nil
 	}
 	v := &MaskView{Params: d.params, Selected: m.sel, Brush: m.brush, RangePick: m.rangePick, TintOf: -1}
@@ -120,6 +127,9 @@ func (cu *culler) maskView() *MaskView {
 	}
 	if m.tint != nil && m.tintOf == m.hover {
 		v.Tint, v.TintOf = m.tint, m.tintOf
+	}
+	if m.pick.armed && m.pick.plane != nil {
+		v.Pick = &PickView{Kind: m.pick.kind, Plane: m.pick.plane, IDs: m.pick.ids()}
 	}
 	if i, ok := cu.index[d.id]; ok {
 		f := frameSize(cu.photos[i], d.params)
@@ -169,7 +179,15 @@ func (cu *culler) maskAdd(kind string) {
 // then the photo's map made, then the mask.
 func (cu *culler) maskAI(in MaskAI) {
 	d := &cu.dev
-	if !d.open || !cu.culling || d.id != cu.photos[cu.at].ID || cu.masks.aiBusy != "" {
+	if !d.open || !cu.culling || d.id != cu.photos[cu.at].ID {
+		return
+	}
+	if pickKind(in.Kind) != "" {
+		// Scene and People are picked, region by region.
+		cu.maskPickArm(in)
+		return
+	}
+	if cu.masks.aiBusy != "" {
 		return
 	}
 	mapKind := map[string]string{"subject": "subject", "background": "subject", "depth": "depth", "tilt": "depth"}[in.Kind]
@@ -249,6 +267,7 @@ func (cu *culler) maskSelect(i int) {
 	}
 	cu.masks.sel, cu.masks.active = i, ""
 	cu.masks.rangePick = false
+	cu.masks.pick.armed = false
 	cu.masks.brush.Painting = i >= 0 && d.params.Masks[i].Type == "brush" && len(d.params.Masks[i].Strokes) == 0
 	cu.masksChanged()
 }
@@ -474,13 +493,25 @@ func tintKey(p marrawclient.Params, i int) string {
 // showing.
 func (cu *culler) fetchTint(i int) {
 	d := &cu.dev
+	cu.fetchTintFor(d.params, i, i, tintKey(d.params, i))
+}
+
+// fetchTintFor has the backend render the tint of mask i of params, to
+// show for tag, the hover it answers, named key: the one showing, or one
+// kept, at once.
+func (cu *culler) fetchTintFor(params marrawclient.Params, i, tag int, key string) {
+	d := &cu.dev
 	m := &cu.masks
-	key := tintKey(d.params, i)
-	if m.tint != nil && m.tintKey == key && m.tintOf == i {
+	if m.tint != nil && m.tintKey == key && m.tintOf == tag {
 		cu.showCull()
 		return
 	}
-	gen, id, params := m.tintGen, d.id, d.params
+	if img, ok := m.tints[key]; ok {
+		m.tint, m.tintOf, m.tintKey = img, tag, key
+		cu.showCull()
+		return
+	}
+	gen, id := m.tintGen, d.id
 	go func() {
 		ctx, cancel := context.WithTimeout(cu.ctx, 30*time.Second)
 		defer cancel()
@@ -499,15 +530,38 @@ func (cu *culler) fetchTint(i int) {
 				log.Printf("mask tint: %v", err)
 				return
 			}
-			if cu.masks.tintGen != gen || d.id != id {
+			if d.id != id {
 				return
 			}
-			cu.masks.tint, cu.masks.tintOf, cu.masks.tintKey = img, i, key
+			cu.keepTint(key, img)
+			if cu.masks.tintGen != gen {
+				return
+			}
+			cu.masks.tint, cu.masks.tintOf, cu.masks.tintKey = img, tag, key
 			cu.showCull()
 		}:
 		case <-cu.ctx.Done():
 		}
 	}()
+}
+
+// maxTints is how many tints are kept, for the pointer to come back to.
+const maxTints = 32
+
+// keepTint keeps tint img named key, the oldest going past maxTints.
+func (cu *culler) keepTint(key string, img *paint.Image) {
+	m := &cu.masks
+	if m.tints == nil {
+		m.tints = map[string]*paint.Image{}
+	}
+	if _, ok := m.tints[key]; !ok {
+		m.tintOrder = append(m.tintOrder, key)
+	}
+	m.tints[key] = img
+	for len(m.tintOrder) > maxTints {
+		delete(m.tints, m.tintOrder[0])
+		m.tintOrder = m.tintOrder[1:]
+	}
 }
 
 // masksEscape lets the masks' tools go, one at a time, as Escape does: the
@@ -518,6 +572,8 @@ func (cu *culler) masksEscape() bool {
 	switch {
 	case m.brush.Painting:
 		m.brush.Painting = false
+	case m.pick.armed:
+		cu.disarmPick()
 	case m.rangePick:
 		m.rangePick = false
 	case m.sel >= 0 || m.active != "":

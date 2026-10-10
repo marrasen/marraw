@@ -403,6 +403,10 @@ func (cu *culler) serve() error {
 				}
 			case DevAuto:
 				cu.devAuto(in)
+			case MaskPickAt:
+				cu.maskPickAt(in.ID)
+			case MaskPickHover:
+				cu.maskPickHover(in.ID)
 			case MaskMove:
 				cu.maskMove(in)
 			case PresetAmount:
@@ -457,11 +461,17 @@ func (cu *culler) serve() error {
 				cu.maskGeom(in)
 			case BrushSet:
 				cu.masks.brush = in.Tool
+				if in.Tool.Painting {
+					cu.masks.pick.armed = false
+				}
 				cu.masksChanged()
 			case BrushClear:
 				cu.brushClear(in.Index)
 			case RangePick:
 				cu.masks.rangePick = in.On && cu.maskOK(cu.masks.sel)
+				if cu.masks.rangePick {
+					cu.masks.pick.armed = false
+				}
 				cu.masks.brush.Painting = false
 				cu.masksChanged()
 			case RangeAt:

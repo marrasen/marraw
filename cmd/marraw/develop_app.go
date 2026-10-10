@@ -42,9 +42,15 @@ type (
 		MaskSel int
 		// MaskActive is the chosen mask's control the keys act on.
 		MaskActive string
-		Brush      BrushTool
-		RangePick  bool
-		AIBusy     string
+		// PickChips are the scene's or the people's regions found, to
+		// pick, PickKind which, "class" or "person", and PickArmed says
+		// a click on the photo picks.
+		PickChips []PickChip
+		PickKind  string
+		PickArmed bool
+		Brush     BrushTool
+		RangePick bool
+		AIBusy    string
 		// Tab is the panel's tab showing.
 		Tab int
 		// Amount is the preset applied last's Amount, or nil.
@@ -149,6 +155,7 @@ func (cu *culler) developState() DevelopState {
 	st.Presets = cu.presetCards()
 	st.MaskSel, st.Brush, st.RangePick, st.AIBusy = cu.masks.sel, cu.masks.brush, cu.masks.rangePick, cu.masks.aiBusy
 	st.MaskActive = cu.masks.active
+	st.PickChips, st.PickKind, st.PickArmed = cu.pickChips(), cu.masks.pick.kind, cu.masks.pick.armed
 	st.Tab = cu.devTab
 	st.Amount = cu.amountView()
 	if st.MaskSel >= len(d.params.Masks) {

@@ -34,6 +34,7 @@ var (
 	sectionLabelSize = theme.Length("marraw.section.label.size", 10)
 	tabTitleSize     = theme.Length("marraw.tab.title.size", 13)
 	tabLabelSize     = theme.Length("marraw.tab.label.size", 11)
+	chipTextSize     = theme.Length("marraw.chip.text", 11)
 	tabLabelInk      = theme.Color("marraw.tab.label", color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
 	sectionLabelPad  = theme.Insets("marraw.section.label.pad", geom.Insets{Top: 10, Bottom: 6})
 	mutedInkTok      = theme.Color("marraw.muted", mutedInk)

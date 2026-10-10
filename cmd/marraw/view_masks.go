@@ -28,6 +28,8 @@ type maskPanel struct {
 	aiBtn  map[string]*widget.Button
 	none   *widget.Label
 	editor *maskEditor
+	// chips are the scene's or the people's regions found, to pick.
+	chips *pickChips
 	rows   []*maskRow
 	st     DevelopState
 	// places glides each row to its place as masks come, go and open.
@@ -104,7 +106,8 @@ func (p *maskPanel) drop(u *gunim.UI) {
 }
 
 // The AI masks' buttons, as marraw's: what each adds, and its label.
-var aiKinds = []struct{ kind, label string }{{"subject", "Subject"}, {"background", "Background"}, {"depth", "Depth"}, {"tilt", "Tilt shift"}}
+var aiKinds = []struct{ kind, label string }{{"subject", "Subject"}, {"background", "Background"}, {"depth", "Depth"},
+	{"tilt", "Tilt shift"}, {"scene", "Scene"}, {"people", "People"}}
 
 func newMaskPanel(v *developView) *maskPanel {
 	p := &maskPanel{v: v, aiBtn: map[string]*widget.Button{}, places: map[*maskRow]*anim.Float{}}
@@ -129,7 +132,8 @@ func newMaskPanel(v *developView) *maskPanel {
 		p.aiBtn[k.kind] = b
 		ai = append(ai, &edged{child: b})
 	}
-	p.ais = small(widget.Row(ai...))
+	p.ais = small(widget.NewWrap(ai...))
+	p.chips = &pickChips{}
 	p.none = newSmallLabel("No masks yet: add one to adjust a part of the photo.")
 	p.none.Color, p.none.MaxLines = noteInk, 2
 	p.editor = newMaskEditor(p)
@@ -151,14 +155,18 @@ func (p *maskPanel) show(s DevelopState, u *gunim.UI) {
 			label += "…"
 		}
 		b.Label = label
+		b.Active = s.PickArmed && pickKind(k) == s.PickKind
 	}
+	p.chips.set(s.PickChips, u)
 	p.editor.show(s, u)
 	u.Invalidate()
 }
 
 // Children implements [gunim.Composite]: the rows are built as the masks
 // come.
-func (p *maskPanel) Children() []gunim.Node { return []gunim.Node{p.adds, p.ais, p.none, p.editor} }
+func (p *maskPanel) Children() []gunim.Node {
+	return []gunim.Node{p.adds, p.ais, p.none, p.editor, p.chips}
+}
 
 // Layout implements [gunim.Node].
 func (p *maskPanel) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children) geom.Size {
@@ -192,7 +200,13 @@ func (p *maskPanel) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childr
 		return s.H
 	}
 	place(kids.At(0), 40)
-	place(kids.At(1), 40)
+	place(kids.At(1), 80)
+	if len(p.chips.list) > 0 {
+		place(kids.At(4), 200)
+	} else {
+		kids.At(4).Layout(gunim.Tight(geom.Size{}))
+		kids.At(4).Place(geom.Pt(-10000, 0))
+	}
 	y += 4
 	if len(masks) == 0 {
 		place(kids.At(2), 60)
@@ -283,6 +297,7 @@ type maskRow struct {
 	// which shows while there is more than one mask.
 	panel *maskPanel
 	grip  bool
+	kids  []gunim.Node
 }
 
 // gripWidth is the room at a row's left where its grip takes it up.
@@ -307,6 +322,12 @@ func newMaskRow(i int) *maskRow {
 	r.trash = widget.NewIconButton(icon.Trash2, "Delete the mask")
 	r.trash.KeepFocus = true
 	r.trash.OnClick = func(*gunim.UI) gunim.Intent { return MaskDelete{Index: r.i} }
+	// The pills small, as marraw's, to leave the name its room.
+	pills := marrawTheme().With(theme.Set(widget.ButtonHeight, 22), theme.Set(widget.ButtonPadding, 7),
+		theme.Set(widget.ButtonRadius, 6), theme.Set(widget.TextSize, 11))
+	icons := marrawTheme().With(theme.Set(widget.ButtonHeight, 24), theme.Set(widget.IconSize, 14))
+	r.kids = []gunim.Node{r.name, widget.NewThemed(r.remove, pills), widget.NewThemed(r.invert, pills),
+		widget.NewThemed(r.eye, icons), widget.NewThemed(r.trash, icons)}
 	return r
 }
 
@@ -327,9 +348,7 @@ func (r *maskRow) set(m marrawclient.Mask, i int, chosen bool) {
 }
 
 // Children implements [gunim.Composite].
-func (r *maskRow) Children() []gunim.Node {
-	return []gunim.Node{r.name, r.remove, r.invert, r.eye, r.trash}
-}
+func (r *maskRow) Children() []gunim.Node { return r.kids }
 
 // Layout implements [gunim.Node].
 func (r *maskRow) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
@@ -695,4 +714,153 @@ func maskFXKey(key string) (maskSpec, bool) {
 		}
 	}
 	return maskSpec{}, false
+}
+
+// pickChips are the regions the scene or the people picking found, a chip
+// of each, as marraw's: the pointer over one tints it on the photo, a
+// click adds a mask of it, and a tick marks one with a mask already.
+type pickChips struct {
+	anim.Group
+	list   []PickChip
+	labels map[int]*widget.Label
+	rects  []geom.Rect
+	hot    int
+}
+
+// set shows list.
+func (c *pickChips) set(list []PickChip, u *gunim.UI) {
+	c.list = list
+	u.Invalidate()
+}
+
+// at is the chip at p, or -1.
+func (c *pickChips) at(p geom.Point) int {
+	for i, r := range c.rects {
+		if r.Contains(p) {
+			return i
+		}
+	}
+	return -1
+}
+
+// Handle implements [gunim.Handler].
+func (c *pickChips) Handle(e input.Event, u *gunim.UI) bool {
+	switch e := e.(type) {
+	case input.PointerMove:
+		i := c.at(e.Pos)
+		id := 0
+		if i >= 0 {
+			id = c.list[i].ID
+		}
+		if id != c.hot {
+			c.hot = id
+			u.Send(c, MaskPickHover{ID: id})
+			u.Invalidate()
+		}
+		return i >= 0
+	case input.PointerLeave:
+		if c.hot != 0 {
+			c.hot = 0
+			u.Send(c, MaskPickHover{ID: 0})
+			u.Invalidate()
+		}
+	case input.PointerDown:
+		if i := c.at(e.Pos); i >= 0 && e.Button == input.ButtonPrimary {
+			u.Send(c, MaskPickAt{ID: c.list[i].ID})
+			return true
+		}
+	}
+	return false
+}
+
+// Cursor implements [gunim.CursorShaper].
+func (c *pickChips) Cursor(p geom.Point) input.Cursor {
+	if c.at(p) >= 0 {
+		return input.CursorHand
+	}
+	return input.CursorInherit
+}
+
+// Children implements [gunim.Composite]: the chips' labels are built as
+// the regions come.
+func (c *pickChips) Children() []gunim.Node { return nil }
+
+// Layout implements [gunim.Node]: the chips in rows that wrap.
+func (c *pickChips) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	if c.labels == nil {
+		c.labels = map[int]*widget.Label{}
+	}
+	byNode := map[gunim.Node]gunim.Child{}
+	for k := range kids.All {
+		byNode[k.Node()] = k
+	}
+	want := map[int]bool{}
+	for _, ch := range c.list {
+		want[ch.ID] = true
+	}
+	for id, l := range c.labels {
+		if !want[id] {
+			kids.Drop(l)
+			delete(c.labels, id)
+		}
+	}
+	const padX, h, gap, tick = 9, 22, 5, 12
+	w := cs.Max.W
+	x, y := float32(0), float32(0)
+	c.rects = c.rects[:0]
+	for _, ch := range c.list {
+		l, ok := c.labels[ch.ID]
+		var k gunim.Child
+		if !ok {
+			l = widget.NewLabel("")
+			l.Size = chipTextSize
+			c.labels[ch.ID] = l
+			k = kids.Build(l)
+		} else {
+			k = byNode[l]
+		}
+		l.Text = ch.Label
+		s := k.Layout(gunim.Loose(geom.Sz(w, h)))
+		cw := s.W + 2*padX
+		if ch.Has {
+			cw += tick + 4
+		}
+		if x > 0 && x+cw > w {
+			x, y = 0, y+h+gap
+		}
+		r := geom.Rc(x, y, cw, h)
+		c.rects = append(c.rects, r)
+		lx := r.Min.X + padX
+		if ch.Has {
+			lx += tick + 4
+		}
+		k.Place(geom.Pt(lx, r.Min.Y+(h-s.H)/2))
+		x += cw + gap
+	}
+	if len(c.list) == 0 {
+		return geom.Size{}
+	}
+	return geom.Sz(w, y+h)
+}
+
+// Paint implements [gunim.Node].
+func (c *pickChips) Paint(p *paint.Painter, f gunim.Frame, _ geom.Size, kids gunim.Children) {
+	for i, r := range c.rects {
+		if i >= len(c.list) {
+			break
+		}
+		ch := c.list[i]
+		fill := frost(0x14)
+		if ch.ID == c.hot {
+			fill = frost(0x2c)
+		}
+		p.RRect(r, r.Size().H/2, paint.Solid(fill))
+		p.RRectStroke(r.Inset(geom.Uniform(0.5)), r.Size().H/2-0.5, paint.Fill{}, paint.Stroke{Width: 1, Color: frost(0x24)})
+		if ch.Has {
+			widget.PaintIcon(p, f.Theme, icon.Check, geom.Rc(r.Min.X+8, r.Min.Y+5, 12, 12), doneInk)
+		}
+	}
+	for k := range kids.All {
+		k.Paint(p)
+	}
 }

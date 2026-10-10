@@ -137,6 +137,11 @@ type cullView struct {
 	hudRect geom.Rect
 	// errors are the errors not cleared yet, in the corner.
 	errors *errorTray
+	// pickHot is the region under the pointer while picking, and
+	// pickPress where a press began, to tell a click from a drag.
+	pickHot     int
+	pickPress   geom.Point
+	pickPressed bool
 }
 
 // idleAfter is how long with no input before what floats over the photo
@@ -451,6 +456,9 @@ func (v *cullView) Children() []gunim.Node {
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
 // eyedropper is on.
 func (v *cullView) Cursor(p geom.Point) input.Cursor {
+	if v.picking() && v.inPhotoArea(p) {
+		return input.CursorCrosshair
+	}
 	if v.maskOn() && !v.stripRect.Contains(p) && !v.inPanel(p) {
 		ms := v.st.Masks
 		switch {
@@ -734,6 +742,7 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		if v.cropping() && v.cropHandle(e, u) {
 			return true
 		}
+		v.pickHandle(e, u)
 		if v.maskOn() && v.maskHandle(e, u) {
 			return true
 		}
@@ -785,6 +794,7 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		if v.cropping() && v.cropHandle(e, u) {
 			return true
 		}
+		v.pickHandle(e, u)
 		if v.maskOn() && v.maskHandle(e, u) {
 			return true
 		}
@@ -819,6 +829,7 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		if v.cropping() && v.cropHandle(e, u) {
 			return true
 		}
+		v.pickHandle(e, u)
 		if v.maskOn() && v.maskHandle(e, u) {
 			return true
 		}

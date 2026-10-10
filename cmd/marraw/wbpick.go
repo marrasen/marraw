@@ -48,6 +48,9 @@ func (cu *culler) devWBPick(on bool) {
 	if on == cu.wb.on {
 		return
 	}
+	if on {
+		cu.disarmPick()
+	}
 	if !on {
 		cu.wbFinish(true)
 		return

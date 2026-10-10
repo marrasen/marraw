@@ -418,3 +418,71 @@ func (v *cullView) maskShow(s Cull, u *gunim.UI) {
 	}
 	v.maskTintIn.Animate(0, anim.Tween{Duration: 300 * time.Millisecond})
 }
+
+// picking says the scene's or the people's picking is armed: a click on
+// the photo picks the region under it.
+func (v *cullView) picking() bool {
+	ms := v.st.Masks
+	return ms != nil && ms.Pick != nil && v.st.Crop == nil && !v.st.WBPick
+}
+
+// inPhotoArea says p is over the photo, clear of what floats over it.
+func (v *cullView) inPhotoArea(p geom.Point) bool {
+	return !v.inPanel(p) && !v.stripRect.Contains(p) && !v.marksRect().Contains(p)
+}
+
+// pickAt is the region under p of the picking, nought for none.
+func (v *cullView) pickAt(p geom.Point) int {
+	pk := v.st.Masks.Pick
+	if !v.inPhotoArea(p) || !v.photoRect().Contains(p) {
+		return 0
+	}
+	fx, fy := v.toFrame(p)
+	if fx < 0 || fy < 0 || fx > 1 || fy > 1 {
+		return 0
+	}
+	b := pk.Plane.Bounds()
+	x := b.Min.X + int(math.Round(fx*float64(b.Dx()-1)))
+	y := b.Min.Y + int(math.Round(fy*float64(b.Dy()-1)))
+	id := int(pk.Plane.GrayAt(x, y).Y)
+	if !pk.IDs[id] {
+		return 0
+	}
+	return id
+}
+
+// pickSlop is how far the pointer may move between press and release for
+// a click to pick, rather than drag the photo.
+const pickSlop = 4
+
+// pickHandle follows the pointer while the picking is armed: the region
+// under it tinted, and a click, not a drag, adding a mask of it. It takes
+// no event: a drag still moves the photo.
+func (v *cullView) pickHandle(e input.Event, u *gunim.UI) {
+	if !v.picking() {
+		v.pickHot = 0
+		return
+	}
+	switch e := e.(type) {
+	case input.PointerMove:
+		if id := v.pickAt(e.Pos); id != v.pickHot {
+			v.pickHot = id
+			u.Send(v, MaskPickHover{ID: id})
+		}
+	case input.PointerDown:
+		if e.Button == input.ButtonPrimary {
+			v.pickPress, v.pickPressed = e.Pos, true
+		}
+	case input.PointerUp:
+		if !v.pickPressed {
+			return
+		}
+		v.pickPressed = false
+		if d := e.Pos.Sub(v.pickPress); d.X*d.X+d.Y*d.Y > pickSlop*pickSlop {
+			return
+		}
+		if id := v.pickAt(e.Pos); id > 0 {
+			u.Send(v, MaskPickAt{ID: id})
+		}
+	}
+}
