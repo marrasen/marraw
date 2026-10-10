@@ -68,6 +68,12 @@ func paletteEntries(at paletteFor) []paletteEntry {
 		add("Add a range mask", "", MaskAdd{Kind: "range"}, "local", "mask", "colour", "luminance")
 		add("Add an AI subject mask", "", MaskAI{Kind: "subject"}, "local", "mask")
 		add("Add an AI background mask", "", MaskAI{Kind: "background"}, "local", "mask")
+		add("Add an AI depth mask", "", MaskAI{Kind: "depth"}, "local", "mask", "distance")
+		add("Tilt shift", "", MaskAI{Kind: "tilt"}, "local", "mask", "blur", "miniature")
+		add("Pick a scene region as a mask", "", MaskAI{Kind: "scene"}, "local", "mask", "sky", "foliage")
+		add("Pick a person as a mask", "", MaskAI{Kind: "people"}, "local", "mask", "people")
+		add("Heal spots", "Q", HealToggle{}, "retouch", "clone", "fill", "spot", "dust")
+		add("Auto crop around the subject", "", CropAuto{}, "crop", "subject")
 		add("Keep this burst frame: pick it, reject the rest", "Shift+P", BurstKeep{Pick: true}, "burst", "sharpest")
 		add("Save the edit as a preset", "", AskPreset{}, "look")
 	}
@@ -170,6 +176,12 @@ var shortcutGroups = []struct {
 		{"Tab / Shift+Tab", "Next / previous panel tab"},
 		{"R", "Crop and straighten; Enter, Esc or R again to finish"},
 		{"Ctrl+1–9 / Ctrl+Shift+1–9", "Creative preset / your own preset, by its place"},
+	}},
+	{"Local tab", [][2]string{
+		{"Up / Down", "Walk the masks' controls"}, {"+ / − (Shift)", "Step the control (further)"},
+		{"Esc", "Let the mask go; put Scene or People picking away"},
+		{"Q", "Heal spots, on and off"}, {"Delete (a spot chosen)", "Delete the spot"},
+		{"1–9 / 0 (a spot chosen)", "The spot's opacity, 10–90% / whole"},
 	}},
 }
 
