@@ -218,7 +218,8 @@ func newExportView(s ExportAsk) *exportView {
 	v.mark.KeepFocus = true
 	v.mark.OnChange = func(int, *gunim.UI) gunim.Intent { v.changed(nil); return nil }
 	editMarks := widget.NewButton("Edit…")
-	editMarks.KeepFocus, editMarks.OnClick = true, widget.Sends(AskWatermarks{})
+	editMarks.KeepFocus = true
+	editMarks.OnClick = func(*gunim.UI) gunim.Intent { return AskWatermarks{Selected: v.options().WatermarkID} }
 	v.exif = seg(exportExifs, indexOf(exportExifKeys, o.ExifMode))
 	v.location = widget.NewSwitch("Remove location info")
 	v.location.KeepFocus = true

@@ -51,6 +51,7 @@ func paletteEntries(at paletteFor) []paletteEntry {
 	}
 	add("Export…", "Ctrl+E", AskExport{}, "save", "jpeg")
 	add("Copy the photo as an image", "Ctrl+Shift+C", CopyImage{}, "clipboard", "paste")
+	add("Watermarks…", "", AskWatermarks{}, "logo", "signature", "frame")
 	add("Undo", "Ctrl+Z", DevUndo{})
 	add("Redo", "Ctrl+Shift+Z", DevUndo{Redo: true})
 	add("Copy edit settings", "Ctrl+C", EditCopy{})

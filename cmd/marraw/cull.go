@@ -193,6 +193,8 @@ type culler struct {
 	pendingExport *ExportGo
 	// stopCopy cancels the render for the clipboard under way.
 	stopCopy context.CancelFunc
+	// wm is the watermark editor's state.
+	wm watermarker
 	// heal is the heal tool, for retouching spots.
 	heal healState
 	// settings is what the settings dialog shows, while settingsOpen.
@@ -422,6 +424,14 @@ func (cu *culler) serve() error {
 				cu.exportCopy(in)
 			case CopyImage:
 				cu.copyImage()
+			case AskWatermarks:
+				cu.askWatermarks(in.Selected)
+			case WMChanged:
+				cu.wmChanged(in)
+			case WMAddImage:
+				cu.wmAddImage()
+			case WMDone:
+				cu.wmDone()
 			case AskSettings:
 				cu.askSettings(in.Section)
 			case SettingsDone:

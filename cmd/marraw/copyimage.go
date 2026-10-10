@@ -62,7 +62,7 @@ func (cu *culler) copyPhoto(id int64, o marrawclient.ExportOptions) {
 			if err != nil {
 				return err
 			}
-			return setClipboardImage(cu, b.Data)
+			return cu.c.SetClipboardImage(b.Data)
 		}()
 		select {
 		case cu.do <- func() {
@@ -77,9 +77,4 @@ func (cu *culler) copyPhoto(id int64, o marrawclient.ExportOptions) {
 		case <-cu.ctx.Done():
 		}
 	}()
-}
-
-// setClipboardImage puts png on the system clipboard.
-func setClipboardImage(cu *culler, png []byte) error {
-	return errors.New("pictures on the clipboard need a newer gunim")
 }

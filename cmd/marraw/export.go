@@ -55,8 +55,9 @@ type (
 	// ExportCopy renders the photo with Options and puts it on the
 	// clipboard.
 	ExportCopy struct{ Options marrawclient.ExportOptions }
-	// AskWatermarks opens the watermark editor.
-	AskWatermarks struct{}
+	// AskWatermarks opens the watermark editor on the watermark
+	// Selected.
+	AskWatermarks struct{ Selected string }
 	// CopyImage puts the photo in hand on the clipboard as a picture,
 	// rendered as the export last chose.
 	CopyImage struct{}

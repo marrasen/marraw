@@ -137,3 +137,29 @@ func size(p marrawclient.Photo) image.Point {
 	}
 	return image.Pt(w, h)
 }
+
+// rgba fetches and decodes one rendition, for drawing on rather than
+// showing.
+func (im *images) rgba(ctx context.Context, p marrawclient.Photo, w want) (*image.RGBA, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, im.url(p, w), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := im.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: %s", w, resp.Status)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	m, err := jpegturbo.DecodeRGBA(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", w, err)
+	}
+	return m, nil
+}
