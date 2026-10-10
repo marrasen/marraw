@@ -39,10 +39,12 @@ type (
 		// MaskSel is the mask chosen, below nought none; Brush the brush;
 		// RangePick says the range mask's colour picker is out, and AIBusy
 		// the AI mask being made.
-		MaskSel   int
-		Brush     BrushTool
-		RangePick bool
-		AIBusy    string
+		MaskSel int
+		// MaskActive is the chosen mask's control the keys act on.
+		MaskActive string
+		Brush      BrushTool
+		RangePick  bool
+		AIBusy     string
 		// Tab is the panel's tab showing.
 		Tab int
 		// Amount is the preset applied last's Amount, or nil.
@@ -146,6 +148,7 @@ func (cu *culler) developState() DevelopState {
 	st.History, st.HistoryAt = cu.historyOfShowing()
 	st.Presets = cu.presetCards()
 	st.MaskSel, st.Brush, st.RangePick, st.AIBusy = cu.masks.sel, cu.masks.brush, cu.masks.rangePick, cu.masks.aiBusy
+	st.MaskActive = cu.masks.active
 	st.Tab = cu.devTab
 	st.Amount = cu.amountView()
 	if st.MaskSel >= len(d.params.Masks) {

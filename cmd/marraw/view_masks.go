@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"math"
+	"slices"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/anim"
@@ -30,6 +32,75 @@ type maskPanel struct {
 	st     DevelopState
 	// places glides each row to its place as masks come, go and open.
 	places map[*maskRow]*anim.Float
+	// drag is a row being dragged to another place, or nil; rowsTop is
+	// where the rows start, from the last layout.
+	drag    *maskDrag
+	rowsTop float32
+}
+
+// maskDrag is a mask's row dragged by its grip: the mask it was, where
+// the row is, where in the row the pointer holds it, and the place it
+// would go; lift brings it up off the list.
+type maskDrag struct {
+	from, to int
+	y, grab  float32
+	lift     *anim.Float
+}
+
+// rowStep is the room a mask's row takes in the list.
+const rowStep = maskRowHeight + 2
+
+// startDrag takes row r up by its grip, held at grab in the row.
+func (p *maskPanel) startDrag(r *maskRow, grab float32, u *gunim.UI) {
+	a := p.places[r]
+	if a == nil || len(p.rows) < 2 {
+		return
+	}
+	d := &maskDrag{from: r.i, to: r.i, y: a.Value(), grab: grab, lift: anim.NewFloat(0)}
+	r.Add(d.lift)
+	d.lift.Animate(1, widget.Quick.Get(u.Theme()))
+	p.drag = d
+	u.Invalidate()
+}
+
+// dragTo moves the row dragged to the pointer, at y in the row.
+func (p *maskPanel) dragTo(y float32, u *gunim.UI) {
+	d := p.drag
+	if d == nil {
+		return
+	}
+	last := p.rowsTop + float32(len(p.rows)-1)*rowStep
+	d.y = min(max(d.y+y-d.grab, p.rowsTop-rowStep/2), last+rowStep/2)
+	d.to = min(max(int(math.Round(float64((d.y-p.rowsTop)/rowStep))), 0), len(p.rows)-1)
+	u.Invalidate()
+}
+
+// drop lets the row dragged go at its place: the rows take their masks'
+// new order at once, so none changes what it shows, and the culler is
+// told.
+func (p *maskPanel) drop(u *gunim.UI) {
+	d := p.drag
+	if d == nil {
+		return
+	}
+	p.drag = nil
+	if d.to == d.from {
+		u.Invalidate()
+		return
+	}
+	r := p.rows[d.from]
+	p.rows = slices.Insert(slices.Delete(p.rows, d.from, d.from+1), d.to, r)
+	ms := slices.Clone(p.st.Params.Masks)
+	m := ms[d.from]
+	p.st.Params.Masks = slices.Insert(slices.Delete(ms, d.from, d.from+1), d.to, m)
+	if p.st.MaskSel >= 0 {
+		p.st.MaskSel = movedIndex(p.st.MaskSel, d.from, d.to)
+	}
+	if a := p.places[r]; a != nil {
+		a.Jump(d.y)
+	}
+	u.Send(r, MaskMove{From: d.from, To: d.to})
+	u.Invalidate()
 }
 
 // The AI masks' buttons, as marraw's: what each adds, and its label.
@@ -109,6 +180,7 @@ func (p *maskPanel) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childr
 	}
 	for len(p.rows) < len(masks) {
 		r := newMaskRow(len(p.rows))
+		r.panel = p
 		p.rows = append(p.rows, r)
 		children[r] = kids.Build(r)
 	}
@@ -131,8 +203,20 @@ func (p *maskPanel) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childr
 	th := f.Theme
 	ed := kids.At(3)
 	edPlaced := false
-	for i, r := range p.rows {
+	p.rowsTop = y
+	// While a row is dragged, the others make room where it would go,
+	// and the chosen mask's settings stand aside.
+	order := make([]int, len(p.rows))
+	for i := range order {
+		order[i] = i
+	}
+	if d := p.drag; d != nil && d.from < len(order) {
+		order = slices.Insert(slices.Delete(order, d.from, d.from+1), d.to, d.from)
+	}
+	for _, i := range order {
+		r := p.rows[i]
 		r.set(masks[i], i, i == p.st.MaskSel)
+		r.grip = len(p.rows) > 1
 		k := children[r]
 		s := k.Layout(gunim.Tight(geom.Sz(w, maskRowHeight)))
 		a, ok := p.places[r]
@@ -141,10 +225,14 @@ func (p *maskPanel) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childr
 			p.places[r] = a
 			r.Add(a)
 		}
-		a.Animate(y, widget.Quick.Get(th))
+		if d := p.drag; d != nil && d.from == i {
+			a.Jump(d.y)
+		} else {
+			a.Animate(y, widget.Quick.Get(th))
+		}
 		k.Place(geom.Pt(0, a.Value()))
 		y += s.H + 2
-		if i == p.st.MaskSel {
+		if i == p.st.MaskSel && p.drag == nil {
 			es := ed.Layout(gunim.Loose(geom.Sz(w, 4000)))
 			ed.Place(geom.Pt(0, y+4))
 			y += es.H + 10
@@ -160,8 +248,18 @@ func (p *maskPanel) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childr
 
 // Paint implements [gunim.Node].
 func (p *maskPanel) Paint(pt *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	// The row dragged goes over the others, lifted off the list.
+	var lifted gunim.Child
+	var have bool
 	for k := range kids.All {
+		if r, ok := k.Node().(*maskRow); ok && p.drag != nil && p.drag.from == r.i {
+			lifted, have = k, true
+			continue
+		}
 		k.Paint(pt)
+	}
+	if have {
+		lifted.Paint(pt)
 	}
 }
 
@@ -181,7 +279,14 @@ type maskRow struct {
 	sel, hot, dim     *anim.Float
 	adjusted, canDrop bool
 	box               geom.Size
+	// panel is the list the row is in, for dragging it by its grip,
+	// which shows while there is more than one mask.
+	panel *maskPanel
+	grip  bool
 }
+
+// gripWidth is the room at a row's left where its grip takes it up.
+const gripWidth = 16
 
 func newMaskRow(i int) *maskRow {
 	r := &maskRow{i: i, name: newSmallLabel(""), sel: anim.NewFloat(0), hot: anim.NewFloat(0), dim: anim.NewFloat(0)}
@@ -243,8 +348,8 @@ func (r *maskRow) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children
 		right -= 2
 	}
 	n := kids.At(0)
-	ns := n.Layout(gunim.Loose(geom.Sz(max(0, right-30), maskRowHeight)))
-	n.Place(geom.Pt(22, (maskRowHeight-ns.H)/2))
+	ns := n.Layout(gunim.Loose(geom.Sz(max(0, right-36), maskRowHeight)))
+	n.Place(geom.Pt(30, (maskRowHeight-ns.H)/2))
 	return r.box
 }
 
@@ -263,9 +368,26 @@ func (r *maskRow) Handle(e input.Event, u *gunim.UI) bool {
 		if e.Button != input.ButtonPrimary {
 			return false
 		}
+		if r.grip && e.Pos.X < gripWidth {
+			// The grip: the row comes up off the list to be dragged.
+			r.panel.startDrag(r, e.Pos.Y, u)
+			return true
+		}
 		chosen := r.sel.Target() > 0.5
 		u.Send(r, MaskSelect{Index: map[bool]int{false: r.i, true: -1}[chosen]})
 		return true
+	case input.PointerMove:
+		if d := r.panel.drag; d != nil && d.from == r.i {
+			r.panel.dragTo(e.Pos.Y, u)
+			return true
+		}
+		return false
+	case input.PointerUp:
+		if d := r.panel.drag; d != nil && d.from == r.i {
+			r.panel.drop(u)
+			return true
+		}
+		return false
 	default:
 		return false
 	}
@@ -273,10 +395,27 @@ func (r *maskRow) Handle(e input.Event, u *gunim.UI) bool {
 	return false
 }
 
+// Cursor implements [gunim.CursorShaper]: the grip moves the row.
+func (r *maskRow) Cursor(p geom.Point) input.Cursor {
+	if r.grip && p.X < gripWidth {
+		return input.CursorMove
+	}
+	return input.CursorInherit
+}
+
 // Paint implements [gunim.Node].
 func (r *maskRow) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
 	th := f.Theme
 	rr := geom.Rect{Max: box.Point()}
+	if d := r.panel.drag; d != nil && d.from == r.i {
+		// Lifted: a shadow under it, and a pane behind it.
+		k := d.lift.Value()
+		p.ShadowRRect(rr, 6, paint.Solid(color.NRGBA{R: 0x20, G: 0x24, B: 0x2c, A: 0xff}),
+			paint.Shadow{Offset: geom.Pt(0, 6*k), Blur: 14 * k, Color: color.NRGBA{A: uint8(0x90 * k)}})
+	}
+	if r.grip {
+		widget.PaintIcon(p, th, icon.GripVertical, geom.Rc(2, box.H/2-6, 12, 12), withAlpha(mutedInk, 0.4+0.6*r.hot.Value()))
+	}
 	if s := r.sel.Value(); s > 0.01 {
 		p.RRect(rr, 6, paint.Solid(withAlpha(color.NRGBA{R: 0x5e, G: 0x9c, B: 0xff, A: 0x30}, s)))
 	}
@@ -284,7 +423,7 @@ func (r *maskRow) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gun
 		p.RRect(rr, 6, paint.Solid(withAlpha(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x0e}, h)))
 	}
 	if r.adjusted {
-		p.RRect(geom.Rc(9, box.H/2-3, 6, 6), 3, paint.Solid(widget.Accent.Get(th)))
+		p.RRect(geom.Rc(18, box.H/2-3, 6, 6), 3, paint.Solid(widget.Accent.Get(th)))
 	}
 	op := 1 - 0.55*r.dim.Value()
 	func() {
@@ -315,6 +454,8 @@ type maskEditor struct {
 	fxHead  *widget.Button
 	fxOpen  bool
 	lastSel int
+	// lastActive is the control the keys acted on, last shown.
+	lastActive string
 }
 
 // The shape's settings' sliders: their keys, labels and ranges.
@@ -507,6 +648,21 @@ func (e *maskEditor) show(s DevelopState, u *gunim.UI) {
 	e.paint.Label = map[bool]string{false: "Paint", true: "Done painting"}[s.Brush.Painting]
 	e.clear.Disabled = len(m.Strokes) == 0
 	e.pick.Active = s.RangePick
+	// The control the keys act on stands out, in sight, the effects
+	// opening for one of theirs.
+	for k, r := range e.rows {
+		r.SetActive(k == s.MaskActive, u)
+	}
+	if s.MaskActive != e.lastActive {
+		e.lastActive = s.MaskActive
+		if _, fx := maskFXKey(s.MaskActive); fx && !e.fxOpen {
+			e.fxOpen = true
+			e.fxFold.SetOpen(true, u)
+		}
+		if r := e.rows[s.MaskActive]; r != nil {
+			u.Reveal(r)
+		}
+	}
 	e.pick.Label = map[bool]string{false: "Pick colour", true: "Picking colour…"}[s.RangePick]
 	if r := e.rows["fxAngle"]; r != nil {
 		r.Slider.Disabled = m.Adjust.MotionBlur == 0 && m.Adjust.Streaks == 0
@@ -529,4 +685,14 @@ func (e *maskEditor) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Child
 func (e *maskEditor) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
 	p.RRect(geom.Rc(3, 0, 2, box.H), 1, paint.Solid(color.NRGBA{R: 0x5e, G: 0x9c, B: 0xff, A: 0x60}))
 	kids.At(0).Paint(p)
+}
+
+// maskFXKey reports whether key is one of the effects'.
+func maskFXKey(key string) (maskSpec, bool) {
+	for _, sp := range maskFX {
+		if sp.key == key {
+			return sp, true
+		}
+	}
+	return maskSpec{}, false
 }

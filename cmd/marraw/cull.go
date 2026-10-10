@@ -403,6 +403,8 @@ func (cu *culler) serve() error {
 				}
 			case DevAuto:
 				cu.devAuto(in)
+			case MaskMove:
+				cu.maskMove(in)
 			case PresetAmount:
 				cu.setPresetAmount(in)
 			case ErrClear:

@@ -69,6 +69,11 @@ func (cu *culler) setActive(key string) {
 // devWalk chooses the control by places on from the one chosen, or the
 // first or the last with none chosen.
 func (cu *culler) devWalk(by int) {
+	if cu.devTab == tabLocal {
+		// On the Local tab the keys walk the masks' controls.
+		cu.maskWalk(by)
+		return
+	}
 	d := &cu.dev
 	order := controlOrder(d.params.WBMode == "kelvin")
 	at := -1
@@ -93,6 +98,10 @@ func (cu *culler) devWalk(by int) {
 // and the edit is saved a moment after the last.
 func (cu *culler) devNudge(in DevNudge) {
 	d := &cu.dev
+	if cu.devTab == tabLocal {
+		cu.maskNudge(in)
+		return
+	}
 	if !d.open || d.active == "" || d.id != cu.photos[cu.at].ID {
 		return
 	}

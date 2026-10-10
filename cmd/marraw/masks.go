@@ -102,6 +102,8 @@ type maskState struct {
 	tintOf    int
 	tintKey   string
 	tintGen   int
+	// active is the chosen mask's control the keys act on, or "".
+	active string
 }
 
 // maskView is the masks as the cull view shows them, or nil while none is
@@ -245,7 +247,7 @@ func (cu *culler) maskSelect(i int) {
 	if i >= len(d.params.Masks) {
 		i = -1
 	}
-	cu.masks.sel = i
+	cu.masks.sel, cu.masks.active = i, ""
 	cu.masks.rangePick = false
 	cu.masks.brush.Painting = i >= 0 && d.params.Masks[i].Type == "brush" && len(d.params.Masks[i].Strokes) == 0
 	cu.masksChanged()
@@ -300,6 +302,10 @@ func (cu *culler) maskSet(in MaskSet) {
 		}
 	}
 	d.params.Masks = ms
+	if in.Index == cu.masks.sel {
+		// The control moved is the one the keys act on now.
+		cu.masks.active = in.Key
+	}
 	cu.maskEdit(in.Commit, "Adjust mask")
 }
 
@@ -514,8 +520,8 @@ func (cu *culler) masksEscape() bool {
 		m.brush.Painting = false
 	case m.rangePick:
 		m.rangePick = false
-	case m.sel >= 0:
-		m.sel = -1
+	case m.sel >= 0 || m.active != "":
+		m.sel, m.active = -1, ""
 	default:
 		return false
 	}
