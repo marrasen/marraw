@@ -9,6 +9,7 @@ import (
 	"github.com/marrasen/gunim/anim"
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/icon"
+	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
 	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
@@ -32,6 +33,8 @@ var (
 	sectionLabelInk  = theme.Color("marraw.section.label", mutedInk)
 	sectionLabelSize = theme.Length("marraw.section.label.size", 10)
 	tabTitleSize     = theme.Length("marraw.tab.title.size", 13)
+	tabLabelSize     = theme.Length("marraw.tab.label.size", 11)
+	tabLabelInk      = theme.Color("marraw.tab.label", color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
 	sectionLabelPad  = theme.Insets("marraw.section.label.pad", geom.Insets{Top: 10, Bottom: 6})
 	mutedInkTok      = theme.Color("marraw.muted", mutedInk)
 	infoNameSize     = theme.Length("marraw.info.name.size", 12)
@@ -40,42 +43,29 @@ var (
 	headExifSize     = theme.Length("marraw.head.exif.size", 10.5)
 )
 
-// tabsTheme is the theme of the panel's tabs: a small segmented control
-// of frosted glass, the chosen tab a brighter pane of it.
-func tabsTheme() theme.Theme {
-	return glassSegments(marrawTheme()).With(
-		theme.Set(widget.SegmentedHeight, 26),
-		theme.Set(widget.SegmentedPadding, 7),
-		theme.Set(widget.TextSize, 11.5))
-}
-
-// devPager is the panel's tabs: a segmented row of their names, and the
+// devPager is the panel's tabs: a bar of them across the panel, and the
 // page of the one chosen under it, the last fading as the next slides in
 // a little from the side it lies on.
 type devPager struct {
 	anim.Group
-	seg   *widget.Segmented
-	bar   gunim.Node
+	bar   *devTabBar
 	pages []gunim.Node
 	// selected is the page showing, prev the one leaving or -1, from the
 	// side the new one comes from, and slide how far it has come.
 	selected, prev int
 	from           float32
 	slide          *anim.Float
-	// dot shows on the Curve tab while a curve is set.
-	dot    *anim.Float
-	barH   float32
-	segBox geom.Rect
+	barH           float32
 }
 
 func newDevPager(titles []string, pages []gunim.Node, onChange func(i int, u *gunim.UI) gunim.Intent) *devPager {
-	g := &devPager{seg: widget.NewSegmented(titles...), pages: pages, prev: -1, slide: anim.NewFloat(1), dot: anim.NewFloat(0)}
-	g.seg.KeepFocus = true
-	g.seg.OnChange = onChange
-	g.bar = widget.NewThemed(&edged{child: g.seg, round: true}, tabsTheme())
-	g.Add(g.slide, g.dot)
+	g := &devPager{bar: newDevTabBar(titles, devTabIcons, onChange), pages: pages, prev: -1, slide: anim.NewFloat(1)}
+	g.Add(g.slide)
 	return g
 }
+
+// devTabIcons are the tabs' icons, by place.
+var devTabIcons = []*icon.Icon{icon.SlidersHorizontal, icon.Spline, icon.Brush, icon.SwatchBook, icon.Info}
 
 // Selected is the tab showing.
 func (g *devPager) Selected() int { return g.selected }
@@ -90,7 +80,7 @@ func (g *devPager) SetSelected(i int, u *gunim.UI) {
 		g.from = -1
 	}
 	g.selected = i
-	g.seg.SetSelected(i, u)
+	g.bar.choose(i, u)
 	g.slide.Jump(0)
 	g.slide.Animate(1, anim.Tween{Duration: tabSlide})
 	u.Invalidate()
@@ -101,28 +91,29 @@ const tabSlide = 180 * time.Millisecond
 
 // setDot shows the Curve tab's dot, or takes it off.
 func (g *devPager) setDot(on bool, u *gunim.UI) {
-	to := float32(0)
-	if on {
-		to = 1
+	if g.bar.dot.Target() != on2(on) {
+		g.bar.dot.Animate(on2(on), widget.Quick.Get(u.Theme()))
 	}
-	if g.dot.Target() != to {
-		g.dot.Animate(to, widget.Quick.Get(u.Theme()))
+}
+
+func on2(b bool) float32 {
+	if b {
+		return 1
 	}
+	return 0
 }
 
 // Children implements [gunim.Composite].
 func (g *devPager) Children() []gunim.Node { return append([]gunim.Node{g.bar}, g.pages...) }
 
-// Layout implements [gunim.Node]: the row of tabs, then the page showing,
+// Layout implements [gunim.Node]: the bar of tabs, then the page showing,
 // and the one leaving, in the room under it. The other pages stay
 // mounted, unlaid, and keep their scroll.
 func (g *devPager) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
-	const padX, padTop, padBottom = 16, 11, 6
 	bar := kids.At(0)
-	bs := bar.Layout(gunim.Loose(geom.Sz(c.Max.W-2*padX, 40)))
-	bar.Place(geom.Pt(padX, padTop))
-	g.segBox = geom.Rc(padX, padTop, bs.W, bs.H)
-	g.barH = padTop + bs.H + padBottom
+	bs := bar.Layout(gunim.Tight(geom.Sz(c.Max.W, devTabBarH)))
+	bar.Place(geom.Point{})
+	g.barH = bs.H
 	page := geom.Sz(c.Max.W, max(0, c.Max.H-g.barH))
 	for i := 1; i < kids.Len(); i++ {
 		if i-1 != g.selected && i-1 != g.prev {
@@ -138,13 +129,6 @@ func (g *devPager) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 // Paint implements [gunim.Node].
 func (g *devPager) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
 	kids.At(0).Paint(p)
-	if d := g.dot.Value(); d > 0.01 && tabCurve < len(g.pages) {
-		// The dot sits after the Curve tab's name, at its top right.
-		w := g.segBox.Size().W / float32(len(g.pages))
-		at := geom.Pt(g.segBox.Min.X+w*float32(tabCurve+1)-7, g.segBox.Min.Y+7)
-		s := 5 * d
-		p.RRect(geom.Rc(at.X-s/2, at.Y-s/2, s, s), s/2, paint.Solid(withAlpha(primaryInk, d)))
-	}
 	body := geom.Rect{Min: geom.Pt(0, g.barH), Max: box.Point()}
 	defer p.Layer(paint.LayerOpts{Bounds: body, Opacity: 1, Clip: true})()
 	s := min(max(g.slide.Value(), 0), 1)
@@ -164,6 +148,182 @@ func (g *devPager) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	kids.At(g.selected + 1).Paint(p)
 }
 
+// devTabBarH is the tab bar's height.
+const devTabBarH = 60
+
+// The tab bar's motions: the line's leading edge runs ahead and its
+// trailing edge follows, so it stretches as it goes and draws together as
+// it lands; the pane behind the tab glides after them.
+var (
+	tabLead  = anim.Spring{Response: 0.22, Damping: 0.9}
+	tabTrail = anim.Spring{Response: 0.36, Damping: 0.95}
+	tabPane  = anim.Spring{Response: 0.3, Damping: 0.86}
+)
+
+// devTabBar is the panel's tabs as a bar across the panel: each tab its
+// icon over its name, in equal columns. The chosen one stands on a pane
+// of brighter glass, a short glowing line under it; changing tabs, the
+// line runs to the next, stretching as it goes, and the names and icons
+// brighten as it reaches them.
+type devTabBar struct {
+	anim.Group
+	titles   []string
+	icons    []*icon.Icon
+	labels   []*widget.Label
+	onChange func(i int, u *gunim.UI) gunim.Intent
+	selected int
+	// left and right are the line's ends and pane the pane's middle, in
+	// tabs from the first, at their middles; hot is how far the pointer
+	// is over each tab, and dot the Curve tab's dot.
+	left, right, pane *anim.Float
+	hot               []*anim.Float
+	dot               *anim.Float
+	over              int
+	kids              []gunim.Node
+	col               float32
+}
+
+func newDevTabBar(titles []string, icons []*icon.Icon, onChange func(i int, u *gunim.UI) gunim.Intent) *devTabBar {
+	b := &devTabBar{titles: titles, icons: icons, onChange: onChange, left: anim.NewFloat(0), right: anim.NewFloat(0),
+		pane: anim.NewFloat(0), dot: anim.NewFloat(0), over: -1}
+	b.Add(b.left, b.right, b.pane, b.dot)
+	for _, t := range titles {
+		l := widget.NewLabel(t)
+		l.Size, l.Color = tabLabelSize, tabLabelInk
+		b.labels = append(b.labels, l)
+		b.kids = append(b.kids, l)
+		h := anim.NewFloat(0)
+		b.hot = append(b.hot, h)
+		b.Add(h)
+	}
+	return b
+}
+
+// choose moves the bar to tab i.
+func (b *devTabBar) choose(i int, u *gunim.UI) {
+	if i == b.selected {
+		return
+	}
+	// The edge on the side it goes leads, the other trails.
+	to := float32(i)
+	if i > b.selected {
+		b.right.Animate(to, tabLead)
+		b.left.Animate(to, tabTrail)
+	} else {
+		b.left.Animate(to, tabLead)
+		b.right.Animate(to, tabTrail)
+	}
+	b.pane.Animate(to, tabPane)
+	b.selected = i
+	u.Invalidate()
+}
+
+// Children implements [gunim.Composite].
+func (b *devTabBar) Children() []gunim.Node { return b.kids }
+
+// Handle implements [gunim.Handler]: a click chooses a tab, and the
+// pointer lights the tab it is over.
+func (b *devTabBar) Handle(e input.Event, u *gunim.UI) bool {
+	th := u.Theme()
+	switch e := e.(type) {
+	case input.PointerMove:
+		b.hover(b.at(e.Pos), th)
+		return true
+	case input.PointerLeave:
+		b.hover(-1, th)
+		return false
+	case input.PointerDown:
+		if e.Button != input.ButtonPrimary {
+			return false
+		}
+		if i := b.at(e.Pos); i >= 0 && i != b.selected {
+			if b.onChange != nil {
+				u.Send(b, b.onChange(i, u))
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// hover lights tab i, -1 for none.
+func (b *devTabBar) hover(i int, th *theme.Live) {
+	if i == b.over {
+		return
+	}
+	b.over = i
+	for k, h := range b.hot {
+		h.Animate(on2(k == i), widget.Quick.Get(th))
+	}
+}
+
+// at is the tab at p, or -1.
+func (b *devTabBar) at(p geom.Point) int {
+	if b.col <= 0 || p.Y < 0 || p.Y > devTabBarH {
+		return -1
+	}
+	i := int((p.X - devTabPadX) / b.col)
+	if i < 0 || i >= len(b.titles) {
+		return -1
+	}
+	return i
+}
+
+// devTabPadX is the room either side of the tabs.
+const devTabPadX = 10
+
+// Layout implements [gunim.Node].
+func (b *devTabBar) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	w := c.Max.W
+	b.col = (w - 2*devTabPadX) / float32(len(b.titles))
+	for i := range b.titles {
+		k := kids.At(i)
+		s := k.Layout(gunim.Loose(geom.Sz(b.col, 20)))
+		k.Place(geom.Pt(devTabPadX+b.col*(float32(i)+0.5)-s.W/2, 33))
+	}
+	return geom.Sz(w, devTabBarH)
+}
+
+// Paint implements [gunim.Node].
+func (b *devTabBar) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
+	th := f.Theme
+	mid := func(at float32) float32 { return devTabPadX + b.col*(at+0.5) }
+	// The pane behind the chosen tab.
+	pw := min(b.col-6, 62)
+	pane := geom.Rc(mid(b.pane.Value())-pw/2, 7, pw, 46)
+	p.RRect(pane, 11, paint.Solid(frost(0x14)))
+	p.RRectStroke(pane.Inset(geom.Uniform(0.5)), 10.5, paint.Fill{}, paint.Stroke{Width: 1, Color: frost(0x1c)})
+	// The tabs: lit as the line nears them, and under the pointer; white,
+	// faded as far as they are not.
+	lit := (b.left.Value() + b.right.Value()) / 2
+	for i := range b.labels {
+		near := 1 - min(abs32(lit-float32(i)), 1)
+		a := 0.55 + 0.45*max(near, b.hot[i].Value()*0.6)
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rc(devTabPadX+b.col*float32(i), 0, b.col, box.H), Opacity: a})()
+			if i < len(b.icons) && b.icons[i] != nil {
+				c := geom.Pt(mid(float32(i)), 21)
+				s := float32(17)
+				ink := anim.Mix(anim.ColorCodec, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}, accentInk, near*0.5)
+				widget.PaintIcon(p, th, b.icons[i], geom.Rc(c.X-s/2, c.Y-s/2, s, s), ink)
+			}
+			kids.At(i).Paint(p)
+		}()
+	}
+	// The Curve tab's dot, at its icon's top right.
+	if d := b.dot.Value(); d > 0.01 && tabCurve < len(b.titles) {
+		at := geom.Pt(mid(tabCurve)+12, 13)
+		s := 5 * d
+		p.RRect(geom.Rc(at.X-s/2, at.Y-s/2, s, s), s/2, paint.Solid(withAlpha(primaryInk, d)))
+	}
+	// The line under the chosen tab, stretching as it runs, glowing.
+	const lineW = 22
+	x0, x1 := mid(b.left.Value())-lineW/2, mid(b.right.Value())+lineW/2
+	line := geom.Rc(x0, 50, x1-x0, 2.5)
+	p.ShadowRRect(line, 1.25, paint.Solid(primaryInk), paint.Shadow{Blur: 6, Color: withAlpha(primaryInk, 0.7)})
+	// The panel's hairline under the bar.
+	p.RRect(geom.Rc(0, box.H-1, box.W, 1), 0, paint.Solid(panelLine))
+}
 // titleRow is a tab's title, and Undo and Redo at its right, as marraw's
 // panel heads its Develop, Curve and Local tabs.
 type titleRow struct {

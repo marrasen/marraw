@@ -48,6 +48,10 @@ type CropView struct {
 	// the frame, turned since: the view turns it on, while the pixels of
 	// the turned frame come.
 	Turn int
+	// MirrorH and MirrorV say the picture showing is mirrored behind the
+	// frame, across and upside down: the view mirrors it, while the
+	// mirrored frame's pixels come.
+	MirrorH, MirrorV bool
 }
 
 // cropMode is cropping, while it goes on: the shape chosen, and whether
@@ -58,8 +62,9 @@ type cropMode struct {
 	ready  bool
 	frame  image.Point
 	// turn is the quarter turns, clockwise, the picture showing is
-	// behind the frame.
-	turn int
+	// behind the frame, and mirrorH and mirrorV the mirrors.
+	turn             int
+	mirrorH, mirrorV bool
 }
 
 // frameSize is photo p's whole frame, at full size, as the edit's quarter
@@ -83,7 +88,7 @@ func (cu *culler) cropView() *CropView {
 	}
 	d := &cu.dev
 	v := &CropView{Rect: rectOf(d.params), Angle: d.params.CropAngle, Aspect: cu.crop.aspect, Ready: cu.crop.ready,
-		Turn: cu.crop.turn}
+		Turn: cu.crop.turn, MirrorH: cu.crop.mirrorH, MirrorV: cu.crop.mirrorV}
 	if i, ok := cu.index[d.id]; ok {
 		v.Frame = frameSize(cu.photos[i], d.params)
 	}
@@ -209,9 +214,28 @@ func (cu *culler) cropTurn(in CropTurn) {
 	cu.showCull()
 }
 
-// cropFlip mirrors the frame: its pixels come anew.
-
-func (cu *culler) cropFlip(in CropFlip) { cu.cropFrame(flipCrop(cu.dev.params, in.Vertical), "Flip") }
+// cropFlip mirrors the frame: the picture showing mirrors with it at
+// once, in the view, while the mirrored frame's pixels come.
+func (cu *culler) cropFlip(in CropFlip) {
+	if !cu.crop.on {
+		return
+	}
+	if !cu.crop.ready || cu.crop.turn != 0 {
+		cu.cropFrame(flipCrop(cu.dev.params, in.Vertical), "Flip")
+		return
+	}
+	d := &cu.dev
+	d.params = flipCrop(d.params, in.Vertical)
+	if in.Vertical {
+		cu.crop.mirrorV = !cu.crop.mirrorV
+	} else {
+		cu.crop.mirrorH = !cu.crop.mirrorH
+	}
+	cu.edited(true)
+	cu.remember("Flip")
+	_ = cu.c.Update("develop", cu.developState())
+	cu.showCull()
+}
 
 // cropFrame takes an edit with the frame turned or mirrored.
 func (cu *culler) cropFrame(p marrawclient.Params, label string) {
@@ -221,6 +245,7 @@ func (cu *culler) cropFrame(p marrawclient.Params, label string) {
 	d := &cu.dev
 	d.params = p
 	cu.crop.ready, cu.crop.frame, cu.crop.turn = false, image.Point{}, 0
+	cu.crop.mirrorH, cu.crop.mirrorV = false, false
 	cu.edited(true)
 	cu.remember(label)
 	_ = cu.c.Update("develop", cu.developState())

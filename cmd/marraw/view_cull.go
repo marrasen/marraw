@@ -97,6 +97,9 @@ type cullView struct {
 	cropIn   *anim.Float
 	cropOver *anim.Float
 	spin     *anim.Float
+	// flipX and flipY are the picture's mirror across and upside down,
+	// from 1 to -1, as the frame mirrors ahead of its pixels.
+	flipX, flipY *anim.Float
 	// mask is mask editing's own; maskTintIn brings the backend's tint of
 	// a mask, tintImg, in and out.
 	mask       maskUI
@@ -174,13 +177,14 @@ func newCullView(s Cull) *cullView {
 	v.wbBar = v.newWBBar()
 	v.film = newFilmstrip(v)
 	v.cropIn, v.cropOver, v.spin = anim.NewFloat(0), anim.NewFloat(0), anim.NewFloat(0)
+	v.flipX, v.flipY = anim.NewFloat(1), anim.NewFloat(1)
 	v.maskTintIn = anim.NewFloat(0)
 	v.crop.bar = v.newCropBar()
 	v.notice.Size = noteSize
 	if s.Panel {
 		v.side.Jump(1)
 	}
-	v.Add(v.z, v.c, v.in, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin, v.maskTintIn, v.filmIn, v.idle)
+	v.Add(v.z, v.c, v.in, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin, v.maskTintIn, v.filmIn, v.idle, v.flipX, v.flipY)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -1123,6 +1127,11 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 			// Straightening, the frame turns about its middle, here, and
 			// a quarter turn turns the picture on ahead of its pixels.
 			defer p.Push(paint.Rotate(float32(deg*math.Pi/180), r.Center()))()
+		}
+		if sx, sy := v.flipX.Value(), v.flipY.Value(); sx != 1 || sy != 1 {
+			// A mirror turns the picture over ahead of its pixels.
+			c := r.Center()
+			defer p.Push(paint.Transform{A: sx, C: c.X - sx*c.X, E: sy, F: c.Y - sy*c.Y})()
 		}
 		kids.At(0).Paint(p)
 	}()

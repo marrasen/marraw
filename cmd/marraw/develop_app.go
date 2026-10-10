@@ -402,6 +402,7 @@ func (cu *culler) startPreview() {
 				if flat {
 					what = "whole frame"
 					cu.crop.ready, cu.crop.frame, cu.crop.turn = true, size, 0
+					cu.crop.mirrorH, cu.crop.mirrorV = false, false
 				}
 				if full && !flat {
 					what = "full"

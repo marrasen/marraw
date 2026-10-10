@@ -155,7 +155,37 @@ func (v *cullView) cropShow(s, prev Cull, u *gunim.UI) {
 	if s.Crop == nil {
 		v.spin.Jump(0)
 	}
-	v.cropOver.Animate(on(now && turn == 0), widget.Quick.Get(th))
+	// A mirror: the picture turns over to the frame's new way, as a card
+	// does, and once the mirrored frame's pixels come, they take its
+	// place where it has got to, and it goes on to rest.
+	var mh, mv, wasH, wasV bool
+	if s.Crop != nil {
+		mh, mv = s.Crop.MirrorH, s.Crop.MirrorV
+	}
+	if prev.Crop != nil {
+		wasH, wasV = prev.Crop.MirrorH, prev.Crop.MirrorV
+	}
+	for _, m := range []struct {
+		a        *anim.Float
+		now, was bool
+	}{{v.flipX, mh, wasH}, {v.flipY, mv, wasV}} {
+		switch {
+		case m.now == m.was:
+		case m.now:
+			m.a.Animate(-1, cropSpin)
+		case s.Img != prev.Img:
+			// The mirrored pixels came: the same picture, mirrored back.
+			m.a.Jump(-m.a.Value())
+			m.a.Animate(1, cropSpin)
+		default:
+			m.a.Animate(1, cropSpin)
+		}
+	}
+	if s.Crop == nil {
+		v.flipX.Jump(1)
+		v.flipY.Jump(1)
+	}
+	v.cropOver.Animate(on(now && turn == 0 && !mh && !mv), widget.Quick.Get(th))
 	if s.Crop == nil {
 		c.hasLocal, c.dragging = false, false
 		return
