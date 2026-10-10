@@ -324,6 +324,7 @@ func (b *devTabBar) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids g
 	// The panel's hairline under the bar.
 	p.RRect(geom.Rc(0, box.H-1, box.W, 1), 0, paint.Solid(panelLine))
 }
+
 // titleRow is a tab's title, and Undo and Redo at its right, as marraw's
 // panel heads its Develop, Curve and Local tabs.
 type titleRow struct {
