@@ -78,6 +78,7 @@ func paletteEntries(at paletteFor) []paletteEntry {
 		add("Save the edit as a preset", "", AskPreset{}, "look")
 	}
 	add("Keyboard shortcuts", "?", ShowShortcuts{}, "keys", "help")
+	add("Settings…", "", AskSettings{}, "preferences", "options", "cache", "models", "sidecars")
 	add("Judge the bursts: pick the sharpest of each, reject the rest", "", JudgeBursts{}, "burst", "auto")
 	add("Look for closed eyes", "", CheckEyes{}, "blink", "eyes", "analyse")
 	add("Find the subjects, to judge their sharpness", "", CheckSubjects{}, "focus", "sharp", "analyse")

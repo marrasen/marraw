@@ -48,6 +48,47 @@ type gridBar struct {
 	// choices, in minutes, nought for none.
 	gap  *widget.Dropdown
 	gaps []int
+	// hide are the buttons each culling aid has, which go while it is
+	// turned off.
+	hide map[string][]*hideable
+}
+
+// setOff hides the buttons of the culling aids off.
+func (b *gridBar) setOff(off map[string]bool, u *gunim.UI) {
+	for id, hs := range b.hide {
+		for _, h := range hs {
+			h.hidden = off[id]
+		}
+	}
+	u.Invalidate()
+}
+
+// hideable is a node that takes no room while hidden.
+type hideable struct {
+	child  gunim.Node
+	hidden bool
+}
+
+// Children implements [gunim.Composite].
+func (h *hideable) Children() []gunim.Node { return []gunim.Node{h.child} }
+
+// Layout implements [gunim.Node].
+func (h *hideable) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	if h.hidden {
+		kids.At(0).Layout(gunim.Tight(geom.Size{}))
+		kids.At(0).Place(geom.Pt(-10000, 0))
+		return geom.Size{}
+	}
+	s := kids.At(0).Layout(c)
+	kids.At(0).Place(geom.Point{})
+	return s
+}
+
+// Paint implements [gunim.Node].
+func (h *hideable) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	if !h.hidden {
+		kids.At(0).Paint(p)
+	}
 }
 
 func newGridBar(g *gridView) *gridBar {
@@ -98,7 +139,14 @@ func newGridBar(g *gridView) *gridBar {
 	b.judge = act(icon.WandSparkles, "Judge the bursts: pick each one's sharpest frame, reject the rest", JudgeBursts{})
 	b.eyes = act(icon.ScanEye, "Look for closed eyes in the photos not checked yet", CheckEyes{})
 	b.subjects = act(icon.ScanFace, "Find each photo's subject, to judge its sharpness there", CheckSubjects{})
-	aids := widget.Row(b.soft, b.blinks, b.bursts, &divider{}, b.judge, b.eyes, b.subjects)
+	b.hide = map[string][]*hideable{}
+	wrap := func(n gunim.Node, feature string) gunim.Node {
+		h := &hideable{child: n}
+		b.hide[feature] = append(b.hide[feature], h)
+		return h
+	}
+	aids := widget.Row(wrap(b.soft, "softFilter"), wrap(b.blinks, "eyes"), wrap(b.bursts, "bursts"), &divider{},
+		wrap(b.judge, "bursts"), wrap(b.eyes, "eyes"), wrap(b.subjects, "subjects"))
 	aids.Cross = widget.CrossCenter
 	sp := widget.NewSpacer()
 	row := widget.Row(b.sorts, b.flags, b.stars, sp, aids).Grow(sp, 1)

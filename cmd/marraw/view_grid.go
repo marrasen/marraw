@@ -26,6 +26,9 @@ import (
 type gridView struct {
 	// errors are the errors not cleared yet, in the corner.
 	errors *errorTray
+	// crop says the tiles fill their cells, cropped, as the settings'
+	// Crop framing has them, rather than fitting their pictures whole.
+	crop   bool
 	st     GridState
 	grid   *widget.TileGrid
 	head   *gridHead
@@ -103,6 +106,8 @@ func newGridView(GridState) *gridView {
 func (v *gridView) show(s GridState, u *gunim.UI) {
 	lastGrid = s
 	v.bar.set(s.View, u)
+	v.bar.setOff(s.Off, u)
+	v.setCrop(s.Crop, u)
 	if v.shown && s.FolderID != v.folder {
 		v.swapTo(s, u)
 		return
@@ -303,7 +308,8 @@ func (v *gridView) newTile(i int) gunim.Node {
 	p := v.st.Photos[i]
 	t := &photoTile{id: p.ID, aspect: anim.NewFloat(p.Aspect), pic: newThumbPic(v.thumbs[i]), burst: newBadgeLabel(),
 		badges: anim.NewFloat(0)}
-	t.Add(t.aspect, t.badges)
+	t.cropK = anim.NewFloat(on(v.crop))
+	t.Add(t.aspect, t.badges, t.cropK)
 	t.setAids(p.Aids, nil)
 	t.hero = widget.NewHero(heroTag(p.ID), t.pic)
 	// The tile is where the cull view's picture flies from and back to.
@@ -473,6 +479,9 @@ type photoTile struct {
 	picRect geom.Rect
 	badges  *anim.Float
 	burst   *widget.Label
+	// cropK is how far the picture fills its cell, cropped: the
+	// settings' Crop framing.
+	cropK *anim.Float
 	// aspect is the picture's shape, gliding to the one its pixels have
 	// once they come.
 	aspect *anim.Float
@@ -493,7 +502,13 @@ func picRoom(box geom.Size) geom.Rect {
 func (t *photoTile) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
 	t.box = box
-	r := fitIn(picRoom(box), t.aspect.Value())
+	room := picRoom(box)
+	r := fitIn(room, t.aspect.Value())
+	if k := t.cropK.Value(); k > 0.001 {
+		// Cropped, the picture grows to fill its cell.
+		r = lerpRect(r, room, k)
+	}
+	t.pic.cover = t.cropK.Value() > 0.001
 	t.picRect = r
 	k := kids.At(0)
 	k.Layout(gunim.Tight(r.Size()))
@@ -575,8 +590,10 @@ type thumbPic struct {
 	anim.Group
 	img, old *paint.Image
 	in       *anim.Float
-	// dim is how far the picture is dimmed, for a rejected photo.
-	dim float32
+	// dim is how far the picture is dimmed, for a rejected photo, and
+	// cover says it fills its box, cropped, rather than fits.
+	dim   float32
+	cover bool
 }
 
 func newThumbPic(img *paint.Image) *thumbPic {
@@ -605,14 +622,24 @@ func (q *thumbPic) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, _ gunim
 	r := geom.Rect{Max: box.Point()}
 	op := 1 - 0.6*q.dim
 	k := q.in.Value()
+	place := func(img *paint.Image) (geom.Rect, paint.ImageOpts) {
+		if q.cover {
+			return r, paint.ImageOpts{Src: coverSrc(img, r), Radius: 3}
+		}
+		return pixelFit(r, img), paint.ImageOpts{Radius: 3}
+	}
 	if q.old != nil && k < 1 {
-		p.Image(q.old, pixelFit(r, q.old), paint.ImageOpts{Opacity: op, Radius: 3})
+		at, o := place(q.old)
+		o.Opacity = op
+		p.Image(q.old, at, o)
 	} else if q.img == nil || k < 1 {
 		p.RRect(r, 3, paint.Solid(frameInk))
 	}
 	if q.img != nil {
 		// It settles from a touch larger as it fades in.
-		p.Image(q.img, scaleAbout(pixelFit(r, q.img), 1+0.04*(1-k)), paint.ImageOpts{Opacity: op * k, Radius: 3})
+		at, o := place(q.img)
+		o.Opacity = op * k
+		p.Image(q.img, scaleAbout(at, 1+0.04*(1-k)), o)
 	}
 }
 
@@ -805,4 +832,25 @@ func (c *countPill) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids g
 	w := map[bool]float32{false: 2, true: 3}[c.icon == rejectMark]
 	p.Mask(icon.Stroke{Icon: c.icon, Width: w, Progress: 1}, geom.Rc(9, box.H/2-6, 12, 12), c.ink)
 	kids.At(0).Paint(p)
+}
+
+// setCrop has the tiles fill their cells, cropped, or fit their pictures
+// whole, gliding between the two.
+func (v *gridView) setCrop(crop bool, u *gunim.UI) {
+	if crop == v.crop {
+		return
+	}
+	v.crop = crop
+	for _, t := range v.tiles {
+		if t != nil {
+			t.cropK.Animate(on(crop), widget.Settle.Get(u.Theme()))
+		}
+	}
+	u.Invalidate()
+}
+
+// lerpRect is the rect t of the way from a to b.
+func lerpRect(a, b geom.Rect, t float32) geom.Rect {
+	l := func(x, y float32) float32 { return x + (y-x)*t }
+	return geom.Rect{Min: geom.Pt(l(a.Min.X, b.Min.X), l(a.Min.Y, b.Min.Y)), Max: geom.Pt(l(a.Max.X, b.Max.X), l(a.Max.Y, b.Max.Y))}
 }

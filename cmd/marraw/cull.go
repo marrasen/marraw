@@ -189,6 +189,9 @@ type culler struct {
 	errSeq int
 	// heal is the heal tool, for retouching spots.
 	heal healState
+	// settings is what the settings dialog shows, while settingsOpen.
+	settings     SettingsState
+	settingsOpen bool
 	// presetAmt is the preset applied last, for its Amount, and
 	// amountScrub says the Amount is making the edit, which keeps it.
 	presetAmt   *presetAmount
@@ -405,6 +408,26 @@ func (cu *culler) serve() error {
 				}
 			case DevAuto:
 				cu.devAuto(in)
+			case AskSettings:
+				cu.askSettings(in.Section)
+			case SettingsDone:
+				cu.settingsDone()
+			case SettingSet:
+				cu.settingSet(in)
+			case CacheClear:
+				cu.cacheClear()
+			case CacheCap:
+				cu.cacheCap(in.GB)
+			case CacheDirAsk:
+				cu.cacheDirAsk()
+			case CacheDir:
+				cu.cacheDir(in.Path)
+			case ModelDelete:
+				cu.modelDelete(in.File)
+			case DefaultPreset:
+				cu.defaultPreset(in)
+			case LinkRevoke:
+				cu.linkRevoke(in.ID)
 			case MaskPickAt:
 				cu.maskPickAt(in.ID)
 			case MaskPickHover:
@@ -528,9 +551,13 @@ func (cu *culler) serve() error {
 			case PresetDelete:
 				cu.presetDelete(in.Index)
 			case BurstKeep:
-				cu.burstKeep(in.Pick)
+				if cu.feature("bursts") {
+					cu.burstKeep(in.Pick)
+				}
 			case JudgeBursts:
-				cu.judgeBursts()
+				if cu.feature("bursts") {
+					cu.judgeBursts()
+				}
 			case CheckEyes:
 				cu.checkEyes(in.Download)
 			case CheckSubjects:
@@ -872,6 +899,9 @@ func (cu *culler) scriptStep(k string) bool {
 		}
 	case ok && verb == "type":
 		_ = cu.c.Input(cu.ctx, input.TextInput{Text: arg, Time: now})
+	case ok && verb == "settings":
+		// The settings dialog, at the section named.
+		cu.do <- func() { cu.askSettings(arg) }
 	case ok && verb == "fail":
 		// A made-up failure, to see the error tray.
 		cu.do <- func() { cu.fail(arg, errors.New("made up by the test script for "+arg)) }

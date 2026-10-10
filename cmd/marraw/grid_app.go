@@ -25,6 +25,10 @@ type (
 		// Groups are the runs of photos taken close together, as View's
 		// Gap groups them, or none.
 		Groups []GapGroup
+		// Off are the culling aids turned off, by their ids, and Crop
+		// says the tiles fill their cells, cropped.
+		Off  map[string]bool
+		Crop bool
 	}
 	// GridPhoto is one photo as a tile shows it.
 	GridPhoto struct {
@@ -84,6 +88,8 @@ func (cu *culler) gridState() GridState {
 		st.Folder = ""
 	}
 	st.Groups = gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)
+	st.Off = cu.featuresOff()
+	st.Crop = cu.ui != nil && cu.ui.ThumbFit == "crop"
 	for _, p := range cu.photos {
 		st.Photos = append(st.Photos, GridPhoto{ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Rating: p.Rating, Flag: string(p.Flag),
 			Aids: cu.aids.of(p)})

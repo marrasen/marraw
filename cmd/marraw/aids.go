@@ -41,6 +41,8 @@ type burst struct {
 type aidsOf struct {
 	softBelow float64
 	bursts    map[int64]*burst
+	// off are the culling aids turned off in the settings, by their ids.
+	off map[string]bool
 }
 
 // focusScore is how sharp photo p is, its subject's sharpness where known.
@@ -105,6 +107,21 @@ func newAids(all []marrawclient.Photo, v LibView) aidsOf {
 
 // of is photo p's aids.
 func (a aidsOf) of(p marrawclient.Photo) Aids {
+	out := a.on(p)
+	if a.off["softFilter"] {
+		out.Soft = false
+	}
+	if a.off["eyes"] {
+		out.Eyes = false
+	}
+	if a.off["bursts"] {
+		out.Burst, out.BurstOf, out.BurstBest = 0, 0, false
+	}
+	return out
+}
+
+// on is photo p's aids, all of them on.
+func (a aidsOf) on(p marrawclient.Photo) Aids {
 	var out Aids
 	if s, ok := focusScore(p); ok && a.softBelow > 0 {
 		out.Soft = s < a.softBelow
@@ -308,6 +325,7 @@ func (cu *culler) aidsChanged() {
 	}
 	cu.syncAll()
 	cu.aids = newAids(cu.all, cu.libView)
+	cu.aids.off = cu.featuresOff()
 	cu.refilter()
 	_ = cu.c.Update("grid", cu.gridState())
 	cu.showCull()

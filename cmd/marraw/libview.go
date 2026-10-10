@@ -98,6 +98,7 @@ func (cu *culler) syncAll() {
 func (cu *culler) viewList() []marrawclient.Photo {
 	cu.syncAll()
 	cu.aids = newAids(cu.all, cu.libView)
+	cu.aids.off = cu.featuresOff()
 	var out []marrawclient.Photo
 	for _, p := range cu.all {
 		if cu.libView.shows(p, cu.aids) {
