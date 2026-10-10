@@ -51,6 +51,18 @@ type gridBar struct {
 	// hide are the buttons each culling aid has, which go while it is
 	// turned off.
 	hide map[string][]*hideable
+	// railBtn puts the library away or brings it back, as railHidden
+	// says it is.
+	railBtn    *widget.IconButton
+	railHidden bool
+}
+
+// setRail shows whether the library is put away.
+func (b *gridBar) setRail(hidden bool, u *gunim.UI) {
+	b.railHidden = hidden
+	b.railBtn.Active = !hidden
+	b.railBtn.Tooltip = map[bool]string{false: "Hide the library", true: "Show the library"}[hidden]
+	u.Invalidate()
 }
 
 // setOff hides the buttons of the culling aids off.
@@ -149,7 +161,10 @@ func newGridBar(g *gridView) *gridBar {
 		wrap(b.judge, "bursts"), wrap(b.eyes, "eyes"), wrap(b.subjects, "subjects"))
 	aids.Cross = widget.CrossCenter
 	sp := widget.NewSpacer()
-	row := widget.Row(b.sorts, b.flags, b.stars, sp, aids).Grow(sp, 1)
+	b.railBtn = widget.NewIconButton(icon.PanelLeft, "Hide the library")
+	b.railBtn.KeepFocus = true
+	b.railBtn.OnClick = func(*gunim.UI) gunim.Intent { return RailHide{Hidden: !b.railHidden} }
+	row := widget.Row(b.railBtn, b.sorts, b.flags, b.stars, sp, aids).Grow(sp, 1)
 	// The tiles' size is set in the heading, beside the counts, and the
 	// gap the photos are grouped by.
 	g.head.size = &fixedWidth{w: 130, child: b.size}

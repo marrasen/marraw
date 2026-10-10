@@ -195,6 +195,12 @@ type culler struct {
 	stopCopy context.CancelFunc
 	// wm is the watermark editor's state.
 	wm watermarker
+	// lib is the library as the backend sends it, and cullNext a shoot
+	// on its way to opening in the cull view.
+	lib      library
+	cullNext string
+	// addf is the Add folder dialog's state.
+	addf addFolder
 	// heal is the heal tool, for retouching spots.
 	heal healState
 	// settings is what the settings dialog shows, while settingsOpen.
@@ -348,7 +354,7 @@ func (cu *culler) serve() error {
 			cu.stopLive()
 		}
 	}()
-	go cu.loadLibrary()
+	cu.followLibrary()
 	for {
 		select {
 		case <-cu.ctx.Done():
@@ -436,6 +442,33 @@ func (cu *culler) serve() error {
 				cu.batchDelta(in)
 			case BatchPreset:
 				cu.batchPreset(in)
+			case RailToggle:
+				cu.railToggle(in.Key)
+			case RailFilter:
+				cu.lib.filter = in.Text
+				cu.railChanged()
+			case RailOrder:
+				cu.railOrder(in)
+			case RailAct:
+				cu.railAct(in)
+			case RailWidth:
+				cu.railWidth(in.Px)
+			case RailHide:
+				cu.railHide(in.Hidden)
+			case AddFolders:
+				cu.addFolders(in.Paths)
+			case AskAddFolder:
+				cu.askAddFolder()
+			case AddFolderNav:
+				cu.addFolderNav(in.Path)
+			case AddFolderMode:
+				cu.addFolderMode(in)
+			case AddFolderGo:
+				cu.addFolderGo(in)
+			case AddFolderSystem:
+				cu.addFolderSystem()
+			case PromptDone:
+				cu.promptDone(in)
 			case AskSettings:
 				cu.askSettings(in.Section)
 			case SettingsDone:
@@ -878,7 +911,7 @@ func (cu *culler) record(what string, sharp bool) {
 // hands.
 // scriptStep takes a step of -keys that is not a key: click:x:y and
 // move:x:y move the pointer, in the window, and click there, dclick:x:y
-// twice; drag:x:y:x:y
+// twice, rclick:x:y with the secondary button; drag:x:y:x:y
 // drags from one point to another; type:text
 // types; shift+plus presses Shift and + as a Swedish keyboard does, which
 // types ?; shift+ a key presses it with Shift; ctrl+z and w press those; wait:ms waits; and shot:name writes the window to name.png. It
@@ -887,6 +920,15 @@ func (cu *culler) scriptStep(k string) bool {
 	verb, arg, ok := strings.Cut(k, ":")
 	now := time.Now()
 	switch {
+	case ok && verb == "rclick":
+		xs, ys, _ := strings.Cut(arg, ":")
+		x, _ := strconv.ParseFloat(xs, 32)
+		y, _ := strconv.ParseFloat(ys, 32)
+		at := geom.Pt(float32(x), float32(y))
+		_ = cu.c.Input(cu.ctx, input.PointerMove{Pos: at, Time: now})
+		time.Sleep(50 * time.Millisecond)
+		_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonSecondary, Clicks: 1, Time: now})
+		_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: at, Button: input.ButtonSecondary, Time: now})
 	case ok && (verb == "click" || verb == "move" || verb == "dclick"):
 		xs, ys, _ := strings.Cut(arg, ":")
 		x, _ := strconv.ParseFloat(xs, 32)

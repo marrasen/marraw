@@ -64,6 +64,10 @@ type gridView struct {
 	selN                        int
 	selIn, batchIn              *anim.Float
 	batchHidden                 bool
+	// rw carries the library's edge as it is put away and brought back,
+	// to rwTo.
+	rw   *anim.Float
+	rwTo float32
 }
 
 const (
@@ -85,7 +89,7 @@ func newGridView(GridState) *gridView {
 		empty: widget.NewLabel("No photos match the filter"), noneIn: anim.NewFloat(0)}
 	v.empty.Color = noteInk
 	v.bar = newGridBar(v)
-	v.selIn, v.batchIn = anim.NewFloat(0), anim.NewFloat(0)
+	v.selIn, v.batchIn, v.rw, v.rwTo = anim.NewFloat(0), anim.NewFloat(0), anim.NewFloat(railWidth), railWidth
 	v.sel = newSelBar(func(u *gunim.UI) { v.batchHidden = !v.batchHidden; v.selCount(v.selN, u) })
 	v.batch = newBatchCard(func(u *gunim.UI) { v.batchHidden = true; v.selCount(v.selN, u) })
 	v.barGate, v.selGate, v.batchGate = &gate{child: v.bar, open: true}, &gate{child: v.sel}, &gate{child: v.batch}
@@ -256,7 +260,12 @@ func (v *gridView) enter(s GridState, u *gunim.UI) {
 func (v *gridView) railIn(s RailState, u *gunim.UI) {
 	lastRail = s
 	v.rail.show(s, u)
+	v.bar.setRail(s.Hidden, u)
+	u.Invalidate()
 }
+
+// railX is where the grid starts: the library's edge, as it slides.
+func (v *gridView) railX() float32 { return v.rw.Value() }
 
 // thumbIn takes a tile's small picture, or, nil, lets it go.
 func (v *gridView) thumbIn(t ThumbIn, u *gunim.UI) {
@@ -364,7 +373,8 @@ func (v *gridView) Step(dt time.Duration) bool {
 	b := v.noneIn.Step(dt)
 	c := v.selIn.Step(dt)
 	d := v.batchIn.Step(dt)
-	return a || b || c || d
+	e := v.rw.Step(dt)
+	return a || b || c || d || e
 }
 
 // gridNotice pops a note in over the grid, and lets it fade after a
@@ -418,7 +428,7 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 				return true
 			case input.KeyK:
 				_, cursor := v.grid.Selected()
-				openPalette(v, geom.Rc(railWidth, v.top, v.box.W-railWidth, v.box.H-v.top), u, paletteFor{cursor: cursor})
+				openPalette(v, geom.Rc(v.railX(), v.top, v.box.W-v.railX(), v.box.H-v.top), u, paletteFor{cursor: cursor})
 				return true
 			}
 			return false
@@ -456,8 +466,21 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	top := f.Safe.Top
 	v.top, v.rail.top = top, top
 	head, grid, rail := kids.At(0), kids.At(1), kids.At(2)
-	rail.Layout(gunim.Tight(geom.Sz(railWidth, box.H)))
-	rail.Place(geom.Point{})
+	to := v.rail.width
+	if v.rail.st.Hidden {
+		to = 0
+	}
+	switch {
+	case v.rail.dragging:
+		v.rw.Jump(to)
+		v.rwTo = to
+	case to != v.rwTo:
+		v.rwTo = to
+		v.rw.Animate(to, widget.Quick.Get(f.Theme))
+	}
+	railWidth := v.railX()
+	rail.Layout(gunim.Tight(geom.Sz(v.rail.width, box.H)))
+	rail.Place(geom.Pt(railWidth-v.rail.width, 0))
 	w := max(0, box.W-railWidth)
 	head.Layout(gunim.Tight(geom.Sz(w, gridHeadHeight)))
 	head.Place(geom.Pt(railWidth, top))
@@ -499,7 +522,7 @@ func (v *gridView) tasksIn(t TasksIn, u *gunim.UI) { v.errors.setTasks(t.List, u
 func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
 	kids.At(1).Paint(p)
 	kids.At(0).Paint(p)
-	p.RRect(geom.Rc(railWidth, v.top+gridHeadHeight-1, box.W-railWidth, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
+	p.RRect(geom.Rc(v.railX(), v.top+gridHeadHeight-1, box.W-v.railX(), 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
 	if k := v.selIn.Value(); k < 0.99 {
 		func() {
 			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(max(1-k, 0), 1)})()

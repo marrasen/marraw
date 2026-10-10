@@ -52,6 +52,7 @@ func paletteEntries(at paletteFor) []paletteEntry {
 	add("Export…", "Ctrl+E", AskExport{}, "save", "jpeg")
 	add("Copy the photo as an image", "Ctrl+Shift+C", CopyImage{}, "clipboard", "paste")
 	add("Watermarks…", "", AskWatermarks{}, "logo", "signature", "frame")
+	add("Add a folder to the library…", "", AskAddFolder{}, "import", "library", "shoot")
 	add("Undo", "Ctrl+Z", DevUndo{})
 	add("Redo", "Ctrl+Shift+Z", DevUndo{Redo: true})
 	add("Copy edit settings", "Ctrl+C", EditCopy{})
@@ -123,7 +124,7 @@ func paletteEntries(at paletteFor) []paletteEntry {
 		}
 	}
 	for _, it := range lastRail.Items {
-		if it.Group {
+		if it.Kind != "shoot" && it.Kind != "root" {
 			continue
 		}
 		e := paletteEntry{widget.PaletteItem{Title: "Open " + it.Name, Detail: fmt.Sprintf("%d photos", it.Count),
