@@ -482,6 +482,8 @@ func (cu *culler) serve() error {
 				cu.cropFlip(in)
 			case CropAspect:
 				cu.cropAspect(in.Index)
+			case CropAuto:
+				cu.cropAuto(in.Download)
 			case CropReset:
 				cu.cropReset()
 			case PresetApply:

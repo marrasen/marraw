@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"image"
+	"time"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
 )
@@ -30,6 +32,9 @@ type (
 	// CropReset takes the crop, the straighten, the turns and the mirror
 	// off.
 	CropReset struct{}
+	// CropAuto crops around the photo's subject, to the shape chosen, as
+	// marraw's Auto does; Download allows its model to be fetched.
+	CropAuto struct{ Download bool }
 )
 
 // CropView is what the cull view shows of a crop under way: the crop of
@@ -48,6 +53,8 @@ type CropView struct {
 	// the frame, turned since: the view turns it on, while the pixels of
 	// the turned frame come.
 	Turn int
+	// AutoBusy says Auto is looking for the subject.
+	AutoBusy bool
 	// MirrorH and MirrorV say the picture showing is mirrored behind the
 	// frame, across and upside down: the view mirrors it, while the
 	// mirrored frame's pixels come.
@@ -65,6 +72,8 @@ type cropMode struct {
 	// behind the frame, and mirrorH and mirrorV the mirrors.
 	turn             int
 	mirrorH, mirrorV bool
+	// autoBusy says Auto is looking for the subject.
+	autoBusy bool
 }
 
 // frameSize is photo p's whole frame, at full size, as the edit's quarter
@@ -88,7 +97,7 @@ func (cu *culler) cropView() *CropView {
 	}
 	d := &cu.dev
 	v := &CropView{Rect: rectOf(d.params), Angle: d.params.CropAngle, Aspect: cu.crop.aspect, Ready: cu.crop.ready,
-		Turn: cu.crop.turn, MirrorH: cu.crop.mirrorH, MirrorV: cu.crop.mirrorV}
+		Turn: cu.crop.turn, MirrorH: cu.crop.mirrorH, MirrorV: cu.crop.mirrorV, AutoBusy: cu.crop.autoBusy}
 	if i, ok := cu.index[d.id]; ok {
 		v.Frame = frameSize(cu.photos[i], d.params)
 	}
@@ -278,4 +287,68 @@ func (cu *culler) cropReset() {
 	p.CropX, p.CropY, p.CropW, p.CropH, p.CropAngle = 0, 0, 0, 0, 0
 	cu.crop.aspect = 0
 	cu.cropFrame(p, "Reset crop")
+}
+
+// cropAuto crops around the photo's subject: the backend finds it, and
+// the crop takes it with room round it, in the shape chosen, kept on the
+// photo as straightened. One step in the history.
+func (cu *culler) cropAuto(download bool) {
+	if !cu.crop.on || !cu.crop.ready || cu.crop.autoBusy {
+		return
+	}
+	d := &cu.dev
+	id, params, aspect := d.id, d.params, cu.frameAspect()
+	rf := ratioFrac(aspectChoices[cu.crop.aspect].ratio, aspect)
+	cu.crop.autoBusy = true
+	cu.showCull()
+	done := func(fn func()) {
+		select {
+		case cu.do <- func() { cu.crop.autoBusy = false; fn(); cu.showCull() }:
+		case <-cu.ctx.Done():
+		}
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(cu.ctx, 3*time.Minute)
+		defer cancel()
+		if !download {
+			if m, err := cu.api.Edits.AIModelStatus(ctx, marrawclient.AIKindSubject); err == nil && m != nil && !m.Downloaded {
+				done(func() {})
+				cu.askModel("cropModel", "the subject model", m.Bytes)
+				return
+			}
+		}
+		res, err := cu.api.Edits.SubjectBounds(ctx, id, params, download)
+		done(func() {
+			switch {
+			case err != nil:
+				cu.fail("Auto could not find the subject", err)
+			case res == nil || !res.Found:
+				cu.tell("No subject found: crop it by hand")
+			case cu.crop.on && d.id == id:
+				setRect(&d.params, autoCropRect(cropRect{res.X, res.Y, res.W, res.H}, rf, d.params.CropAngle, aspect))
+				cu.cropKeep("Auto crop")
+			}
+		})
+	}()
+}
+
+// autoCropRect is the crop round subject b, in frame fractions, as
+// marraw's Auto makes it: 12% of the subject's size spare on each side,
+// grown on its short side to ratio rf where a shape is chosen, no larger
+// than the frame, then kept on the photo as straightened by angle.
+func autoCropRect(b cropRect, rf, angle, aspect float64) cropRect {
+	const m = 0.12
+	w, h := b.W*(1+2*m), b.H*(1+2*m)
+	cx, cy := b.X+b.W/2, b.Y+b.H/2
+	if rf > 0 {
+		if w/h < rf {
+			w = h * rf
+		} else {
+			h = w / rf
+		}
+	}
+	s := min(1, 1/w, 1/h)
+	w, h = w*s, h*s
+	r := cropRect{X: min(max(cx-w/2, 0), 1-w), Y: min(max(cy-h/2, 0), 1-h), W: w, H: h}
+	return fitToTurn(r, angle, aspect)
 }

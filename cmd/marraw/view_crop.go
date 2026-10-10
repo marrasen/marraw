@@ -61,6 +61,18 @@ type cropUI struct {
 	from     geom.Point
 	local    cropRect
 	hasLocal bool
+	// auto crops around the subject, saying so while it looks.
+	auto *widget.Button
+}
+
+// autoButton is the bar's Auto: it crops around the photo's subject, to
+// the shape chosen.
+func (c *cropUI) autoButton() *widget.Button {
+	c.auto = widget.NewButton("Auto")
+	c.auto.Icon, c.auto.Ghost, c.auto.KeepFocus = icon.Sparkles, true, true
+	c.auto.Tooltip = "Crop around the subject, to the shape chosen"
+	c.auto.OnClick = widget.Sends(CropAuto{})
+	return c.auto
 }
 
 // newCropBar is the crop's bar, as marraw's: the shapes, the straighten,
@@ -99,7 +111,7 @@ func (v *cullView) newCropBar() gunim.Node {
 	row := widget.Row(c.aspects, &divider{}, &fixedWidth{w: 120, child: c.angle}, c.degrees, &divider{},
 		icon(iconRotateCcw, "Turn left", CropTurn{}), icon(iconRotateCw, "Turn right", CropTurn{CW: true}),
 		icon(iconFlipH, "Mirror across", CropFlip{}), icon(iconFlipV, "Mirror upside down", CropFlip{Vertical: true}),
-		&divider{}, btn("Reset", CropReset{}, false), btn("Done", CropDone{}, true))
+		&divider{}, c.autoButton(), btn("Reset", CropReset{}, false), btn("Done", CropDone{}, true))
 	row.Cross = widget.CrossCenter
 	th := marrawTheme().With(theme.Set(widget.ButtonHeight, 28), theme.Set(widget.ButtonPadding, 11),
 		theme.Set(widget.ButtonRadius, 7), theme.Set(widget.TextSize, 12.5), theme.Set(widget.SegmentedHeight, 28))
@@ -118,6 +130,10 @@ var (
 // out to show whole as cropping starts, and back as it ends.
 func (v *cullView) cropShow(s, prev Cull, u *gunim.UI) {
 	c := &v.crop
+	if s.Crop != nil && c.auto != nil {
+		c.auto.Label = map[bool]string{false: "Auto", true: "Finding…"}[s.Crop.AutoBusy]
+		c.auto.Disabled = s.Crop.AutoBusy
+	}
 	was := prev.Crop != nil && prev.Crop.Ready
 	now := s.Crop != nil && s.Crop.Ready
 	th := u.Theme()
