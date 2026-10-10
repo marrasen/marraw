@@ -75,6 +75,12 @@ func (t *errorTray) Children() []gunim.Node { return t.kids }
 // setTasks shows the tasks in list, chips coming and going.
 func (t *errorTray) setTasks(list []TaskNote, u *gunim.UI) {
 	t.tasks = list
+	// The chips showing glide to how far their tasks have got.
+	for _, n := range list {
+		if chip, ok := t.chips[n.ID]; ok {
+			chip.show(n, u)
+		}
+	}
 	u.Invalidate()
 }
 
@@ -171,7 +177,6 @@ func (t *errorTray) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 		} else {
 			k = byNode[chip]
 		}
-		chip.show(n)
 		s := k.Layout(gunim.Tight(geom.Sz(errCardW, taskCardH)))
 		y -= s.H
 		at := geom.Pt(t.corner.X-errCardW, y)
@@ -338,31 +343,45 @@ func newTaskCard(n TaskNote) *taskCard {
 	small := marrawTheme().With(theme.Set(widget.ButtonHeight, 22), theme.Set(widget.IconSize, 12))
 	c.kids = []gunim.Node{c.title, c.count, widget.NewThemed(c.bar, bar), widget.NewThemed(c.cancel, small)}
 	c.Add(c.in, c.y)
-	c.show(n)
+	c.show(n, nil)
 	return c
 }
 
-// show takes n as the task moves on.
-func (c *taskCard) show(n TaskNote) {
+// show takes n as the task moves on: the bar glides to it, and the count
+// with the bar. With a nil u, as a chip is made, the bar starts there.
+func (c *taskCard) show(n TaskNote, u *gunim.UI) {
+	if n.Total != c.n.Total || n.Title != c.n.Title {
+		// Another count, as a scan's photos after its download: the bar
+		// starts it afresh.
+		u = nil
+	}
 	c.n = n
 	c.title.Text = n.Title
 	if n.Done {
 		c.title.Text = n.Title + " · Done"
 	}
-	c.count.Text = ""
-	if n.Total > 0 && !n.Done {
-		c.count.Text = fmt.Sprintf("%d/%d", n.Current, n.Total)
-		if n.Unit != "" {
-			c.count.Text += " " + n.Unit
-		}
-	}
 	c.bar.Indeterminate = n.Total <= 0 && !n.Done
 	switch {
 	case n.Done:
-		c.bar.SetValue(1, nil)
+		c.bar.SetValue(1, u)
 	case n.Total > 0:
-		c.bar.SetValue(float32(n.Current)/float32(n.Total), nil)
+		c.bar.SetValue(float32(n.Current)/float32(n.Total), u)
+	default:
+		c.bar.SetValue(0, nil)
 	}
+}
+
+// countText is how far the task has got, counting up with the bar as it
+// glides.
+func (c *taskCard) countText() string {
+	if c.n.Total <= 0 || c.n.Done {
+		return ""
+	}
+	s := fmt.Sprintf("%d/%d", int(math.Round(float64(c.bar.Shown())*float64(c.n.Total))), c.n.Total)
+	if c.n.Unit != "" {
+		s += " " + c.n.Unit
+	}
+	return s
 }
 
 // Children implements [gunim.Composite].
@@ -402,6 +421,7 @@ func (c *taskCard) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 		kids.At(3).Place(geom.Pt(w-padR-bs.W, (h-bs.H)/2))
 	}
 	right := w - padR - bs.W - 10
+	c.count.Text = c.countText()
 	ns := kids.At(1).Layout(gunim.Loose(geom.Sz(120, 20)))
 	kids.At(1).Place(geom.Pt(right-ns.W, 11))
 	kids.At(0).Layout(gunim.Loose(geom.Sz(max(0, right-ns.W-12-x), 20)))

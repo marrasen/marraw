@@ -764,7 +764,9 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			}
 			return true
 		}
-		if e.Clicks == 2 {
+		// Every second click of a run is a double click: a quick double
+		// click after one counts on from it, as clicks three and four.
+		if e.Clicks >= 2 && e.Clicks%2 == 0 {
 			v.toggle(e.Pos, u)
 			return true
 		}

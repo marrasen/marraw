@@ -368,8 +368,6 @@ type developView struct {
 	lensNote *widget.Label
 	history  *widget.List
 	info     *infoRows
-	// pipette puts the white-balance eyedropper out, lit while it is.
-	pipette *widget.IconButton
 	// presets are the presets' cards, and masks the masks.
 	presets *presetGrid
 	masks   *maskPanel
@@ -412,12 +410,12 @@ func newDevelopView(s DevelopState) *developView {
 		case "Geometry":
 			b := widget.NewButton("Crop and straighten   R")
 			b.Icon, b.KeepFocus, b.OnClick = icon.Crop, true, widget.Sends(ToggleCrop{})
-			body = append([]gunim.Node{b}, body...)
+			body = append([]gunim.Node{glassButton(b)}, body...)
 		case "Masks":
 			v.masks = newMaskPanel(v)
 			body = append(body, v.masks)
 		case "Auto":
-			var bs []gunim.Node
+			var bs []*widget.Button
 			for _, a := range []struct {
 				label    string
 				sections []string
@@ -426,7 +424,7 @@ func newDevelopView(s DevelopState) *developView {
 				b.KeepFocus, b.OnClick = true, widget.Sends(DevAuto{Sections: a.sections})
 				bs = append(bs, b)
 			}
-			body = append(body, widget.Row(bs...))
+			body = append(body, smallButtons(bs...))
 		case "Presets":
 			v.presets = newPresetGrid(v)
 			body = append(body, v.presets)
@@ -458,7 +456,7 @@ func newDevelopView(s DevelopState) *developView {
 			copyDir.OnClick = func(u *gunim.UI) gunim.Intent { return v.copyText(u, v.st.Info.Folder, "Folder path") }
 			copyName.OnClick = func(u *gunim.UI) gunim.Intent { return v.copyText(u, v.st.Info.File, "File name") }
 			body = append(body, sectionLabel("Histogram"),
-				widget.NewThemed(h, marrawTheme().With(theme.Set(widget.HistogramHeight, 120))),
+				widget.NewThemed(h, marrawTheme().With(theme.Set(widget.HistogramHeight, 120), theme.Set(widget.HistogramFill, histGlass))),
 				sectionLabel("Info"), v.info, spacer(8), smallButtons(locate, copyAll, copyDir, copyName))
 		case "Tone curve":
 			v.channel.KeepFocus = true
@@ -469,7 +467,7 @@ func newDevelopView(s DevelopState) *developView {
 			v.curve.OnCommit = func(pts []geom.Point, _ *gunim.UI) gunim.Intent {
 				return DevCurve{Channel: v.st.Channel, Points: pts, Commit: true}
 			}
-			body = append(body, v.channel, v.curve)
+			body = append(body, glassSegmented(v.channel), v.curve)
 		}
 		col := widget.Column(body...)
 		if sec.bare {
@@ -497,7 +495,7 @@ func newDevelopView(s DevelopState) *developView {
 			// Undo and Redo, as in marraw.
 			h := widget.NewHistogram()
 			v.hists = append(v.hists, h)
-			hp := widget.NewPad(widget.NewThemed(h, marrawTheme().With(theme.Set(widget.HistogramHeight, 52))))
+			hp := widget.NewPad(widget.NewThemed(h, marrawTheme().With(theme.Set(widget.HistogramHeight, 52), theme.Set(widget.HistogramFill, histGlass))))
 			hp.Padding = theme.Insets("marraw.develop.histpad", geom.Insets{Bottom: 6})
 			nodes = append([]gunim.Node{hp, newTitleRow(devTabs[i])}, nodes...)
 		}
@@ -530,18 +528,26 @@ func (v *developView) choiceRow(key string) gunim.Node {
 	seg.KeepFocus = true
 	seg.OnChange = func(i int, _ *gunim.UI) gunim.Intent { return DevChoice{Key: key, Index: i} }
 	v.choices[key] = seg
-	l := &labeled{label: newSmallLabel(ch.label), child: seg, active: anim.NewFloat(0)}
+	l := &labeled{label: newSmallLabel(ch.label), child: glassSegmented(seg), active: anim.NewFloat(0)}
 	l.Add(l.active)
+	// Four options or more do not fit beside the label: the label goes
+	// above, and the options take the row, as marraw's button rows do.
+	l.stacked = len(ch.options) >= 4 && key != "wbMode"
 	if key == "wbMode" {
-		// The modes have the row, and the eyedropper's button ends it.
+		// The modes take the row, the eyedropper last as an icon: it
+		// puts the eyedropper out, and stays chosen with the white
+		// balance it picked.
 		l.wide, l.label.Text = true, ""
-		// Four modes and the button only just fit: "As shot" keeps its
-		// name with less room either side of each.
-		l.child = widget.NewThemed(seg, marrawTheme().With(theme.Set(widget.SegmentedPadding, 7)))
-		v.pipette = widget.NewIconButton(icon.Pipette, "White balance eyedropper (W)")
-		v.pipette.KeepFocus = true
-		v.pipette.OnClick = func(*gunim.UI) gunim.Intent { return DevWBPick{On: !v.st.WBPick} }
-		l.tail = v.pipette
+		seg.Items[wbPickIndex] = ""
+		seg.Icons = make([]*icon.Icon, len(seg.Items))
+		seg.Icons[wbPickIndex] = icon.Pipette
+		seg.OnChange = func(i int, _ *gunim.UI) gunim.Intent {
+			if i == wbPickIndex {
+				return DevWBPick{On: true}
+			}
+			return DevChoice{Key: key, Index: i}
+		}
+		l.child = glassSegmented(&wbModes{seg: seg})
 	}
 	v.choiceRows[key] = l
 	return l
@@ -600,9 +606,6 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 	first := !v.shown
 	v.shown = true
 	v.st = s
-	if v.pipette != nil {
-		v.pipette.Active = s.WBPick
-	}
 	if v.presets != nil {
 		v.presets.show(s, u)
 	}
@@ -626,7 +629,12 @@ func (v *developView) show(s DevelopState, u *gunim.UI) {
 		}
 	}
 	for key, seg := range v.choices {
-		seg.SetSelected(devChoices[key].get(p), u)
+		i := devChoices[key].get(p)
+		if key == "wbMode" && s.WBPick {
+			// The eyedropper is out: its segment stays chosen while it is.
+			i = wbPickIndex
+		}
+		seg.SetSelected(i, u)
 	}
 	// White balance: Kelvin's own slider in Kelvin mode, and nothing to
 	// move in Auto.
@@ -1105,6 +1113,8 @@ type labeled struct {
 	// after it, or nil.
 	wide bool
 	tail gunim.Node
+	// stacked puts the label above, and gives the child the whole row.
+	stacked bool
 }
 
 // setActive marks the row as the one the keys act on, as a slider row
@@ -1129,6 +1139,14 @@ func (l *labeled) Children() []gunim.Node {
 // Layout implements [gunim.Node].
 func (l *labeled) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children) geom.Size {
 	w := c.Max.W
+	if l.stacked {
+		label, child := kids.At(0), kids.At(1)
+		ls := label.Layout(gunim.Loose(geom.Sz(w, 40)))
+		label.Place(geom.Pt(0, 4))
+		cs := child.Layout(gunim.Tight(geom.Sz(w, widget.SegmentedHeight.Get(f.Theme))))
+		child.Place(geom.Pt(0, 4+ls.H+6))
+		return geom.Sz(w, 4+ls.H+6+cs.H+4)
+	}
 	lw := widget.SliderRowLabel.Get(f.Theme)
 	if l.wide {
 		lw = 0
@@ -1303,3 +1321,43 @@ func (g *vgap) Layout(c gunim.Constraints, _ gunim.Frame, _ gunim.Children) geom
 
 // Paint implements [gunim.Node].
 func (g *vgap) Paint(*paint.Painter, gunim.Frame, geom.Size, gunim.Children) {}
+
+// wbPickIndex is the white-balance modes' eyedropper, last of them.
+const wbPickIndex = 3
+
+// wbModes is the white-balance modes: the eyedropper's segment, chosen
+// already, puts the eyedropper out again for another pick.
+type wbModes struct {
+	seg  *widget.Segmented
+	size geom.Size
+}
+
+// Children implements [gunim.Composite].
+func (w *wbModes) Children() []gunim.Node { return []gunim.Node{w.seg} }
+
+// ClaimsPointer implements [gunim.PointerClaimer]: the eyedropper's
+// segment while it is chosen, which the control would ignore.
+func (w *wbModes) ClaimsPointer(p geom.Point) bool {
+	return w.seg.Selected() == wbPickIndex && p.X >= w.size.W*float32(wbPickIndex)/float32(w.seg.Len())
+}
+
+// Handle implements [gunim.Handler].
+func (w *wbModes) Handle(e input.Event, u *gunim.UI) bool {
+	if d, ok := e.(input.PointerDown); ok && d.Button == input.ButtonPrimary && w.ClaimsPointer(d.Pos) {
+		u.Send(w, DevWBPick{On: true})
+		return true
+	}
+	return false
+}
+
+// Layout implements [gunim.Node].
+func (w *wbModes) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	w.size = kids.At(0).Layout(c)
+	kids.At(0).Place(geom.Point{})
+	return w.size
+}
+
+// Paint implements [gunim.Node].
+func (w *wbModes) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
+}

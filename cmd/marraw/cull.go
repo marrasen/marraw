@@ -823,6 +823,17 @@ func (cu *culler) scriptStep(k string) bool {
 			_ = cu.c.Input(cu.ctx, input.PointerMove{Pos: at, Time: time.Now()})
 		}
 		_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: to, Button: input.ButtonPrimary, Time: time.Now()})
+	case ok && verb == "scroll":
+		// scroll:x:y:dy, a wheel turned at x, y by dy pixels, down negative.
+		c := strings.Split(arg, ":")
+		if len(c) == 3 {
+			x, _ := strconv.ParseFloat(c[0], 32)
+			y, _ := strconv.ParseFloat(c[1], 32)
+			dy, _ := strconv.ParseFloat(c[2], 32)
+			at := geom.Pt(float32(x), float32(y))
+			_ = cu.c.Input(cu.ctx, input.PointerMove{Pos: at, Time: now})
+			_ = cu.c.Input(cu.ctx, input.Scroll{Pos: at, Delta: geom.Pt(0, float32(dy)), Time: now})
+		}
 	case ok && verb == "type":
 		_ = cu.c.Input(cu.ctx, input.TextInput{Text: arg, Time: now})
 	case ok && verb == "fail":

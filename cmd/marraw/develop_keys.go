@@ -97,7 +97,12 @@ func (cu *culler) devNudge(in DevNudge) {
 		return
 	}
 	if ch, ok := devChoices[d.active]; ok {
-		i := (ch.get(&d.params) + in.Dir + len(ch.options)) % len(ch.options)
+		n := len(ch.options)
+		if d.active == "wbMode" {
+			// The eyedropper is no mode to step to.
+			n = wbPickIndex
+		}
+		i := (min(ch.get(&d.params), n-1) + in.Dir + n) % n
 		cu.devChoose(DevChoice{Key: d.active, Index: i})
 		return
 	}

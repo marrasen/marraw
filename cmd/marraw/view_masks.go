@@ -43,20 +43,20 @@ func newMaskPanel(v *developView) *maskPanel {
 		return b
 	}
 	small := func(n gunim.Node) gunim.Node {
-		th := marrawTheme().With(theme.Set(widget.ButtonHeight, 26), theme.Set(widget.ButtonPadding, 9),
-			theme.Set(widget.ButtonRadius, 6), theme.Set(widget.TextSize, 12))
+		th := glassTheme(marrawTheme().With(theme.Set(widget.ButtonHeight, 26), theme.Set(widget.ButtonPadding, 9),
+			theme.Set(widget.ButtonRadius, 6), theme.Set(widget.TextSize, 12)))
 		return widget.NewThemed(n, th)
 	}
-	row := widget.Row(add("Linear", icon.Spline, "Add a linear gradient", MaskAdd{Kind: "linear"}),
-		add("Radial", icon.Circle, "Add a radial mask", MaskAdd{Kind: "radial"}),
-		add("Brush", icon.Brush, "Add a brush mask", MaskAdd{Kind: "brush"}),
-		add("Range", icon.Palette, "Add a luminance and colour range mask: select pixels by tone and hue", MaskAdd{Kind: "range"}))
+	row := widget.Row(&edged{child: add("Linear", icon.Spline, "Add a linear gradient", MaskAdd{Kind: "linear"})},
+		&edged{child: add("Radial", icon.Circle, "Add a radial mask", MaskAdd{Kind: "radial"})},
+		&edged{child: add("Brush", icon.Brush, "Add a brush mask", MaskAdd{Kind: "brush"})},
+		&edged{child: add("Range", icon.Palette, "Add a luminance and colour range mask: select pixels by tone and hue", MaskAdd{Kind: "range"})})
 	p.adds = small(row)
 	var ai []gunim.Node
 	for _, k := range aiKinds {
 		b := add(k.label, icon.Sparkles, "Add an AI "+k.label+" mask", MaskAI{Kind: k.kind})
 		p.aiBtn[k.kind] = b
-		ai = append(ai, b)
+		ai = append(ai, &edged{child: b})
 	}
 	p.ais = small(widget.Row(ai...))
 	p.none = newSmallLabel("No masks yet: add one to adjust a part of the photo.")

@@ -4,7 +4,21 @@ What to test in this build
 New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
-Background tasks (new in this build)
+Fixes and polish (new in this build)
+  - A double click zooms in, and the next double click zooms out at
+    once, without moving the pointer first.
+  - Task progress glides: the bar and its count run smoothly between
+    the backend's updates, a download's megabytes too.
+  - The panel's buttons, tabs and choices are frosted glass: a pale
+    pane with a hairline edge, brighter under the pointer; the chosen
+    tab or option a brighter pane. The histogram's ground is glass too.
+  - White balance: the eyedropper is the last of the modes. Click it to
+    pick; it stays chosen with the white balance it picked. Cancelling
+    goes back to the mode before.
+  - Detail's Highlights and Demosaic: their names above, the options
+    across the whole row, every one readable.
+
+Background tasks
   - Background work shows as chips at the bottom right, above any error
     cards, over the grid and over the photo: a spinner, what it is, how
     far it has got, a bar, and a cross to cancel it. Done, a chip ticks

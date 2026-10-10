@@ -25,6 +25,9 @@ var (
 	accentInk  = color.NRGBA{R: 0xc3, G: 0xc7, B: 0xff, A: 0xff}
 	mutedInk   = color.NRGBA{R: 0x8b, G: 0x8f, B: 0x96, A: 0xff}
 	panelLine  = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x17}
+	// histGlass is the histogram's ground: a darker pane of the glass,
+	// dark enough for its channels to read.
+	histGlass = color.NRGBA{R: 6, G: 7, B: 9, A: 0x80}
 
 	sectionLabelInk  = theme.Color("marraw.section.label", mutedInk)
 	sectionLabelSize = theme.Length("marraw.section.label.size", 10)
@@ -37,14 +40,10 @@ var (
 	headExifSize     = theme.Length("marraw.head.exif.size", 10.5)
 )
 
-// tabsTheme is the theme of the panel's tabs: marraw's small segmented
-// control, the chosen tab a soft violet with light violet text.
+// tabsTheme is the theme of the panel's tabs: a small segmented control
+// of frosted glass, the chosen tab a brighter pane of it.
 func tabsTheme() theme.Theme {
-	return marrawTheme().With(
-		theme.Set(widget.Accent, withAlpha(primaryInk, 0.25)),
-		theme.Set(widget.ButtonStrongInk, accentInk),
-		theme.Set(widget.Placeholder, mutedInk),
-		theme.Set(widget.FieldFill, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x0d}),
+	return glassSegments(marrawTheme()).With(
 		theme.Set(widget.SegmentedHeight, 26),
 		theme.Set(widget.SegmentedPadding, 7),
 		theme.Set(widget.TextSize, 11.5))
@@ -73,7 +72,7 @@ func newDevPager(titles []string, pages []gunim.Node, onChange func(i int, u *gu
 	g := &devPager{seg: widget.NewSegmented(titles...), pages: pages, prev: -1, slide: anim.NewFloat(1), dot: anim.NewFloat(0)}
 	g.seg.KeepFocus = true
 	g.seg.OnChange = onChange
-	g.bar = widget.NewThemed(g.seg, tabsTheme())
+	g.bar = widget.NewThemed(&edged{child: g.seg, round: true}, tabsTheme())
 	g.Add(g.slide, g.dot)
 	return g
 }
@@ -221,17 +220,75 @@ func sectionLabel(s string) gunim.Node {
 	return pad
 }
 
-// smallButtons are buttons in a row that wraps, in marraw's small outlined
-// look.
+// smallButtons are buttons of glass in a row that wraps.
 func smallButtons(bs ...*widget.Button) gunim.Node {
 	nodes := make([]gunim.Node, len(bs))
 	for i, b := range bs {
 		b.KeepFocus = true
-		nodes[i] = b
+		nodes[i] = &edged{child: b}
 	}
-	th := marrawTheme().With(theme.Set(widget.ButtonHeight, 28), theme.Set(widget.ButtonPadding, 10),
-		theme.Set(widget.ButtonRadius, 7), theme.Set(widget.TextSize, 12))
+	th := glassTheme(marrawTheme().With(theme.Set(widget.ButtonHeight, 28), theme.Set(widget.ButtonPadding, 10),
+		theme.Set(widget.ButtonRadius, 7), theme.Set(widget.TextSize, 12)))
 	return widget.NewThemed(widget.NewWrap(nodes...), th)
+}
+
+// glassSegments is th with its segmented controls of frosted glass: a
+// faint pane, the chosen option a brighter one in white.
+func glassSegments(th theme.Theme) theme.Theme {
+	return th.With(
+		theme.Set(widget.Accent, frost(0x2e)),
+		theme.Set(widget.ButtonStrongInk, color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}),
+		theme.Set(widget.Placeholder, mutedInk),
+		theme.Set(widget.FieldFill, frost(0x0f)))
+}
+
+// glassSegmented is seg in glass, its edge drawn.
+func glassSegmented(seg gunim.Node) gunim.Node {
+	return widget.NewThemed(&edged{child: seg, round: true}, glassSegments(marrawTheme()))
+}
+
+// frost is white at alpha a: over the panel's frosted glass, a paler,
+// clearer pane of it.
+func frost(a uint8) color.NRGBA { return color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: a} }
+
+// glassTheme is th with its buttons of frosted glass: a pale pane over
+// the panel's glass, paler under the pointer.
+func glassTheme(th theme.Theme) theme.Theme {
+	return th.With(theme.Set(widget.ButtonFill, frost(0x16)), theme.Set(widget.ButtonHover, frost(0x2c)))
+}
+
+// glassButton is b in glass, its edge drawn, as a lone button in the
+// panel.
+func glassButton(b *widget.Button) gunim.Node {
+	return widget.NewThemed(&edged{child: b}, glassTheme(marrawTheme()))
+}
+
+// edged draws glass's hairline edge round its child, a button or a
+// segmented control: its corners a button's, or round with round set.
+type edged struct {
+	child gunim.Node
+	round bool
+}
+
+// Children implements [gunim.Composite].
+func (e *edged) Children() []gunim.Node { return []gunim.Node{e.child} }
+
+// Layout implements [gunim.Node].
+func (e *edged) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	s := kids.At(0).Layout(c)
+	kids.At(0).Place(geom.Point{})
+	return s
+}
+
+// Paint implements [gunim.Node].
+func (e *edged) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
+	radius := min(widget.ButtonRadius.Get(f.Theme), box.H/2)
+	if e.round {
+		radius = box.H / 2
+	}
+	r := geom.Rect{Max: box.Point()}.Inset(geom.Uniform(0.5))
+	p.RRectStroke(r, max(0, radius-0.5), paint.Fill{}, paint.Stroke{Width: 1, Color: frost(0x24)})
 }
 
 // InfoLocate shows the photo's file in the system's file manager, and
