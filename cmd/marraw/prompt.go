@@ -82,5 +82,7 @@ func (cu *culler) promptDone(in PromptDone) {
 	switch in.Kind {
 	case "rename", "renameDisk":
 		cu.railRenamed(in.Kind, in.Key, in.Value)
+	case "gap":
+		cu.gapGiven(in.Value)
 	}
 }

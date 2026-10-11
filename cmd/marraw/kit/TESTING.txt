@@ -5,6 +5,32 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - marraw's own chrome, as the Electron app's: no title bar. Along the
+    top, the mode switcher (Library, Cull, Develop, Export) in the middle,
+    and the window's buttons in a pill at the right. Drag the empty band
+    along the top to move the window; double-click it to maximize.
+      Library: the shoot's name at the left, and Jump to anything (opens
+      the palette). A status bar along the foot: the folder, shown /
+      total, the counts, the build. An info panel at the right: the
+      photo's marks, histogram and details, or the batch card with
+      several selected. The button at the right of the filter bar hides
+      and shows it, and it stays as you left it.
+      Cull: the shoot's pill at the top left (time, frame number), Group
+      by gap and the window's buttons at the right, and the confirm bar
+      at the foot: name and stars, Pick P, Reject X, Fit / 1:1, a zoom
+      slider and the zoom in percent.
+  - Keys as in marraw: Enter goes Library -> Cull -> Develop, and Enter
+    in Develop back to Cull; Escape goes Develop -> Cull -> Library. D
+    still opens and closes the panel. Export in the switcher opens the
+    export dialog.
+  - Group by gap is marraw's pill: a menu of 1, 2, 5, 10 and 30 minutes,
+    a gap of your own, or off.
+  - Finished exports stay in a card at the bottom right, with Open folder
+    and a cross.
+  - The export dialog no longer jumps when Long edge is turned on.
+  - marraw's icon, on the window, the taskbar and the exe.
+  - Context menus: marraw has them only in the library's sidebar, which
+    this build has too.
   - The backend runs in a process of its own: the same marraw-cull.exe,
     started again, at below-normal priority. Its renders and scans should
     no longer make the window lag. Task Manager shows two marraw-cull.exe;

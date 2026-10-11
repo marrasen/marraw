@@ -56,14 +56,19 @@ type gridView struct {
 	// under and the rest keeps below.
 	top float32
 	// sel takes the bar's place while selN, more than one, are selected,
-	// coming in as selIn does; batch is the selection's card, out as
-	// batchIn says, unless the user hid it.
+	// coming in as selIn does; batch is the selection's card, in the info
+	// panel aside, which is out as asideIn says while asideOn.
 	sel                         *selBar
-	barGate, selGate, batchGate *gate
+	barGate, selGate, asideGate *gate
 	batch                       *batchCard
+	aside                       *libAside
 	selN                        int
-	selIn, batchIn              *anim.Float
-	batchHidden                 bool
+	selIn, asideIn              *anim.Float
+	asideOn                     bool
+	// status is the line at the foot, and band the top band's handle that
+	// moves the window, off while the cull view covers the grid.
+	status *statusBar
+	band   *dragBand
 	// rw carries the library's edge as it is put away and brought back,
 	// to rwTo.
 	rw   *anim.Float
@@ -91,11 +96,20 @@ func newGridView(GridState) *gridView {
 		empty: widget.NewLabel("No photos match the filter"), noneIn: anim.NewFloat(0)}
 	v.empty.Color = noteInk
 	v.bar = newGridBar(v)
-	v.selIn, v.batchIn, v.rw, v.rwTo = anim.NewFloat(0), anim.NewFloat(0), anim.NewFloat(railWidth), railWidth
+	v.selIn, v.asideIn, v.rw, v.rwTo = anim.NewFloat(0), anim.NewFloat(1), anim.NewFloat(railWidth), railWidth
+	v.asideOn = true
 	v.dim = anim.NewFloat(1)
-	v.sel = newSelBar(func(u *gunim.UI) { v.batchHidden = !v.batchHidden; v.selCount(v.selN, u) })
-	v.batch = newBatchCard(func(u *gunim.UI) { v.batchHidden = true; v.selCount(v.selN, u) })
-	v.barGate, v.selGate, v.batchGate = &gate{child: v.bar, open: true}, &gate{child: v.sel}, &gate{child: v.batch}
+	v.sel = newSelBar(func(u *gunim.UI) { u.Send(v, AsideToggle{}) })
+	v.batch = newBatchCard(func(u *gunim.UI) { u.Send(v, AsideToggle{}) })
+	v.aside = newLibAside(v.batch)
+	v.status = newStatusBar()
+	v.band = &dragBand{}
+	v.head.pills = v.status.pills
+	v.head.jump.act = func(u *gunim.UI) {
+		_, cursor := v.grid.Selected()
+		openPalette(v, geom.Rc(v.railX(), v.top, v.box.W-v.railX(), v.box.H-v.top), u, paletteFor{cursor: cursor})
+	}
+	v.barGate, v.selGate, v.asideGate = &gate{child: v.bar, open: true}, &gate{child: v.sel}, &gate{child: v.aside, open: true}
 	v.notice.Size = noteSize
 	v.grid = widget.NewTileGrid(cellSize(200))
 	// A folder's tiles come and go at twice gunim's pace.
@@ -130,6 +144,8 @@ func (v *gridView) show(s GridState, u *gunim.UI) {
 	v.bar.setOff(s.Off, u)
 	v.setCrop(s.Crop, u)
 	v.batch.set(max(v.selN, 0), s.Presets, u)
+	v.setAside(s.Aside, u)
+	v.status.set(s.Path, len(s.Photos), s.Total, v.selN)
 	if v.shown && s.FolderID != v.folder {
 		v.swapTo(s, u)
 		return
@@ -360,7 +376,42 @@ func (v *gridView) newTile(i int) gunim.Node {
 
 // Children implements [gunim.Composite].
 func (v *gridView) Children() []gunim.Node {
-	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.errors, v.selGate, v.batchGate}
+	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.errors, v.selGate, v.asideGate, v.status, v.band}
+}
+
+// asideIn shows the info panel, or puts it away.
+func (v *gridView) setAside(on bool, u *gunim.UI) {
+	if on == v.asideOn {
+		return
+	}
+	v.asideOn = on
+	v.asideGate.open = on
+	v.asideIn.Animate(map[bool]float32{false: 0, true: 1}[on], widget.Quick.Get(u.Theme()))
+	v.bar.setAside(on, u)
+	v.sel.set(v.selN, on, u)
+	u.Invalidate()
+}
+
+// asidePatch takes the info panel shown or put away.
+func (v *gridView) asidePatch(a AsideIn, u *gunim.UI) { v.setAside(a.On, u) }
+
+// libInfoIn takes the photo the info panel shows.
+func (v *gridView) libInfoIn(l LibInfo, u *gunim.UI) {
+	if l.Folder != v.folder {
+		return
+	}
+	v.aside.has = l.ID != 0
+	if l.ID != 0 {
+		v.aside.info.show(l, u)
+	}
+	u.Invalidate()
+}
+
+// coveredIn says whether the cull view covers the grid: the band then
+// moves no window.
+func (v *gridView) coveredIn(c Covered, u *gunim.UI) {
+	v.band.off = c.On
+	u.Invalidate()
 }
 
 // selCount shows n photos selected: with more than one, the selection's
@@ -371,13 +422,13 @@ func (v *gridView) selCount(n int, u *gunim.UI) {
 		v.batch.fresh(u)
 	}
 	v.selN = n
-	out := many && !v.batchHidden
-	v.barGate.open, v.selGate.open, v.batchGate.open = !many, many, out
-	v.sel.set(n, out, u)
+	v.barGate.open, v.selGate.open = !many, many
+	v.aside.many = many
+	v.sel.set(n, v.asideOn, u)
 	v.batch.set(n, v.st.Presets, u)
+	v.status.set(v.st.Path, len(v.st.Photos), v.st.Total, n)
 	th := u.Theme()
 	v.selIn.Animate(map[bool]float32{false: 0, true: 1}[many], widget.Quick.Get(th))
-	v.batchIn.Animate(map[bool]float32{false: 0, true: 1}[out], widget.Quick.Get(th))
 	u.Invalidate()
 }
 
@@ -386,7 +437,7 @@ func (v *gridView) Step(dt time.Duration) bool {
 	a := v.noticeIn.Step(dt)
 	b := v.noneIn.Step(dt)
 	c := v.selIn.Step(dt)
-	d := v.batchIn.Step(dt)
+	d := v.asideIn.Step(dt)
 	e := v.rw.Step(dt)
 	g := v.dim.Step(dt)
 	return a || b || c || d || e || g
@@ -500,13 +551,13 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	rail.Layout(gunim.Tight(geom.Sz(v.rail.width, box.H)))
 	rail.Place(geom.Pt(railWidth-v.rail.width, 0))
 	w := max(0, box.W-railWidth)
+	v.head.mid = box.W/2 - railWidth
 	head.Layout(gunim.Tight(geom.Sz(w, gridHeadHeight)))
 	head.Place(geom.Pt(railWidth, top))
-	gw := w
-	if v.batchGate.open {
-		gw = max(0, w-batchCardW-24)
-	}
-	grid.Layout(gunim.Tight(geom.Sz(gw, max(0, box.H-gridTop-top))))
+	// The info panel takes its width from the tiles as it comes.
+	aw := asideW * min(max(v.asideIn.Value(), 0), 1)
+	gw := max(0, w-aw)
+	grid.Layout(gunim.Tight(geom.Sz(gw, max(0, box.H-gridTop-top-statusH))))
 	grid.Place(geom.Pt(railWidth, gridTop+top))
 	bar := kids.At(4)
 	bar.Layout(gunim.Tight(geom.Sz(w, barHeight)))
@@ -518,15 +569,29 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	empty := kids.At(5)
 	es := empty.Layout(gunim.Loose(geom.Sz(w, 40)))
 	empty.Place(geom.Pt(railWidth+w/2-es.W/2, gridTop+top+80))
-	v.errors.corner = geom.Pt(box.W-16, box.H-16)
 	kids.At(6).Layout(gunim.Tight(box))
 	kids.At(6).Place(geom.Point{})
 	sel := kids.At(7)
 	sel.Layout(gunim.Tight(geom.Sz(w, barHeight)))
 	sel.Place(geom.Pt(railWidth, gridHeadHeight+top))
-	card := kids.At(8)
-	card.Layout(gunim.Loose(geom.Sz(batchCardW, max(0, box.H-gridTop-top-24))))
-	card.Place(geom.Pt(box.W-batchCardW-16, gridTop+top+12))
+	aside := kids.At(8)
+	aside.Layout(gunim.Tight(geom.Sz(asideW, max(0, box.H-gridTop-top-statusH))))
+	aside.Place(geom.Pt(box.W-aw, gridTop+top))
+	st := kids.At(9)
+	st.Layout(gunim.Tight(geom.Sz(w, statusH)))
+	st.Place(geom.Pt(railWidth, box.H-statusH))
+	v.errors.corner = geom.Pt(box.W-aw-16, box.H-statusH-16)
+	// The band along the top moves the window, but where its controls
+	// are: the switcher, the jump, the window's buttons, and the library's
+	// own column.
+	v.band.holes = v.band.holes[:0]
+	v.band.holes = append(v.band.holes, geom.Rc(0, 0, railWidth, gridHeadHeight))
+	for _, h := range v.head.holes {
+		v.band.holes = append(v.band.holes, h.Add(geom.Pt(railWidth, 0)))
+	}
+	band := kids.At(10)
+	band.Layout(gunim.Tight(geom.Sz(box.W, gridHeadHeight)))
+	band.Place(geom.Pt(0, top))
 	return box
 }
 
@@ -572,13 +637,11 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 			e.Paint(p)
 		}()
 	}
-	if k := v.batchIn.Value(); k > 0.01 {
-		func() {
-			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(max(k, 0), 1)})()
-			defer p.Push(paint.Translate(geom.Pt((1-k)*(batchCardW+24), 0)))()
-			kids.At(8).Paint(p)
-		}()
+	if v.asideIn.Value() > 0.01 {
+		kids.At(8).Paint(p)
 	}
+	kids.At(9).Paint(p)
+	kids.At(10).Paint(p)
 	kids.At(6).Paint(p)
 }
 
@@ -771,9 +834,11 @@ func pixelFit(r geom.Rect, img *paint.Image) geom.Rect {
 	return fitIn(r, float32(w)/float32(h))
 }
 
-// gridHead is the band above the tiles: the folder's name, how many
-// photos it holds or are selected, and the counts of picks, rejects and
-// rated photos, each popping as it changes.
+// gridHead is the band along the top, as marraw's top bar: the folder's
+// name and how many photos it holds or are selected at the left, the mode
+// switcher in the window's middle, and Jump to anything and the window's
+// buttons at the right. The counts of picks, rejects and rated photos
+// are the status bar's, each popping as it changes.
 type gridHead struct {
 	title, sub *widget.Label
 	pills      [3]*countPill
@@ -784,10 +849,14 @@ type gridHead struct {
 	none        bool
 	folderTotal int
 	opening     string
-	// size is the tiles' size slider, before the counts, and gap the
-	// time between groups, before it.
-	size gunim.Node
-	gap  gunim.Node
+	// modes is the switcher, jump the palette's button, and win the
+	// window's buttons. mid is the window's middle in the band's space,
+	// and holes where the band takes presses itself.
+	modes *modeSwitch
+	jump  *jumpButton
+	win   gunim.Node
+	mid   float32
+	holes []geom.Rect
 }
 
 var (
@@ -796,11 +865,10 @@ var (
 )
 
 func newGridHead() *gridHead {
-	h := &gridHead{title: widget.NewLabel(""), sub: widget.NewLabel("")}
+	h := &gridHead{title: widget.NewLabel(""), sub: widget.NewLabel(""), modes: newModeSwitch(modeLibrary), win: newWindowPill()}
+	h.jump = newJumpButton("Jump to anything")
 	h.title.Size = headTitleSize
 	h.sub.Color, h.sub.Size = noteInk, noteSize
-	h.pills = [3]*countPill{newCountPill(pickInk, flagSet, "picked"), newCountPill(rejectInk, rejectMark, "rejected"),
-		newCountPill(ratedInk, starLit, "rated")}
 	return h
 }
 
@@ -829,7 +897,9 @@ func (h *gridHead) set(s GridState, animate bool, th *theme.Live) {
 		}
 	}
 	for i, n := range []int{picks, rejects, rated} {
-		h.pills[i].set(n, animate, th)
+		if h.pills[i] != nil {
+			h.pills[i].set(n, animate, th)
+		}
 	}
 }
 
@@ -860,35 +930,38 @@ func (h *gridHead) subText() {
 
 // Children implements [gunim.Composite].
 func (h *gridHead) Children() []gunim.Node {
-	return []gunim.Node{h.title, h.sub, h.pills[0], h.pills[1], h.pills[2], h.size, h.gap}
+	return []gunim.Node{h.title, h.sub, h.modes.node, h.jump, h.win}
 }
 
-// Layout implements [gunim.Node]: the name and the count on the left, the
-// pills on the right, all on the band's middle line.
+// Layout implements [gunim.Node]: the name and the count on the left,
+// the switcher in the window's middle, the jump and the window's buttons
+// on the right, all on the band's middle line.
 func (h *gridHead) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
 	mid := box.H / 2
+	h.holes = h.holes[:0]
+	place := func(k gunim.Child, s geom.Size, x float32, hole bool) {
+		k.Place(geom.Pt(x, mid-s.H/2))
+		if hole {
+			h.holes = append(h.holes, geom.Rc(x, mid-s.H/2, s.W, s.H))
+		}
+	}
+	ws := kids.At(4).Layout(gunim.Loose(box))
+	right := box.W - 12 - ws.W
+	place(kids.At(4), ws, right, true)
+	js := kids.At(3).Layout(gunim.Loose(box))
+	right -= 10 + js.W
+	place(kids.At(3), js, right, true)
+	ms := kids.At(2).Layout(gunim.Loose(box))
+	mx := min(max(h.mid-ms.W/2, 0), right-16-ms.W)
+	place(kids.At(2), ms, mx, true)
 	x := float32(20)
 	for i := range 2 {
 		k := kids.At(i)
-		s := k.Layout(gunim.Loose(geom.Sz(box.W/3, box.H)))
+		s := k.Layout(gunim.Loose(geom.Sz(max(0, mx-x-16), box.H)))
 		k.Place(geom.Pt(x, mid-s.H/2))
 		x += s.W + 14
 	}
-	right := box.W - 16
-	for i := 4; i >= 2; i-- {
-		k := kids.At(i)
-		s := k.Layout(gunim.Loose(geom.Sz(box.W/4, box.H)))
-		right -= s.W
-		k.Place(geom.Pt(right, mid-s.H/2))
-		right -= 8
-	}
-	sz := kids.At(5)
-	ss := sz.Layout(gunim.Loose(geom.Sz(box.W/4, box.H)))
-	sz.Place(geom.Pt(right-16-ss.W, mid-ss.H/2))
-	gp := kids.At(6)
-	gs := gp.Layout(gunim.Loose(geom.Sz(220, box.H)))
-	gp.Place(geom.Pt(right-16-ss.W-16-gs.W, mid-gs.H/2))
 	return box
 }
 

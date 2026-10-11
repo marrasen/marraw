@@ -83,6 +83,11 @@ type (
 		Rating int
 		Flag   string
 		Strip  []Thumb
+		// Shoot is the shoot's name, Taken when the photo was taken, as
+		// 10:08, and Gap the time gap that groups the photos.
+		Shoot string
+		Taken string
+		Gap   int
 	}
 	// Thumb is one photo in the filmstrip: where it is in the folder, its
 	// small picture once fetched, and its rating and flag.
@@ -410,6 +415,7 @@ func (cu *culler) serve() error {
 				cu.needThumbs(in)
 			case Selected:
 				cu.sel, cu.cursor = in.Runs, in.Cursor
+				cu.sendLibInfo()
 			case OpenCull:
 				cu.openCull(in.Index)
 			case LeaveCull:
@@ -497,6 +503,16 @@ func (cu *culler) serve() error {
 				cu.shareDone()
 			case ToggleViewer:
 				cu.toggleViewer()
+			case SetMode:
+				cu.setMode(in.Mode)
+			case GapPick:
+				cu.gapPick(in.Minutes)
+			case AskGapCustom:
+				cu.askGapCustom(in.Minutes)
+			case AsideToggle:
+				cu.asideToggle()
+			case LibLocate:
+				cu.locateID(in.ID)
 			case HealVisual:
 				cu.healVisual(in.On)
 			case HealSens:
@@ -674,7 +690,8 @@ func (cu *culler) serve() error {
 func (cu *culler) state() Cull {
 	p := cu.photos[cu.at]
 	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Exif: exifLine(p), Errors: cu.errs, Tasks: cu.shownTasks(), Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
-		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p)}
+		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p),
+		Shoot: baseName(cu.folderPath), Taken: takenAt(p.TakenAt), Gap: cu.libView.Gap}
 	gapAt := map[int]int{}
 	groups := gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)
 	days := spansDays(groups)

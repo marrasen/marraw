@@ -6,6 +6,8 @@ import (
 	"image"
 	"image/png"
 	"io/fs"
+
+	"github.com/marrasen/gunim/paint"
 )
 
 // appIconFiles are marraw's icon at the sizes a title bar and a taskbar
@@ -29,4 +31,23 @@ func appIcons() []image.Image {
 		}
 	}
 	return out
+}
+
+// appMarkImg is marraw's icon, small, as the shoot's pill shows it.
+var appMarkImg *paint.Image
+
+// appMark is marraw's icon to draw, made the first time it is asked for.
+func appMark() *paint.Image {
+	if appMarkImg == nil {
+		b, err := appIconFiles.ReadFile("appicon/icon64.png")
+		if err != nil {
+			return nil
+		}
+		m, err := png.Decode(bytes.NewReader(b))
+		if err != nil {
+			return nil
+		}
+		appMarkImg = paint.NewImage(m)
+	}
+	return appMarkImg
 }

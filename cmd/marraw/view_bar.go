@@ -1,10 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"image/color"
 	"math"
-	"slices"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/anim"
@@ -30,8 +28,9 @@ var (
 
 // gridBar is the filter bar over the tiles: the order, by capture time or
 // by name, each way; the flags shown; the least rating shown, as stars;
-// and the tiles' size. A change of the view carries the tiles to their
-// new places.
+// the culling aids; then the time gap that groups them, the tiles' size,
+// and the info panel's button. A change of the view carries the tiles to
+// their new places.
 type gridBar struct {
 	view  LibView
 	sorts *sortButtons
@@ -44,10 +43,6 @@ type gridBar struct {
 	// and eyes and subjects start the backend looking.
 	soft, blinks, bursts  *widget.IconButton
 	judge, eyes, subjects *widget.IconButton
-	// gap groups the photos by the time between them, and gaps are its
-	// choices, in minutes, nought for none.
-	gap  *widget.Dropdown
-	gaps []int
 	// hide are the buttons each culling aid has, which go while it is
 	// turned off.
 	hide map[string][]*hideable
@@ -55,6 +50,17 @@ type gridBar struct {
 	// says it is.
 	railBtn    *widget.IconButton
 	railHidden bool
+	// gapCtl groups the photos by the time between them, and panelBtn
+	// puts the info panel away or brings it back.
+	gapCtl   *gapControl
+	panelBtn *widget.IconButton
+}
+
+// setAside shows whether the info panel is out.
+func (b *gridBar) setAside(on bool, u *gunim.UI) {
+	b.panelBtn.Active = on
+	b.panelBtn.Tooltip = map[bool]string{false: "Show the info panel", true: "Hide the info panel"}[on]
+	u.Invalidate()
 }
 
 // setRail shows whether the library is put away.
@@ -164,21 +170,11 @@ func newGridBar(g *gridView) *gridBar {
 	b.railBtn = widget.NewIconButton(icon.PanelLeft, "Hide the library")
 	b.railBtn.KeepFocus = true
 	b.railBtn.OnClick = func(*gunim.UI) gunim.Intent { return RailHide{Hidden: !b.railHidden} }
-	row := widget.Row(b.railBtn, b.sorts, b.flags, b.stars, sp, aids).Grow(sp, 1)
-	// The tiles' size is set in the heading, beside the counts, and the
-	// gap the photos are grouped by.
-	g.head.size = &fixedWidth{w: 130, child: b.size}
-	b.gap = widget.NewDropdown(nil)
-	b.gap.KeepFocus = true
-	b.gap.OnChange = func(i int, _ *gunim.UI) gunim.Intent {
-		if i < 0 || i >= len(b.gaps) {
-			return nil
-		}
-		v := b.view
-		v.Gap = b.gaps[i]
-		return SetLibView{View: v}
-	}
-	g.head.gap = b.gap
+	b.gapCtl = newGapControl()
+	b.panelBtn = widget.NewIconButton(icon.PanelRight, "Hide the info panel")
+	b.panelBtn.KeepFocus, b.panelBtn.Active = true, true
+	b.panelBtn.OnClick = widget.Sends(AsideToggle{})
+	row := widget.Row(b.railBtn, b.sorts, b.flags, b.stars, aids, sp, b.gapCtl, spacerW(6), b.panelBtn).Grow(sp, 1)
 	row.Cross = widget.CrossCenter
 	b.row = row
 	return b
@@ -195,23 +191,7 @@ func (b *gridBar) set(v LibView, u *gunim.UI) {
 	}
 	b.stars.set(v.MinRating, u)
 	b.soft.Active, b.blinks.Active, b.bursts.Active = v.Soft, v.Blinks, v.Collapse
-	// The choices, and the folder's own where it is another.
-	b.gaps = append([]int(nil), gapChoices...)
-	if !slices.Contains(b.gaps, v.Gap) {
-		b.gaps = append(b.gaps, v.Gap)
-		slices.Sort(b.gaps)
-	}
-	var items []widget.MenuItem
-	for _, m := range b.gaps {
-		label := "No time groups"
-		if m > 0 {
-			label = fmt.Sprintf("Group by %d min gaps", m)
-		}
-		items = append(items, widget.MenuItem{Label: label})
-	}
-	b.gap.SetItems(items)
-	b.gap.SetSelected(slices.Index(b.gaps, v.Gap), u)
-	b.gap.Disabled = v.Sort == "nameAsc" || v.Sort == "nameDesc"
+	b.gapCtl.set(v.Gap)
 	u.Invalidate()
 }
 

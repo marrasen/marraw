@@ -391,20 +391,26 @@ func (cu *culler) checkSubjects(download bool) {
 // askModel asks, on the culler's goroutine, to fetch a model of so many
 // bytes, as kind's answer.
 func (cu *culler) askModel(kind, what string, bytes int64) {
+	cu.askModelFor(kind, what, "this", bytes)
+}
+
+// askModelFor is askModel, saying what the model is for: "this", or
+// "the AI masks of 12 photos here".
+func (cu *culler) askModelFor(kind, what, purpose string, bytes int64) {
 	select {
 	case cu.do <- func() {
 		if cu.asking {
 			return
 		}
 		cu.asking = true
-		body := "marraw needs " + what + " for this, and does not have it yet."
+		body := "marraw needs " + what + " for " + purpose + ", and does not have it yet."
 		if bytes > 0 {
 			mb := float64(bytes) / 1e6
 			size := fmt.Sprintf("%.0f MB", mb)
 			if mb < 10 {
 				size = fmt.Sprintf("%.1f MB", mb)
 			}
-			body = fmt.Sprintf("marraw needs %s for this, %s, and does not have it yet.", what, size)
+			body = fmt.Sprintf("marraw needs %s for %s, %s, and does not have it yet.", what, purpose, size)
 		}
 		_ = cu.c.Mount(gunim.Root, "confirm", "confirm", ConfirmAsk{Kind: kind, Title: "Download " + what + "?",
 			Body: body + " It is fetched once, and runs on this computer.", OK: "Download"})

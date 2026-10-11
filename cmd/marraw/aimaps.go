@@ -277,7 +277,11 @@ func (cu *culler) ensureFolderMaps() {
 							a.asked = map[string]bool{}
 						}
 						a.asked[k] = true
-						cu.askModel("aiFolder:"+k, fmt.Sprintf("%s (%d photos here have its masks)", aiModelWhat[k], len(kids)), st.Bytes)
+						purpose := fmt.Sprintf("the AI masks of %d photos here", len(kids))
+						if len(kids) == 1 {
+							purpose = "the AI masks of a photo here"
+						}
+						cu.askModelFor("aiFolder:"+k, aiModelWhat[k], purpose, st.Bytes)
 					}
 				})
 				continue

@@ -212,6 +212,9 @@ type batchCard struct {
 	body    gunim.Node
 	close   *widget.IconButton
 	busy    int
+	// bare is the card in the library's info panel: no glass and no
+	// cross of its own, as wide as the panel.
+	bare bool
 }
 
 // batchFields are the fields the card's sliders change, as their deltas
@@ -315,17 +318,24 @@ func (c *batchCard) Children() []gunim.Node { return []gunim.Node{c.body, c.clos
 // Layout implements [gunim.Node].
 func (c *batchCard) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	const pad = 16
-	bs := kids.At(0).Layout(gunim.Loose(geom.Sz(batchCardW-2*pad, cs.Max.H)))
+	w := float32(batchCardW)
+	if c.bare {
+		w = asideW
+	}
+	bs := kids.At(0).Layout(gunim.Loose(geom.Sz(w-2*pad, cs.Max.H)))
 	kids.At(0).Place(geom.Pt(pad, pad))
 	xs := kids.At(1).Layout(gunim.Loose(geom.Sz(28, 28)))
-	kids.At(1).Place(geom.Pt(batchCardW-8-xs.W, 8))
-	return geom.Sz(batchCardW, bs.H+2*pad)
+	kids.At(1).Place(geom.Pt(w-8-xs.W, 8))
+	return geom.Sz(w, bs.H+2*pad)
 }
 
 // Paint implements [gunim.Node].
 func (c *batchCard) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
-	paintGlass(p, geom.Rect{Max: box.Point()}, 14)
-	for k := range kids.All {
-		k.Paint(p)
+	if !c.bare {
+		paintGlass(p, geom.Rect{Max: box.Point()}, 14)
+	}
+	kids.At(0).Paint(p)
+	if !c.bare {
+		kids.At(1).Paint(p)
 	}
 }

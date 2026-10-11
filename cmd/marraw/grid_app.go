@@ -32,7 +32,15 @@ type (
 		// Presets are the presets the batch card can lay over a
 		// selection.
 		Presets []PresetCard
+		// Path is the folder's path, for the status bar, and Aside says
+		// the info panel is out.
+		Path  string
+		Aside bool
 	}
+	// AsideIn shows the info panel, or puts it away.
+	AsideIn struct{ On bool }
+	// Covered says the cull view covers the grid, or no longer does.
+	Covered struct{ On bool }
 	// GridPhoto is one photo as a tile shows it.
 	GridPhoto struct {
 		ID     int64
@@ -94,6 +102,8 @@ func (cu *culler) gridState() GridState {
 	st.Off = cu.featuresOff()
 	st.Crop = cu.ui != nil && cu.ui.ThumbFit == "crop"
 	st.Presets = cu.presetCards()
+	st.Path = cu.folderPath
+	st.Aside = cu.ui == nil || !cu.ui.EditPanelHidden
 	for _, p := range cu.photos {
 		st.Photos = append(st.Photos, GridPhoto{ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Rating: p.Rating, Flag: string(p.Flag),
 			Aids: cu.aids.of(p)})
@@ -142,6 +152,7 @@ func (cu *culler) openCull(i int) {
 	cu.at, cu.load = i, nil
 	_ = cu.c.Mount(gunim.Root, "cull", "cull", cu.state())
 	_ = cu.c.Focus("cull")
+	_ = cu.c.Patch("grid", Covered{On: true})
 	cu.goTo(i)
 	// Opened on purpose, not stepped past: its maps are seen to at once.
 	cu.ensureAIMaps(cu.photos[i].ID)
@@ -173,6 +184,14 @@ func (cu *culler) leaveCull() {
 	_ = cu.c.Patch("grid", GridAt{Folder: cu.folder, Index: cu.at})
 	_ = cu.c.Unmount("cull")
 	_ = cu.c.Focus("grid")
+	_ = cu.c.Patch("grid", Covered{})
+	// Back in the library, the cull view starts again without the panel,
+	// as marraw's Cull mode does.
+	if cu.dev.open {
+		cu.dev.open = false
+		cu.closeDevelop()
+	}
+	cu.sendLibInfo()
 }
 
 // showCull shows the cull view its state, while it is open.

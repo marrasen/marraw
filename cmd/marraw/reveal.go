@@ -14,7 +14,16 @@ func (cu *culler) locate() {
 	if !cu.culling || cu.at < 0 || cu.at >= len(cu.photos) {
 		return
 	}
-	in := photoInfo(cu.photos[cu.at], cu.folderPath)
+	cu.locateID(cu.photos[cu.at].ID)
+}
+
+// locateID shows photo id's file in the system's file manager.
+func (cu *culler) locateID(id int64) {
+	i, ok := cu.index[id]
+	if !ok {
+		return
+	}
+	in := photoInfo(cu.photos[i], cu.folderPath)
 	path := filepath.Join(in.Folder, in.File)
 	if _, err := os.Stat(path); err != nil {
 		cu.notify("The file is not on this computer")

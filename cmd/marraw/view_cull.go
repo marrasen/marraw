@@ -132,6 +132,20 @@ type cullView struct {
 	adjust    *adjustHUD
 	adjusting bool
 	adjustIn  *anim.Float
+	// The chrome, as marraw's: the shoot's pill, the mode switcher, the
+	// gap control and the window's buttons along the top, over a band
+	// that moves the window, and the confirm bar at the foot; their
+	// rects, where they take the pointer and fade.
+	shoot                         *shootPill
+	modes                         *modeSwitch
+	gap                           *gapControl
+	winPill                       gunim.Node
+	confirm                       *confirmBar
+	band                          *dragBand
+	shootRect, modesRect, topRect geom.Rect
+	confirmRect                   geom.Rect
+	// lastUI is the UI of the last update, for the readout's widgets.
+	lastUI    *gunim.UI
 	keep      string
 	lastInput time.Time
 	pointer   geom.Point
@@ -176,7 +190,19 @@ func newCullView(s Cull) *cullView {
 		labelOrig: widget.NewLabel("Original"), labelWB: widget.NewLabel("Click something neutral grey or white"),
 		wbRead: widget.NewLabel(""), wbWarn: widget.NewLabel(""),
 		filmIn: anim.NewFloat(1), idle: anim.NewFloat(1), lastInput: time.Now(), adjust: newAdjustHUD(), adjustIn: anim.NewFloat(0),
-		headName: widget.NewLabel(s.Name), headExif: widget.NewLabel(s.Exif), errors: newErrorTray()}
+		headName: widget.NewLabel(s.Name), headExif: widget.NewLabel(s.Exif), errors: newErrorTray(),
+		shoot: newShootPill(), modes: newModeSwitch(map[bool]int{false: modeCull, true: modeDevelop}[s.Panel]), gap: newGapControl(),
+		winPill: newWindowPill(), confirm: newConfirmBar(), band: &dragBand{}}
+	v.confirm.onZoom = func(pct float32, u *gunim.UI) {
+		v.zoomTo(pct/max(v.percent(1), 0.01), v.room().Center(), u)
+	}
+	v.confirm.onFit = func(one bool, u *gunim.UI) {
+		if one {
+			v.zoomTo(v.oneToOne(), v.room().Center(), u)
+		} else if v.z.Target() > 1.01 {
+			v.toggle(v.room().Center(), u)
+		}
+	}
 	v.errors.list, v.errors.tasks = s.Errors, s.Tasks
 	v.headName.Face, v.headName.Size, v.headName.MaxLines = widget.MonoFont, headNameSize, 1
 	v.headExif.Face, v.headExif.Size, v.headExif.Color, v.headExif.MaxLines = widget.MonoFont, headExifSize, mutedInkTok, 1
@@ -261,6 +287,9 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 	if s.NoticeSeq != v.noticeSeq {
 		v.showNotice(s.Notice, s.NoticeSeq, u)
 	}
+	v.lastUI = u
+	v.modes.show(map[bool]int{false: modeCull, true: modeDevelop}[s.Panel], u)
+	v.gap.set(s.Gap)
 	v.readout(v.z.Target())
 	note := s.Note
 	if s.TileNote != "" {
@@ -274,6 +303,18 @@ func (v *cullView) readout(z float32) {
 	v.name.Text = fmt.Sprintf("%s   %d / %d   %.0f%%", v.st.Name, v.st.Index+1, v.st.Total, v.percent(z))
 	if n := aidsNote(v.st.Aids); n != "" {
 		v.name.Text += "   " + n
+	}
+	taken := v.st.Taken
+	if n := aidsNote(v.st.Aids); n != "" && taken != "" {
+		taken += " · " + n
+	}
+	v.shoot.set(v.st.Shoot, taken, v.st.Index+1, v.st.Panel, v.st.Name)
+	if v.lastUI != nil {
+		pct := float32(0)
+		if v.box.W > 0 {
+			pct = v.percent(z)
+		}
+		v.confirm.set(v.st.Name, v.st.Rating, v.st.Flag, pct, z < 1.01, v.lastUI)
 	}
 }
 
@@ -458,7 +499,7 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 // Children implements [gunim.Composite].
 func (v *cullView) Children() []gunim.Node {
 	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead, v.wbWarn, v.crop.bar, v.crop.info, v.film,
-		v.headName, v.headExif, v.errors, v.adjust}
+		v.headName, v.headExif, v.errors, v.adjust, v.band, v.shoot, v.modes.node, v.gap, v.winPill, v.confirm}
 }
 
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
@@ -709,7 +750,14 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			// By what the key types, so + is + on any keyboard.
 			z := map[bool]float32{false: 0.8, true: 1.25}[plusMinus(e) > 0]
 			v.zoomTo(v.z.Target()*z, v.room().Center(), u)
-		case input.KeyEscape, input.KeyEnter, input.KeyG:
+		case input.KeyEnter, input.KeyKPEnter:
+			// As marraw's: Enter goes from Cull to Develop and back.
+			u.Send(v, SetMode{Mode: map[bool]int{false: modeDevelop, true: modeCull}[v.st.Panel]})
+		case input.KeyEscape:
+			// Escape goes back a step: from Develop to Cull, from Cull to
+			// the library.
+			u.Send(v, SetMode{Mode: map[bool]int{false: modeLibrary, true: modeCull}[v.st.Panel]})
+		case input.KeyG:
 			u.Send(v, LeaveCull{})
 		case input.KeyD:
 			u.Send(v, ToggleDevelop{})
@@ -774,7 +822,7 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		// A click on a star rates the photo, again takes the rating off,
 		// and one on a flag sets it, again takes it off: over the photo or
 		// in the panel's header.
-		if v.marksRect().Contains(e.Pos) {
+		if v.headOn() && v.marksRect().Contains(e.Pos) {
 			mp := v.markPlace()
 			if k := mp.starAt(e.Pos); k > 0 {
 				u.Send(v, Rate{Stars: k, Toggle: true})
@@ -1133,6 +1181,33 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	kids.At(13).Place(geom.Point{})
 	as := kids.At(14).Layout(gunim.Loose(box))
 	kids.At(14).Place(geom.Pt(box.W/2-as.W/2, box.H-as.H-24))
+	// The top: the shoot's pill at the left, the switcher in the middle,
+	// the gap and the window's buttons at the right, as marraw's.
+	top := v.top + pillTop
+	sp := kids.At(16).Layout(gunim.Loose(geom.Sz(box.W/3, 40)))
+	v.shootRect = geom.Rc(18, top, sp.W, sp.H)
+	kids.At(16).Place(v.shootRect.Min)
+	wp := kids.At(19).Layout(gunim.Loose(box))
+	wx := box.W - 18 - wp.W
+	kids.At(19).Place(geom.Pt(wx, top))
+	gp := kids.At(18).Layout(gunim.Loose(box))
+	gx := wx - 10 - gp.W
+	kids.At(18).Place(geom.Pt(gx, top))
+	v.topRect = geom.Rc(gx, top, box.W-18-gx, max(gp.H, wp.H))
+	mp := kids.At(17).Layout(gunim.Loose(box))
+	v.modesRect = geom.Rc(box.W/2-mp.W/2, top, mp.W, mp.H)
+	kids.At(17).Place(v.modesRect.Min)
+	v.band.holes = []geom.Rect{v.shootRect, v.modesRect, v.topRect}
+	if v.confirm.percent.Text == "0%" || v.confirm.percent.Text == "" {
+		v.readout(v.z.Target())
+	}
+	kids.At(15).Layout(gunim.Tight(geom.Sz(box.W, bandH+v.top)))
+	kids.At(15).Place(geom.Point{})
+	// The confirm bar, at the foot of the photo's room, over the strip.
+	cfs := kids.At(20).Layout(gunim.Loose(box))
+	fr := v.freeRect()
+	v.confirmRect = geom.Rc(fr.Center().X-cfs.W/2, foot-14-cfs.H, cfs.W, cfs.H)
+	kids.At(20).Place(v.confirmRect.Min)
 
 	return box
 }
@@ -1198,22 +1273,16 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 			kids.At(10).Paint(p)
 		})
 	}
-	// The marks float at the top of the photo, and go into the panel's
-	// header as the panel comes.
-	if chip := 1 - v.side.Value(); chip > 0.01 {
-		v.faded(p, "marks", func() {
-			if chip < 0.999 {
-				defer p.Layer(paint.LayerOpts{Bounds: v.floatMarksRect().Inset(geom.Uniform(-30)), Opacity: chip})()
-			}
-			paintGlass(p, v.floatMarksRect(), 18)
-			v.marks.paint(p, f.Theme, v.floatPlace(), 0xc0, true)
-		})
-	}
-	hud := kids.At(1)
-	v.faded(p, "hud", func() {
-		paintGlass(p, v.hudRect, 10)
-		hud.Paint(p)
+	// The confirm bar at the foot of the photo, and the pills along the
+	// top, as marraw's.
+	v.faded(p, "confirm", func() { kids.At(20).Paint(p) })
+	v.faded(p, "top", func() {
+		kids.At(16).Paint(p)
+		kids.At(17).Paint(p)
+		kids.At(18).Paint(p)
+		kids.At(19).Paint(p)
 	})
+	kids.At(15).Paint(p)
 	v.faded(p, "nav", func() { v.paintNav(p) })
 	v.faded(p, "panel", func() {
 		// The panel slides away for the crop and the eyedropper.
@@ -1361,9 +1430,11 @@ func (v *cullView) pieceAt(p geom.Point) string {
 		return "panel"
 	case v.stripRect.Contains(p):
 		return "film"
-	case v.hudRect.Contains(p):
-		return "hud"
-	case v.marksRect().Contains(p):
+	case v.confirmRect.Contains(p):
+		return "confirm"
+	case v.shootRect.Contains(p) || v.modesRect.Contains(p) || v.topRect.Contains(p):
+		return "top"
+	case v.headOn() && v.marksRect().Contains(p):
 		return "marks"
 	case v.navOn() && v.navRect().Contains(p):
 		return "nav"
