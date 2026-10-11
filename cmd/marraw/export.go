@@ -321,7 +321,7 @@ func (cu *culler) tasksChanged(ts []marrawclient.SharedTaskState) {
 		switch t.Status {
 		case "completed":
 			delete(cu.exports, t.ID)
-			cu.notify(fmt.Sprintf("Exported %d %s to %s", run.count, map[bool]string{false: "photos", true: "photo"}[run.count == 1], run.dest))
+			cu.done(fmt.Sprintf("Exported %d %s", run.count, map[bool]string{false: "photos", true: "photo"}[run.count == 1]), run.dest, "Open folder", run.dest)
 		case "failed":
 			delete(cu.exports, t.ID)
 			why := t.Error

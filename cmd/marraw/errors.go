@@ -12,6 +12,11 @@ type ErrorNote struct {
 	ID           int
 	Text, Detail string
 	Count        int
+	// Done makes the note news of work finished, not a failure: a tick
+	// in place of the warning. Action names a button on it, as "Open
+	// folder", and Path what the button opens.
+	Done         bool
+	Action, Path string
 }
 
 // Errors are the errors to show, and ErrClear clears the one with ID, or
@@ -22,7 +27,35 @@ type (
 		ID  int
 		All bool
 	}
+	// ErrAction does what the note ID's button says.
+	ErrAction struct{ ID int }
 )
+
+// done tells the user work has finished, in a note that stays until they
+// clear it or take its action, the button action opening path.
+func (cu *culler) done(what, detail, action, path string) {
+	cu.errSeq++
+	cu.errs = append(cu.errs, ErrorNote{ID: cu.errSeq, Text: what, Detail: detail, Count: 1, Done: true, Action: action, Path: path})
+	if len(cu.errs) > maxErrors {
+		cu.errs = cu.errs[len(cu.errs)-maxErrors:]
+	}
+	cu.errorsChanged()
+}
+
+// errAction opens what the note's button names, and clears the note.
+func (cu *culler) errAction(id int) {
+	for _, e := range cu.errs {
+		if e.ID == id && e.Path != "" {
+			path := e.Path
+			go func() {
+				if err := cu.c.Open(path); err != nil {
+					cu.onDo(func() { cu.fail("The folder could not be opened", err) })
+				}
+			}()
+		}
+	}
+	cu.clearError(ErrClear{ID: id})
+}
 
 // orNoAnswer is err, or an error saying the backend gave no answer where
 // it gave neither an answer nor an error.

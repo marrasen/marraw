@@ -533,6 +533,8 @@ func (cu *culler) serve() error {
 				cu.setPresetAmount(in)
 			case ErrClear:
 				cu.clearError(in)
+			case ErrAction:
+				cu.errAction(in.ID)
 			case TaskCancel:
 				cu.cancelTask(in.ID)
 			case Notify:

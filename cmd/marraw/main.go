@@ -165,6 +165,7 @@ func run(o options) error {
 
 	err = gunim.Main(ctx, func(a *gunim.App) error {
 		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: parseSize(o.size), Root: newFullSurface(),
+			Icons: appIcons(),
 			// The photo runs under the title bar, as in marraw.
 			UnderTitleBar: true})
 		if err != nil {

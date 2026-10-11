@@ -207,6 +207,9 @@ func newExportView(s ExportAsk) *exportView {
 	v.resize = seg([]string{"Full res", "Long edge"}, map[bool]int{false: 0, true: 1}[o.ResizeMode == "edge"])
 	v.edge = widget.NewNumberField(16, 65536)
 	v.edge.Suffix = " px"
+	// As tall as the switcher beside it, so the row keeps its height as
+	// the field comes and goes.
+	v.edge.Height = widget.SegmentedHeight
 	v.edge.SetValue(float64(o.EdgePx), nil)
 	v.edge.OnChange = func(float64, *gunim.UI) gunim.Intent { v.changed(nil); return nil }
 	v.edgeOn = widget.NewFold(&fixedWidth{w: 120, child: v.edge}, false)

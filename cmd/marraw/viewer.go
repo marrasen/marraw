@@ -103,7 +103,7 @@ func (cu *culler) openViewer() {
 	prefs := loadViewerPrefs()
 	pinned := prefs.Pinned == nil || *prefs.Pinned
 	o := gunim.WindowOptions{Title: "marraw viewer", Size: geom.Sz(1000, 680), UnderTitleBar: true, AskToClose: ViewerClose{},
-		Root: newFullSurface()}
+		Root: newFullSurface(), Icons: appIcons()}
 	if prefs.Place != nil {
 		o.Place = prefs.Place
 	}

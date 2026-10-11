@@ -221,10 +221,12 @@ type errCard struct {
 	title, detail *widget.Label
 	count         *widget.Label
 	close         *widget.IconButton
-	in, y         *anim.Float
-	placed        bool
-	h             float32
-	kids          []gunim.Node
+	// action is the note's button, as Open folder, on a note of work done.
+	action *widget.Button
+	in, y  *anim.Float
+	placed bool
+	h      float32
+	kids   []gunim.Node
 }
 
 func newErrCard(e ErrorNote) *errCard {
@@ -237,7 +239,12 @@ func newErrCard(e ErrorNote) *errCard {
 	id := e.ID
 	c.close.OnClick = func(*gunim.UI) gunim.Intent { return ErrClear{ID: id} }
 	small := marrawTheme().With(theme.Set(widget.ButtonHeight, 22), theme.Set(widget.IconSize, 13))
-	c.kids = []gunim.Node{c.title, c.detail, c.count, widget.NewThemed(c.close, small)}
+	c.action = widget.NewButton(e.Action)
+	c.action.Icon, c.action.KeepFocus = icon.FolderOpen, true
+	c.action.OnClick = func(*gunim.UI) gunim.Intent { return ErrAction{ID: id} }
+	act := widget.NewThemed(&edged{child: c.action}, glassTheme(marrawTheme().With(theme.Set(widget.ButtonHeight, 26),
+		theme.Set(widget.ButtonPadding, 10), theme.Set(widget.ButtonRadius, 7), theme.Set(widget.TextSize, 12))))
+	c.kids = []gunim.Node{c.title, c.detail, c.count, widget.NewThemed(c.close, small), act}
 	c.Add(c.in, c.y)
 	return c
 }
@@ -246,6 +253,7 @@ func newErrCard(e ErrorNote) *errCard {
 func (c *errCard) show(e ErrorNote) {
 	c.e = e
 	c.title.Text, c.detail.Text = e.Text, e.Detail
+	c.action.Label = e.Action
 	c.count.Text = ""
 	if e.Count > 1 {
 		c.count.Text = fmt.Sprintf("×%d", e.Count)
@@ -285,6 +293,13 @@ func (c *errCard) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	ds := kids.At(1).Layout(gunim.Loose(geom.Sz(w-x-pad, 80)))
 	kids.At(1).Place(geom.Pt(x, pad+ts.H+4))
 	c.h = pad + ts.H + 4 + ds.H + pad
+	if c.e.Action != "" {
+		as := kids.At(4).Layout(gunim.Loose(geom.Sz(w-x-pad, 30)))
+		kids.At(4).Place(geom.Pt(x, c.h-pad+8))
+		c.h += 8 + as.H
+	} else {
+		kids.At(4).Layout(gunim.Tight(geom.Sz(0, 0)))
+	}
 	return geom.Sz(w, cs.Max.H)
 }
 
@@ -298,9 +313,16 @@ func (c *errCard) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gun
 	defer p.Layer(paint.LayerOpts{Bounds: r.Inset(geom.Uniform(-40)), Opacity: k})()
 	defer p.Push(paint.Translate(geom.Pt((1-k)*24, 0)))()
 	paintGlass(p, r, 11)
-	widget.PaintIcon(p, f.Theme, icon.CircleAlert, geom.Rc(12, 12, 16, 16), errorInk)
-	for k := range kids.All {
-		k.Paint(p)
+	if c.e.Done {
+		widget.PaintIcon(p, f.Theme, icon.CircleCheck, geom.Rc(12, 12, 16, 16), doneInk)
+	} else {
+		widget.PaintIcon(p, f.Theme, icon.CircleAlert, geom.Rc(12, 12, 16, 16), errorInk)
+	}
+	for i := range kids.Len() {
+		if i == 4 && c.e.Action == "" {
+			continue
+		}
+		kids.At(i).Paint(p)
 	}
 }
 
