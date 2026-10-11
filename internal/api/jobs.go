@@ -318,6 +318,8 @@ func (l *Library) metaPass(ctx context.Context, folderID int64, path string) {
 	if l.isParentRoot(ctx, path) {
 		l.deps.TriggerRefresh(shootsKey(path))
 	}
+	// A root added by hand shows its date and cover through its status.
+	l.deps.TriggerRefresh(rootStatusKey)
 }
 
 // prerenderPass renders the loupe-ready 2048 rendition (which also yields

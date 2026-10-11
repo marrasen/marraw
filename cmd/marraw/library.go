@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/marrasen/gunim/paint"
+
 	"github.com/marrasen/marraw/internal/marrawclient"
 )
 
@@ -66,6 +68,14 @@ type (
 		// Busy that it is being opened or worked on in the background.
 		Outside bool
 		Busy    bool
+		// Title is a shoot's name as it shows, without a date it starts
+		// with, and Line the date and count under it. Picked and Rejected
+		// are its cull counts, for its bar, and Cover its cover's key.
+		Title, Line      string
+		Picked, Rejected int
+		Cover            string
+		// ref is the cover, for the controller to fetch.
+		ref *marrawclient.ShootCover
 	}
 	// OpenShoot opens the folder at Path in the grid; Cull opens it in
 	// the cull view.
@@ -100,9 +110,17 @@ type library struct {
 	shoots map[string][]marrawclient.Shoot
 	stops  map[string]func()
 	online map[string]bool
+	// status is each root's, by its lowercased path.
+	status map[string]marrawclient.RootStatus
 	links  []marrawclient.ShareLink
 	filter string
 	loaded bool
+	// covers are the covers' pictures held, and coverWant those on their
+	// way, by their keys; live the counts and covers known here of shoots
+	// culled since the backend listed them, by lowercased path.
+	covers    map[string]*paint.Image
+	coverWant map[string]bool
+	live      map[string]liveSum
 }
 
 // followLibrary keeps the sidebar up to date: the library's folders, the
@@ -110,6 +128,8 @@ type library struct {
 // links that share shoots, each as the backend says they change.
 func (cu *culler) followLibrary() {
 	cu.lib.shoots, cu.lib.stops, cu.lib.online = map[string][]marrawclient.Shoot{}, map[string]func(){}, map[string]bool{}
+	cu.lib.status, cu.lib.covers, cu.lib.coverWant = map[string]marrawclient.RootStatus{}, map[string]*paint.Image{}, map[string]bool{}
+	cu.lib.live = map[string]liveSum{}
 	roots := cu.api.Library.SubscribeGetLibraryRoots(cu.ctx)
 	status := cu.api.Library.SubscribeGetRootStatus(cu.ctx)
 	links := cu.api.Share.SubscribeListLinks(cu.ctx)
@@ -125,8 +145,11 @@ func (cu *culler) followLibrary() {
 		for s := range status.C {
 			cu.onDo(func() {
 				clear(cu.lib.online)
+				clear(cu.lib.status)
 				for _, st := range s {
 					cu.lib.online[strings.ToLower(st.Path)] = st.Online
+					cu.lib.status[strings.ToLower(st.Path)] = st
+					cu.dropLive(st.Path)
 				}
 				cu.railChanged()
 			})
@@ -173,6 +196,7 @@ func (cu *culler) rootsIn(roots []marrawclient.LibraryRoot) {
 				cu.onDo(func() {
 					if l.stops[key] != nil {
 						l.shoots[key] = s
+						cu.dropLive(r.Path)
 						cu.railChanged()
 					}
 				})
@@ -208,10 +232,20 @@ func (cu *culler) railChanged() {
 		cu.rail.Current = cu.opening
 	}
 	cu.rail.Opening = cu.opening
+	// The open folder's counts and cover as culled here, newer than the
+	// backend's listing, and kept for it until a newer listing comes.
+	if cu.folder != 0 && cu.folderPath != "" {
+		cu.lib.live[strings.ToLower(cu.folderPath)] = cu.liveSummary()
+	}
 	for i := range cu.rail.Items {
 		it := &cu.rail.Items[i]
 		if it.Kind == "shoot" || it.Kind == "root" {
 			it.Busy = strings.EqualFold(it.Path, cu.opening) || cu.busyFolders[strings.ToLower(it.Path)]
+			if s, ok := cu.lib.live[strings.ToLower(it.Path)]; ok {
+				it.Picked, it.Rejected, it.ref = s.picked, s.rejected, s.cover
+			}
+			it.Cover = coverKey(it.ref)
+			cu.wantCover(it.ref)
 		}
 	}
 	_ = cu.c.Patch("grid", cu.rail)
@@ -287,8 +321,10 @@ func (cu *culler) railItems() []RailItem {
 				if s.IsSelf {
 					name = "Loose photos"
 				}
+				title, line := shootLabels(name, s.EarliestTakenAt, s.PhotoCount)
 				return RailItem{Key: s.Path, Path: s.Path, Name: name, Kind: "shoot", Count: s.PhotoCount, Depth: depth,
-					Self: s.IsSelf, Shared: shared(s.Path), Parent: r.Path}
+					Self: s.IsSelf, Shared: shared(s.Path), Parent: r.Path, Title: title, Line: line,
+					Picked: s.Picked, Rejected: s.Rejected, ref: s.Cover}
 			}
 			by := string(ui.ShootGroup)
 			if by == "" || by == "none" {
@@ -336,13 +372,18 @@ func (cu *culler) railItems() []RailItem {
 			continue
 		}
 		for _, r := range rows {
+			st := l.status[strings.ToLower(r.Path)]
+			title, line := shootLabels(rootName(r), st.EarliestTakenAt, r.PhotoCount)
 			items = append(items, RailItem{Key: r.Path, Path: r.Path, Name: rootName(r), Kind: "root", Count: r.PhotoCount,
-				Depth: 1, Offline: !online(r.Path), Shared: shared(r.Path), Subfolders: r.IncludeSubfolders})
+				Depth: 1, Offline: !online(r.Path), Shared: shared(r.Path), Subfolders: r.IncludeSubfolders,
+				Title: title, Line: line, Picked: st.Picked, Rejected: st.Rejected, ref: st.Cover})
 		}
 	}
 	// A folder opened that the library does not hold shows at the top.
 	if cu.folderPath != "" && q == "" && !cu.libraryHolds(cu.folderPath) {
-		items = append([]RailItem{{Key: cu.folderPath, Path: cu.folderPath, Name: baseName(cu.folderPath), Kind: "root", Count: len(cu.all), Outside: true}}, items...)
+		title, line := shootLabels(baseName(cu.folderPath), 0, len(cu.all))
+		items = append([]RailItem{{Key: cu.folderPath, Path: cu.folderPath, Name: baseName(cu.folderPath), Kind: "root", Count: len(cu.all), Outside: true,
+			Title: title, Line: line}}, items...)
 	}
 	return items
 }

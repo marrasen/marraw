@@ -137,6 +137,10 @@ export interface RenderProgressEvent {
 export interface RootStatus {
     path: string;
     online: boolean;
+    earliestTakenAt: number;
+    picked: number;
+    rejected: number;
+    cover?: ShootCover;
 }
 
 export interface Shoot {
@@ -145,6 +149,15 @@ export interface Shoot {
     photoCount: number;
     isSelf: boolean;
     earliestTakenAt: number;
+    picked: number;
+    rejected: number;
+    cover?: ShootCover;
+}
+
+export interface ShootCover {
+    photoId: number;
+    cacheKey: string;
+    editHash: string;
 }
 
 

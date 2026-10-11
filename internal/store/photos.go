@@ -122,6 +122,49 @@ func (db *DB) FolderPhotoCount(ctx context.Context, path string) (int, bool, err
 	return n, true, nil
 }
 
+// FolderSummary is what the library rail shows of one scanned folder row:
+// its earliest known capture time (0 when none is read yet), how many of
+// its photos are picked and rejected, and its cover photo.
+type FolderSummary struct {
+	Path              string
+	Earliest          int64 // unix seconds
+	Picked, Rejected  int
+	CoverID           int64
+	CoverKey, CoverEd string // the cover's cache_key and edit_hash
+}
+
+// FolderSummaries returns a FolderSummary for every scanned folder with
+// photos. The cover is the folder's first pick, or its first photo when
+// nothing is picked, first by capture time, then by file name. Like
+// EarliestTakenByFolder, it is one pass over the catalog, and callers
+// match paths to shoots in Go.
+func (db *DB) FolderSummaries(ctx context.Context) ([]FolderSummary, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT f.path, s.earliest, s.picked, s.rejected, c.id, c.cache_key, COALESCE(c.edit_hash, '')
+		FROM folders f
+		JOIN (SELECT folder_id,
+				COALESCE(MIN(CASE WHEN taken_at > 0 THEN taken_at END), 0) AS earliest,
+				SUM(flag > 0) AS picked, SUM(flag < 0) AS rejected
+			FROM photos GROUP BY folder_id) s ON s.folder_id = f.id
+		JOIN (SELECT folder_id, id, cache_key, edit_hash,
+				ROW_NUMBER() OVER (PARTITION BY folder_id
+					ORDER BY flag > 0 DESC, taken_at <= 0, taken_at, file_name) AS rn
+			FROM photos) c ON c.folder_id = f.id AND c.rn = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FolderSummary
+	for rows.Next() {
+		var s FolderSummary
+		if err := rows.Scan(&s.Path, &s.Earliest, &s.Picked, &s.Rejected, &s.CoverID, &s.CoverKey, &s.CoverEd); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // FolderEarliest is one folder row's earliest known capture time.
 type FolderEarliest struct {
 	Path     string

@@ -41,7 +41,13 @@ var (
 	railSize       = theme.Length("marraw.rail.size", 13)
 	railCount      = theme.Length("marraw.rail.count", 11.5)
 	railSub        = theme.Length("marraw.rail.sub", 10.5)
+	railLine       = theme.Length("marraw.rail.line", 11.5)
+	coverBlank     = color.NRGBA{R: 0x1d, G: 0x20, B: 0x28, A: 0xff}
 )
+
+// shootH is a shoot's row's height, with its cover, its name and the line
+// under it.
+const shootH = 48
 
 // railView is the library sidebar: the library's folders in blocks, a
 // library folder with its shoots under it and the shoots added by hand
@@ -73,6 +79,8 @@ type railView struct {
 	width    float32
 	dragging bool
 	dropIn   *anim.Float
+	// covers are the shoots' covers' pictures, by their keys.
+	covers map[string]*paint.Image
 }
 
 // railHeadH is the room above the rows: the title, the filter, and the
@@ -81,9 +89,9 @@ const railHeadH = gridHeadHeight + 70
 
 func newRailView() *railView {
 	v := &railView{title: widget.NewLabel("Library"), count: newSmallLabel(""), empty: widget.NewLabel(""), list: widget.NewList(),
-		filter: widget.NewTextField(), width: railWidth, dropIn: anim.NewFloat(0)}
+		filter: widget.NewTextField(), width: railWidth, dropIn: anim.NewFloat(0), covers: map[string]*paint.Image{}}
 	v.title.Color, v.title.Size = headingInk, headingSize
-	v.count.Color, v.count.Face = noteInk, widget.MonoFont
+	v.count.Color = noteInk
 	v.empty.Color, v.empty.Size, v.empty.MaxLines = noteInk, noteSize, 4
 	v.filter.Placeholder = "Filter folders"
 	v.filter.OnChange = func(s string, _ *gunim.UI) gunim.Intent { return RailFilter{Text: s} }
@@ -431,7 +439,7 @@ func newRailRow(e railEntry, v *railView) *railRow {
 	// One line, cut with an ellipsis where a name is long.
 	r.name.Size, r.name.MaxLines = railSize, 1
 	r.n.Size, r.n.Color, r.n.NoWrap, r.n.Align = railCount, noteInk, true, text.AlignEnd
-	r.sub.Size, r.sub.Color, r.sub.MaxLines, r.sub.Face = railSub, noteInk, 1, widget.MonoFont
+	r.sub.Size, r.sub.Color, r.sub.MaxLines = railSub, noteInk, 1
 	r.badge.Size, r.badge.Color, r.badge.NoWrap = railSub, railOfflineInk, true
 	r.Add(r.pick, r.hot, r.rot)
 	r.set(e, nil)
@@ -443,12 +451,16 @@ func newRailRow(e railEntry, v *railView) *railRow {
 func (r *railRow) set(e railEntry, u *gunim.UI) {
 	r.item = e
 	r.name.Text = e.Name
-	r.sub.Text = ""
+	r.name.Face = theme.Token[*text.Face]{}
+	r.sub.Text, r.sub.Align = "", text.AlignStart
 	r.n.Text = ""
 	switch e.Kind {
 	case "parent", "group":
-		r.name.Color, r.name.Size, r.name.MaxLines = headingInk, railSize, 1
-		r.sub.Text = e.Sub
+		// A library's heading: its name in small capitals, its folder
+		// faint at the right.
+		r.name.Text = strings.ToUpper(e.Name)
+		r.name.Color, r.name.Size, r.name.MaxLines, r.name.Face = sectionLabelInk, sectionLabelSize, 1, widget.BoldFont
+		r.sub.Text, r.sub.Size, r.sub.Align = e.Sub, railSub, text.AlignEnd
 	case "time":
 		r.name.Color, r.name.Size = noteInk, railCount
 		if e.Count > 0 {
@@ -457,13 +469,16 @@ func (r *railRow) set(e railEntry, u *gunim.UI) {
 	case "note":
 		r.name.Color, r.name.Size, r.name.MaxLines = noteInk, railCount, 3
 	default:
+		// A shoot: its name without the date it starts with, and under
+		// it the date and how many photos; the count is in that line.
 		r.name.Color, r.name.Size = widget.Ink, railSize
 		if e.Offline {
 			r.name.Color = noteInk
 		}
-		if e.Count > 0 {
-			r.n.Text = fmt.Sprint(e.Count)
+		if e.Title != "" {
+			r.name.Text = e.Title
 		}
+		r.sub.Text, r.sub.Size = e.Line, railLine
 	}
 	to := map[bool]float32{false: 0, true: 1}[e.current]
 	turn := map[bool]float32{false: 0, true: 1}[e.Open]
@@ -502,13 +517,26 @@ func (r *railRow) Handle(e input.Event, u *gunim.UI) bool {
 	return false
 }
 
-// indent is where the row's text starts.
+// indent is where the row's text starts: past the chevron of a header,
+// past the cover of a shoot.
 func (r *railRow) indent() float32 {
+	if r.isShoot() {
+		return r.coverAt().Max.X + 10
+	}
 	x := float32(16 + 14*r.item.Depth)
 	if r.item.Kind != "note" {
 		x += 20
 	}
 	return x
+}
+
+// isShoot says the row is a shoot, with a cover.
+func (r *railRow) isShoot() bool { return r.item.Kind == "shoot" || r.item.Kind == "root" }
+
+// coverAt is where a shoot's cover is.
+func (r *railRow) coverAt() geom.Rect {
+	x := float32(14 + 12*max(0, r.item.Depth-1))
+	return geom.Rc(x, (shootH-coverH)/2, coverW, coverH)
 }
 
 // Layout implements [gunim.Node].
@@ -527,13 +555,19 @@ func (r *railRow) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children
 	}
 	switch r.item.Kind {
 	case "parent", "group":
-		const h = 46
-		ms := name.Layout(gunim.Loose(geom.Sz(room, h)))
-		name.Place(geom.Pt(indent, 7))
-		sub.Layout(gunim.Loose(geom.Sz(max(0, w-indent-14), 16)))
-		sub.Place(geom.Pt(indent, 7+ms.H+1))
+		const h = 34
+		ms := name.Layout(gunim.Loose(geom.Sz(max(0, w-indent-14-60), h)))
+		name.Place(geom.Pt(indent, (h-ms.H)/2))
+		// The folder in what the name leaves, ending in "…" where it is
+		// long; the Offline badge in its place while the drive is gone.
+		pathRoom := max(0, w-indent-ms.W-14-14)
+		if r.item.Offline {
+			pathRoom = 0
+		}
+		ss := sub.Layout(gunim.Loose(geom.Sz(pathRoom, 16)))
+		sub.Place(geom.Pt(w-14-ss.W, (h-ss.H)/2))
 		n.Place(geom.Pt(w-14-ns.W, (h-ns.H)/2))
-		r.badgeAt = geom.Rc(w-14-ns.W-bs.W-16, 8, bs.W+10, bs.H+2)
+		r.badgeAt = geom.Rc(w-14-bs.W-10, (h-bs.H-2)/2, bs.W+10, bs.H+2)
 		badge.Place(r.badgeAt.Min.Add(geom.Pt(5, 1)))
 		return geom.Sz(w, h)
 	case "note":
@@ -541,6 +575,29 @@ func (r *railRow) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children
 		name.Place(geom.Pt(indent, 4))
 		sub.Layout(gunim.Loose(geom.Sz(0, 0)))
 		return geom.Sz(w, ms.H+8)
+	}
+	if r.isShoot() {
+		// The name over the line under it, beside the cover; a spinner, a
+		// badge or the shared mark at the right of the name.
+		if r.item.Busy {
+			room -= 18
+		}
+		ms := name.Layout(gunim.Loose(geom.Sz(room+ns.W, 20)))
+		ss := sub.Layout(gunim.Loose(geom.Sz(max(0, w-indent-14), 16)))
+		if r.sub.Text == "" {
+			// Nothing to say under it yet: the name in the middle.
+			ss.H = -2
+		}
+		top := (shootH - ms.H - ss.H - 2) / 2
+		if r.item.Picked+r.item.Rejected > 0 {
+			top -= 3
+		}
+		name.Place(geom.Pt(indent, top))
+		sub.Place(geom.Pt(indent, top+ms.H+2))
+		n.Layout(gunim.Loose(geom.Sz(0, 0)))
+		r.badgeAt = geom.Rc(w-14-bs.W-10, top, bs.W+10, bs.H+2)
+		badge.Place(r.badgeAt.Min.Add(geom.Pt(5, 1)))
+		return geom.Sz(w, shootH)
 	}
 	h := float32(30)
 	if r.item.Kind == "time" {
@@ -571,21 +628,14 @@ func (r *railRow) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gun
 	switch r.item.Kind {
 	case "parent", "group", "time":
 		// The chevron, turning down as the header opens.
-		cy := float32(15)
-		if r.item.Kind == "time" {
-			cy = box.H / 2
-		}
+		cy := box.H / 2
 		func() {
 			defer p.Push(paint.Rotate(r.rot.Value()*1.5708, geom.Pt(x+7, cy)))()
 			p.Mask(icon.Stroke{Icon: icon.ChevronRight, Width: 2, Progress: 1}, geom.Rc(x+1, cy-6, 12, 12), ink)
 		}()
 	case "shoot", "root":
-		ic := icon.Folder
-		c := ink
-		if r.item.current {
-			ic, c = icon.FolderOpen, railMark
-		}
-		p.Mask(icon.Stroke{Icon: ic, Width: 1.6, Progress: 1}, geom.Rc(x, box.H/2-7, 14, 14), c)
+		r.paintCover(p, ink)
+		r.paintBar(p, box)
 	}
 	if r.item.Offline {
 		p.RRect(r.badgeAt, 4, paint.Solid(withAlpha(railOffline, 0.16)))
@@ -609,5 +659,48 @@ func (r *railRow) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gun
 	}
 	if r.item.Shared > 0 && !r.item.Offline {
 		p.Mask(icon.Stroke{Icon: icon.Share2, Width: 1.6, Progress: 1}, geom.Rc(r.badgeAt.Max.X-16, r.badgeAt.Min.Y+1, 14, 14), railShared)
+	}
+}
+
+// paintCover draws a shoot's cover, or a blank with a picture's mark
+// until it comes, and a ring round it while the shoot is the one open.
+func (r *railRow) paintCover(p *paint.Painter, ink color.NRGBA) {
+	at := r.coverAt()
+	img := r.v.covers[r.item.Cover]
+	op := float32(1)
+	if r.item.Offline {
+		op = 0.45
+	}
+	if img != nil {
+		p.Image(img, at, paint.ImageOpts{Opacity: op, Radius: 5})
+	} else {
+		p.RRect(at, 5, paint.Solid(coverBlank))
+		mark := geom.Rc(at.Center().X-7, at.Center().Y-7, 14, 14)
+		p.Mask(icon.Stroke{Icon: icon.Image, Width: 1.5, Progress: 1}, mark, withAlpha(ink, 0.45*op))
+	}
+	if k := r.pick.Value(); k > 0.01 {
+		p.RRectStroke(at.Inset(geom.Uniform(-1.5)), 6.5, paint.Fill{}, paint.Stroke{Width: 1.5, Color: withAlpha(railMark, k)})
+	}
+}
+
+// paintBar draws how far the shoot is culled: its picks in green and its
+// rejects in red, along a thin track under its line, in proportion to its
+// photos.
+func (r *railRow) paintBar(p *paint.Painter, box geom.Size) {
+	it := r.item
+	if it.Picked+it.Rejected == 0 {
+		return
+	}
+	total := max(it.Count, it.Picked+it.Rejected)
+	x0 := r.indent()
+	track := geom.Rc(x0, shootH-11, max(0, box.W-14-x0), 3)
+	p.RRect(track, 1.5, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x14}))
+	pw := track.Size().W * float32(it.Picked) / float32(total)
+	rw := track.Size().W * float32(it.Rejected) / float32(total)
+	if pw > 0 {
+		p.RRect(geom.Rc(track.Min.X, track.Min.Y, max(pw, 3), 3), 1.5, paint.Solid(pickInk))
+	}
+	if rw > 0 {
+		p.RRect(geom.Rc(track.Min.X+pw, track.Min.Y, max(rw, 3), 3), 1.5, paint.Solid(rejectInk))
 	}
 }

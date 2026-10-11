@@ -5,6 +5,16 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - The library sidebar, redesigned: each shoot has a cover (its first
+    pick, or its first photo) beside its name. A name that starts with
+    a date (2019-11-08, 2019_11_08, 2019.11.08 or 20191108) shows
+    without it, and the date shows under the name with the count. A
+    thin bar under that shows the picks in green and the rejects in
+    red; the open shoot's bar follows as you cull. A shoot not opened
+    yet shows a blank cover until it is. Library headings are small
+    capitals with the folder at the right. No more monospaced text.
+  - The window opens where it was when you closed it, and maximized if
+    it was. gunim now writes the place as the window closes.
   - Updates ask first. A new release shows a card, "marraw vX is out",
     and See what's new opens the update window: what changed, and
     Update Now. Settings, General, Updates chooses Auto (download in the

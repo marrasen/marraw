@@ -160,18 +160,21 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 	// Capture dates are display-only (they feed the rail's date sort and time
 	// grouping), so a failed lookup degrades to "no date" rather than failing
 	// the listing.
-	earliest, err := l.deps.DB.EarliestTakenByFolder(ctx)
+	summaries, err := l.deps.DB.FolderSummaries(ctx)
 	if err != nil {
-		earliest = nil
+		summaries = nil
 	}
+	earliest := folderEarliest(summaries)
 
 	out := []Shoot{}
 	// The parent's own loose RAWs are a flat count: anything nested belongs to
 	// one of the children below — so its date, like its count, is exact-match
 	// only.
 	if n, oldest := directRaws(parent); n > 0 {
-		out = append(out, Shoot{Path: parent, Name: filepath.Base(parent), PhotoCount: n, IsSelf: true,
-			EarliestTakenAt: orEstimate(earliestFor(earliest, parent, true), oldest)})
+		self := Shoot{Path: parent, Name: filepath.Base(parent), PhotoCount: n, IsSelf: true,
+			EarliestTakenAt: orEstimate(earliestFor(earliest, parent, true), oldest)}
+		summarize(&self, summaries, true)
+		out = append(out, self)
 	}
 
 	var children []Shoot
@@ -192,13 +195,60 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 		if !ok {
 			continue
 		}
-		children = append(children, Shoot{Path: full, Name: de.Name(), PhotoCount: count,
-			EarliestTakenAt: orEstimate(earliestFor(earliest, full, false), oldest)})
+		child := Shoot{Path: full, Name: de.Name(), PhotoCount: count,
+			EarliestTakenAt: orEstimate(earliestFor(earliest, full, false), oldest)}
+		summarize(&child, summaries, false)
+		children = append(children, child)
 	}
 	sort.Slice(children, func(i, j int) bool {
 		return strings.ToLower(children[i].Name) < strings.ToLower(children[j].Name)
 	})
 	return append(out, children...), nil
+}
+
+// summarize fills in a shoot's cull counts and cover from the per-folder
+// summaries: its own folder row and, unless selfOnly, those beneath it, as
+// earliestFor matches them.
+func summarize(sh *Shoot, rows []store.FolderSummary, selfOnly bool) {
+	sh.Picked, sh.Rejected, sh.Cover = summaryFor(rows, sh.Path, selfOnly)
+}
+
+// summaryFor sums the cull counts of the folder at path and, unless
+// selfOnly, those beneath it, and picks their cover: the folder's own, or
+// else the first nested folder's by path.
+func summaryFor(rows []store.FolderSummary, path string, selfOnly bool) (picked, rejected int, cover *ShootCover) {
+	var own, nested *ShootCover
+	var nestedPath string
+	for _, r := range rows {
+		isOwn := strings.EqualFold(r.Path, path)
+		if !isOwn && (selfOnly || !hasPathPrefixFold(r.Path, path)) {
+			continue
+		}
+		picked += r.Picked
+		rejected += r.Rejected
+		c := &ShootCover{PhotoID: r.CoverID, CacheKey: r.CoverKey, EditHash: r.CoverEd}
+		switch {
+		case isOwn:
+			own = c
+		case nested == nil || r.Path < nestedPath:
+			nested, nestedPath = c, r.Path
+		}
+	}
+	if own != nil {
+		return picked, rejected, own
+	}
+	return picked, rejected, nested
+}
+
+// folderEarliest is the summaries' earliest capture times, for earliestFor.
+func folderEarliest(rows []store.FolderSummary) []store.FolderEarliest {
+	out := make([]store.FolderEarliest, 0, len(rows))
+	for _, s := range rows {
+		if s.Earliest > 0 {
+			out = append(out, store.FolderEarliest{Path: s.Path, Earliest: s.Earliest})
+		}
+	}
+	return out
 }
 
 // earliestFor picks a shoot's earliest capture time from the per-folder

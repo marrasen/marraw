@@ -212,14 +212,22 @@ type LibraryRoot struct {
 	ExcludedChildren []string `json:"excludedChildren,omitempty"`
 }
 
-// RootStatus is the live reachability of one stored root. It is served apart
-// from LibraryRoot on purpose: that struct round-trips through SetLibraryRoots,
-// so a derived field would be written back into the stored config.
+// RootStatus is the live reachability of one stored root, and what the rail
+// shows of it from the catalog. It is served apart from LibraryRoot on
+// purpose: that struct round-trips through SetLibraryRoots, so a derived
+// field would be written back into the stored config.
 type RootStatus struct {
 	Path string `json:"path"`
 	// Online is false when the folder's storage is disconnected — an external
 	// drive that is unplugged, or a network share that is unreachable.
 	Online bool `json:"online"`
+	// EarliestTakenAt, Picked, Rejected and Cover are as a Shoot's, over the
+	// root's photos, its subfolders' too where it includes them. Zero and nil
+	// until the folder is scanned.
+	EarliestTakenAt int64       `json:"earliestTakenAt"`
+	Picked          int         `json:"picked"`
+	Rejected        int         `json:"rejected"`
+	Cover           *ShootCover `json:"cover,omitempty"`
 }
 
 // Shoot is one folder discovered beneath a managed parent, or the parent's own
@@ -238,6 +246,20 @@ type Shoot struct {
 	// folder's catalogued photos, 0 until the metadata pass has read one.
 	// Display only — feeds the rail's date sort and time grouping.
 	EarliestTakenAt int64 `json:"earliestTakenAt"`
+	// Picked and Rejected count the shoot's photos flagged so, for the
+	// rail's cull progress; 0 until the folder is scanned.
+	Picked   int `json:"picked"`
+	Rejected int `json:"rejected"`
+	// Cover is the photo the rail shows for the shoot: its first pick, or
+	// its first photo. Nil until the folder is scanned.
+	Cover *ShootCover `json:"cover,omitempty"`
+}
+
+// ShootCover names a shoot's cover photo, with what its image URL needs.
+type ShootCover struct {
+	PhotoID  int64  `json:"photoId"`
+	CacheKey string `json:"cacheKey"`
+	EditHash string `json:"editHash"`
 }
 
 // PickEntry is one folder row in the Add-folder picker: a subdirectory with

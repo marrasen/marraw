@@ -296,6 +296,12 @@ func (v *gridView) railIn(s RailState, u *gunim.UI) {
 	u.Invalidate()
 }
 
+// coverIn takes a shoot's cover's picture for the sidebar.
+func (v *gridView) coverIn(c CoverIn, u *gunim.UI) {
+	v.rail.covers[c.Key] = c.Img
+	u.Invalidate()
+}
+
 // railX is where the grid starts: the library's edge, as it slides.
 func (v *gridView) railX() float32 { return v.rw.Value() }
 

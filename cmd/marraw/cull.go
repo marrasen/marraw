@@ -1490,6 +1490,14 @@ func (cu *culler) marked(i int) {
 // patched takes changes to photos made anywhere: their ratings and flags,
 // and an edit, whose new pixels are fetched again.
 func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
+	// A flag or an edit changes the open shoot's counts or cover in the
+	// sidebar.
+	for _, pp := range ps {
+		if pp.Flag != nil || pp.EditHash != nil {
+			defer cu.railChanged()
+			break
+		}
+	}
 	// The folder's whole list takes them too, for the photos not showing.
 	aided := false
 	for _, pp := range ps {
