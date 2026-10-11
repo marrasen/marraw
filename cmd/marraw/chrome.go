@@ -58,6 +58,11 @@ func (b *dragBand) Layout(c gunim.Constraints, _ gunim.Frame, _ gunim.Children) 
 // gunim learns where it is.
 func (b *dragBand) Paint(*paint.Painter, gunim.Frame, geom.Size, gunim.Children) {}
 
+// Covers implements [gunim.Shaped]: the band takes no pointer itself, so
+// what lies on it keeps its clicks. Moving the window is the system's
+// work, on the CaptionRects it is told of.
+func (b *dragBand) Covers(geom.Point) bool { return false }
+
 // CaptionRects implements [gunim.Caption]: the band between the holes.
 func (b *dragBand) CaptionRects(size geom.Size) []geom.Rect {
 	if b.off {

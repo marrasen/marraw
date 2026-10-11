@@ -411,6 +411,10 @@ func (v *gridView) libInfoIn(l LibInfo, u *gunim.UI) {
 // moves no window.
 func (v *gridView) coveredIn(c Covered, u *gunim.UI) {
 	v.band.off = c.On
+	if !c.On {
+		// Back in the library: its switch stands on Library again.
+		v.head.modes.show(modeLibrary, u)
+	}
 	u.Invalidate()
 }
 
