@@ -398,6 +398,12 @@ func (v *gridView) setAside(on bool, u *gunim.UI) {
 	u.Invalidate()
 }
 
+// colourIn takes how the window's colours reach the display.
+func (v *gridView) colourIn(c ColourIn, u *gunim.UI) {
+	v.status.colour.Text = c.Short
+	u.Invalidate()
+}
+
 // asidePatch takes the info panel shown or put away.
 func (v *gridView) asidePatch(a AsideIn, u *gunim.UI) { v.setAside(a.On, u) }
 

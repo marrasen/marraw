@@ -21,12 +21,13 @@ type statusBar struct {
 	path, shown, sel *widget.Label
 	pills            [3]*countPill
 	build, state     *widget.Label
+	colour           *widget.Label
 }
 
 func newStatusBar() *statusBar {
 	s := &statusBar{path: newSmallLabel(""), shown: newSmallLabel(""), sel: newSmallLabel(""),
-		build: newSmallLabel("build " + build()), state: newSmallLabel("backend connected")}
-	for _, l := range []*widget.Label{s.path, s.shown, s.sel, s.build, s.state} {
+		build: newSmallLabel("build " + build()), state: newSmallLabel("backend connected"), colour: newSmallLabel("")}
+	for _, l := range []*widget.Label{s.path, s.shown, s.sel, s.build, s.state, s.colour} {
 		l.Face, l.Color, l.NoWrap, l.MaxLines = widget.MonoFont, noteInk, true, 1
 	}
 	s.pills = [3]*countPill{newCountPill(pickInk, flagSet, "picked"), newCountPill(rejectInk, rejectMark, "rejected"),
@@ -46,7 +47,7 @@ func (s *statusBar) set(path string, shown, total, sel int) {
 
 // Children implements [gunim.Composite].
 func (s *statusBar) Children() []gunim.Node {
-	return []gunim.Node{s.path, s.shown, s.pills[0], s.pills[1], s.pills[2], s.sel, s.build, s.state}
+	return []gunim.Node{s.path, s.shown, s.pills[0], s.pills[1], s.pills[2], s.sel, s.build, s.state, s.colour}
 }
 
 // Layout implements [gunim.Node]: from the left, the path, the counts
@@ -55,13 +56,18 @@ func (s *statusBar) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 	box := geom.Sz(c.Max.W, statusH)
 	mid := box.H / 2
 	right := box.W - 16
-	for _, i := range []int{7, 6} {
+	for _, i := range []int{7, 6, 8} {
 		k := kids.At(i)
 		ks := k.Layout(gunim.Loose(geom.Sz(box.W/4, box.H)))
 		if i == 7 {
 			right -= ks.W
 			k.Place(geom.Pt(right, mid-ks.H/2))
 			right -= 12 + 14
+		} else if i == 8 {
+			ks = k.Layout(gunim.Loose(geom.Sz(box.W/5, box.H)))
+			right -= ks.W
+			k.Place(geom.Pt(right, mid-ks.H/2))
+			right -= 16
 		} else {
 			right -= ks.W
 			k.Place(geom.Pt(right, mid-ks.H/2))

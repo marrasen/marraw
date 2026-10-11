@@ -44,6 +44,8 @@ github.com/marrasen/gunim v0.0.0-20261011153501-5d3674b39d22 h1:zUOyxAzrLT/PNHEK
 github.com/marrasen/gunim v0.0.0-20261011153501-5d3674b39d22/go.mod h1:T1ceVaYYVmiWNA1E3BcJg3WqfRG+JkpC4+Qe0Uze3zM=
 github.com/marrasen/gunim v0.0.0-20261011160557-65878d742a4e h1:FiFS69P4Jvi2FDW/aRmhilhIZJxQCdUJLRBD4Xl346k=
 github.com/marrasen/gunim v0.0.0-20261011160557-65878d742a4e/go.mod h1:T1ceVaYYVmiWNA1E3BcJg3WqfRG+JkpC4+Qe0Uze3zM=
+github.com/marrasen/gunim v0.0.0-20261011165630-931c788ac981 h1:MQamlDcKiQk785Fb+mFnBH2YGU6UL5IKKfgTFdEzVlc=
+github.com/marrasen/gunim v0.0.0-20261011165630-931c788ac981/go.mod h1:T1ceVaYYVmiWNA1E3BcJg3WqfRG+JkpC4+Qe0Uze3zM=
 github.com/mattn/go-isatty v0.0.24 h1:tGZZoVgT/KiqK1c8ocVLeDS8BSWMRd47J3Lbz7vsReI=
 github.com/mattn/go-isatty v0.0.24/go.mod h1:nMCL3Zebbrt45jsMDgnfIwz6ydEQApk5oEI3HqDio6A=
 github.com/miekg/dns v1.1.43/go.mod h1:+evo5L0630/F6ca/Z9+GAqzhjGyn8/c+TBaOyfEl0V4=
