@@ -23,6 +23,9 @@ type statusBar struct {
 	pills            [3]*countPill
 	build, state     *widget.Label
 	colour           *widget.Label
+	// gone are the children left out for room, by their place in
+	// Children, not painted.
+	gone [9]bool
 }
 
 func newStatusBar() *statusBar {
@@ -56,32 +59,47 @@ func (s *statusBar) Children() []gunim.Node {
 func (s *statusBar) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	box := geom.Sz(c.Max.W, statusH)
 	mid := box.H / 2
+	s.gone = [9]bool{}
+	// The left's counts at their own widths; the path gets what is left.
+	var counts float32
+	sizes := [6]geom.Size{}
+	for i := 1; i <= 5; i++ {
+		sizes[i] = kids.At(i).Layout(gunim.Loose(geom.Sz(box.W, box.H)))
+		if sizes[i].W > 0 {
+			counts += sizes[i].W + 14
+		}
+	}
+	// The right from its edge: the backend's state, the build, and the
+	// colour line, which goes where the left would run into it.
 	right := box.W - 16
 	for _, i := range []int{7, 6, 8} {
 		k := kids.At(i)
 		ks := k.Layout(gunim.Loose(geom.Sz(box.W/4, box.H)))
-		if i == 7 {
-			right -= ks.W
-			k.Place(geom.Pt(right, mid-ks.H/2))
+		if i == 8 && right-ks.W-16 < 16+120+16+counts {
+			ks, s.gone[i] = geom.Size{}, true
+		}
+		right -= ks.W
+		k.Place(geom.Pt(right, mid-ks.H/2))
+		switch {
+		case i == 7:
 			right -= 12 + 14
-		} else if i == 8 {
-			ks = k.Layout(gunim.Loose(geom.Sz(box.W/5, box.H)))
-			right -= ks.W
-			k.Place(geom.Pt(right, mid-ks.H/2))
-			right -= 16
-		} else {
-			right -= ks.W
-			k.Place(geom.Pt(right, mid-ks.H/2))
+		case ks.W > 0:
 			right -= 16
 		}
 	}
 	x := float32(16)
-	ps := kids.At(0).Layout(gunim.Loose(geom.Sz(max(0, min(box.W*0.4, right-x-300)), box.H)))
+	ps := kids.At(0).Layout(gunim.Loose(geom.Sz(max(0, min(box.W*0.4, right-x-16-counts)), box.H)))
 	kids.At(0).Place(geom.Pt(x, mid-ps.H/2))
-	x += ps.W + 16
+	if ps.W > 0 {
+		x += ps.W + 16
+	}
 	for i := 1; i <= 5; i++ {
 		k := kids.At(i)
-		ks := k.Layout(gunim.Loose(geom.Sz(max(0, right-x), box.H)))
+		ks := sizes[i]
+		if x+ks.W > right {
+			// No room left for it at all.
+			ks, s.gone[i] = geom.Size{}, true
+		}
 		k.Place(geom.Pt(x, mid-ks.H/2))
 		if ks.W > 0 {
 			x += ks.W + 14
@@ -94,8 +112,10 @@ func (s *statusBar) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 func (s *statusBar) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
 	p.RRect(geom.Rect{Max: box.Point()}, 0, paint.Solid(railFill))
 	p.RRect(geom.Rc(0, 0, box.W, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
-	for k := range kids.All {
-		k.Paint(p)
+	for i := range kids.Len() {
+		if !s.gone[i] {
+			kids.At(i).Paint(p)
+		}
 	}
 	// The backend's state, a dot before its words.
 	st := kids.At(7)

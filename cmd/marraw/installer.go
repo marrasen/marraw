@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -54,6 +55,14 @@ func installApp() install.App {
 		Space:       1820 << 20, // every AI model, if all are fetched; the preview cache has a limit of its own
 		Updates:     gunimReleases{Repo: "marrasen/marraw"},
 		UpdateKey:   updateKey,
+		// Updates ask first: the user is told of a release and chooses
+		// when to take it, never finding one put in place unasked.
+		UpdateMode: install.UpdatesNotify,
+		Available: func(r install.Release) {
+			if f := updateAvailable; f != nil {
+				f(r)
+			}
+		},
 		Updated: func(r install.Release) {
 			if f := updateReady; f != nil {
 				f(r)
@@ -64,8 +73,21 @@ func installApp() install.App {
 }
 
 // updateReady, when set, hears of a release put in place for the next
-// start, to tell the user.
-var updateReady func(install.Release)
+// start, and updateAvailable of one out, to tell the user.
+var (
+	updateReady     func(install.Release)
+	updateAvailable func(install.Release)
+	// offered is the release updateAvailable told of last.
+	offered install.Release
+)
+
+// updateMark starts the path of a note's action that shows the release
+// told of, to take it.
+const updateMark = "update:"
+
+// askFirstMark is a file in the data folder that says the install was
+// moved to asking first, once, so a later choice of the user's stands.
+const askFirstMark = "updates-ask-first"
 
 // restartMark is the path of a note's action that restarts into the
 // release put in place.
@@ -75,6 +97,25 @@ const restartMark = "restart:"
 // start, with Restart now, and, on the first start of one, which release
 // it replaced.
 func (cu *culler) tellUpdates() {
+	updateAvailable = func(r install.Release) {
+		cu.onDo(func() {
+			offered = r
+			cu.done("marraw "+r.Version+" is out", "See what changed, and update when you choose.", "See what's new", updateMark+r.Version)
+		})
+	}
+	// Installs from before updates asked first are moved to asking, once.
+	if install.IsRelease(version) {
+		mark := filepath.Join(defaultDataDir(), askFirstMark)
+		if _, err := os.Stat(mark); err != nil {
+			app := installApp()
+			if in, err := install.Find(app); err == nil && in != nil && in.Updates == install.UpdatesInstall {
+				if err := install.SetUpdates(app, install.UpdatesNotify); err != nil {
+					log.Printf("updates: ask first: %v", err)
+				}
+			}
+			_ = os.WriteFile(mark, []byte("updates ask first\n"), 0o644)
+		}
+	}
 	updateReady = func(r install.Release) {
 		cu.onDo(func() {
 			cu.done("marraw "+r.Version+" is ready", "It takes over the next time marraw starts.", "Restart now", restartMark)
@@ -83,6 +124,21 @@ func (cu *culler) tellUpdates() {
 	if from := install.UpdatedFrom(); from != "" {
 		cu.done("Updated to marraw "+version, "From "+from+".", "", "")
 	}
+}
+
+// showUpdate opens the installer's window for the release told of: what
+// changed since this one, and Update Now, which downloads it with its
+// progress shown and restarts into it.
+func (cu *culler) showUpdate() {
+	r := offered
+	if r.Version == "" || cu.viewer.app == nil {
+		return
+	}
+	go func() {
+		if err := install.ShowUpdate(cu.ctx, cu.viewer.app, installApp(), install.Update{Release: r}); err != nil {
+			cu.onDo(func() { cu.fail("The update could not be shown", err) })
+		}
+	}()
 }
 
 // restartIntoUpdate starts the release put in place and ends this copy.

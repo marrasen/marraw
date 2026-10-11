@@ -159,6 +159,8 @@ type gapControl struct {
 	popup        *gunim.Popup
 	menu         *widget.Menu
 	size         geom.Size
+	// compact leaves its words out, the chip alone, where room is short.
+	compact bool
 }
 
 // Focusable implements [gunim.Focuser]: it keeps the keyboard while its
@@ -196,8 +198,13 @@ func (g *gapControl) Children() []gunim.Node { return []gunim.Node{g.label, g.va
 
 // Layout implements [gunim.Node].
 func (g *gapControl) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
-	const h, padX, gap, chipPad = 34, 12, 8, 7
+	const h, chipPad = 34, 7
+	padX, gap := float32(12), float32(8)
 	ls := kids.At(0).Layout(gunim.Loose(geom.Sz(160, h)))
+	if g.compact {
+		ls, padX, gap = geom.Size{}, 6, 0
+		kids.At(0).Layout(gunim.Tight(geom.Size{}))
+	}
 	vs := kids.At(1).Layout(gunim.Loose(geom.Sz(100, h)))
 	kids.At(0).Place(geom.Pt(padX, (h-ls.H)/2))
 	kids.At(1).Place(geom.Pt(padX+ls.W+gap+chipPad, (h-vs.H)/2))
@@ -216,11 +223,16 @@ func (g *gapControl) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids 
 	p.RRectStroke(r.Inset(geom.Uniform(0.5)), 8.5, paint.Fill{}, paint.Stroke{Width: 1, Color: edge})
 	v := kids.At(1)
 	vs := v.Size()
-	chip := geom.Rc(box.W-12-vs.W-14, (box.H-vs.H)/2-2, vs.W+14, vs.H+4)
-	p.RRect(chip, 5, paint.Solid(gapChip))
-	for k := range kids.All {
-		k.Paint(p)
+	pad := float32(12)
+	if g.compact {
+		pad = 6
 	}
+	chip := geom.Rc(box.W-pad-vs.W-14, (box.H-vs.H)/2-2, vs.W+14, vs.H+4)
+	p.RRect(chip, 5, paint.Solid(gapChip))
+	if !g.compact {
+		kids.At(0).Paint(p)
+	}
+	kids.At(1).Paint(p)
 }
 
 // Handle implements [gunim.Handler]: a press opens the menu of gaps.

@@ -37,8 +37,12 @@ type gridBar struct {
 	sorts *sortButtons
 	flags *widget.Segmented
 	stars *starFilter
-	size  *widget.Slider
-	row   gunim.Node
+	// starBox holds the stars, put away where the bar has no room, and
+	// flagBox the flags, measured to know how far they can squeeze.
+	starBox *hideable
+	flagBox *measured
+	size    *widget.Slider
+	row     gunim.Node
 	// soft, blinks and bursts show only the soft photos, those with eyes
 	// closed, and each burst's sharpest frame; judge judges the bursts,
 	// and eyes and subjects start the backend looking.
@@ -75,12 +79,30 @@ func (r *barRow) Children() []gunim.Node { return []gunim.Node{r.left, r.right} 
 // Layout implements [gunim.Node].
 func (r *barRow) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	w := c.Max.W
-	ls := kids.At(0).Layout(gunim.Loose(geom.Sz(w, c.Max.H)))
-	r.bar.sizeBox.hidden = false
+	// The left at its natural width, the flags' among it.
+	r.bar.starBox.hidden = false
+	ls := kids.At(0).Layout(gunim.Loose(geom.Sz(1e5, c.Max.H)))
+	flags := r.bar.flagBox.last.W
+	// Short of room, the size slider goes first, then the gap's words,
+	// leaving its chip.
+	r.bar.sizeBox.hidden, r.bar.gapCtl.compact = false, false
 	rs := kids.At(1).Layout(gunim.Loose(geom.Sz(w, c.Max.H)))
 	if ls.W+16+rs.W > w {
 		r.bar.sizeBox.hidden = true
 		rs = kids.At(1).Layout(gunim.Loose(geom.Sz(w, c.Max.H)))
+	}
+	if ls.W+16+rs.W > w {
+		r.bar.gapCtl.compact = true
+		rs = kids.At(1).Layout(gunim.Loose(geom.Sz(w, c.Max.H)))
+	}
+	if room := max(0, w-16-rs.W); ls.W > room {
+		// Still short: the flags squeeze into what the right leaves, to
+		// a short word each, and past that the stars go.
+		const leastFlags = 200
+		if ls.W-flags+leastFlags > room {
+			r.bar.starBox.hidden = true
+		}
+		ls = kids.At(0).Layout(gunim.Loose(geom.Sz(room, c.Max.H)))
 	}
 	h := max(ls.H, rs.H)
 	kids.At(0).Place(geom.Pt(0, (h-ls.H)/2))
@@ -148,6 +170,53 @@ func (h *hideable) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids guni
 	if !h.hidden {
 		kids.At(0).Paint(p)
 	}
+}
+
+// rigid is a node that keeps its natural width in a row short of room,
+// for one that cannot draw narrower.
+type rigid struct {
+	child gunim.Node
+	last  geom.Size
+}
+
+// Children implements [gunim.Composite].
+func (r *rigid) Children() []gunim.Node { return []gunim.Node{r.child} }
+
+// MinWidth implements [widget.Shrinker]: its width as last laid out,
+// which a row asks after laying it out at its natural size.
+func (r *rigid) MinWidth(gunim.Frame) float32 { return r.last.W }
+
+// Layout implements [gunim.Node].
+func (r *rigid) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	r.last = kids.At(0).Layout(gunim.Loose(geom.Sz(1e5, c.Max.H)))
+	kids.At(0).Place(geom.Point{})
+	return r.last
+}
+
+// Paint implements [gunim.Node].
+func (r *rigid) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
+}
+
+// measured is a node that keeps the size it was last laid out at.
+type measured struct {
+	child gunim.Node
+	last  geom.Size
+}
+
+// Children implements [gunim.Composite].
+func (m *measured) Children() []gunim.Node { return []gunim.Node{m.child} }
+
+// Layout implements [gunim.Node].
+func (m *measured) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	m.last = kids.At(0).Layout(c)
+	kids.At(0).Place(geom.Point{})
+	return m.last
+}
+
+// Paint implements [gunim.Node].
+func (m *measured) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
 }
 
 func newGridBar(g *gridView) *gridBar {
@@ -224,7 +293,11 @@ func newGridBar(g *gridView) *gridBar {
 	sizeRow := widget.Row(&fixedWidth{w: 96, child: b.size}, &fixedWidth{w: 44, child: b.sizeN})
 	sizeRow.Cross = widget.CrossCenter
 	b.sizeBox = &hideable{child: sizeRow}
-	left := widget.Row(b.railBtn, b.sorts, b.flags, b.stars, aids)
+	// Short of room only the flags squeeze; the stars go once they can
+	// squeeze no more, and the rest keep their width.
+	b.starBox = &hideable{child: b.stars}
+	b.flagBox = &measured{child: b.flags}
+	left := widget.Row(&rigid{child: b.railBtn}, &rigid{child: b.sorts}, b.flagBox, &rigid{child: b.starBox}, &rigid{child: aids})
 	left.Cross = widget.CrossCenter
 	right := widget.Row(b.gapCtl, spacerW(4), b.sizeBox, b.panelBtn)
 	right.Cross = widget.CrossCenter

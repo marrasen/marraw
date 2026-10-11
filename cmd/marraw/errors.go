@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strings"
 )
 
 // ErrorNote is an error the user has not cleared yet: what failed, in
@@ -45,6 +46,11 @@ func (cu *culler) done(what, detail, action, path string) {
 // errAction opens what the note's button names, and clears the note.
 func (cu *culler) errAction(id int) {
 	for _, e := range cu.errs {
+		if e.ID == id && strings.HasPrefix(e.Path, updateMark) {
+			cu.clearError(ErrClear{ID: id})
+			cu.showUpdate()
+			return
+		}
 		if e.ID == id && e.Path == restartMark {
 			cu.clearError(ErrClear{ID: id})
 			cu.restartIntoUpdate()

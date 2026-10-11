@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/marrasen/gunim"
@@ -264,6 +265,9 @@ func (c *errCard) show(e ErrorNote) {
 func actionIcon(e ErrorNote) *icon.Icon {
 	if e.Path == restartMark {
 		return icon.RefreshCw
+	}
+	if strings.HasPrefix(e.Path, updateMark) {
+		return icon.Download
 	}
 	return icon.FolderOpen
 }

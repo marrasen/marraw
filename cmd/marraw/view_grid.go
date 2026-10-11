@@ -874,6 +874,8 @@ func pixelFit(r geom.Rect, img *paint.Image) geom.Rect {
 // are the status bar's, each popping as it changes.
 type gridHead struct {
 	title, sub *widget.Label
+	// noSub leaves the count out where the name needs the room.
+	noSub      bool
 	pills      [3]*countPill
 	total, sel int
 	// none says no folder is chosen yet, and folderTotal is how many
@@ -901,7 +903,11 @@ func newGridHead() *gridHead {
 	h := &gridHead{title: widget.NewLabel(""), sub: widget.NewLabel(""), modes: newModeSwitch(modeLibrary), win: newWindowPill()}
 	h.jump = newJumpButton("Jump to anything")
 	h.title.Size = headTitleSize
+	// A long shoot name ends in an ellipsis on its one line, and the
+	// count beside it stays whole.
+	h.title.MaxLines = 1
 	h.sub.Color, h.sub.Size = noteInk, noteSize
+	h.sub.NoWrap, h.sub.MaxLines = true, 1
 	return h
 }
 
@@ -913,7 +919,7 @@ func (h *gridHead) set(s GridState, animate bool, th *theme.Live) {
 	}
 	h.none, h.folderTotal = s.FolderID == 0, s.Total
 	if h.none {
-		h.title.Text = "Choose a shoot in the library"
+		h.title.Text = "No shoot open"
 	}
 	h.total = len(s.Photos)
 	h.subText()
@@ -988,20 +994,28 @@ func (h *gridHead) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	ms := kids.At(2).Layout(gunim.Loose(box))
 	mx := min(max(h.mid-ms.W/2, 0), right-16-ms.W)
 	place(kids.At(2), ms, mx, true)
+	// The count keeps its own width; the name takes what is left.
 	x := float32(20)
-	for i := range 2 {
-		k := kids.At(i)
-		s := k.Layout(gunim.Loose(geom.Sz(max(0, mx-x-16), box.H)))
-		k.Place(geom.Pt(x, mid-s.H/2))
-		x += s.W + 14
+	room := max(0, mx-x-16)
+	ss := kids.At(1).Layout(gunim.Loose(geom.Sz(room, box.H)))
+	h.noSub = room-ss.W-14 < 120
+	if h.noSub {
+		// Too narrow for both: the name, as much of it as fits.
+		ss = geom.Size{}
 	}
+	ts := kids.At(0).Layout(gunim.Loose(geom.Sz(max(0, room-ss.W-14), box.H)))
+	kids.At(0).Place(geom.Pt(x, mid-ts.H/2))
+	x += ts.W + 14
+	kids.At(1).Place(geom.Pt(x, mid-ss.H/2))
 	return box
 }
 
 // Paint implements [gunim.Node].
 func (h *gridHead) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
-	for k := range kids.All {
-		k.Paint(p)
+	for i := range kids.Len() {
+		if i != 1 || !h.noSub {
+			kids.At(i).Paint(p)
+		}
 	}
 }
 
