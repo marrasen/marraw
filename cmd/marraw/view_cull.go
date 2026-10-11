@@ -363,9 +363,9 @@ const (
 // room is where the photo goes at fit: above the filmstrip, and beside
 // the develop panel as far as it has come in.
 func (v *cullView) room() geom.Rect {
-	// The photo fits the whole window, as marraw's; the panel and the
-	// filmstrip float over it, and it can be dragged clear of them.
-	return geom.Rc(0, 0, v.box.W, v.box.H).Inset(geom.Uniform(16))
+	// The photo fits the whole window, edge to edge, as marraw's; the panel
+	// and the filmstrip float over it, and it can be dragged clear of them.
+	return geom.Rc(0, 0, v.box.W, v.box.H)
 }
 
 // inPanel reports whether p is over the develop panel.

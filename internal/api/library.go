@@ -119,6 +119,16 @@ func (l *Library) OpenFolder(ctx context.Context, path string) (*FolderInfo, err
 	if err != nil {
 		return nil, aprot.ErrInvalidParams(err.Error())
 	}
+	// Capture times before the listing goes out, so the folder arrives in
+	// its shooting order and gap groups instead of re-sorting batch by
+	// batch as the metadata pass finds them. Bounded: what it leaves, the
+	// pass behind it reads.
+	quick := time.Now()
+	if n, err := l.deps.Scanner.QuickMeta(ctx, folderID, 6, 4*time.Second); err != nil {
+		log.Printf("open %s: quick metadata: %v", path, err)
+	} else if n > 0 {
+		log.Printf("open %s: read %d photos' metadata up front in %s", path, n, time.Since(quick).Round(time.Millisecond))
+	}
 	aprot.TriggerRefresh(ctx, photosKey(folderID))
 	if parent := filepath.Dir(filepath.Clean(path)); l.isParentRoot(ctx, parent) {
 		aprot.TriggerRefresh(ctx, shootsKey(parent))

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marrasen/marraw/internal/decode"
@@ -315,6 +316,82 @@ func sidecarUpdatedMs(p store.Photo) int64 {
 	return 0
 }
 
+// photoMeta is a RAW's metadata as the catalog keeps it.
+func photoMeta(md libraw.Metadata) store.PhotoMeta {
+	return store.PhotoMeta{
+		Width: md.Width, Height: md.Height, Orientation: md.Orientation,
+		Make: md.Make, Model: md.Model,
+		ISO: md.ISO, Shutter: md.Shutter, Aperture: md.Aperture,
+		FocalLen: md.FocalLen, TakenAt: md.TakenAt.Unix(),
+		Lens:   md.Lens,
+		GPSLat: sql.NullFloat64{Float64: md.Latitude, Valid: md.GPSValid},
+		GPSLon: sql.NullFloat64{Float64: md.Longitude, Valid: md.GPSValid},
+		GPSAlt: sql.NullFloat64{Float64: md.Altitude, Valid: md.AltValid},
+	}
+}
+
+// QuickMeta reads the metadata of the folder's photos that have none yet,
+// workers at a time, each with a LibRaw handle of its own, before the folder
+// is listed to the client: a header read only, a few milliseconds a file,
+// with no pixel decode. Without it the capture times arrive from Backfill a
+// batch at a time, behind queued renders, and the client re-sorts and
+// re-groups the folder with every batch. It stops at budget and leaves what
+// is left to Backfill, so a vast or slow folder still opens. It returns how
+// many photos it read.
+func (s *Scanner) QuickMeta(ctx context.Context, folderID int64, workers int, budget time.Duration) (int, error) {
+	photos, err := s.DB.PhotosNeedingMeta(ctx, folderID)
+	if err != nil || len(photos) == 0 {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	work := make(chan store.Photo)
+	var mu sync.Mutex
+	done := 0
+	var wg sync.WaitGroup
+	for range max(1, min(workers, len(photos))) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			proc, err := libraw.New()
+			if err != nil {
+				for range work {
+				}
+				return
+			}
+			defer proc.Close()
+			for ph := range work {
+				if ctx.Err() != nil {
+					continue
+				}
+				if err := proc.Open(ph.Path()); err != nil {
+					continue
+				}
+				if err := s.DB.SetMeta(ctx, ph.ID, photoMeta(proc.Metadata())); err != nil {
+					continue
+				}
+				mu.Lock()
+				done++
+				mu.Unlock()
+				// Queue the grid thumbnail, as Backfill does for the photos
+				// it reads.
+				if p2, err := s.DB.GetPhoto(ctx, ph.ID); err == nil {
+					go s.Cache.Ensure(context.WithoutCancel(ctx), p2, "512", edit.BaseHash, decode.PriorityBackground)
+				}
+			}
+		}()
+	}
+	for _, ph := range photos {
+		if ctx.Err() != nil {
+			break
+		}
+		work <- ph
+	}
+	close(work)
+	wg.Wait()
+	return done, nil
+}
+
 // MetaCount returns how many photos in the folder still need metadata.
 func (s *Scanner) MetaCount(ctx context.Context, folderID int64) (int, error) {
 	photos, err := s.DB.PhotosNeedingMeta(ctx, folderID)
@@ -359,17 +436,7 @@ func (s *Scanner) Backfill(ctx context.Context, folderID int64, onProgress func(
 			if err := proc.Open(ph.Path()); err != nil {
 				return err
 			}
-			md := proc.Metadata()
-			return s.DB.SetMeta(ctx, ph.ID, store.PhotoMeta{
-				Width: md.Width, Height: md.Height, Orientation: md.Orientation,
-				Make: md.Make, Model: md.Model,
-				ISO: md.ISO, Shutter: md.Shutter, Aperture: md.Aperture,
-				FocalLen: md.FocalLen, TakenAt: md.TakenAt.Unix(),
-				Lens:   md.Lens,
-				GPSLat: sql.NullFloat64{Float64: md.Latitude, Valid: md.GPSValid},
-				GPSLon: sql.NullFloat64{Float64: md.Longitude, Valid: md.GPSValid},
-				GPSAlt: sql.NullFloat64{Float64: md.Altitude, Valid: md.AltValid},
-			})
+			return s.DB.SetMeta(ctx, ph.ID, photoMeta(proc.Metadata()))
 		})
 		if err != nil {
 			log.Printf("scan: meta %s: %v", ph.FileName, err)
