@@ -828,9 +828,17 @@ func (cu *culler) rescan(paths []string) {
 }
 
 // railWidth keeps the sidebar's width, as its edge is let go.
+//
+// The bounds are the rail's own, which are the ones the server keeps.
+// A width that has not moved is not saved again: the sidebar reports
+// its width whenever a gesture ends on it, and saving the same number
+// over and over only risks an error about it.
 func (cu *culler) railWidth(px int) {
-	px = max(180, min(px, 480))
+	px = max(railMin, min(px, railMax))
 	if cu.ui != nil {
+		if cu.ui.RailWidth == px {
+			return
+		}
 		cu.ui.RailWidth = px
 	}
 	cu.railChanged()

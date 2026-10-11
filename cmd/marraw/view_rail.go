@@ -21,9 +21,13 @@ import (
 // railWidth is the library sidebar's width beside the grid, until the
 // user drags its edge, and railMin and railMax how narrow and wide it
 // goes.
+//
+// The two bounds are the ones the server will keep, in
+// internal/api/uisettings.go. A rail dragged outside them is refused
+// when it is saved, so they have to say the same thing.
 const (
 	railWidth        = 270
-	railMin, railMax = 180, 480
+	railMin, railMax = 180, 440
 )
 
 var (
