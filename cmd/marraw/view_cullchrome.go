@@ -208,6 +208,9 @@ func (b *confirmBar) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids 
 	}
 }
 
+// buttonGround is the dark ground under Pick and Reject.
+var buttonGround = color.NRGBA{R: 0x10, G: 0x12, B: 0x16, A: 0xd8}
+
 // tintEdge is a button with a hairline edge of its own ink, stronger when
 // it is on, as marraw's Pick and Reject.
 type tintEdge struct {
@@ -228,6 +231,9 @@ func (t *tintEdge) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 // Paint implements [gunim.Node].
 func (t *tintEdge) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
 	r := geom.Rect{Max: box.Point()}
+	// A dark ground of its own under the tint, so the button reads on a
+	// bright photo, where the glass around it turns pale.
+	p.RRect(r, 8, paint.Solid(buttonGround))
 	if t.child.Active {
 		p.RRect(r, 8, paint.Solid(withAlpha(t.ink, 0.25)))
 	}

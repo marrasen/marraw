@@ -77,8 +77,10 @@ func newModeSwitch(mode int) *modeSwitch {
 		theme.Set(widget.Accent, modeChosen),
 		theme.Set(widget.ButtonStrongInk, modeChosenInk),
 		theme.Set(widget.FieldFill, color.NRGBA{}),
-		theme.Set(widget.SegmentedHeight, 28))
-	m.node = widget.NewThemed(&glassPill{child: m.seg, radius: 10, pad: 4}, th)
+		theme.Set(widget.SegmentedHeight, 32))
+	// Alone in its place, it needs no panel round it: its own track is
+	// the glass.
+	m.node = frosted(m.seg, th)
 	return m
 }
 

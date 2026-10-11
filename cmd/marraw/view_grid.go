@@ -388,7 +388,9 @@ func (v *gridView) newTile(i int) gunim.Node {
 
 // Children implements [gunim.Composite].
 func (v *gridView) Children() []gunim.Node {
-	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.errors, v.selGate, v.asideGate, v.status, v.band}
+	// The cards come last, over the info panel and the rest, so a click
+	// on one reaches it wherever it lies.
+	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.selGate, v.asideGate, v.status, v.band, v.errors}
 }
 
 // asideIn shows the info panel, or puts it away.
@@ -423,6 +425,14 @@ func (v *gridView) libInfoIn(l LibInfo, u *gunim.UI) {
 		v.aside.info.show(l, u)
 	}
 	u.Invalidate()
+}
+
+// libMarksIn takes a photo's rating and flag, changed: the info panel
+// shows them at once where it shows that photo.
+func (v *gridView) libMarksIn(m LibMarks, u *gunim.UI) {
+	if v.aside.has && v.aside.info.st.ID == m.ID {
+		v.aside.info.showMarks(m.Rating, m.Flag, false, u)
+	}
 }
 
 // coveredIn says whether the cull view covers the grid: the band then
@@ -601,15 +611,15 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	empty := kids.At(5)
 	es := empty.Layout(gunim.Loose(geom.Sz(w, 40)))
 	empty.Place(geom.Pt(railWidth+w/2-es.W/2, gridTop+top+80))
-	kids.At(6).Layout(gunim.Tight(box))
-	kids.At(6).Place(geom.Point{})
-	sel := kids.At(7)
+	kids.At(10).Layout(gunim.Tight(box))
+	kids.At(10).Place(geom.Point{})
+	sel := kids.At(6)
 	sel.Layout(gunim.Tight(geom.Sz(w, barHeight)))
 	sel.Place(geom.Pt(railWidth, gridHeadHeight+top))
-	aside := kids.At(8)
+	aside := kids.At(7)
 	aside.Layout(gunim.Tight(geom.Sz(asideW, max(0, box.H-gridTop-top-statusH))))
 	aside.Place(geom.Pt(box.W-aw, gridTop+top))
-	st := kids.At(9)
+	st := kids.At(8)
 	st.Layout(gunim.Tight(geom.Sz(w, statusH)))
 	st.Place(geom.Pt(railWidth, box.H-statusH))
 	// The cards in the window's lower right corner, as marraw's toasts,
@@ -623,7 +633,7 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	for _, h := range v.head.holes {
 		v.band.holes = append(v.band.holes, h.Add(geom.Pt(railWidth, 0)))
 	}
-	band := kids.At(10)
+	band := kids.At(9)
 	band.Layout(gunim.Tight(geom.Sz(box.W, gridHeadHeight)))
 	band.Place(geom.Pt(0, top))
 	return box
@@ -658,7 +668,7 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 		func() {
 			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(max(k, 0), 1)})()
 			defer p.Push(paint.Translate(geom.Pt(0, 6*(1-k))))()
-			kids.At(7).Paint(p)
+			kids.At(6).Paint(p)
 		}()
 	}
 	kids.At(2).Paint(p)
@@ -672,11 +682,11 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 		}()
 	}
 	if v.asideIn.Value() > 0.01 {
-		kids.At(8).Paint(p)
+		kids.At(7).Paint(p)
 	}
+	kids.At(8).Paint(p)
 	kids.At(9).Paint(p)
 	kids.At(10).Paint(p)
-	kids.At(6).Paint(p)
 }
 
 // photoTile is one photo in the grid: its picture, fitted, as a hero, and

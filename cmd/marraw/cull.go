@@ -1482,6 +1482,7 @@ func (cu *culler) targets() []int {
 func (cu *culler) marked(i int) {
 	p := cu.photos[i]
 	_ = cu.c.Patch("grid", PhotoMarked{Folder: cu.folder, Index: i, Rating: p.Rating, Flag: string(p.Flag)})
+	_ = cu.c.Patch("grid", LibMarks{ID: p.ID, Rating: p.Rating, Flag: string(p.Flag)})
 	if cu.culling && i >= cu.at-stripReach && i <= cu.at+stripReach {
 		cu.showCull()
 	}
@@ -1542,6 +1543,7 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 			}
 			if pp.Rating != nil || pp.Flag != nil {
 				_ = cu.c.Patch("grid", PhotoMarked{Folder: cu.folder, Index: i, Rating: p.Rating, Flag: string(p.Flag)})
+				_ = cu.c.Patch("grid", LibMarks{ID: p.ID, Rating: p.Rating, Flag: string(p.Flag)})
 			}
 			if pp.EditHash != nil && cu.dev.saved[p.ID] {
 				// The panel's own save, whose pixels show already: the

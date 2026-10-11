@@ -296,7 +296,7 @@ func newGridBar(g *gridView) *gridBar {
 	// Short of room only the flags squeeze; the stars go once they can
 	// squeeze no more, and the rest keep their width.
 	b.starBox = &hideable{child: b.stars}
-	b.flagBox = &measured{child: b.flags}
+	b.flagBox = &measured{child: frosted(b.flags, marrawTheme())}
 	left := widget.Row(&rigid{child: b.railBtn}, &rigid{child: b.sorts}, b.flagBox, &rigid{child: b.starBox}, &rigid{child: aids})
 	left.Cross = widget.CrossCenter
 	right := widget.Row(b.gapCtl, spacerW(4), b.sizeBox, b.panelBtn)
@@ -350,6 +350,9 @@ type sortButtons struct {
 	// nought up, one down.
 	at, turn *anim.Float
 	hot      int
+	// glow is how far each button has lit under the pointer, fading in
+	// and out as the switchers' labels do.
+	glow [2]*anim.Float
 	// way is each order's way as last used: true for newest or Z first.
 	way    [2]bool
 	widths [2]float32
@@ -359,8 +362,9 @@ type sortButtons struct {
 
 func newSortButtons() *sortButtons {
 	s := &sortButtons{at: anim.NewFloat(0), turn: anim.NewFloat(0), hot: -1,
-		labels: [2]*widget.Label{widget.NewLabel("Time"), widget.NewLabel("Name")}}
-	s.Add(s.at, s.turn)
+		labels: [2]*widget.Label{widget.NewLabel("Time"), widget.NewLabel("Name")},
+		glow:   [2]*anim.Float{anim.NewFloat(0), anim.NewFloat(0)}}
+	s.Add(s.at, s.turn, s.glow[0], s.glow[1])
 	return s
 }
 
@@ -435,16 +439,31 @@ func (s *sortButtons) Layout(_ gunim.Constraints, _ gunim.Frame, kids gunim.Chil
 	return geom.Sz(s.widths[0]+s.widths[1], sortH)
 }
 
+// setHot lights button i under the pointer, or none for -1: quickly in,
+// more slowly out.
+func (s *sortButtons) setHot(i int, u *gunim.UI) {
+	if i == s.hot {
+		return
+	}
+	s.hot = i
+	for j, g := range s.glow {
+		if j == i {
+			g.Animate(1, widget.Quick.Get(u.Theme()))
+		} else {
+			g.Animate(0, widget.Settle.Get(u.Theme()))
+		}
+	}
+	u.Invalidate()
+}
+
 // Handle implements [gunim.Handler].
 func (s *sortButtons) Handle(e input.Event, u *gunim.UI) bool {
 	switch e := e.(type) {
 	case input.PointerMove:
-		s.hot = s.button(e.Pos.X)
-		u.Invalidate()
+		s.setHot(s.button(e.Pos.X), u)
 		return true
 	case input.PointerLeave:
-		s.hot = -1
-		u.Invalidate()
+		s.setHot(-1, u)
 	case input.PointerDown:
 		i := s.button(e.Pos.X)
 		if e.Button != input.ButtonPrimary || i < 0 || s.onSort == nil {
@@ -465,7 +484,7 @@ func (s *sortButtons) Handle(e input.Event, u *gunim.UI) bool {
 // Paint implements [gunim.Node].
 func (s *sortButtons) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
 	th := f.Theme
-	p.RRect(geom.Rect{Max: box.Point()}, box.H/2, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x0c}))
+	paintFrostedTrack(p, geom.Rect{Max: box.Point()})
 	at := s.at.Value()
 	x := at * s.widths[0]
 	w := s.widths[0] + (s.widths[1]-s.widths[0])*at
@@ -475,7 +494,7 @@ func (s *sortButtons) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids
 		lit := 1 - min(float32(math.Abs(float64(at-float32(i)))), 1)
 		k := kids.At(i)
 		func() {
-			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: 0.6 + 0.4*max(lit, on(s.hot == i)*0.5)})()
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: 0.6 + 0.4*max(lit, s.glow[i].Value()*0.5)})()
 			k.Paint(p)
 		}()
 		ink := widget.Ink.Get(th)

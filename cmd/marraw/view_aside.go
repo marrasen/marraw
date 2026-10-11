@@ -5,8 +5,10 @@ import (
 	"image/color"
 
 	"github.com/marrasen/gunim"
+	"github.com/marrasen/gunim/anim"
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/icon"
+	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
 	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
@@ -28,6 +30,13 @@ type (
 		Info    PhotoInfo
 		Hist    [3][256]uint32
 		HasHist bool
+	}
+	// LibMarks is the rating and the flag of photo ID, changed, for the
+	// info panel to show at once.
+	LibMarks struct {
+		ID     int64
+		Rating int
+		Flag   string
 	}
 	// AsideToggle puts the library's info panel away, or brings it back.
 	AsideToggle struct{}
@@ -97,8 +106,7 @@ type libInfo struct {
 	st    LibInfo
 	name  *widget.Label
 	exif  *widget.Label
-	pick  *widget.Button
-	rej   *widget.Button
+	flags *flagSquares
 	stars []*widget.IconButton
 	hist  *widget.Histogram
 	rows  *infoRows
@@ -109,11 +117,7 @@ func newLibInfo() *libInfo {
 	l := &libInfo{name: widget.NewLabel(""), exif: newSmallLabel(""), hist: widget.NewHistogram(), rows: newInfoRows()}
 	l.name.Face, l.name.MaxLines = widget.MonoFont, 1
 	l.exif.Face, l.exif.Color, l.exif.MaxLines = widget.MonoFont, noteInk, 2
-	l.pick, l.rej = widget.NewButton("P"), widget.NewButton("X")
-	l.pick.Tooltip, l.rej.Tooltip = "Pick (P)", "Reject (X)"
-	l.pick.KeepFocus, l.rej.KeepFocus = true, true
-	l.pick.OnClick = func(*gunim.UI) gunim.Intent { return Mark{Flag: "pick", ID: l.st.ID} }
-	l.rej.OnClick = func(*gunim.UI) gunim.Intent { return Mark{Flag: "exclude", ID: l.st.ID} }
+	l.flags = newFlagSquares(func() int64 { return l.st.ID })
 	var stars []gunim.Node
 	for n := 1; n <= 5; n++ {
 		s := widget.NewIconButton(icon.Star, fmt.Sprintf("Rate %d", n))
@@ -123,7 +127,7 @@ func newLibInfo() *libInfo {
 		stars = append(stars, s)
 	}
 	small := marrawTheme().With(theme.Set(widget.ButtonHeight, 24), theme.Set(widget.ButtonPadding, 8), theme.Set(widget.TextSize, 11))
-	flags := widget.NewThemed(&hflow{items: []gunim.Node{&edged{child: l.pick}, &edged{child: l.rej}}, gap: 6}, glassTheme(small))
+	flags := l.flags
 	starRow := widget.NewThemed(&hflow{items: stars, gap: 0}, small.With(theme.Set(widget.IconSize, 15)))
 	head := &asideHead{name: l.name, flags: flags, stars: starRow, exif: l.exif}
 	locate, copyAll := widget.NewButton("Locate on disk"), widget.NewButton("Copy")
@@ -153,14 +157,10 @@ func newLibInfo() *libInfo {
 
 // show takes the photo s.
 func (l *libInfo) show(s LibInfo, u *gunim.UI) {
+	same := s.ID == l.st.ID
 	l.st = s
 	l.name.Text, l.exif.Text = s.Name, s.Exif
-	l.pick.Active, l.rej.Active = s.Flag == "pick", s.Flag == "exclude"
-	for i, st := range l.stars {
-		lit := i < s.Rating
-		st.Icon = map[bool]*icon.Icon{false: icon.Star, true: starLit}[lit]
-		st.Ink = map[bool]theme.Token[color.NRGBA]{false: noteInk, true: selStarInk}[lit]
-	}
+	l.showMarks(s.Rating, s.Flag, !same, u)
 	l.rows.show(s.Info)
 	if s.HasHist {
 		l.hist.SetCounts(s.Hist, u)
@@ -168,8 +168,92 @@ func (l *libInfo) show(s LibInfo, u *gunim.UI) {
 	u.Invalidate()
 }
 
+// showMarks shows the photo's rating and flag: at once for another photo,
+// and animated, as the Develop panel's, for one marked here or anywhere.
+func (l *libInfo) showMarks(rating int, flag string, jump bool, u *gunim.UI) {
+	l.st.Rating, l.st.Flag = rating, flag
+	for i, st := range l.stars {
+		lit := i < rating
+		st.Icon = map[bool]*icon.Icon{false: icon.Star, true: starLit}[lit]
+		st.Ink = map[bool]theme.Token[color.NRGBA]{false: noteInk, true: selStarInk}[lit]
+	}
+	if jump || u == nil {
+		l.flags.marks.jump(rating, flag)
+	} else {
+		l.flags.marks.set(rating, flag, u.Theme())
+	}
+	if u != nil {
+		u.Invalidate()
+	}
+}
+
 // Children implements [gunim.Composite].
 func (l *libInfo) Children() []gunim.Node { return []gunim.Node{l.body} }
+
+// flagSquares are a photo's pick flag and reject cross in their squares,
+// as the Develop panel's header has them: a click sets one, or takes it
+// off again, and it pops in, drawing itself on.
+type flagSquares struct {
+	anim.Group
+	marks *marks
+	id    func() int64
+}
+
+func newFlagSquares(id func() int64) *flagSquares {
+	f := &flagSquares{id: id}
+	f.marks = newMarks(&f.Group, 0, "")
+	return f
+}
+
+// place is where the flags are in the squares.
+func (f *flagSquares) place() markPlace {
+	return markPlace{pick: geom.Pt(12, 12), reject: geom.Pt(12+24+6, 12), flag: 14}
+}
+
+// Layout implements [gunim.Node].
+func (f *flagSquares) Layout(gunim.Constraints, gunim.Frame, gunim.Children) geom.Size {
+	return geom.Sz(24+6+24, 24)
+}
+
+// Paint implements [gunim.Node].
+func (f *flagSquares) Paint(p *paint.Painter, fr gunim.Frame, _ geom.Size, _ gunim.Children) {
+	mp := f.place()
+	for _, sq := range []struct {
+		at  geom.Point
+		set float32
+		ink color.NRGBA
+	}{{mp.pick, f.marks.pick.Value(), pickInk}, {mp.reject, f.marks.reject.Value(), rejectInk}} {
+		r := geom.Rc(sq.at.X-12, sq.at.Y-12, 24, 24)
+		p.RRect(r, 6, paint.Solid(withAlpha(sq.ink, 0.15*sq.set)))
+		edge := anim.Mix(anim.ColorCodec, panelLine, withAlpha(sq.ink, 0.45), min(sq.set, 1))
+		p.RRectStroke(r.Inset(geom.Uniform(0.5)), 5.5, paint.Fill{}, paint.Stroke{Width: 1, Color: edge})
+	}
+	f.marks.paintFlags(p, fr.Theme, mp, true)
+}
+
+// Handle implements [gunim.Handler].
+func (f *flagSquares) Handle(e input.Event, u *gunim.UI) bool {
+	switch e := e.(type) {
+	case input.PointerEnter:
+		f.marks.hover(e.Pos, true, f.place(), u.Theme())
+		u.Invalidate()
+	case input.PointerMove:
+		f.marks.hover(e.Pos, true, f.place(), u.Theme())
+		u.Invalidate()
+	case input.PointerLeave:
+		f.marks.hover(geom.Point{}, false, f.place(), u.Theme())
+		u.Invalidate()
+	case input.PointerDown:
+		if e.Button != input.ButtonPrimary {
+			return false
+		}
+		if fl := f.place().flagAt(e.Pos); fl != "" && f.id() != 0 {
+			u.Send(f, Mark{Flag: fl, ID: f.id()})
+			return true
+		}
+	}
+	return false
+}
 
 // Layout implements [gunim.Node].
 func (l *libInfo) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {

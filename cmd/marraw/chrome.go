@@ -378,3 +378,37 @@ func (j *jumpButton) Handle(e input.Event, u *gunim.UI) bool {
 
 // spacerW is room w wide in a row.
 func spacerW(w float32) gunim.Node { return &fixedWidth{w: w, child: widget.NewSpacer()} }
+
+// frostedTrack is a segmented control on a track of frosted glass of its
+// own, with no panel round it: the glass blurs what lies behind, a photo
+// or the window's ground, and a hairline edges it.
+type frostedTrack struct{ child gunim.Node }
+
+// frosted is seg on a frosted track, in th with the control's own track
+// left clear.
+func frosted(seg gunim.Node, th theme.Theme) gunim.Node {
+	return widget.NewThemed(&frostedTrack{child: seg}, th.With(theme.Set(widget.SegmentedTrack, color.NRGBA{})))
+}
+
+// Children implements [gunim.Composite].
+func (t *frostedTrack) Children() []gunim.Node { return []gunim.Node{t.child} }
+
+// Layout implements [gunim.Node].
+func (t *frostedTrack) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	s := kids.At(0).Layout(c)
+	kids.At(0).Place(geom.Point{})
+	return s
+}
+
+// Paint implements [gunim.Node].
+func (t *frostedTrack) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
+	paintFrostedTrack(p, geom.Rect{Max: box.Point()})
+	kids.At(0).Paint(p)
+}
+
+// paintFrostedTrack draws a pill-shaped track of frosted glass in r.
+func paintFrostedTrack(p *paint.Painter, r geom.Rect) {
+	radius := r.Size().H / 2
+	paintGlass(p, r, radius)
+	p.RRectStroke(r.Inset(geom.Uniform(0.5)), radius-0.5, paint.Fill{}, paint.Stroke{Width: 1, Color: frost(0x1c)})
+}
