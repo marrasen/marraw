@@ -197,11 +197,11 @@ func run(o options) error {
 	log.Printf("marraw: build %s; %d photos in %q, backend at %s", build(), len(photos), path, host)
 
 	err = gunim.Main(ctx, func(a *gunim.App) error {
-		var place *driver.Placement
+		var keep string
 		if o.place {
-			place = savedPlace()
+			keep = placeFile()
 		}
-		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: parseSize(o.size), Place: place, Root: newFullSurface(),
+		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: parseSize(o.size), PlaceFile: keep, Root: newFullSurface(),
 			Icons: appIcons(), TitleBar: bareTitleBar{},
 			// The photo runs under the title bar, as in marraw.
 			UnderTitleBar: true})
@@ -209,9 +209,6 @@ func run(o options) error {
 			return err
 		}
 		registerViews(w)
-		if o.place {
-			go keepPlace(ctx, w.Placement)
-		}
 		c := w.Client()
 		cu := newCuller(ctx, c, api, newImages("http://"+host, token), info.FolderID, path, photos)
 		cu.viewer.app = a
