@@ -143,7 +143,8 @@ func (v *gridView) show(s GridState, u *gunim.UI) {
 	lastGrid = s
 	v.bar.set(s.View, u)
 	v.bar.setOff(s.Off, u)
-	v.setCrop(s.Crop, u)
+	v.setCrop(s.Crop || s.Natural, u)
+	v.setNatural(s.Natural, u)
 	v.batch.set(max(v.selN, 0), s.Presets, u)
 	v.setAside(s.Aside, u)
 	v.status.set(s.Path, len(s.Photos), s.Total, v.selN)
@@ -324,6 +325,10 @@ func (v *gridView) photoAspect(a PhotoAspect, u *gunim.UI) {
 	v.st.Photos[a.Index].Aspect = a.Aspect
 	if t := v.tiles[a.Index]; t != nil {
 		t.aspect.Animate(a.Aspect, widget.Quick.Get(u.Theme()))
+	}
+	if v.grid.Aspect != nil {
+		// Its shape is its tile's: the rows find their places anew.
+		v.grid.Reshape(u)
 	}
 	u.Invalidate()
 }
@@ -745,7 +750,14 @@ func (t *photoTile) setAids(a Aids, u *gunim.UI) {
 // left of the band under the picture, and the flags at the right.
 func tilePlace(box geom.Size) markPlace {
 	y := box.H - captionHeight/2 - 6
-	return markPlace{stars: geom.Pt(10, y), star: 12, gap: 3, pick: geom.Pt(box.W-38, y), reject: geom.Pt(box.W-16, y), flag: 13}
+	// A narrow tile, as a portrait in Natural rows, gets smaller stars,
+	// so they keep clear of the flags at its right.
+	star, gap := float32(12), float32(3)
+	if room := box.W - 10 - 48; room < 5*star+4*gap {
+		gap = 2
+		star = max(7, (room-4*gap)/5)
+	}
+	return markPlace{stars: geom.Pt(10, y), star: star, gap: gap, pick: geom.Pt(box.W-38, y), reject: geom.Pt(box.W-16, y), flag: 13}
 }
 
 // Handle implements [gunim.Handler]: the pointer over the marks shows what
@@ -1061,6 +1073,27 @@ func (v *gridView) setCrop(crop bool, u *gunim.UI) {
 			t.cropK.Animate(on(crop), widget.Settle.Get(u.Theme()))
 		}
 	}
+	u.Invalidate()
+}
+
+// setNatural lays the tiles out in rows of their own shapes, as
+// marraw's Natural thumbnails, or back in a grid of cells.
+func (v *gridView) setNatural(on bool, u *gunim.UI) {
+	if on == (v.grid.Aspect != nil) {
+		return
+	}
+	if on {
+		v.grid.Caption = captionHeight + 14
+		v.grid.Aspect = func(i int) float32 {
+			if i < 0 || i >= len(v.st.Photos) {
+				return 0
+			}
+			return v.st.Photos[i].Aspect
+		}
+	} else {
+		v.grid.Aspect = nil
+	}
+	v.grid.Reshape(u)
 	u.Invalidate()
 }
 

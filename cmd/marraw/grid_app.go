@@ -29,6 +29,8 @@ type (
 		// says the tiles fill their cells, cropped.
 		Off  map[string]bool
 		Crop bool
+		// Natural lays the tiles out in rows of their own shapes.
+		Natural bool
 		// Presets are the presets the batch card can lay over a
 		// selection.
 		Presets []PresetCard
@@ -101,6 +103,7 @@ func (cu *culler) gridState() GridState {
 	st.Groups = gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)
 	st.Off = cu.featuresOff()
 	st.Crop = cu.ui != nil && cu.ui.ThumbFit == "crop"
+	st.Natural = cu.ui != nil && cu.ui.ThumbFit == "natural"
 	st.Presets = cu.presetCards()
 	st.Path = cu.folderPath
 	st.Aside = cu.ui == nil || !cu.ui.EditPanelHidden

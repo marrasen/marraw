@@ -310,27 +310,32 @@ var settingsPagePad = theme.Insets("marraw.settings.pad", geom.Insets{Left: 16, 
 
 // --- General
 
+// thumbFits are the ways the grid can frame its pictures, as marraw's
+// settings name them.
+var thumbFits = []string{"crop", "fit", "natural"}
+
 type generalPage struct {
 	n   gunim.Node
 	fit *widget.Segmented
 }
 
 func newGeneralPage() *generalPage {
-	p := &generalPage{fit: widget.NewSegmented("Crop", "Fit")}
+	p := &generalPage{fit: widget.NewSegmented("Crop", "Fit", "Natural")}
 	p.fit.KeepFocus = true
 	p.fit.OnChange = func(i int, _ *gunim.UI) gunim.Intent {
-		return SettingSet{Key: "thumbFit", Value: map[int]string{0: "crop", 1: "fit"}[i]}
+		return SettingSet{Key: "thumbFit", Value: thumbFits[max(0, i)]}
 	}
 	p.n = settingsScroll(newSettingRow("Thumbnails",
-		"Crop fills each cell, the pictures cropped to it. Fit shows the whole frame in its cell.", glassSegmented(p.fit)))
+		"Crop fills each cell, the pictures cropped to it. Fit shows the whole frame in its cell. Natural gives each frame its own shape, in rows that fill the width.",
+		glassSegmented(p.fit)))
 	return p
 }
 
 func (p *generalPage) node() gunim.Node { return p.n }
 func (p *generalPage) show(s SettingsState, u *gunim.UI) {
-	i := 1
-	if s.ThumbFit == "crop" {
-		i = 0
+	i := slices.Index(thumbFits, s.ThumbFit)
+	if i < 0 {
+		i = 1
 	}
 	p.fit.SetSelected(i, u)
 }

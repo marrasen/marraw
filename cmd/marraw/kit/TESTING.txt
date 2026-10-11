@@ -5,6 +5,15 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - Thumbnails: Natural is back (Settings, General, beside Crop and
+    Fit): each photo at its own shape, in rows that fill the width; the
+    last row of a group keeps its height. Up and Down go to the nearest
+    photo in the row above or below.
+  - The tiles' size slider is back in the filter bar, with the width in
+    pixels; it goes only when the bar has no room for it.
+  - Ctrl+K and the other keys keep working after a click on the
+    sidebar's empty space.
+  - gunim's latest text spacing (fractions of a pixel).
   - marraw's own chrome, as the Electron app's: no title bar. Along the
     top, the mode switcher (Library, Cull, Develop, Export) in the middle,
     and the window's buttons in a pill at the right. Drag the empty band
