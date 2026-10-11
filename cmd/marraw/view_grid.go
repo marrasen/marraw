@@ -132,6 +132,7 @@ func newGridView(GridState) *gridView {
 		w := v.grid.Size.W * float32(math.Pow(1.15, float64(notches)))
 		v.grid.Size = cellSize(max(tileMin, min(w, tileMax)))
 		v.bar.size.SetValue(v.grid.Size.W, u)
+		v.bar.showSize(v.grid.Size.W)
 		u.Invalidate()
 		return nil
 	}
@@ -469,6 +470,16 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 	case input.FocusGained:
 		u.After(0, func(u *gunim.UI) { u.Focus(v.grid) })
 		return true
+	case input.PointerDown:
+		// A press on nothing that takes the keyboard, as the sidebar's
+		// empty space, leaves the keyboard with the grid, so its keys,
+		// as Ctrl+K, go on working.
+		u.After(0, func(u *gunim.UI) {
+			if f := u.Focused(); f == nil || f == gunim.Node(v) {
+				u.Focus(v.grid)
+			}
+		})
+		return false
 	case input.KeyPress:
 		// Ctrl and C copies the edit of the photo the keyboard is on, and
 		// Ctrl and V pastes it on the photos selected.

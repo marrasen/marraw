@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
 	"math"
 
@@ -51,10 +52,50 @@ type gridBar struct {
 	railBtn    *widget.IconButton
 	railHidden bool
 	// gapCtl groups the photos by the time between them, and panelBtn
-	// puts the info panel away or brings it back.
+	// puts the info panel away or brings it back. sizeBox holds the
+	// tiles' size slider and sizeN its width in pixels.
 	gapCtl   *gapControl
 	panelBtn *widget.IconButton
+	sizeBox  *hideable
+	sizeN    *widget.Label
+	right    gunim.Node
 }
+
+// barRow is the bar's controls: the filters at the left, the gap, the
+// tiles' size and the info panel's button at the right; the size goes
+// when the two would meet.
+type barRow struct {
+	left, right gunim.Node
+	bar         *gridBar
+}
+
+// Children implements [gunim.Composite].
+func (r *barRow) Children() []gunim.Node { return []gunim.Node{r.left, r.right} }
+
+// Layout implements [gunim.Node].
+func (r *barRow) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	w := c.Max.W
+	ls := kids.At(0).Layout(gunim.Loose(geom.Sz(w, c.Max.H)))
+	r.bar.sizeBox.hidden = false
+	rs := kids.At(1).Layout(gunim.Loose(geom.Sz(w, c.Max.H)))
+	if ls.W+16+rs.W > w {
+		r.bar.sizeBox.hidden = true
+		rs = kids.At(1).Layout(gunim.Loose(geom.Sz(w, c.Max.H)))
+	}
+	h := max(ls.H, rs.H)
+	kids.At(0).Place(geom.Pt(0, (h-ls.H)/2))
+	kids.At(1).Place(geom.Pt(w-rs.W, (h-rs.H)/2))
+	return geom.Sz(w, h)
+}
+
+// Paint implements [gunim.Node].
+func (r *barRow) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
+	kids.At(1).Paint(p)
+}
+
+// showSize says the tiles' width in pixels.
+func (b *gridBar) showSize(w float32) { b.sizeN.Text = fmt.Sprintf("%.0fpx", w) }
 
 // setAside shows whether the info panel is out.
 func (b *gridBar) setAside(on bool, u *gunim.UI) {
@@ -131,8 +172,12 @@ func newGridBar(g *gridView) *gridBar {
 	// The tiles' size is the window's own: they spring to it.
 	b.size.KeepFocus = true
 	b.size.SetValue(200, nil)
+	b.sizeN = newSmallLabel("")
+	b.showSize(200)
+	b.size.Snap = 10
 	b.size.OnChange = func(x float32, u *gunim.UI) gunim.Intent {
 		g.grid.Size = cellSize(x)
+		b.showSize(x)
 		u.Invalidate()
 		return nil
 	}
@@ -166,7 +211,6 @@ func newGridBar(g *gridView) *gridBar {
 	aids := widget.Row(wrap(b.soft, "softFilter"), wrap(b.blinks, "eyes"), wrap(b.bursts, "bursts"), &divider{},
 		wrap(b.judge, "bursts"), wrap(b.eyes, "eyes"), wrap(b.subjects, "subjects"))
 	aids.Cross = widget.CrossCenter
-	sp := widget.NewSpacer()
 	b.railBtn = widget.NewIconButton(icon.PanelLeft, "Hide the library")
 	b.railBtn.KeepFocus = true
 	b.railBtn.OnClick = func(*gunim.UI) gunim.Intent { return RailHide{Hidden: !b.railHidden} }
@@ -174,8 +218,18 @@ func newGridBar(g *gridView) *gridBar {
 	b.panelBtn = widget.NewIconButton(icon.PanelRight, "Hide the info panel")
 	b.panelBtn.KeepFocus, b.panelBtn.Active = true, true
 	b.panelBtn.OnClick = widget.Sends(AsideToggle{})
-	row := widget.Row(b.railBtn, b.sorts, b.flags, b.stars, aids, sp, b.gapCtl, spacerW(6), b.panelBtn).Grow(sp, 1)
-	row.Cross = widget.CrossCenter
+	// The tiles' size, as marraw's: a slider and its width in pixels,
+	// put away when the bar has no room for it.
+	b.sizeN.Face, b.sizeN.Color, b.sizeN.NoWrap = widget.MonoFont, noteInk, true
+	sizeRow := widget.Row(&fixedWidth{w: 96, child: b.size}, &fixedWidth{w: 44, child: b.sizeN})
+	sizeRow.Cross = widget.CrossCenter
+	b.sizeBox = &hideable{child: sizeRow}
+	left := widget.Row(b.railBtn, b.sorts, b.flags, b.stars, aids)
+	left.Cross = widget.CrossCenter
+	right := widget.Row(b.gapCtl, spacerW(4), b.sizeBox, b.panelBtn)
+	right.Cross = widget.CrossCenter
+	b.right = right
+	row := &barRow{left: left, right: right, bar: b}
 	b.row = row
 	return b
 }
@@ -201,7 +255,7 @@ func (b *gridBar) Children() []gunim.Node { return []gunim.Node{b.row} }
 // Layout implements [gunim.Node].
 func (b *gridBar) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	k := kids.At(0)
-	s := k.Layout(gunim.Constraints{Max: geom.Sz(c.Max.W-36, barHeight)})
+	s := k.Layout(gunim.Constraints{Min: geom.Sz(c.Max.W-36, 0), Max: geom.Sz(c.Max.W-36, barHeight)})
 	k.Place(geom.Pt(20, (barHeight-s.H)/2))
 	return geom.Sz(c.Max.W, barHeight)
 }
