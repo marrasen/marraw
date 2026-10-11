@@ -54,8 +54,44 @@ func installApp() install.App {
 		Space:       1820 << 20, // every AI model, if all are fetched; the preview cache has a limit of its own
 		Updates:     gunimReleases{Repo: "marrasen/marraw"},
 		UpdateKey:   updateKey,
-		Data:        []string{defaultDataDir()},
+		Updated: func(r install.Release) {
+			if f := updateReady; f != nil {
+				f(r)
+			}
+		},
+		Data: []string{defaultDataDir()},
 	}
+}
+
+// updateReady, when set, hears of a release put in place for the next
+// start, to tell the user.
+var updateReady func(install.Release)
+
+// restartMark is the path of a note's action that restarts into the
+// release put in place.
+const restartMark = "restart:"
+
+// tellUpdates shows a card when a release is put in place for the next
+// start, with Restart now, and, on the first start of one, which release
+// it replaced.
+func (cu *culler) tellUpdates() {
+	updateReady = func(r install.Release) {
+		cu.onDo(func() {
+			cu.done("marraw "+r.Version+" is ready", "It takes over the next time marraw starts.", "Restart now", restartMark)
+		})
+	}
+	if from := install.UpdatedFrom(); from != "" {
+		cu.done("Updated to marraw "+version, "From "+from+".", "", "")
+	}
+}
+
+// restartIntoUpdate starts the release put in place and ends this copy.
+func (cu *culler) restartIntoUpdate() {
+	if err := install.Restart(installApp()); err != nil {
+		cu.fail("marraw could not restart", err)
+		return
+	}
+	cu.c.Leave()
 }
 
 // defaultDataDir is where a release build keeps its catalog and caches:

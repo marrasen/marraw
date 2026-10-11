@@ -240,7 +240,7 @@ func newErrCard(e ErrorNote) *errCard {
 	c.close.OnClick = func(*gunim.UI) gunim.Intent { return ErrClear{ID: id} }
 	small := marrawTheme().With(theme.Set(widget.ButtonHeight, 22), theme.Set(widget.IconSize, 13))
 	c.action = widget.NewButton(e.Action)
-	c.action.Icon, c.action.KeepFocus = icon.FolderOpen, true
+	c.action.Icon, c.action.KeepFocus = actionIcon(e), true
 	c.action.OnClick = func(*gunim.UI) gunim.Intent { return ErrAction{ID: id} }
 	act := widget.NewThemed(&edged{child: c.action}, glassTheme(marrawTheme().With(theme.Set(widget.ButtonHeight, 26),
 		theme.Set(widget.ButtonPadding, 10), theme.Set(widget.ButtonRadius, 7), theme.Set(widget.TextSize, 12))))
@@ -253,11 +253,19 @@ func newErrCard(e ErrorNote) *errCard {
 func (c *errCard) show(e ErrorNote) {
 	c.e = e
 	c.title.Text, c.detail.Text = e.Text, e.Detail
-	c.action.Label = e.Action
+	c.action.Label, c.action.Icon = e.Action, actionIcon(e)
 	c.count.Text = ""
 	if e.Count > 1 {
 		c.count.Text = fmt.Sprintf("×%d", e.Count)
 	}
+}
+
+// actionIcon is the icon of a note's button: a restart's, or a folder's.
+func actionIcon(e ErrorNote) *icon.Icon {
+	if e.Path == restartMark {
+		return icon.RefreshCw
+	}
+	return icon.FolderOpen
 }
 
 // height is the card's height at its width, from its last layout.

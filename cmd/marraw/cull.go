@@ -383,6 +383,7 @@ func (cu *culler) serve() error {
 	}()
 	cu.followLibrary()
 	cu.watchColour()
+	cu.tellUpdates()
 	for {
 		// The pop-out viewer follows the photo in hand.
 		cu.viewerTick()

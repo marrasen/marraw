@@ -45,6 +45,11 @@ func (cu *culler) done(what, detail, action, path string) {
 // errAction opens what the note's button names, and clears the note.
 func (cu *culler) errAction(id int) {
 	for _, e := range cu.errs {
+		if e.ID == id && e.Path == restartMark {
+			cu.clearError(ErrClear{ID: id})
+			cu.restartIntoUpdate()
+			return
+		}
 		if e.ID == id && e.Path != "" {
 			path := e.Path
 			go func() {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/geom"
+	"github.com/marrasen/gunim/install"
 	"github.com/marrasen/gunim/paint"
 	"github.com/marrasen/gunim/widget"
 )
@@ -26,7 +27,7 @@ type statusBar struct {
 
 func newStatusBar() *statusBar {
 	s := &statusBar{path: newSmallLabel(""), shown: newSmallLabel(""), sel: newSmallLabel(""),
-		build: newSmallLabel("build " + build()), state: newSmallLabel("backend connected"), colour: newSmallLabel("")}
+		build: newSmallLabel(buildName()), state: newSmallLabel("backend connected"), colour: newSmallLabel("")}
 	for _, l := range []*widget.Label{s.path, s.shown, s.sel, s.build, s.state, s.colour} {
 		l.Face, l.Color, l.NoWrap, l.MaxLines = widget.MonoFont, noteInk, true, 1
 	}
@@ -99,4 +100,13 @@ func (s *statusBar) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids g
 	// The backend's state, a dot before its words.
 	st := kids.At(7)
 	p.RRect(geom.Rc(st.Size().W*0+box.W-16-st.Size().W-12, box.H/2-3, 6, 6), 3, paint.Solid(doneInk))
+}
+
+// buildName is what the status bar calls this build: its version, for a
+// release, or its commit.
+func buildName() string {
+	if install.IsRelease(version) {
+		return "marraw " + version
+	}
+	return "build " + build()
 }
