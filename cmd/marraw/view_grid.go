@@ -68,6 +68,8 @@ type gridView struct {
 	// to rwTo.
 	rw   *anim.Float
 	rwTo float32
+	// dim fades the tiles while another shoot opens.
+	dim *anim.Float
 }
 
 const (
@@ -90,6 +92,7 @@ func newGridView(GridState) *gridView {
 	v.empty.Color = noteInk
 	v.bar = newGridBar(v)
 	v.selIn, v.batchIn, v.rw, v.rwTo = anim.NewFloat(0), anim.NewFloat(0), anim.NewFloat(railWidth), railWidth
+	v.dim = anim.NewFloat(1)
 	v.sel = newSelBar(func(u *gunim.UI) { v.batchHidden = !v.batchHidden; v.selCount(v.selN, u) })
 	v.batch = newBatchCard(func(u *gunim.UI) { v.batchHidden = true; v.selCount(v.selN, u) })
 	v.barGate, v.selGate, v.batchGate = &gate{child: v.bar, open: true}, &gate{child: v.sel}, &gate{child: v.batch}
@@ -260,6 +263,17 @@ func (v *gridView) enter(s GridState, u *gunim.UI) {
 func (v *gridView) railIn(s RailState, u *gunim.UI) {
 	lastRail = s
 	v.rail.show(s, u)
+	// A shoot on its way: its name heads the grid at once, and the photos
+	// of the one leaving dim until the new ones come.
+	if s.Opening != v.head.opening {
+		v.head.opening = s.Opening
+		v.head.subText()
+		v.head.title.Text = v.st.Folder
+		if s.Opening != "" {
+			v.head.title.Text = baseName(s.Opening)
+		}
+		v.dim.Animate(map[bool]float32{false: 1, true: 0.35}[s.Opening != ""], widget.Quick.Get(u.Theme()))
+	}
 	v.bar.setRail(s.Hidden, u)
 	u.Invalidate()
 }
@@ -374,7 +388,8 @@ func (v *gridView) Step(dt time.Duration) bool {
 	c := v.selIn.Step(dt)
 	d := v.batchIn.Step(dt)
 	e := v.rw.Step(dt)
-	return a || b || c || d || e
+	g := v.dim.Step(dt)
+	return a || b || c || d || e || g
 }
 
 // gridNotice pops a note in over the grid, and lets it fade after a
@@ -523,7 +538,14 @@ func (v *gridView) tasksIn(t TasksIn, u *gunim.UI) { v.errors.setTasks(t.List, u
 
 // Paint implements [gunim.Node].
 func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
-	kids.At(1).Paint(p)
+	if k := v.dim.Value(); k < 0.999 {
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: max(k, 0)})()
+			kids.At(1).Paint(p)
+		}()
+	} else {
+		kids.At(1).Paint(p)
+	}
 	kids.At(0).Paint(p)
 	p.RRect(geom.Rc(v.railX(), v.top+gridHeadHeight-1, box.W-v.railX(), 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
 	if k := v.selIn.Value(); k < 0.99 {
@@ -757,9 +779,11 @@ type gridHead struct {
 	pills      [3]*countPill
 	total, sel int
 	// none says no folder is chosen yet, and folderTotal is how many
-	// photos the folder holds, filtered or not.
+	// photos the folder holds, filtered or not; opening is the folder on
+	// its way, or "".
 	none        bool
 	folderTotal int
+	opening     string
 	// size is the tiles' size slider, before the counts, and gap the
 	// time between groups, before it.
 	size gunim.Node
@@ -783,6 +807,9 @@ func newGridHead() *gridHead {
 // set shows s's counts, popping those that changed when animate is set.
 func (h *gridHead) set(s GridState, animate bool, th *theme.Live) {
 	h.title.Text = s.Folder
+	if h.opening != "" {
+		h.title.Text = baseName(h.opening)
+	}
 	h.none, h.folderTotal = s.FolderID == 0, s.Total
 	if h.none {
 		h.title.Text = "Choose a shoot in the library"
@@ -813,6 +840,10 @@ func (h *gridHead) selected(n int) {
 }
 
 func (h *gridHead) subText() {
+	if h.opening != "" {
+		h.sub.Text = "Opening…"
+		return
+	}
 	if h.none {
 		h.sub.Text = ""
 		return

@@ -199,6 +199,10 @@ type culler struct {
 	// on its way to opening in the cull view.
 	lib      library
 	cullNext string
+	// opening is the shoot on its way to the grid, and busyFolders the
+	// folders, lower case, whose background work is under way.
+	opening     string
+	busyFolders map[string]bool
 	// aimaps is what has been done about AI masks' missing maps, and
 	// editThumbSlots holds the renders of edited photos' small pictures
 	// to two at a time.

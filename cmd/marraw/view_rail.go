@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"strings"
 	"time"
 
@@ -404,6 +405,20 @@ type railRow struct {
 	badge          *widget.Label
 	badgeAt        geom.Rect
 	pick, hot, rot *anim.Float
+	// turn is the spinner's turn, while the folder is busy, and painted
+	// says it was drawn since the last step.
+	turn    float32
+	painted bool
+}
+
+// Step implements [gunim.Animator]: the spinner turns while it shows.
+func (r *railRow) Step(dt time.Duration) bool {
+	moving := r.item.Busy && r.painted
+	if dt > 0 {
+		r.painted = false
+		r.turn = float32(math.Mod(float64(r.turn)+dt.Seconds()/0.9, 1))
+	}
+	return r.Group.Step(dt) || moving
 }
 
 func newRailRow(e railEntry, v *railView) *railRow {
@@ -572,10 +587,21 @@ func (r *railRow) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gun
 		p.RRect(r.badgeAt, 4, paint.Solid(withAlpha(railOffline, 0.16)))
 	}
 	for i := range kids.Len() {
-		if i == 3 && !r.item.Offline {
+		if i == 3 && !r.item.Offline || i == 1 && r.item.Busy {
 			continue
 		}
 		kids.At(i).Paint(p)
+	}
+	if r.item.Busy {
+		// A spinner in the count's place while the folder opens or is
+		// worked on.
+		r.painted = true
+		at := geom.Rc(box.W-14-13, box.H/2-6.5, 13, 13)
+		p.RRectStroke(at.Inset(geom.Uniform(1.5)), 5, paint.Fill{}, paint.Stroke{Width: 1.5, Color: withAlpha(spinnerInk, 0.3)})
+		func() {
+			defer p.Push(paint.Rotate(r.turn*2*math.Pi, at.Center()))()
+			p.Mask(icon.Stroke{Icon: spinnerArc, Width: 1.5, Progress: 1}, at, spinnerInk)
+		}()
 	}
 	if r.item.Shared > 0 && !r.item.Offline {
 		p.Mask(icon.Stroke{Icon: icon.Share2, Width: 1.6, Progress: 1}, geom.Rc(r.badgeAt.Max.X-16, r.badgeAt.Min.Y+1, 14, 14), railShared)

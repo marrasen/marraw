@@ -1,7 +1,9 @@
 package main
 
 import (
+	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
@@ -111,6 +113,18 @@ func (cu *culler) trackTasks(ts []marrawclient.SharedTaskState) {
 		}
 	}
 	cu.showTasks()
+	// The library marks the folders being worked on.
+	busy := map[string]bool{}
+	for _, t := range ts {
+		if t.Meta != nil && t.Meta.FolderPath != "" &&
+			(t.Status == marrawclient.TaskNodeStatusRunning || t.Status == marrawclient.TaskNodeStatusCreated) {
+			busy[strings.ToLower(t.Meta.FolderPath)] = true
+		}
+	}
+	if !maps.Equal(busy, cu.busyFolders) {
+		cu.busyFolders = busy
+		cu.railChanged()
+	}
 }
 
 // taskMoved takes how far a task has got.

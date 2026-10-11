@@ -32,6 +32,8 @@ type (
 		// Width is the sidebar's width, and Hidden says it is put away.
 		Width  int
 		Hidden bool
+		// Opening is the folder on its way to the grid, or "".
+		Opening string
 	}
 	// RailItem is one row: a header over rows, a shoot, or a note.
 	RailItem struct {
@@ -60,8 +62,10 @@ type (
 		// header's block is at the top or the bottom.
 		Parent      string
 		First, Last bool
-		// Outside says the folder is open but not in the library.
+		// Outside says the folder is open but not in the library, and
+		// Busy that it is being opened or worked on in the background.
 		Outside bool
+		Busy    bool
 	}
 	// OpenShoot opens the folder at Path in the grid; Cull opens it in
 	// the cull view.
@@ -200,6 +204,16 @@ func (cu *culler) railChanged() {
 		cu.rail.Width, cu.rail.Hidden = ui.RailWidth, ui.RailHidden
 	}
 	cu.rail.Current = cu.folderPath
+	if cu.opening != "" {
+		cu.rail.Current = cu.opening
+	}
+	cu.rail.Opening = cu.opening
+	for i := range cu.rail.Items {
+		it := &cu.rail.Items[i]
+		if it.Kind == "shoot" || it.Kind == "root" {
+			it.Busy = strings.EqualFold(it.Path, cu.opening) || cu.busyFolders[strings.ToLower(it.Path)]
+		}
+	}
 	_ = cu.c.Patch("grid", cu.rail)
 }
 
@@ -936,8 +950,8 @@ func (cu *culler) openShoot(path string) {
 		cu.notify(it.Name + " is offline. Reconnect its drive and it comes back on its own.")
 		return
 	}
-	cu.rail.Current = path
-	_ = cu.c.Patch("grid", cu.rail)
+	cu.opening = path
+	cu.railChanged()
 	go func() {
 		info, err := cu.api.Library.OpenFolder(cu.ctx, path)
 		var photos []marrawclient.Photo
@@ -946,12 +960,14 @@ func (cu *culler) openShoot(path string) {
 		}
 		select {
 		case cu.do <- func() {
-			if err != nil {
-				cu.fail("The folder could not be opened", err)
+			if cu.opening != path {
+				// Another shoot was chosen meanwhile.
 				return
 			}
-			if cu.rail.Current != path {
-				// Another shoot was chosen meanwhile.
+			cu.opening = ""
+			if err != nil {
+				cu.railChanged()
+				cu.fail("The folder could not be opened", err)
 				return
 			}
 			cu.showFolder(info.FolderID, path, photos)

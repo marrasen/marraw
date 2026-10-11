@@ -5,6 +5,11 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - Opening a shoot shows at once: a spinner in the shoot's row in the
+    library, its name over the grid with "Opening…", and the photos of
+    the last shoot dim until the new ones come. The spinner stays while
+    the shoot's background work runs (calibrating, pre-rendering), as in
+    marraw.
   - Edits from marraw now show in full. An AI mask (subject, depth,
     scene, people) needs a map the model makes for each photo, and marraw
     keeps those in its own data folder, so this build had none: the
