@@ -51,7 +51,7 @@ func installApp() install.App {
 		URL:         "https://github.com/marrasen/marraw",
 		IconFunc:    bigIcon,
 		Files:       ortFiles,
-		Space:       2 << 30,
+		Space:       1820 << 20, // every AI model, if all are fetched; the preview cache has a limit of its own
 		Updates:     gunimReleases{Repo: "marrasen/marraw"},
 		UpdateKey:   updateKey,
 		Data:        []string{defaultDataDir()},

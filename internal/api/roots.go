@@ -169,9 +169,9 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 	// The parent's own loose RAWs are a flat count: anything nested belongs to
 	// one of the children below — so its date, like its count, is exact-match
 	// only.
-	if n := countDirectRaws(parent); n > 0 {
+	if n, oldest := directRaws(parent); n > 0 {
 		out = append(out, Shoot{Path: parent, Name: filepath.Base(parent), PhotoCount: n, IsSelf: true,
-			EarliestTakenAt: earliestFor(earliest, parent, true)})
+			EarliestTakenAt: orEstimate(earliestFor(earliest, parent, true), oldest)})
 	}
 
 	var children []Shoot
@@ -188,12 +188,12 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 		if isStoredRoot(full) || excluded[strings.ToLower(full)] {
 			continue
 		}
-		count, ok := l.shootCount(ctx, full)
+		count, oldest, ok := l.shootCount(ctx, full)
 		if !ok {
 			continue
 		}
 		children = append(children, Shoot{Path: full, Name: de.Name(), PhotoCount: count,
-			EarliestTakenAt: earliestFor(earliest, full, false)})
+			EarliestTakenAt: orEstimate(earliestFor(earliest, full, false), oldest)})
 	}
 	sort.Slice(children, func(i, j int) bool {
 		return strings.ToLower(children[i].Name) < strings.ToLower(children[j].Name)
@@ -219,24 +219,42 @@ func earliestFor(rows []store.FolderEarliest, shootPath string, selfOnly bool) i
 	return min
 }
 
-// shootCount returns a child's photo count and whether it qualifies as a shoot.
+// shootCount returns a child's photo count and whether it qualifies as a shoot,
+// and, for a folder not scanned yet, the oldest modification time of its direct
+// RAWs (unix seconds, 0 when unknown), to stand in for its capture date.
 //
 // A scanned folder answers from the catalog, which is both authoritative and
 // free — the steady-state case, since the rail's folders are the ones being
 // opened. An unscanned folder falls back to its direct RAW count (one ReadDir,
 // exact for the usual flat folder of ARWs). Only a folder with no direct RAWs
 // pays for a walk, and HasRaw stops at the first file it finds.
-func (l *Library) shootCount(ctx context.Context, path string) (int, bool) {
+func (l *Library) shootCount(ctx context.Context, path string) (int, int64, bool) {
 	if n, scanned, err := l.deps.DB.FolderPhotoCount(ctx, path); err == nil && scanned {
-		return n, n > 0
+		// Its date comes from the catalog; until the metadata pass has read
+		// it, the files' times stand in, which costs the one ReadDir.
+		_, oldest := directRaws(path)
+		return n, oldest, n > 0
 	}
-	if n := countDirectRaws(path); n > 0 {
-		return n, true
+	if n, oldest := directRaws(path); n > 0 {
+		return n, oldest, true
 	}
 	if scan.HasRaw(ctx, path) {
-		return 0, true
+		return 0, 0, true
 	}
-	return 0, false
+	return 0, 0, false
+}
+
+// orEstimate is a shoot's capture date: the catalog's when it knows one, else
+// the estimate from its files' modification times. A fresh catalog (a new data
+// folder, another machine) has dates only for the shoots opened so far, and the
+// rail's date sort and time groups would put every other shoot under "No date";
+// a card copy keeps the cameras' file times, so the estimate is close, and the
+// real capture time replaces it once the shoot is scanned.
+func orEstimate(catalog, estimate int64) int64 {
+	if catalog != 0 {
+		return catalog
+	}
+	return estimate
 }
 
 func (l *Library) libraryRoots(ctx context.Context) []LibraryRoot {
@@ -295,17 +313,32 @@ func (l *Library) ListDirRaws(ctx context.Context, path string) ([]PickEntry, er
 }
 
 func countDirectRaws(path string) int {
+	n, _ := directRaws(path)
+	return n
+}
+
+// directRaws counts the RAW files directly in path, and finds the oldest of
+// their modification times, in unix seconds (0 with none). The times come with
+// the directory listing on Windows; elsewhere they cost a stat each.
+func directRaws(path string) (int, int64) {
 	dirents, err := os.ReadDir(path)
 	if err != nil {
-		return 0
+		return 0, 0
 	}
 	n := 0
+	var oldest int64
 	for _, de := range dirents {
-		if !de.IsDir() && scan.IsRawFile(de.Name()) {
-			n++
+		if de.IsDir() || !scan.IsRawFile(de.Name()) {
+			continue
+		}
+		n++
+		if info, err := de.Info(); err == nil {
+			if t := info.ModTime().Unix(); t > 0 && (oldest == 0 || t < oldest) {
+				oldest = t
+			}
 		}
 	}
-	return n
+	return n, oldest
 }
 
 // CountRaws totals the RAW files under the given paths for the picker
