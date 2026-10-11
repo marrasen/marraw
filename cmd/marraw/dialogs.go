@@ -83,6 +83,10 @@ func (cu *culler) confirmed(a Confirmed) {
 		cu.refocus()
 		cu.maskAI(MaskAI{Kind: strings.TrimPrefix(a.Kind, "aiModel:"), Download: true})
 		return
+	case strings.HasPrefix(a.Kind, "aiFolder:") && a.OK:
+		cu.refocus()
+		cu.aiFolderDownload(strings.TrimPrefix(a.Kind, "aiFolder:"))
+		return
 	case strings.HasPrefix(a.Kind, "aiRestore:") && a.OK:
 		cu.refocus()
 		cu.aiRestore(strings.TrimPrefix(a.Kind, "aiRestore:"))

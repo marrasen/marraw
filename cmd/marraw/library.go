@@ -1017,6 +1017,7 @@ func (cu *culler) showFolder(id int64, path string, photos []marrawclient.Photo)
 	cu.stopLive = cu.followFolder()
 	_ = cu.c.Update("grid", cu.gridState())
 	cu.railChanged()
+	cu.ensureFolderMaps()
 }
 
 // AskAddFolder opens the dialog for adding a folder to the library.

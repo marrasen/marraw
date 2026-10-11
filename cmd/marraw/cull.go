@@ -338,6 +338,7 @@ func (cu *culler) serve() error {
 	// backend has measured since, such as sizes and base exposures.
 	if cu.folder != 0 {
 		cu.stopLive = cu.followFolder()
+		cu.ensureFolderMaps()
 	}
 	// The backend's tasks as they change, for the exports' notes.
 	cu.exports = map[string]exportRun{}
@@ -349,6 +350,15 @@ func (cu *culler) serve() error {
 		}
 	})
 	defer stopTasks()
+	// A map made in the background, for an AI mask the photo's edit had
+	// already: its pixels change with its edit the same.
+	stopMaps := cu.api.OnAIMapsGeneratedEvent(func(ev marrawclient.AIMapsGeneratedEvent) {
+		select {
+		case cu.do <- func() { cu.pixelsRenewed(ev.PhotoID) }:
+		case <-cu.ctx.Done():
+		}
+	})
+	defer stopMaps()
 	// And how far each has got, which comes apart from its state.
 	stopProgress := cu.api.OnTaskUpdateEvent(func(ev marrawclient.TaskUpdateEvent) {
 		if ev.Current == nil || ev.Total == nil {

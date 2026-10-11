@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
@@ -32,6 +34,11 @@ type aiMaps struct {
 	fired map[string]bool
 	asked map[string]bool
 	timer *time.Timer
+	// stopFolder stops the look through the folder before, and waiting
+	// are the photos of the folder whose model's download is being asked
+	// about, by kind.
+	stopFolder context.CancelFunc
+	waiting    map[string][]int64
 }
 
 // ensureAIMapsSoon sees to the maps of the photo at i once the cull view
@@ -188,4 +195,114 @@ func (cu *culler) upgradeThumb(p marrawclient.Photo) {
 			}
 		})
 	}()
+}
+
+// ensureFolderMaps makes, in one background task for each kind, the maps
+// the folder's edited photos' AI masks read and do not have yet, so the
+// grid shows them as edited without each being opened first. A model not
+// downloaded yet is asked for once, with how many photos need it.
+func (cu *culler) ensureFolderMaps() {
+	a := &cu.aimaps
+	if a.stopFolder != nil {
+		a.stopFolder()
+	}
+	var ids []int64
+	for _, p := range cu.all {
+		if p.EditHash != "" && p.EditHash != "base" {
+			ids = append(ids, p.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(cu.ctx)
+	a.stopFolder = cancel
+	go func() {
+		// Which photos read which kind of map, a few edits read at a time.
+		byKind := map[string][]int64{}
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		work := make(chan int64)
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for id := range work {
+					p, err := cu.api.Edits.GetEditParams(ctx, id)
+					if err != nil || p == nil {
+						continue
+					}
+					seen := map[string]bool{}
+					for _, m := range p.Masks {
+						if m.Type != "ai" || m.AIKind == "" {
+							continue
+						}
+						k := string(m.AIKind)
+						if k == "background" {
+							k = "subject"
+						}
+						if !seen[k] {
+							seen[k] = true
+							mu.Lock()
+							byKind[k] = append(byKind[k], id)
+							mu.Unlock()
+						}
+					}
+				}
+			}()
+		}
+	feed:
+		for _, id := range ids {
+			select {
+			case work <- id:
+			case <-ctx.Done():
+				break feed
+			}
+		}
+		close(work)
+		wg.Wait()
+		if ctx.Err() != nil {
+			return
+		}
+		for k, kids := range byKind {
+			st, err := cu.api.Edits.AIModelStatus(ctx, marrawclient.AIKind(k))
+			if err == nil && st != nil && !st.Downloaded {
+				cu.onDo(func() {
+					if a.waiting == nil {
+						a.waiting = map[string][]int64{}
+					}
+					a.waiting[k] = kids
+					if !a.asked[k] || a.asked == nil {
+						if a.asked == nil {
+							a.asked = map[string]bool{}
+						}
+						a.asked[k] = true
+						cu.askModel("aiFolder:"+k, fmt.Sprintf("%s (%d photos here have its masks)", aiModelWhat[k], len(kids)), st.Bytes)
+					}
+				})
+				continue
+			}
+			cu.startMaps(ctx, k, kids, false)
+		}
+	}()
+}
+
+// startMaps asks the backend to make kind's maps for ids, as a task of
+// its own; each map made comes back as an AIMapsGeneratedEvent.
+func (cu *culler) startMaps(ctx context.Context, kind string, ids []int64, download bool) {
+	if _, err := cu.api.Edits.GenerateAIMaps(ctx, ids, []marrawclient.AIKind{marrawclient.AIKind(kind)}, download); err != nil && ctx.Err() == nil {
+		cu.onDo(func() { cu.fail("The AI masks' maps could not be made", err) })
+	}
+}
+
+// aiFolderDownload makes kind's maps for the folder's photos waiting for
+// its model, the model downloaded with the user's leave.
+func (cu *culler) aiFolderDownload(kind string) {
+	a := &cu.aimaps
+	ids := a.waiting[kind]
+	delete(a.waiting, kind)
+	if len(ids) == 0 {
+		return
+	}
+	go cu.startMaps(cu.ctx, kind, ids, true)
 }

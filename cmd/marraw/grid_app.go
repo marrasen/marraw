@@ -143,6 +143,8 @@ func (cu *culler) openCull(i int) {
 	_ = cu.c.Mount(gunim.Root, "cull", "cull", cu.state())
 	_ = cu.c.Focus("cull")
 	cu.goTo(i)
+	// Opened on purpose, not stepped past: its maps are seen to at once.
+	cu.ensureAIMaps(cu.photos[i].ID)
 }
 
 // leaveCull closes the cull view, the photo flying back to its tile, and

@@ -10,6 +10,11 @@ New in this build
     the last shoot dim until the new ones come. The spinner stays while
     the shoot's background work runs (calibrating, pre-rendering), as in
     marraw.
+  - AI masks' maps for a whole shoot: opening a shoot makes the maps its
+    edited photos' AI masks need, in one background task (its chip at
+    the bottom right), so the grid shows the edits without opening each
+    photo. It asks once for each model it needs. A photo no longer shows
+    its edit without the mask for a moment before the right version.
   - Edits from marraw now show in full. An AI mask (subject, depth,
     scene, people) needs a map the model makes for each photo, and marraw
     keeps those in its own data folder, so this build had none: the
