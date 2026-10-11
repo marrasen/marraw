@@ -103,7 +103,12 @@ func main() {
 		}
 		return
 	}
-	if err := run(options{folder: *folder, connect: *connect, token: *token, dataDir: *dataDir, inProcess: *inProcess,
+	// A size asked for, as test runs do, opens there; a script's run
+	// neither takes the place kept nor keeps one.
+	sized := false
+	flag.Visit(func(f *flag.Flag) { sized = sized || f.Name == "size" })
+	scripted := *skim > 0 || *shot != "" || *zoom || *keys != "" || *edit != ""
+	if err := run(options{place: !sized && !scripted, folder: *folder, connect: *connect, token: *token, dataDir: *dataDir, inProcess: *inProcess,
 		skim: *skim, every: *every, wait: *wait, burst: *burst, edit: *edit, addLibrary: *addLibrary, shot: *shot, zoom: *zoom, keys: *keys, size: *winSize}); err != nil {
 		log.Fatal(err)
 	}
@@ -120,6 +125,8 @@ type options struct {
 	addLibrary                      string
 	size                            string
 	inProcess                       bool
+	// place opens the window where it was last, and keeps where it goes.
+	place bool
 }
 
 func run(o options) error {
@@ -190,7 +197,11 @@ func run(o options) error {
 	log.Printf("marraw: build %s; %d photos in %q, backend at %s", build(), len(photos), path, host)
 
 	err = gunim.Main(ctx, func(a *gunim.App) error {
-		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: parseSize(o.size), Root: newFullSurface(),
+		var place *driver.Placement
+		if o.place {
+			place = savedPlace()
+		}
+		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: parseSize(o.size), Place: place, Root: newFullSurface(),
 			Icons: appIcons(), TitleBar: bareTitleBar{},
 			// The photo runs under the title bar, as in marraw.
 			UnderTitleBar: true})
@@ -198,6 +209,9 @@ func run(o options) error {
 			return err
 		}
 		registerViews(w)
+		if o.place {
+			go keepPlace(ctx, w.Placement)
+		}
 		c := w.Client()
 		cu := newCuller(ctx, c, api, newImages("http://"+host, token), info.FolderID, path, photos)
 		cu.viewer.app = a
