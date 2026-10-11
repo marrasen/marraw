@@ -51,3 +51,13 @@ func appMark() *paint.Image {
 	}
 	return appMarkImg
 }
+
+// bigIcon is marraw's icon at its largest, for the installer.
+func bigIcon() image.Image {
+	b, err := appIconFiles.ReadFile("appicon/icon256.png")
+	if err != nil {
+		return nil
+	}
+	m, _ := png.Decode(bytes.NewReader(b))
+	return m
+}

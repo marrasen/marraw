@@ -1,0 +1,129 @@
+name: gunim test release
+
+# Publishes a release of cmd/marraw, the gunim test build, as gunim's
+# installer installs and updates it: one Windows program, ONNX Runtime
+# inside it, a SHA256SUMS of it, and that signed with GUNIM_SIGN_KEY.
+#
+# Its tags are gunim-v0.1.0 and on, kept apart from the Electron app's v*
+# tags, whose release workflow they do not start. The release is a
+# pre-release and never "latest", so the Electron app's stable updates
+# never see it; its beta updates skip tags that are no plain version.
+on:
+  push:
+    tags: ['gunim-v*']
+
+env:
+  LIBRAW_VERSION: '0.22.1'
+  LIBJPEG_TURBO_VERSION: '3.2.0'
+  ORT_VERSION: '1.29.0'
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # As the release job finds it: probe the image, else install.
+      - name: Locate MinGW-w64
+        shell: pwsh
+        run: |
+          $probe = @(
+            'C:\msys64\ucrt64\bin'
+            'C:\msys64\mingw64\bin'
+            'C:\mingw64\bin'
+            'C:\ProgramData\mingw64\mingw64\bin'
+          )
+          $bin = $probe | Where-Object { Test-Path (Join-Path $_ 'g++.exe') } | Select-Object -First 1
+          if (-not $bin) {
+            choco install mingw --no-progress --yes
+            $bin = @(
+              'C:\ProgramData\mingw64\mingw64\bin'
+              'C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin'
+            ) | Where-Object { Test-Path (Join-Path $_ 'g++.exe') } | Select-Object -First 1
+          }
+          if (-not $bin) { throw 'MinGW-w64 g++ not found' }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+
+      - name: Cache LibRaw
+        uses: actions/cache@v6
+        with:
+          path: |
+            third_party/libraw
+            third_party/LibRaw-${{ env.LIBRAW_VERSION }}.tar.gz
+          key: libraw-${{ runner.os }}-${{ env.LIBRAW_VERSION }}-${{ hashFiles('scripts/setup-libraw.ps1') }}
+
+      - name: Build LibRaw
+        shell: pwsh
+        run: ./scripts/setup-libraw.ps1
+
+      - name: Cache libjpeg-turbo
+        uses: actions/cache@v6
+        with:
+          path: |
+            third_party/libjpeg-turbo
+            third_party/libjpeg-turbo-${{ env.LIBJPEG_TURBO_VERSION }}.tar.gz
+          key: libjpeg-turbo-${{ runner.os }}-${{ env.LIBJPEG_TURBO_VERSION }}-${{ hashFiles('scripts/setup-libjpeg-turbo.ps1') }}
+
+      # Its SIMD code needs NASM, which the image lacks.
+      - name: Build libjpeg-turbo
+        shell: pwsh
+        run: |
+          if (-not (Test-Path third_party/libjpeg-turbo/lib/libturbojpeg.a)) {
+            choco install nasm --no-progress --yes
+            Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\NASM'
+            $env:PATH = "C:\Program Files\NASM;$env:PATH"
+          }
+          ./scripts/setup-libjpeg-turbo.ps1 -Version $env:LIBJPEG_TURBO_VERSION
+
+      - name: Cache ONNX Runtime
+        uses: actions/cache@v6
+        with:
+          path: third_party/onnxruntime
+          key: ort-${{ runner.os }}-${{ env.ORT_VERSION }}-${{ hashFiles('scripts/setup-ort.ps1') }}
+
+      - name: Fetch ONNX Runtime
+        shell: pwsh
+        run: ./scripts/setup-ort.ps1
+
+      # A program of the windows subsystem, no console: its log goes to a
+      # file in its data folder. ONNX Runtime goes inside it, for the
+      # installer to put beside it.
+      - name: Build
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $version = $tag -replace '^gunim-', ''
+          $plain = $version -replace '^v', ''
+          New-Item -ItemType Directory -Force dist, cmd/marraw/ortlib | Out-Null
+          Copy-Item third_party/onnxruntime/lib/*.dll cmd/marraw/ortlib/
+          $exe = "marraw-gunim_${plain}_windows_amd64.exe"
+          go build -tags ortembed -ldflags "-H windowsgui -X main.version=$version" -o "dist/$exe" ./cmd/marraw
+          $hash = (Get-FileHash "dist/$exe" -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("$PWD/dist/SHA256SUMS", "$hash  $exe`n")
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      # Sign the checksums, for the installed copies' updates.
+      - name: Sign
+        shell: pwsh
+        env:
+          GUNIM_SIGN_KEY: ${{ secrets.GUNIM_SIGN_KEY }}
+        run: go run github.com/marrasen/gunim/tools/gunimsign dist/SHA256SUMS
+
+      - name: Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $notes = git tag -l --format='%(contents)' $tag
+          if (-not $notes) { $notes = "marraw's gunim test build, $env:VERSION." }
+          [IO.File]::WriteAllText("$PWD/notes.md", ($notes -join "`n"))
+          gh release create $tag dist/* --prerelease --latest=false --title "marraw gunim test $env:VERSION" --notes-file notes.md

@@ -22,6 +22,10 @@ import (
 // without starving Go's own scheduler. The window talks to it as it would
 // to another machine's marraw: WebSocket for calls, HTTP for images.
 
+// logOut is where the log goes, and the backend process's: the console,
+// or in a release, which has none, a file in its data folder.
+var logOut io.Writer = os.Stderr
+
 // backendTokenEnv carries the launch token to the backend process, kept
 // out of its command line, which other programs can read.
 const backendTokenEnv = "MARRAW_BACKEND_TOKEN"
@@ -97,7 +101,7 @@ func (b *backendProc) start(ctx context.Context) error {
 	}
 	cmd := exec.Command(exe, args...)
 	cmd.Env = append(os.Environ(), backendTokenEnv+"="+b.token)
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = logOut
 	childAttrs(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -122,7 +126,7 @@ func (b *backendProc) start(ctx context.Context) error {
 				ready <- strings.TrimPrefix(line, backendReady)
 				continue
 			}
-			fmt.Fprintln(os.Stdout, line)
+			fmt.Fprintln(logOut, line)
 		}
 		if !said {
 			close(ready)

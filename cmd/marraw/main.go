@@ -42,22 +42,29 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"time"
 
 	"github.com/marrasen/aprot/client"
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/driver"
 	"github.com/marrasen/gunim/geom"
+	"github.com/marrasen/gunim/install"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
 )
 
 func main() {
+	// The backend process this program starts is the same program: it
+	// is no install, and looks for no updates.
+	if !slices.Contains(os.Args[1:], "-backend") {
+		install.Run(installApp())
+	}
 	addLibrary := flag.String("add-library", "", "add this folder to the library: as a library folder, its subfolders shoots, as marraw's Add library folder does, or as a shoot where its photos are in it")
 	folder := flag.String("folder", "", "the folder of photos to open; without it, the library opens, to choose one")
 	connect := flag.String("connect", "", "another marraw to cull on, as host:port; by default this program runs its own backend")
 	token := flag.String("token", "", "the token for -connect")
-	dataDir := flag.String("data-dir", "", "the backend's data folder (default: the config folder's marraw, as marrawd uses)")
+	dataDir := flag.String("data-dir", "", "the backend's data folder (default: the config folder's marraw, as marrawd uses; a release's own, marraw-gunim)")
 	skim := flag.Int("skim", 0, "step right this many times on its own, -every apart, report the timings, and quit")
 	every := flag.Duration("every", 150*time.Millisecond, "how far apart -skim steps")
 	shot := flag.String("shot", "", "write the window to this PNG file once the script is done, and quit")
@@ -71,6 +78,25 @@ func main() {
 	backendPort := flag.Int("backend-port", 0, "with -backend, the port to listen on, nought for a free one (internal)")
 	inProcess := flag.Bool("in-process", false, "run the backend inside this process, as before, instead of a process of its own")
 	flag.Parse()
+	if *dataDir == "" && install.IsRelease(version) {
+		// A release keeps a catalog of its own, apart from the Electron
+		// app's.
+		*dataDir = defaultDataDir()
+	}
+	if install.IsRelease(version) {
+		// A release has no console: its log, and its backend's, go to a
+		// file in its data folder, begun anew each start.
+		name := "marraw-gunim.log"
+		if *backend {
+			name = "marraw-gunim-backend.log"
+		}
+		if err := os.MkdirAll(*dataDir, 0o755); err == nil {
+			if f, err := os.Create(filepath.Join(*dataDir, name)); err == nil {
+				log.SetOutput(f)
+				logOut = f
+			}
+		}
+	}
 	if *backend {
 		if err := runBackendProcess(*dataDir, *backendPort); err != nil {
 			log.Fatal(err)
