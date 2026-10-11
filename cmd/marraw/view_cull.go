@@ -288,6 +288,10 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 		v.showNotice(s.Notice, s.NoticeSeq, u)
 	}
 	v.lastUI = u
+	if !s.Panel || s.Active == "" {
+		// No control to step: the readout has nothing to show.
+		v.endAdjust(u)
+	}
 	v.modes.show(map[bool]int{false: modeCull, true: modeDevelop}[s.Panel], u)
 	v.gap.set(s.Gap)
 	v.readout(v.z.Target())
@@ -1391,6 +1395,13 @@ func (v *cullView) Overhear(e input.Event, u *gunim.UI) {
 	case input.PointerDown:
 		v.pointer = e.Pos
 		v.endAdjust(u)
+	case input.KeyPress:
+		// Only + and - keep the readout up: any other key, as Escape
+		// letting the control go, brings the chrome back. Shift alone
+		// steps further, so it keeps it too.
+		if plusMinus(e) == 0 && e.Key != input.KeyLeftShift && e.Key != input.KeyRightShift {
+			v.endAdjust(u)
+		}
 	}
 	v.lastInput = time.Now()
 	if v.idle.Target() != 1 {
