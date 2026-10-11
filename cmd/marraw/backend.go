@@ -11,9 +11,9 @@ import (
 
 // startBackend runs marraw's backend in this process, on loopback, and
 // returns where it listens and how to stop it.
-func startBackend(ctx context.Context, dataDir, token string) (string, func(), error) {
+func startBackend(ctx context.Context, dataDir, token string, port int) (string, func(), error) {
 	daemon.LimitMemory()
-	d, err := daemon.Start(ctx, daemon.Options{Listen: "127.0.0.1", DataDir: dataDir, CacheCapGB: 20, Token: token})
+	d, err := daemon.Start(ctx, daemon.Options{Listen: "127.0.0.1", Port: port, DataDir: dataDir, CacheCapGB: 20, Token: token})
 	if err != nil {
 		return "", nil, err
 	}

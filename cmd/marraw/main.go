@@ -2,10 +2,13 @@
 // gunim: the library grid and the cull view, beside the Electron app, to
 // learn what gunim needs for photos before any wider port.
 //
-// It runs the backend inside itself, on a private loopback port, and talks
-// to it exactly as it would to another machine's marraw: the generated aprot
-// Go client over WebSocket, and HTTP for the images. -connect points the same
-// code at another instance instead.
+// It runs the backend as a process of its own, this same program started
+// again with -backend, at a lower priority, on a private loopback port, and
+// talks to it exactly as it would to another machine's marraw: the
+// generated aprot Go client over WebSocket, and HTTP for the images. The
+// backend's work then never takes the window's time. -in-process runs it
+// inside this process instead, as before, and -connect points the same
+// code at another instance.
 //
 //	go run ./cmd/marraw -folder ~/Pictures/shoot
 //	go run ./cmd/marraw -connect 192.168.1.20:8482 -token … -folder D:\Photos\shoot
@@ -64,8 +67,17 @@ func main() {
 	burst := flag.Int("burst", 0, "write this many pictures, from the last of -keys on, to -shot's name with -01, -02 and on, instead of one")
 	edit := flag.String("edit", "", "once -keys are pressed, with the develop panel open, set adjustments as the panel does, such as contrast=0.6,expEV=2, choices by their option, such as wbMode=2 for Kelvin, or auto=tone or auto=wb+color, and save them")
 	zoom := flag.Bool("zoom", false, "once -skim is done, zoom to one to one with Z, and wait for the full resolution before the shot")
+	backend := flag.Bool("backend", false, "run as the backend process the window starts, and nothing else (internal)")
+	backendPort := flag.Int("backend-port", 0, "with -backend, the port to listen on, nought for a free one (internal)")
+	inProcess := flag.Bool("in-process", false, "run the backend inside this process, as before, instead of a process of its own")
 	flag.Parse()
-	if err := run(options{folder: *folder, connect: *connect, token: *token, dataDir: *dataDir,
+	if *backend {
+		if err := runBackendProcess(*dataDir, *backendPort); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if err := run(options{folder: *folder, connect: *connect, token: *token, dataDir: *dataDir, inProcess: *inProcess,
 		skim: *skim, every: *every, wait: *wait, burst: *burst, edit: *edit, addLibrary: *addLibrary, shot: *shot, zoom: *zoom, keys: *keys, size: *winSize}); err != nil {
 		log.Fatal(err)
 	}
@@ -81,6 +93,7 @@ type options struct {
 	edit                            string
 	addLibrary                      string
 	size                            string
+	inProcess                       bool
 }
 
 func run(o options) error {
@@ -88,16 +101,29 @@ func run(o options) error {
 	defer stop()
 
 	host, token := o.connect, o.token
-	if host == "" {
+	var proc *backendProc
+	switch {
+	case host != "":
+	case o.inProcess:
 		// The backend in this process: loopback only, with a token of its
 		// own, as the Electron shell starts marrawd.
 		token = randomToken()
-		addr, stopBackend, err := startBackend(ctx, o.dataDir, token)
+		addr, stopBackend, err := startBackend(ctx, o.dataDir, token, 0)
 		if err != nil {
 			return fmt.Errorf("start the backend: %w", err)
 		}
 		defer stopBackend()
 		host = addr
+	default:
+		// The backend in a process of its own: this program again, with
+		// -backend, on loopback, with a token of its own.
+		token = randomToken()
+		p, err := spawnBackend(ctx, o.dataDir, token)
+		if err != nil {
+			return fmt.Errorf("start the backend: %w", err)
+		}
+		defer p.stop()
+		proc, host = p, p.addr
 	}
 
 	cc, err := client.Dial(ctx, "ws://"+host+"/ws", client.Options{
@@ -148,6 +174,9 @@ func run(o options) error {
 		c := w.Client()
 		cu := newCuller(ctx, c, api, newImages("http://"+host, token), info.FolderID, path, photos)
 		cu.viewer.app = a
+		if proc != nil {
+			proc.onRestart = func(why string) { cu.onDo(func() { cu.fail("The backend restarted", errors.New(why)) }) }
+		}
 		if o.skim > 0 || o.shot != "" || o.zoom || o.keys != "" {
 			go cu.script(o)
 		}
