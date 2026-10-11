@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"time"
 
 	"github.com/marrasen/gunim/driver"
@@ -23,6 +24,17 @@ func colourShort(info driver.ColorInfo) string {
 	case driver.ColorSRGB:
 		return "colour: sRGB display"
 	case driver.ColorBySystem:
+		// Who converts, from gunim's detail of it.
+		switch d := info.Detail; {
+		case strings.Contains(d, "(HDR)"):
+			return "colour: Windows (HDR)"
+		case strings.Contains(d, "Auto Color Management"):
+			return "colour: Windows (Auto Color)"
+		case strings.HasPrefix(d, "Windows"):
+			return "colour: Windows"
+		case strings.HasPrefix(d, "macOS"):
+			return "colour: macOS"
+		}
 		return "colour: by the system"
 	case driver.ColorUnsupported:
 		return "colour: profile not supported"
