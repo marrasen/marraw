@@ -269,6 +269,9 @@ func actionIcon(e ErrorNote) *icon.Icon {
 	if strings.HasPrefix(e.Path, updateMark) {
 		return icon.Download
 	}
+	if strings.HasPrefix(e.Path, whatsNewMark) {
+		return icon.Sparkles
+	}
 	return icon.FolderOpen
 }
 

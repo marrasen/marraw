@@ -10,6 +10,7 @@ import (
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/anim"
 	"github.com/marrasen/gunim/geom"
+	"github.com/marrasen/gunim/install"
 	"github.com/marrasen/gunim/paint"
 	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
@@ -317,6 +318,11 @@ var thumbFits = []string{"crop", "fit", "natural"}
 type generalPage struct {
 	n   gunim.Node
 	fit *widget.Segmented
+	// updates is how newer releases come, check looks now and its row
+	// tells what it found; updatesOn shows them for an installed copy.
+	updates   *widget.Segmented
+	check     *settingRow
+	updatesOn *widget.Fold
 }
 
 func newGeneralPage() *generalPage {
@@ -325,9 +331,22 @@ func newGeneralPage() *generalPage {
 	p.fit.OnChange = func(i int, _ *gunim.UI) gunim.Intent {
 		return SettingSet{Key: "thumbFit", Value: thumbFits[max(0, i)]}
 	}
+	p.updates = widget.NewSegmented("Auto", "Ask first", "Off")
+	p.updates.KeepFocus = true
+	p.updates.OnChange = func(i int, _ *gunim.UI) gunim.Intent {
+		return SettingSet{Key: "updates", Value: string(updateModes[max(0, i)])}
+	}
+	check := widget.NewButton("Check now")
+	check.KeepFocus, check.OnClick = true, widget.Sends(CheckUpdates{})
+	p.check = newSettingRow("Check for updates", "", check)
+	p.updatesOn = widget.NewFold(widget.Column(
+		newSettingRow("Updates", "Auto downloads a new release in the background, and it takes over the "+
+			"next time marraw starts. Ask first tells you it is out, and you choose when to update. Off never looks.",
+			glassSegmented(p.updates)),
+		p.check), false)
 	p.n = settingsScroll(newSettingRow("Thumbnails",
 		"Crop fills each cell, the pictures cropped to it. Fit shows the whole frame in its cell. Natural gives each frame its own shape, in rows that fill the width.",
-		glassSegmented(p.fit)))
+		glassSegmented(p.fit)), p.updatesOn)
 	return p
 }
 
@@ -338,6 +357,16 @@ func (p *generalPage) show(s SettingsState, u *gunim.UI) {
 		i = 1
 	}
 	p.fit.SetSelected(i, u)
+	if m := slices.Index(updateModes, install.UpdateMode(s.Updates)); m >= 0 {
+		p.updates.SetSelected(m, u)
+	}
+	p.check.help.Text = "This is marraw " + version + "."
+	if s.UpdateNote != "" {
+		p.check.help.Text = s.UpdateNote
+	}
+	if u != nil {
+		p.updatesOn.SetOpen(s.UpdatesKnown, u)
+	}
 }
 
 // --- Features

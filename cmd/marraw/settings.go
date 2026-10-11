@@ -42,6 +42,8 @@ type (
 	DefaultPreset struct{ Key, ID string }
 	// LinkRevoke withdraws the shared link ID.
 	LinkRevoke struct{ ID string }
+	// CheckUpdates looks for a newer release now.
+	CheckUpdates struct{}
 )
 
 // SettingsState is what the settings dialog shows.
@@ -63,6 +65,12 @@ type SettingsState struct {
 	Links                   []marrawclient.ShareLink
 	LinksKnown              bool
 	Busy                    string
+	// Updates is how the installed marraw takes newer releases, as
+	// install.UpdateMode names it, where UpdatesKnown; and UpdateNote
+	// what Check now found.
+	Updates      string
+	UpdatesKnown bool
+	UpdateNote   string
 }
 
 // PresetChoice is a preset that can be a camera's default: its id and
@@ -199,6 +207,10 @@ func (cu *culler) fetchSettings() {
 			}
 		}
 	})
+	get(func(context.Context) func() {
+		mode, known := updatesState()
+		return func() { cu.settings.Updates, cu.settings.UpdatesKnown = mode, known }
+	})
 	get(func(ctx context.Context) func() {
 		links, err := cu.api.Share.ListLinks(ctx)
 		return func() {
@@ -274,6 +286,8 @@ func (cu *culler) settingSet(in SettingSet) {
 		cu.call("Pre-rendering could not be set", func(ctx context.Context) error {
 			return cu.api.Settings.SetPrerenderFullres(ctx, in.On)
 		}, nil)
+	case "updates":
+		cu.setUpdates(in.Value)
 	case "sidecars":
 		cu.settings.Sidecars = in.On
 		cu.call("Sidecar writing could not be set", func(ctx context.Context) error {

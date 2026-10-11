@@ -606,7 +606,9 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	st := kids.At(9)
 	st.Layout(gunim.Tight(geom.Sz(w, statusH)))
 	st.Place(geom.Pt(railWidth, box.H-statusH))
-	v.errors.corner = geom.Pt(box.W-aw-16, box.H-statusH-16)
+	// The cards in the window's lower right corner, as marraw's toasts,
+	// over the info panel where it shows.
+	v.errors.corner = geom.Pt(box.W-16, box.H-statusH-16)
 	// The band along the top moves the window, but where its controls
 	// are: the switcher, the jump, the window's buttons, and the library's
 	// own column.

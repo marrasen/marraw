@@ -5,6 +5,19 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - Updates ask first. A new release shows a card, "marraw vX is out",
+    and See what's new opens the update window: what changed, and
+    Update Now. Settings, General, Updates chooses Auto (download in the
+    background), Ask first or Off; Check now looks at once. An install
+    that updated by itself is moved to Ask first once, on its first
+    start of v0.1.4 or later.
+  - After an update, the "Updated to" card has a What's new button.
+  - Cards and progress chips sit in the window's lower right corner,
+    over the info panel, as the Electron app's toasts do.
+  - Narrow windows: a long shoot name ends in "…" on one line; the
+    filter bar's parts give way (size slider, then the gap's words,
+    then the flags squeeze, then the stars) instead of overlapping; the
+    status bar drops the colour line, then counts, rather than overlap.
   - Thumbnails: Natural is back (Settings, General, beside Crop and
     Fit): each photo at its own shape, in rows that fill the width; the
     last row of a group keeps its height. Up and Down go to the nearest

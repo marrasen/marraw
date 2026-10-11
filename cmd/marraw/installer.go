@@ -82,8 +82,12 @@ var (
 )
 
 // updateMark starts the path of a note's action that shows the release
-// told of, to take it.
-const updateMark = "update:"
+// told of, to take it, and whatsNewMark one that shows what the releases
+// since the version after it changed.
+const (
+	updateMark   = "update:"
+	whatsNewMark = "whatsnew:"
+)
 
 // askFirstMark is a file in the data folder that says the install was
 // moved to asking first, once, so a later choice of the user's stands.
@@ -122,7 +126,7 @@ func (cu *culler) tellUpdates() {
 		})
 	}
 	if from := install.UpdatedFrom(); from != "" {
-		cu.done("Updated to marraw "+version, "From "+from+".", "", "")
+		cu.done("Updated to marraw "+version, "From "+from+".", "What's new", whatsNewMark+from)
 	}
 }
 
@@ -135,10 +139,78 @@ func (cu *culler) showUpdate() {
 		return
 	}
 	go func() {
-		if err := install.ShowUpdate(cu.ctx, cu.viewer.app, installApp(), install.Update{Release: r}); err != nil {
+		// Update Now ends this copy once the new one has started, as
+		// Restart now does.
+		quit := func() error {
+			cu.onDo(func() { cu.c.Leave() })
+			return nil
+		}
+		if err := install.ShowUpdate(cu.ctx, cu.viewer.app, installApp(), install.Update{Release: r, Quit: quit}); err != nil {
 			cu.onDo(func() { cu.fail("The update could not be shown", err) })
 		}
 	}()
+}
+
+// showWhatsNew opens the installer's window on what the releases since
+// from changed.
+func (cu *culler) showWhatsNew(from string) {
+	if cu.viewer.app == nil {
+		return
+	}
+	go func() {
+		if err := install.ShowWhatsNew(cu.ctx, cu.viewer.app, installApp(), from); err != nil {
+			cu.onDo(func() { cu.fail("What's new could not be shown", err) })
+		}
+	}()
+}
+
+// The ways to take newer releases the settings offer, in their order.
+var updateModes = []install.UpdateMode{install.UpdatesInstall, install.UpdatesNotify, install.UpdatesOff}
+
+// setUpdates sets how the installed marraw takes newer releases.
+func (cu *culler) setUpdates(mode string) {
+	cu.settings.Updates = mode
+	if err := install.SetUpdates(installApp(), install.UpdateMode(mode)); err != nil {
+		cu.fail("Updates could not be set", err)
+	}
+}
+
+// checkUpdates looks for a newer release now, and opens the installer's
+// window on one, as the settings' Check now asks.
+func (cu *culler) checkUpdates() {
+	cu.settings.UpdateNote = "Checking…"
+	cu.settingsChanged()
+	go func() {
+		ctx, cancel := context.WithTimeout(cu.ctx, time.Minute)
+		defer cancel()
+		r, newer, err := install.Check(ctx, installApp())
+		cu.onDo(func() {
+			switch {
+			case err != nil:
+				cu.settings.UpdateNote = "Couldn't check: " + err.Error()
+			case !newer:
+				cu.settings.UpdateNote = "marraw " + version + " is up to date."
+			default:
+				cu.settings.UpdateNote = "marraw " + r.Version + " is out: its window shows what changed."
+				offered = r
+				cu.showUpdate()
+			}
+			cu.settingsChanged()
+		})
+	}()
+}
+
+// updatesState is how the installed marraw takes newer releases, for the
+// settings, or nothing where this copy is not an installed release.
+func updatesState() (mode string, known bool) {
+	if !install.IsRelease(version) {
+		return "", false
+	}
+	in, err := install.Find(installApp())
+	if err != nil || in == nil {
+		return "", false
+	}
+	return string(in.Updates), true
 }
 
 // restartIntoUpdate starts the release put in place and ends this copy.

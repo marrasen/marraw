@@ -529,6 +529,8 @@ func (cu *culler) serve() error {
 				cu.settingSet(in)
 			case CacheClear:
 				cu.cacheClear()
+			case CheckUpdates:
+				cu.checkUpdates()
 			case CacheCap:
 				cu.cacheCap(in.GB)
 			case CacheDirAsk:

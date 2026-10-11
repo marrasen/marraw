@@ -51,6 +51,11 @@ func (cu *culler) errAction(id int) {
 			cu.showUpdate()
 			return
 		}
+		if e.ID == id && strings.HasPrefix(e.Path, whatsNewMark) {
+			cu.clearError(ErrClear{ID: id})
+			cu.showWhatsNew(strings.TrimPrefix(e.Path, whatsNewMark))
+			return
+		}
 		if e.ID == id && e.Path == restartMark {
 			cu.clearError(ErrClear{ID: id})
 			cu.restartIntoUpdate()
