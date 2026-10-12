@@ -5,6 +5,8 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - Folding a header in the sidebar and opening it again: its rows open
+    where they belong, rather than gliding down from the top of the list.
   - A memory card copied whole into a library folder (DCIM, PRIVATE,
     AVF_INFO and the rest beside each other) is one shoot under the
     folder's own name, dated or not, rather than a DCIM header over a
