@@ -18,6 +18,9 @@ import (
 
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/fingerprint"
+	"github.com/marrasen/marraw/internal/foldermeta"
+	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/sidecar"
 	"github.com/marrasen/marraw/internal/store"
 	"github.com/marrasen/marraw/internal/trash"
@@ -481,12 +484,25 @@ func (l *Library) DeletePhotos(ctx context.Context, ids []int64) (*DeleteResult,
 		paths[i] = p.Path()
 		folders[p.FolderID] = true
 	}
+	// What each photo was, by its fingerprint, read while the file is
+	// still there: an import must not bring back a photo deleted on
+	// purpose.
+	now := time.Now().UnixMilli()
+	gone := make([]store.DeletedPhoto, len(photos))
+	for i, p := range photos {
+		fp, _ := l.deps.DB.Fingerprint(ctx, p.ID)
+		if fp == "" {
+			fp, _ = fingerprint.Of(p.Path())
+		}
+		gone[i] = store.DeletedPhoto{Fingerprint: fp, FileName: p.FileName, FolderPath: p.FolderPath, TakenAt: p.TakenAt, DeletedAt: now}
+	}
 	if err := trash.MoveToTrash(paths); err != nil {
 		return nil, err
 	}
 	if err := l.deps.DB.DeletePhotos(ctx, ids); err != nil {
 		return nil, err
 	}
+	l.recordDeleted(ctx, photos, gone)
 	// Remove orphaned sidecars so a deleted photo leaves nothing behind. Best
 	// effort: a stray sidecar is harmless (no matching RAW is ever read).
 	for _, p := range photos {
@@ -500,6 +516,27 @@ func (l *Library) DeletePhotos(ctx context.Context, ids []int64) (*DeleteResult,
 		aprot.TriggerRefresh(ctx, photosKey(f))
 	}
 	return &DeleteResult{Deleted: len(photos)}, nil
+}
+
+// recordDeleted keeps the photos deleted on purpose in the catalog, which
+// outlives their folder, and in their folders' marraw.json, which outlives
+// the catalog.
+func (l *Library) recordDeleted(ctx context.Context, photos []store.Photo, gone []store.DeletedPhoto) {
+	writes := l.deps.Meta != nil && l.deps.DB.SidecarWritesEnabled(ctx)
+	for i, d := range gone {
+		if d.Fingerprint == "" {
+			continue
+		}
+		if err := l.deps.DB.RecordDeleted(ctx, d); err != nil {
+			log.Printf("api: record deleted %s: %v", d.FileName, err)
+		}
+		if !writes {
+			continue
+		}
+		dir, name := scan.MetaLoc(photos[i].Path())
+		rec := foldermeta.Deleted{FP: d.Fingerprint, Name: name, TakenAt: d.TakenAt, DeletedAt: d.DeletedAt}
+		l.deps.Meta.Change(dir, func(f *foldermeta.File) { f.Delete(name, rec) })
+	}
 }
 
 // maxVisibleHints bounds one viewport hint. No screen shows more thumbnails

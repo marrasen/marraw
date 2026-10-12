@@ -677,9 +677,9 @@ func newSidecarsPage() *sidecarsPage {
 	p := &sidecarsPage{sw: widget.NewSwitch("")}
 	p.sw.KeepFocus = true
 	p.sw.OnChange = func(on bool, _ *gunim.UI) gunim.Intent { return SettingSet{Key: "sidecars", On: on} }
-	p.n = settingsScroll(newSettingRow("Write edit sidecars", "Keep the ratings and the develop settings in a .marraw.json "+
-		"file beside each RAW, so a folder copied to another computer carries its edits. Folders that have sidecars "+
-		"already are always read.", p.sw))
+	p.n = settingsScroll(newSettingRow("Keep the work in each folder", "Ratings, flags, develop settings and the photos "+
+		"you deleted go into one marraw.json file in each folder, so a folder copied to another computer, or backed up, "+
+		"carries its work. The older .marraw.json files beside each RAW are still read, and kept in step.", p.sw))
 	return p
 }
 

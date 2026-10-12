@@ -5,6 +5,17 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - What you do to photos is now kept in ONE file per folder, marraw.json,
+    instead of a .marraw.json beside each RAW. It holds the ratings,
+    flags and develop settings, each photo's fingerprint, and the photos
+    you deleted, so a later import can leave them out. A folder opened in
+    this build gets a marraw.json (fingerprints are read once, in the
+    background: two small reads a photo). The old per-photo files are
+    still read, carried into marraw.json and kept in step, so the Electron
+    app sees the same; no new ones are made. Removing the old ones will be
+    a step you confirm, in a later build.
+  - Deleting a photo records it as deleted on purpose, in marraw.json and
+    in the catalogue (which outlives the folder).
   - Open in new window: right-click a shoot in the sidebar, or press
     Ctrl+Shift+N for a window on the library, or use Jump to anything
     ("New window", "Open this shoot in a new window"). Each window is a

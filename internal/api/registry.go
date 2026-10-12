@@ -18,6 +18,7 @@ import (
 	"github.com/marrasen/marraw/internal/discovery"
 	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/foldermeta"
 	"github.com/marrasen/marraw/internal/infer"
 	"github.com/marrasen/marraw/internal/pairing"
 	"github.com/marrasen/marraw/internal/pyramid"
@@ -35,6 +36,8 @@ type Deps struct {
 	Cache   *pyramid.Cache
 	Handles *decode.HandleCache
 	Scanner *scan.Scanner
+	// Meta writes the folders' marraw.json; nil writes none.
+	Meta *foldermeta.Writer
 	// Janitor bounds the preview cache; Settings adjusts its cap live.
 	Janitor *pyramid.Janitor
 	// DefaultCacheDir is the built-in preview-cache location (under the app

@@ -15,6 +15,7 @@ import (
 
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/foldermeta"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/sidecar"
@@ -209,6 +210,8 @@ type Scanner struct {
 	DB    *store.DB
 	Cache *pyramid.Cache
 	Pool  *decode.Pool
+	// Meta writes the folders' marraw.json; nil writes none.
+	Meta *foldermeta.Writer
 	// OnPhotosChanged is called (already throttled) when a folder's photo
 	// rows changed and subscribers should refresh.
 	OnPhotosChanged func(folderID int64)
@@ -246,19 +249,28 @@ func (s *Scanner) OpenFolder(ctx context.Context, path string, recursive bool) (
 	return folderID, count, nil
 }
 
-// importSidecars reconciles each RAW's on-disk sidecar with its catalog row.
-// When a sidecar is present and newer it overwrites the row (last-writer-wins,
-// enforced in the store); when a sidecar is absent but the row carries intent,
-// a sidecar is written so the folder becomes self-contained. Returns after
+// importSidecars reconciles what the folder's photos carry on disk with
+// their catalog rows. A photo's record is its entry in the marraw.json of the
+// folder it lies in, or an older per-photo sidecar beside it; the newer of
+// the two wins over the row where it is newer than the row (last writer wins,
+// enforced in the store). Then marraw.json is brought up to date with every
+// row that carries intent and is newer than its entry, which also carries the
+// old sidecars' work into it. No new per-photo sidecar is made. Returns after
 // notifying subscribers if any row changed.
 func (s *Scanner) importSidecars(ctx context.Context, folderID int64, folderPath string, entries []store.FileEntry) error {
-	photos, err := s.DB.ListPhotos(ctx, folderID)
-	if err != nil {
-		return err
-	}
-	byName := make(map[string]store.Photo, len(photos))
-	for _, p := range photos {
-		byName[p.FileName] = p
+	// A recursive folder's photos lie in its subfolders, each with a
+	// marraw.json of its own.
+	files := map[string]*foldermeta.File{}
+	fileOf := func(dir string) *foldermeta.File {
+		if f, ok := files[dir]; ok {
+			return f
+		}
+		f, err := foldermeta.Read(dir)
+		if err != nil {
+			log.Printf("scan: read %s: %v", filepath.Join(dir, foldermeta.Name), err)
+		}
+		files[dir] = f
+		return f
 	}
 
 	var applied int
@@ -267,34 +279,64 @@ func (s *Scanner) importSidecars(ctx context.Context, folderID int64, folderPath
 			return ctx.Err()
 		}
 		rawPath := filepath.Join(folderPath, e.Name)
-		sc, err := sidecar.Read(rawPath)
+		dir, name := MetaLoc(rawPath)
+		var best *sidecar.File
+		if mp, ok := fileOf(dir).Photos[name]; ok && (mp.HasIntent() || mp.UpdatedAt > 0) {
+			best = &sidecar.File{V: sidecar.Version, File: name, FileSize: mp.Size, Rating: mp.Rating, Flag: mp.Flag, Edit: mp.Edit, UpdatedAt: mp.UpdatedAt}
+		}
+		old, err := sidecar.Read(rawPath)
 		if err != nil {
 			log.Printf("scan: read sidecar %s: %v", e.Name, err)
-			continue
 		}
-		if sc != nil {
-			if s.applySidecar(ctx, folderID, e, sc) {
-				applied++
-			}
-			continue
+		if old != nil && (best == nil || old.UpdatedAt > best.UpdatedAt) {
+			best = old
 		}
-		// No sidecar on disk: backfill one from existing catalog intent, unless
-		// sidecar writes are disabled (importing above still runs regardless).
-		if p, ok := byName[e.Name]; ok && hasIntent(p) && s.DB.SidecarWritesEnabled(ctx) {
-			editJSON := ""
-			if p.EditParams.Valid {
-				editJSON = p.EditParams.String
+		if best != nil && s.applySidecar(ctx, folderID, e, best) {
+			applied++
+		}
+	}
+
+	// marraw.json up to date with the rows, which now hold the newest of
+	// everything.
+	if s.Meta != nil && s.DB.SidecarWritesEnabled(ctx) {
+		photos, err := s.DB.ListPhotos(ctx, folderID)
+		if err != nil {
+			return err
+		}
+		for _, p := range photos {
+			if !hasIntent(p) {
+				continue
 			}
-			f := sidecar.Build(p.FileName, p.FileSize, p.Rating, p.Flag, editJSON, sidecarUpdatedMs(p))
-			if err := sidecar.Write(rawPath, f); err != nil {
-				log.Printf("scan: backfill sidecar %s: %v", e.Name, err)
+			dir, name := MetaLoc(p.Path())
+			mp, ok := fileOf(dir).Photos[name]
+			if ok && mp.HasIntent() && mp.UpdatedAt >= sidecarUpdatedMs(p) {
+				continue
 			}
+			fp, _ := s.DB.Fingerprint(ctx, p.ID)
+			entry := MetaEntry(p, fp)
+			s.Meta.Change(dir, func(f *foldermeta.File) { f.SetPhoto(name, entry) })
 		}
 	}
 	if applied > 0 && s.OnPhotosChanged != nil {
 		s.OnPhotosChanged(folderID)
 	}
 	return nil
+}
+
+// MetaLoc is the folder whose marraw.json holds the photo at path, and the
+// photo's name there.
+func MetaLoc(path string) (dir, name string) {
+	return filepath.Dir(path), filepath.Base(path)
+}
+
+// MetaEntry is a catalog row as its marraw.json entry, with its fingerprint
+// fp, where it has one.
+func MetaEntry(p store.Photo, fp string) foldermeta.Photo {
+	e := foldermeta.Photo{Size: p.FileSize, FP: fp, Rating: p.Rating, Flag: p.Flag, UpdatedAt: sidecarUpdatedMs(p)}
+	if p.EditParams.Valid && p.EditParams.String != "" {
+		e.Edit = json.RawMessage(p.EditParams.String)
+	}
+	return e
 }
 
 // applySidecar validates a sidecar against the file it names and, if it wins

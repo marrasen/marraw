@@ -19,6 +19,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/marrasen/aprot"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/marrasen/marraw/internal/discovery"
 	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/export"
+	"github.com/marrasen/marraw/internal/foldermeta"
 	"github.com/marrasen/marraw/internal/guestui"
 	"github.com/marrasen/marraw/internal/imghttp"
 	"github.com/marrasen/marraw/internal/infer"
@@ -209,7 +211,11 @@ func Start(ctx context.Context, o Options) (*Daemon, error) {
 	handles := decode.NewHandleCache(3)
 	d.onClose(func() { handles.Close() })
 
-	scanner := &scan.Scanner{DB: db, Cache: cache, Pool: pool}
+	// The folders' marraw.json, written a moment after their last change
+	// and all of it as the daemon closes.
+	meta := foldermeta.NewWriter(1500 * time.Millisecond)
+	d.onClose(meta.Flush)
+	scanner := &scan.Scanner{DB: db, Cache: cache, Pool: pool, Meta: meta}
 
 	// Cache size cap: the flag is the default; a Settings-dialog override
 	// persists in the store and wins at startup.
@@ -243,7 +249,7 @@ func Start(ctx context.Context, o Options) (*Daemon, error) {
 	// Its port is filled in once the listener is bound, below.
 	funnel := tsfunnel.New(0)
 
-	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Janitor: janitor, DefaultCacheDir: defaultCacheDir, WatermarkDir: watermarkDir,
+	deps := &api.Deps{DB: db, Pool: pool, Cache: cache, Handles: handles, Scanner: scanner, Meta: meta, Janitor: janitor, DefaultCacheDir: defaultCacheDir, WatermarkDir: watermarkDir,
 		Infer: infer.NewManager(filepath.Join(o.DataDir, "models")), IOGate: ioGate, Tokens: tokens, Pairing: broker,
 		Advertiser: advertiser, Funnel: funnel, LoopbackOnly: loopbackOnly}
 	registry, library, _, _ := api.NewRegistry(deps)

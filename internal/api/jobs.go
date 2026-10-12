@@ -20,8 +20,11 @@ import (
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/fingerprint"
+	"github.com/marrasen/marraw/internal/foldermeta"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
+	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
 )
 
@@ -70,6 +73,7 @@ func (l *Library) startFolderJobs(reqCtx context.Context, folderID int64, path s
 // and the watcher's ingest path (which must not touch that slot).
 func (l *Library) folderPasses(ctx context.Context, folderID int64, path string) {
 	l.metaPass(ctx, folderID, path)
+	l.fingerprintPass(ctx, folderID)
 	l.calibratePass(ctx, folderID, path)
 	l.prerenderPass(ctx, folderID, path)
 	// Opt-in: 1:1 full-resolution tiles, the most expensive pass, runs
@@ -295,6 +299,51 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 	// hold predates them; re-list so photo.baseExpEV (the exposure dial's
 	// neutral) matches the seed GetEditParams now returns.
 	l.deps.TriggerRefresh(photosKey(folderID))
+}
+
+// fingerprintPass takes the fingerprints of the folder's photos that have
+// none yet, a few files at a time, and records them in the catalog and in
+// the folders' marraw.json. Two small reads a file, once; quiet, as it is
+// over in moments for a local folder and needs no task to watch.
+func (l *Library) fingerprintPass(ctx context.Context, folderID int64) {
+	photos, err := l.deps.DB.Unfingerprinted(ctx, folderID)
+	if err != nil || len(photos) == 0 {
+		return
+	}
+	writes := l.deps.Meta != nil && l.deps.DB.SidecarWritesEnabled(ctx)
+	work := make(chan store.Photo)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for p := range work {
+				fp, err := fingerprint.Of(p.Path())
+				if err != nil {
+					continue
+				}
+				if err := l.deps.DB.SetFingerprint(ctx, p.ID, fp); err != nil {
+					continue
+				}
+				if writes {
+					dir, name := scan.MetaLoc(p.Path())
+					size := p.FileSize
+					l.deps.Meta.Change(dir, func(f *foldermeta.File) { f.SetFingerprint(name, size, fp) })
+				}
+			}
+		}()
+	}
+	for _, p := range photos {
+		select {
+		case work <- p:
+		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	close(work)
+	wg.Wait()
 }
 
 // metaPass backfills missing photo metadata under a shared task.
