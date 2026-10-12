@@ -66,7 +66,66 @@ type gridBar struct {
 	sizeBox  *hideable
 	sizeN    *widget.Label
 	right    gunim.Node
+	lead     *barLead
 }
+
+// barLead leads the bar's row: the library's button, and while a folder
+// shows the switch between its photos and its shoots. The grid view
+// floats it over the filter bar and the overview alike, so the switch
+// stays put as it flips between them; both leave its width free.
+type barLead struct {
+	rail, views gunim.Node
+	// on says the switch shows; w is the lead's width as last laid out.
+	on bool
+	w  float32
+}
+
+// Children implements [gunim.Composite].
+func (l *barLead) Children() []gunim.Node { return []gunim.Node{l.rail, l.views} }
+
+// Layout implements [gunim.Node].
+func (l *barLead) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children) geom.Size {
+	gap := widget.Gap.Get(f.Theme)
+	rs := kids.At(0).Layout(gunim.Loose(c.Max))
+	vs := geom.Size{}
+	if l.on {
+		vs = kids.At(1).Layout(gunim.Loose(c.Max))
+	} else {
+		kids.At(1).Layout(gunim.Tight(geom.Size{}))
+	}
+	h := max(rs.H, vs.H)
+	kids.At(0).Place(geom.Pt(0, (h-rs.H)/2))
+	l.w = rs.W
+	if l.on {
+		kids.At(1).Place(geom.Pt(rs.W+gap, (h-vs.H)/2))
+		l.w += gap + vs.W
+	} else {
+		kids.At(1).Place(geom.Pt(-10000, 0))
+	}
+	return geom.Sz(l.w, h)
+}
+
+// Paint implements [gunim.Node].
+func (l *barLead) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
+	if l.on {
+		kids.At(1).Paint(p)
+	}
+}
+
+// leadRoom is the room a bar leaves for the lead floated over it.
+type leadRoom struct{ lead *barLead }
+
+// MinWidth implements [widget.Shrinker]: the room never squeezes.
+func (r *leadRoom) MinWidth(gunim.Frame) float32 { return r.lead.w }
+
+// Layout implements [gunim.Node].
+func (r *leadRoom) Layout(c gunim.Constraints, _ gunim.Frame, _ gunim.Children) geom.Size {
+	return c.Constrain(geom.Sz(r.lead.w, 1))
+}
+
+// Paint implements [gunim.Node].
+func (r *leadRoom) Paint(*paint.Painter, gunim.Frame, geom.Size, gunim.Children) {}
 
 // barRow is the bar's controls: the filters at the left, the gap, the
 // tiles' size and the info panel's button at the right; the size goes
@@ -300,7 +359,10 @@ func newGridBar(g *gridView) *gridBar {
 	// squeeze no more, and the rest keep their width.
 	b.starBox = &hideable{child: b.stars}
 	b.flagBox = &measured{child: frosted(b.flags, marrawTheme())}
-	left := widget.Row(&rigid{child: b.railBtn}, &rigid{child: b.sorts}, b.flagBox, &rigid{child: b.starBox}, &rigid{child: aids})
+	// The library's button leads the row, in the lead the grid view
+	// floats over the bar; the row keeps its room.
+	b.lead = &barLead{rail: b.railBtn}
+	left := widget.Row(&leadRoom{lead: b.lead}, &rigid{child: b.sorts}, b.flagBox, &rigid{child: b.starBox}, &rigid{child: aids})
 	left.Cross = widget.CrossCenter
 	b.gapBox = &hideable{child: b.gapCtl}
 	right := widget.Row(b.gapBox, spacerW(4), b.sizeBox, b.panelBtn)

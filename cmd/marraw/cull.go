@@ -727,7 +727,7 @@ func (cu *culler) state() Cull {
 	p := cu.photos[cu.at]
 	st := Cull{Viewer: cu.viewer.win != nil, Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Exif: exifLine(p), Errors: cu.errs, Tasks: cu.shownTasks(), Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
 		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p),
-		Shoot: baseName(cu.folderPath), Taken: takenAt(p.TakenAt), Gap: cu.libView.Gap}
+		Shoot: baseName(cu.folderOf(p)), Taken: takenAt(p.TakenAt), Gap: cu.libView.Gap}
 	gapAt := map[int]int{}
 	groups := gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)
 	days := spansDays(groups)

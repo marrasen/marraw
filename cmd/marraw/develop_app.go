@@ -153,7 +153,7 @@ func (cu *culler) developState() DevelopState {
 	st := DevelopState{ID: d.id, Params: d.params, Channel: d.channel, Active: d.active, Lens: d.lens, WBPick: cu.wb.on}
 	if i, ok := cu.index[d.id]; ok {
 		st.BaseExpEV = cu.photos[i].BaseExpEV
-		st.Info = photoInfo(cu.photos[i], cu.folderPath)
+		st.Info = photoInfo(cu.photos[i], cu.folderOf(cu.photos[i]))
 	}
 	st.History, st.HistoryAt = cu.historyOfShowing()
 	st.Presets = cu.presetCards()

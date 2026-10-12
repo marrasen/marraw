@@ -152,10 +152,12 @@ func (o *overviewView) Children() []gunim.Node { return []gunim.Node{o.filter, o
 
 // Layout implements [gunim.Node]: the filter where the filter bar is, the
 // cards under it.
-func (o *overviewView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+func (o *overviewView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
-	fs := kids.At(0).Layout(gunim.Tight(geom.Sz(min(280, max(0, box.W-40)), 32)))
-	kids.At(0).Place(geom.Pt(20, (barHeight-fs.H)/2))
+	// The filter after the lead the grid view floats over the bar.
+	x := 20 + o.v.bar.lead.w + widget.Gap.Get(f.Theme)
+	fs := kids.At(0).Layout(gunim.Tight(geom.Sz(min(280, max(0, box.W-x-20)), 32)))
+	kids.At(0).Place(geom.Pt(x, (barHeight-fs.H)/2))
 	gw := box.W
 	if o.gridW > 0 {
 		gw = min(o.gridW, box.W)

@@ -241,6 +241,15 @@ func (cu *culler) followSet() func() {
 	}
 }
 
+// folderOf is the folder photo p's file is in: the open folder, or with
+// a folder's photos as one, p's own shoot.
+func (cu *culler) folderOf(p marrawclient.Photo) string {
+	if s, ok := cu.shootOf(p); ok {
+		return s.path
+	}
+	return cu.folderPath
+}
+
 // shootOf is the shoot of the set that photo p is in, and whether it is in
 // one.
 func (cu *culler) shootOf(p marrawclient.Photo) (setShoot, bool) {

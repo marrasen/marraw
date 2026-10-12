@@ -23,7 +23,7 @@ func (cu *culler) locateID(id int64) {
 	if !ok {
 		return
 	}
-	in := photoInfo(cu.photos[i], cu.folderPath)
+	in := photoInfo(cu.photos[i], cu.folderOf(cu.photos[i]))
 	path := filepath.Join(in.Folder, in.File)
 	if _, err := os.Stat(path); err != nil {
 		cu.notify("The file is not on this computer")

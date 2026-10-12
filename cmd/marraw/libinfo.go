@@ -24,7 +24,7 @@ func (cu *culler) sendLibInfo() {
 	}
 	p := cu.photos[i]
 	in := LibInfo{Folder: cu.folder, ID: p.ID, Name: p.FileName, Exif: exifLine(p), Rating: p.Rating, Flag: string(p.Flag),
-		Info: photoInfo(p, cu.folderPath)}
+		Info: photoInfo(p, cu.folderOf(p))}
 	_ = cu.c.Patch("grid", in)
 	libInfoGen++
 	gen := libInfoGen

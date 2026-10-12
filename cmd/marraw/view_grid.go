@@ -101,6 +101,7 @@ func newGridView(GridState) *gridView {
 		empty: widget.NewLabel("No photos match the filter"), noneIn: anim.NewFloat(0)}
 	v.empty.Color = noteInk
 	v.bar = newGridBar(v)
+	v.bar.lead.views = v.head.viewsNode
 	v.selIn, v.asideIn, v.rw, v.rwTo = anim.NewFloat(0), anim.NewFloat(1), anim.NewFloat(railWidth), railWidth
 	v.asideOn = true
 	v.dim = anim.NewFloat(1)
@@ -405,7 +406,7 @@ func (v *gridView) newTile(i int) gunim.Node {
 func (v *gridView) Children() []gunim.Node {
 	// The cards come last, over the info panel and the rest, so a click
 	// on one reaches it wherever it lies.
-	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.selGate, v.asideGate, v.status, v.band, v.ov, v.errors}
+	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.selGate, v.asideGate, v.status, v.band, v.ov, v.errors, v.bar.lead}
 }
 
 // asideIn shows the info panel, or puts it away.
@@ -656,6 +657,12 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	gw := max(0, w-aw)
 	grid.Layout(gunim.Tight(geom.Sz(gw, max(0, box.H-gridTop-top-statusH))))
 	grid.Place(geom.Pt(railWidth, gridTop+top))
+	// The bar's lead first, as the bar and the overview leave it room; it
+	// sits where the bar's row starts.
+	v.bar.lead.on = v.head.inFolder
+	lead := kids.At(12)
+	ls := lead.Layout(gunim.Loose(geom.Sz(w, barHeight)))
+	lead.Place(geom.Pt(railWidth+20, gridHeadHeight+top+(barHeight-ls.H)/2))
 	bar := kids.At(4)
 	bar.Layout(gunim.Tight(geom.Sz(w, barHeight)))
 	bar.Place(geom.Pt(railWidth, gridHeadHeight+top))
@@ -742,6 +749,15 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 		func() {
 			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(k, 1)})()
 			kids.At(10).Paint(p)
+		}()
+	}
+	// The bar's lead over the bar and the overview, going as the bar does
+	// for the selection's.
+	if k := v.selIn.Value(); k < 0.99 {
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(max(1-k, 0), 1)})()
+			defer p.Push(paint.Translate(geom.Pt(0, -6*k)))()
+			kids.At(12).Paint(p)
 		}()
 	}
 	kids.At(2).Paint(p)
@@ -995,7 +1011,8 @@ type gridHead struct {
 	backNode      gunim.Node
 	backKey       string
 	// views switches a folder between its photos and its shoots; it shows
-	// while a folder's photos or its overview do. shoots is how many
+	// while a folder's photos or its overview do, in the bar's lead (the
+	// grid view places it, as viewsNode). shoots is how many
 	// shoots a folder's photos are of, nought for one shoot.
 	views     *widget.Segmented
 	viewsNode gunim.Node
@@ -1100,7 +1117,7 @@ func (h *gridHead) subText() {
 
 // Children implements [gunim.Composite].
 func (h *gridHead) Children() []gunim.Node {
-	return []gunim.Node{h.title, h.sub, h.modes.node, h.jump, h.win, h.backNode, h.viewsNode}
+	return []gunim.Node{h.title, h.sub, h.modes.node, h.jump, h.win, h.backNode}
 }
 
 // showSet says whether a folder's photos show, of shoots shoots, for the
@@ -1125,6 +1142,7 @@ func (h *gridHead) overview(in OverviewIn, st GridState) {
 	if in.On {
 		h.over, h.overSub, h.backKey = in.Title, in.Sub, ""
 		h.title.Text, h.sub.Text = in.Title, in.Sub
+		h.subFull, h.subShort = "", ""
 		h.inFolder = true
 		h.views.SetSelected(1, nil)
 		return
@@ -1176,18 +1194,6 @@ func (h *gridHead) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 		kids.At(5).Place(geom.Pt(-10000, 0))
 	}
 	room := max(0, mx-x-16)
-	// A folder's switch first, where it shows: the count goes before it
-	// does, and the name keeps 100 at least.
-	vs := geom.Size{}
-	if h.inFolder {
-		vs = kids.At(6).Layout(gunim.Loose(geom.Sz(200, 32)))
-		if room-vs.W-16 < 100 {
-			vs = geom.Size{}
-		}
-	}
-	if vs.W > 0 {
-		room -= vs.W + 16
-	}
 	// The name keeps its own width, up to 120; the count goes short
 	// (the photos only) before it goes.
 	name := min(kids.At(0).Layout(gunim.Loose(geom.Sz(room, box.H))).W, 120)
@@ -1208,24 +1214,13 @@ func (h *gridHead) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	kids.At(0).Place(geom.Pt(x, mid-ts.H/2))
 	x += ts.W + 14
 	kids.At(1).Place(geom.Pt(x, mid-ss.H/2))
-	if vs.W > 0 {
-		if ss.W > 0 {
-			x += ss.W + 16
-		} else {
-			x += 2
-		}
-		place(kids.At(6), vs, x, true)
-	} else {
-		kids.At(6).Layout(gunim.Tight(geom.Size{}))
-		kids.At(6).Place(geom.Pt(-10000, 0))
-	}
 	return box
 }
 
 // Paint implements [gunim.Node].
 func (h *gridHead) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
 	for i := range kids.Len() {
-		if (i != 1 || !h.noSub) && (i != 5 || h.backOn()) && (i != 6 || h.inFolder && kids.At(6).Size().W > 0) {
+		if (i != 1 || !h.noSub) && (i != 5 || h.backOn()) {
 			kids.At(i).Paint(p)
 		}
 	}

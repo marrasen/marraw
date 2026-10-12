@@ -5,6 +5,18 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - The Photos | Shoots switch has moved to the start of the bar under
+    the folder's name, beside the sidebar button. It stays in the same
+    place in both views, and slides between them.
+  - Chips and switches cast a short shadow that stays by them, rather
+    than one that reached the controls around them. Big panels over a
+    photo keep their deep shadow; the size in between scales.
+  - With a folder's photos showing, the info panel's Folder, "Locate on
+    disk" and "Copy folder path" give the photo's own shoot folder, and
+    the photo view names its own shoot. Before, they gave the folder
+    you clicked.
+
+From the build before (v0.1.18)
   - A folder's photos as one shoot: click the name of a library folder's
     heading, or of a folder header (a year, a client) in the sidebar,
     and the photos of all its shoots show in one grid, under a header
@@ -15,8 +27,8 @@ New in this build
   - Only shoots marraw has already read show their photos here. A shoot
     you have never opened is left out for now; reading those in the
     background comes in a later build.
-  - A "Photos | Shoots" switch beside the folder's name changes between
-    this view and the overview of cards. marraw remembers your choice
+  - A "Photos | Shoots" switch changes between this view and the
+    overview of cards. marraw remembers your choice
     for the next folder you click.
   - The overview's cards sit a little further from the line above them.
 
