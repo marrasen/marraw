@@ -6,7 +6,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/libp2p/zeroconf/v2 v2.2.0
 	github.com/marrasen/aprot v0.65.0
-	github.com/marrasen/gunim v0.0.0-20261012075443-68af67e7d9b5
+	github.com/marrasen/gunim v0.0.0-20261012090839-12c146ed66a9
 	github.com/yalue/onnxruntime_go v1.36.0
 	golang.org/x/image v0.46.0
 	golang.org/x/sync v0.23.0
