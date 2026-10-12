@@ -43,6 +43,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,7 @@ import (
 	"github.com/marrasen/gunim/driver"
 	"github.com/marrasen/gunim/geom"
 	"github.com/marrasen/gunim/install"
+	"github.com/marrasen/gunim/single"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
 )
@@ -84,15 +86,39 @@ func main() {
 		// app's.
 		*dataDir = defaultDataDir()
 	}
+	sized := false
+	flag.Visit(func(f *flag.Flag) { sized = sized || f.Name == "size" })
+	scripted := *skim > 0 || *shot != "" || *zoom || *keys != "" || *edit != ""
+	// One marraw at a time: started while one runs, this one hands it
+	// its command line, which opens a window for it, and ends. A test
+	// run, a backend and a window on another marraw run on their own.
+	var handovers <-chan single.Handover
+	if !*backend && !scripted && *connect == "" {
+		dir := *dataDir
+		if dir == "" {
+			dir = defaultDataDir()
+		}
+		cwd, _ := os.Getwd()
+		if taken, _ := single.Hand(dir, single.Handover{Args: os.Args[1:], Dir: cwd}); taken {
+			return
+		}
+		if h, stop, err := single.Listen(context.Background(), dir); err == nil {
+			handovers = h
+			defer stop()
+		}
+	}
 	if install.IsRelease(version) {
 		// A release has no console: its log, and its backend's, go to a
-		// file in its data folder, begun anew each start.
+		// file in its data folder, begun anew each start, the one before
+		// kept beside it for when something went wrong last time.
 		name := "marraw-gunim.log"
 		if *backend {
 			name = "marraw-gunim-backend.log"
 		}
 		if err := os.MkdirAll(*dataDir, 0o755); err == nil {
-			if f, err := os.Create(filepath.Join(*dataDir, name)); err == nil {
+			path := filepath.Join(*dataDir, name)
+			_ = os.Rename(path, strings.TrimSuffix(path, ".log")+".prev.log")
+			if f, err := os.Create(path); err == nil {
 				log.SetOutput(f)
 				logOut = f
 			}
@@ -106,10 +132,7 @@ func main() {
 	}
 	// A size asked for, as test runs do, opens there; a script's run
 	// neither takes the place kept nor keeps one.
-	sized := false
-	flag.Visit(func(f *flag.Flag) { sized = sized || f.Name == "size" })
-	scripted := *skim > 0 || *shot != "" || *zoom || *keys != "" || *edit != ""
-	if err := run(options{place: !sized && !scripted, folder: *folder, connect: *connect, token: *token, dataDir: *dataDir, inProcess: *inProcess,
+	if err := run(options{handovers: handovers, place: !sized && !scripted, folder: *folder, connect: *connect, token: *token, dataDir: *dataDir, inProcess: *inProcess,
 		skim: *skim, every: *every, wait: *wait, burst: *burst, edit: *edit, addLibrary: *addLibrary, shot: *shot, zoom: *zoom, keys: *keys, size: *winSize}); err != nil {
 		log.Fatal(err)
 	}
@@ -128,6 +151,9 @@ type options struct {
 	inProcess                       bool
 	// place opens the window where it was last, and keeps where it goes.
 	place bool
+	// handovers are the command lines of the marraws started while this
+	// one runs, each to open a window for.
+	handovers <-chan single.Handover
 }
 
 func run(o options) error {
@@ -267,6 +293,18 @@ func run(o options) error {
 		if err := open(path); err != nil {
 			return err
 		}
+		// A marraw started meanwhile: a window here for its folder, or
+		// for the library.
+		go func() {
+			for {
+				select {
+				case h := <-o.handovers:
+					h.Take(open(handoverFolder(h)) == nil)
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
 		wins.Wait()
 		return nil
 	})
@@ -274,6 +312,26 @@ func run(o options) error {
 		return nil
 	}
 	return err
+}
+
+// handoverFolder is the folder a marraw started while this one runs asked
+// for with -folder, or "" for the library.
+func handoverFolder(h single.Handover) string {
+	folder := ""
+	for i, a := range h.Args {
+		name, value, hasValue := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		if !strings.HasPrefix(a, "-") || name != "folder" {
+			continue
+		}
+		if !hasValue && i+1 < len(h.Args) {
+			value = h.Args[i+1]
+		}
+		folder = value
+	}
+	if folder == "" || filepath.IsAbs(folder) {
+		return folder
+	}
+	return filepath.Join(h.Dir, folder)
 }
 
 // randomToken is a launch token for the backend in this process.

@@ -5,6 +5,16 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - One marraw at a time: starting marraw while it runs (Start menu,
+    taskbar) opens a new window in the one running instead of a second
+    copy with its own backend. A second copy is what kept the old version
+    running after an update. (Copies of older versions still start apart:
+    this begins once every copy is this version or newer.)
+  - The update window counts the other copies running. If there are any,
+    it says they would go on as the old version, and the button becomes
+    Update Anyway.
+  - The log from the run before is kept as marraw-gunim.prev.log beside
+    marraw-gunim.log, in %APPDATA%\marraw-gunim.
   - Shoots at any depth in a library folder, as you keep them: by year
     (2019 / 2019-11-08 Wedding), by client (Client / Project / Date), or
     mixed. Folders without photos directly in them, as a year or a
