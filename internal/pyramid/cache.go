@@ -5,6 +5,8 @@
 package pyramid
 
 import (
+	"encoding/hex"
+	"crypto/sha1"
 	"context"
 	"fmt"
 	"image"
@@ -952,6 +954,46 @@ func encodeJPEG(w io.Writer, img image.Image, quality int) error {
 		return jpegturbo.EncodeRGBA(w, rgba, quality)
 	}
 	return jpeg.Encode(w, img, &jpeg.Options{Quality: quality})
+}
+
+// coverEdge is the long edge of a folder's cover read from a RAW's
+// embedded preview; see FilePreview.
+const coverEdge = 256
+
+// FilePreview returns a small JPEG of the embedded preview of the RAW at
+// path, coverEdge on its long edge: the library sidebar's cover of a
+// folder not scanned yet. It never decodes RAW data, runs on the fast
+// pool behind the images someone is waiting on, and is kept under the
+// cache's covers folder, named for the file's path, size and time, so it
+// is read from the RAW once.
+func (c *Cache) FilePreview(ctx context.Context, path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha1.Sum([]byte(fmt.Sprintf("%s|%d|%d|%d", path, info.Size(), info.ModTime().UnixNano(), coverEdge)))
+	dst := filepath.Join(c.Dir(), "covers", hex.EncodeToString(sum[:])+".jpg")
+	if b, err := os.ReadFile(dst); err == nil {
+		return b, nil
+	}
+	err = c.fastPool.Do(ctx, "cover|"+dst, decode.PriorityPrefetch, func(_ context.Context, proc *libraw.Processor) error {
+		if _, err := os.Stat(dst); err == nil {
+			return nil
+		}
+		// Direct open: the preview is a small slice of the file.
+		if err := proc.Open(path); err != nil {
+			return err
+		}
+		rgba := thumbRGBA(proc)
+		if rgba == nil {
+			return fs.ErrNotExist
+		}
+		return writeJPEGFile(dst, scaleToLongEdge(rgba, coverEdge), 80)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(dst)
 }
 
 // tmpSeq disambiguates concurrent writes of the same cache file.

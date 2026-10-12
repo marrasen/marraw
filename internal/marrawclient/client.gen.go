@@ -813,6 +813,20 @@ func (h LibraryClient) SetVisible(ctx context.Context, folderID int64, ids []int
 	return err
 }
 
+// ShootPreview is the cover of a folder not scanned yet, for the library
+// sidebar: the camera's preview embedded in its first RAW, read without
+// cataloguing anything. The folder must be in the library, a root or a
+// shoot under one, and its drive connected.
+func (h LibraryClient) ShootPreview(ctx context.Context, path string) (*ShootPreview, error) {
+	return client.Call[*ShootPreview](ctx, h.c, "Library.ShootPreview", []any{path})
+}
+
+// SubscribeShootPreview runs ShootPreview as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h LibraryClient) SubscribeShootPreview(ctx context.Context, path string, opts ...client.SubscribeOption) *client.Subscription[*ShootPreview] {
+	return client.Subscribe[*ShootPreview](ctx, h.c, "Library.ShootPreview", []any{path}, opts...)
+}
+
 // SettingsClient calls the methods of the Settings handler group.
 type SettingsClient struct {
 	c *client.Client
@@ -2279,6 +2293,12 @@ const (
 	ShootGroupMonth ShootGroup = "month"
 	ShootGroupDay   ShootGroup = "day"
 )
+
+// ShootPreview is a folder's cover before it is scanned: the embedded
+// preview of its first RAW, as a small JPEG, or empty where it has none.
+type ShootPreview struct {
+	JPEG []byte `json:"jpeg"`
+}
 
 // ShootSort is the folder ordering in the library rail (LibrarySort is the
 // photos within a folder). date* keys on Shoot.earliestTakenAt, undated

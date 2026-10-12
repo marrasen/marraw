@@ -255,6 +255,12 @@ type Shoot struct {
 	Cover *ShootCover `json:"cover,omitempty"`
 }
 
+// ShootPreview is a folder's cover before it is scanned: the embedded
+// preview of its first RAW, as a small JPEG, or empty where it has none.
+type ShootPreview struct {
+	JPEG []byte `json:"jpeg"`
+}
+
 // ShootCover names a shoot's cover photo, with what its image URL needs.
 type ShootCover struct {
 	PhotoID  int64  `json:"photoId"`

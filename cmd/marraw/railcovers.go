@@ -8,6 +8,7 @@ import (
 
 	"github.com/marrasen/gunim/paint"
 
+	"github.com/marrasen/marraw/internal/jpegturbo"
 	"github.com/marrasen/marraw/internal/marrawclient"
 )
 
@@ -110,6 +111,44 @@ func (cu *culler) wantCover(c *marrawclient.ShootCover) {
 			if img == nil {
 				return
 			}
+			cu.lib.covers[key] = img
+			_ = cu.c.Patch("grid", CoverIn{Key: key, Img: img})
+		})
+	}()
+}
+
+// previewKey names the cover of the folder at path before it is
+// scanned: its first RAW's embedded preview.
+func previewKey(path string) string { return "preview:" + strings.ToLower(path) }
+
+// wantPreview fetches the cover of the folder at path, not scanned yet:
+// the backend reads the preview its camera put in its first RAW, without
+// cataloguing the folder. A folder with none, or one that fails, is not
+// asked again while this program runs.
+func (cu *culler) wantPreview(path string) {
+	key := previewKey(path)
+	if cu.lib.covers[key] != nil || cu.lib.coverWant[key] {
+		return
+	}
+	cu.lib.coverWant[key] = true
+	go func() {
+		var img *paint.Image
+		select {
+		case cu.lib.previewSlots <- struct{}{}:
+			res, err := cu.api.Library.ShootPreview(cu.ctx, path)
+			<-cu.lib.previewSlots
+			if err == nil && res != nil && len(res.JPEG) > 0 {
+				if m, err := jpegturbo.DecodeRGBA(res.JPEG); err == nil {
+					img = paint.NewImage(coverCut(m, coverW*coverScale, coverH*coverScale))
+				}
+			}
+		case <-cu.ctx.Done():
+			return
+		}
+		if img == nil {
+			return
+		}
+		cu.onDo(func() {
 			cu.lib.covers[key] = img
 			_ = cu.c.Patch("grid", CoverIn{Key: key, Img: img})
 		})

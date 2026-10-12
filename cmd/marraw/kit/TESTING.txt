@@ -5,6 +5,11 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - Shoots you have never opened get a cover in the sidebar too: the
+    preview the camera put in the folder's first RAW, read without
+    scanning the folder. It is kept in the cache, so it is read once.
+    Once the folder is scanned, its cover becomes its first pick, or its
+    first photo by time.
   - Pick and Reject at the foot of Cull and Develop sit on a dark ground
     of their own, so they read on a bright photo.
   - A card at the bottom right (an update, an error, a task) can be

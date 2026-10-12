@@ -206,6 +206,40 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 	return append(out, children...), nil
 }
 
+// ShootPreview is the cover of a folder not scanned yet, for the library
+// sidebar: the camera's preview embedded in its first RAW, read without
+// cataloguing anything. The folder must be in the library, a root or a
+// shoot under one, and its drive connected.
+func (l *Library) ShootPreview(ctx context.Context, path string) (*ShootPreview, error) {
+	path = filepath.Clean(path)
+	inLibrary := false
+	for _, r := range l.libraryRoots(ctx) {
+		if strings.EqualFold(r.Path, path) || hasPathPrefixFold(path, r.Path) {
+			inLibrary = true
+			break
+		}
+	}
+	if !inLibrary {
+		return nil, aprot.ErrInvalidParams(fmt.Sprintf("%s is not in the library", path))
+	}
+	if !l.rootOnline(path) {
+		return &ShootPreview{}, nil
+	}
+	raw := scan.FirstRaw(ctx, path)
+	if raw == "" {
+		return &ShootPreview{}, nil
+	}
+	b, err := l.deps.Cache.FilePreview(ctx, raw)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// A RAW with no preview, or one that will not open: no cover.
+		return &ShootPreview{}, nil
+	}
+	return &ShootPreview{JPEG: b}, nil
+}
+
 // summarize fills in a shoot's cull counts and cover from the per-folder
 // summaries: its own folder row and, unless selfOnly, those beneath it, as
 // earliestFor matches them.

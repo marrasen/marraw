@@ -82,6 +82,42 @@ func HasRaw(ctx context.Context, root string) bool {
 	return false
 }
 
+// FirstRaw returns the first RAW file beneath root, or "": the first by
+// name in root itself, else in the shallowest folder under it that has
+// one, folders taken by name. It is what stands for a folder not scanned
+// yet, as its cover in the library's sidebar, and reads no file.
+func FirstRaw(ctx context.Context, root string) string {
+	const maxDepth = 12
+	type dirItem struct {
+		abs   string
+		depth int
+	}
+	queue := []dirItem{{abs: root}}
+	for len(queue) > 0 {
+		if ctx.Err() != nil {
+			return ""
+		}
+		d := queue[0]
+		queue = queue[1:]
+		// ReadDir lists by name.
+		dirents, err := os.ReadDir(d.abs)
+		if err != nil {
+			continue
+		}
+		for _, de := range dirents {
+			if !de.IsDir() && IsRawFile(de.Name()) {
+				return filepath.Join(d.abs, de.Name())
+			}
+		}
+		for _, de := range dirents {
+			if de.IsDir() && d.depth < maxDepth && !skipDirName(de.Name()) {
+				queue = append(queue, dirItem{abs: filepath.Join(d.abs, de.Name()), depth: d.depth + 1})
+			}
+		}
+	}
+	return ""
+}
+
 // skipDirName filters noise directories out of recursive walks: exports,
 // select copies, thumbnail caches, our own preview cache, and dot/system
 // folders.

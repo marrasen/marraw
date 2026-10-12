@@ -121,6 +121,9 @@ type library struct {
 	covers    map[string]*paint.Image
 	coverWant map[string]bool
 	live      map[string]liveSum
+	// previewSlots bounds the folders' previews asked for at once, so
+	// they never hold up the grid's own pictures.
+	previewSlots chan struct{}
 }
 
 // followLibrary keeps the sidebar up to date: the library's folders, the
@@ -130,6 +133,7 @@ func (cu *culler) followLibrary() {
 	cu.lib.shoots, cu.lib.stops, cu.lib.online = map[string][]marrawclient.Shoot{}, map[string]func(){}, map[string]bool{}
 	cu.lib.status, cu.lib.covers, cu.lib.coverWant = map[string]marrawclient.RootStatus{}, map[string]*paint.Image{}, map[string]bool{}
 	cu.lib.live = map[string]liveSum{}
+	cu.lib.previewSlots = make(chan struct{}, 3)
 	roots := cu.api.Library.SubscribeGetLibraryRoots(cu.ctx)
 	status := cu.api.Library.SubscribeGetRootStatus(cu.ctx)
 	links := cu.api.Share.SubscribeListLinks(cu.ctx)
@@ -244,8 +248,14 @@ func (cu *culler) railChanged() {
 			if s, ok := cu.lib.live[strings.ToLower(it.Path)]; ok {
 				it.Picked, it.Rejected, it.ref = s.picked, s.rejected, s.cover
 			}
-			it.Cover = coverKey(it.ref)
-			cu.wantCover(it.ref)
+			if it.ref != nil {
+				it.Cover = coverKey(it.ref)
+				cu.wantCover(it.ref)
+			} else if !it.Offline && !it.Outside {
+				// Not scanned yet: the preview in its first RAW stands in.
+				it.Cover = previewKey(it.Path)
+				cu.wantPreview(it.Path)
+			}
 		}
 	}
 	_ = cu.c.Patch("grid", cu.rail)

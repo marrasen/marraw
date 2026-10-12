@@ -160,6 +160,10 @@ export interface ShootCover {
     editHash: string;
 }
 
+export interface ShootPreview {
+    jpeg: string;
+}
+
 
 export function analyzeEyes(client: ApiClient, photoIDs: number[], allowDownload: boolean, options?: RequestOptions): Promise<TaskRef> {
     return client.request<TaskRef>('Library.AnalyzeEyes', [photoIDs, allowDownload], options);
@@ -470,6 +474,19 @@ setVisible.method = 'Library.SetVisible' as const;
 
 export function subscribeSetVisible(client: ApiClient, folderID: number, ids: number[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Library.SetVisible', [folderID, ids], callback, onError, options);
+}
+
+
+export function shootPreview(client: ApiClient, path: string, options?: RequestOptions): Promise<ShootPreview> {
+    return client.request<ShootPreview>('Library.ShootPreview', [path], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+shootPreview.method = 'Library.ShootPreview' as const;
+
+export function subscribeShootPreview(client: ApiClient, path: string, callback: (data: ShootPreview) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<ShootPreview>('Library.ShootPreview', [path], callback, onError, options);
 }
 
 export function onPhotoPatchEvent(client: ApiClient, handler: PushHandler<PhotoPatchEvent>): () => void {
@@ -833,6 +850,21 @@ export function useSetVisible(folderID: number, ids: number[], options?: UseQuer
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [folderID, ids], _subscribe: { method: 'Library.SetVisible', params: [folderID, ids] } });
+}
+
+/**
+ * Subscribes to `Library.ShootPreview` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useShootPreview(path: string, options?: UseQueryOptions<ShootPreview>): UseQueryResult<ShootPreview> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, path: string) => shootPreview(client, path, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Library.ShootPreview', params: [path] } });
 }
 
 export function usePhotoPatchEvent(options?: { maxEvents?: number }): UsePushResult<PhotoPatchEvent> {
