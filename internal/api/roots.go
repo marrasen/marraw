@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -75,11 +76,15 @@ func (l *Library) syncWatchedParents(roots []LibraryRoot) {
 		return
 	}
 	var parents []string
+	l.deps.groupMu.Lock()
 	for _, r := range roots {
 		if r.IsParent && l.rootOnline(r.Path) {
 			parents = append(parents, r.Path)
+			// The group folders under it, where shoots appear too.
+			parents = append(parents, l.deps.groupDirs[strings.ToLower(filepath.Clean(r.Path))]...)
 		}
 	}
+	l.deps.groupMu.Unlock()
 	l.deps.Watch.SetParents(parents)
 }
 
@@ -93,10 +98,9 @@ func (l *Library) isParentRoot(ctx context.Context, path string) bool {
 //
 // An exact stored root always wins: if the user configured D:\Shoots\Wedding as
 // a shoot with include-subfolders off, that beats the fact that D:\Shoots is a
-// managed parent. Otherwise an immediate child of a parent scans recursively,
-// so a shoot's own subfolders roll into its grid rather than becoming shoots of
-// their own. Rule 2 compares against filepath.Dir, not a path prefix — a
-// grandchild is never a shoot.
+// managed parent. Otherwise a shoot at any depth under a parent scans
+// recursively, so its own subfolders roll into its grid rather than becoming
+// shoots of their own, unless the user split it, which leaves it its own RAWs.
 func (l *Library) scanRecursionFor(ctx context.Context, path string) bool {
 	clean := filepath.Clean(path)
 	roots := l.libraryRoots(ctx)
@@ -110,11 +114,8 @@ func (l *Library) scanRecursionFor(ctx context.Context, path string) bool {
 			return r.IncludeSubfolders
 		}
 	}
-	parent := filepath.Dir(clean)
-	for _, r := range roots {
-		if r.IsParent && strings.EqualFold(r.Path, parent) {
-			return true
-		}
+	if r, ok := l.libraryFolderOf(ctx, clean); ok {
+		return shootRecursion(r, clean)
 	}
 	return false
 }
@@ -134,15 +135,16 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 	if !l.rootOnline(parent) {
 		return []Shoot{}, nil
 	}
-	dirents, err := os.ReadDir(parent)
-	if err != nil {
+	if _, err := os.ReadDir(parent); err != nil {
 		return nil, aprot.ErrInvalidParams(fmt.Sprintf("cannot read %s: %v", parent, err))
 	}
 
 	roots := l.libraryRoots(ctx)
+	var root LibraryRoot
 	excluded := map[string]bool{}
 	for _, r := range roots {
 		if r.IsParent && strings.EqualFold(r.Path, parent) {
+			root = r
 			for _, e := range r.ExcludedChildren {
 				excluded[strings.ToLower(e)] = true
 			}
@@ -168,7 +170,7 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 
 	out := []Shoot{}
 	// The parent's own loose RAWs are a flat count: anything nested belongs to
-	// one of the children below — so its date, like its count, is exact-match
+	// one of the shoots below — so its date, like its count, is exact-match
 	// only.
 	if n, oldest := directRaws(parent); n > 0 {
 		self := Shoot{Path: parent, Name: filepath.Base(parent), PhotoCount: n, IsSelf: true,
@@ -177,33 +179,52 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 		out = append(out, self)
 	}
 
-	var children []Shoot
-	for _, de := range dirents {
+	// The shoots at any depth, the folders above them as groups.
+	w := &shootWalk{l: l, ctx: ctx, root: root, excluded: excluded, stored: isStoredRoot, earliest: earliest, sums: summaries}
+	in, _ := l.deps.dirs.info(parent)
+	for _, s := range in.subdirs {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !de.IsDir() || scan.SkipDirName(de.Name()) {
-			continue
-		}
-		full := filepath.Join(parent, de.Name())
-		// A child that is itself a stored root renders in its own right; listing
-		// it here too would show the same folder twice.
-		if isStoredRoot(full) || excluded[strings.ToLower(full)] {
-			continue
-		}
-		count, oldest, ok := l.shootCount(ctx, full)
-		if !ok {
-			continue
-		}
-		child := Shoot{Path: full, Name: de.Name(), PhotoCount: count,
-			EarliestTakenAt: orEstimate(earliestFor(earliest, full, false), oldest)}
-		summarize(&child, summaries, false)
-		children = append(children, child)
+		w.visit(filepath.Join(parent, s), "", 1)
 	}
-	sort.Slice(children, func(i, j int) bool {
-		return strings.ToLower(children[i].Name) < strings.ToLower(children[j].Name)
+	l.watchGroups(parent, w.groups)
+	sort.Slice(w.shoots, func(i, j int) bool {
+		return strings.ToLower(w.shoots[i].Path) < strings.ToLower(w.shoots[j].Path)
 	})
-	return append(out, children...), nil
+	return append(out, w.shoots...), nil
+}
+
+// watchGroups keeps the group folders found under the library folder parent,
+// and has the watcher watch them too where they changed, so a shoot appearing
+// in a year's folder shows as one appearing in the library folder does.
+func (l *Library) watchGroups(parent string, groups []string) {
+	key := strings.ToLower(filepath.Clean(parent))
+	sort.Strings(groups)
+	l.deps.groupMu.Lock()
+	if l.deps.groupDirs == nil {
+		l.deps.groupDirs = map[string][]string{}
+	}
+	same := slices.Equal(l.deps.groupDirs[key], groups)
+	l.deps.groupDirs[key] = groups
+	l.deps.groupMu.Unlock()
+	if !same {
+		l.syncWatchedParents(l.libraryRoots(context.Background()))
+	}
+}
+
+// libraryFolderOf is the library folder path lies in or is, and whether
+// there is one.
+func (l *Library) libraryFolderOf(ctx context.Context, path string) (LibraryRoot, bool) {
+	clean := filepath.Clean(path)
+	var best LibraryRoot
+	found := false
+	for _, r := range l.libraryRoots(ctx) {
+		if r.IsParent && (strings.EqualFold(r.Path, clean) || hasPathPrefixFold(clean, r.Path)) && len(r.Path) >= len(best.Path) {
+			best, found = r, true
+		}
+	}
+	return best, found
 }
 
 // ShootPreview is the cover of a folder not scanned yet, for the library

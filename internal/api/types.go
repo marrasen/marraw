@@ -208,8 +208,14 @@ type LibraryRoot struct {
 	// RPC makes that impossible rather than merely unlikely.
 	IsParent bool `json:"isParent"`
 	// ExcludedChildren are discovered children the user hid, as lowercased
-	// absolute paths. Only meaningful on a parent.
+	// absolute paths, at any depth. Only meaningful on a parent.
 	ExcludedChildren []string `json:"excludedChildren,omitempty"`
+	// FolderModes are how the user wants folders under a parent shown, by
+	// their lowercased absolute paths: "split" shows a folder's subfolders
+	// as shoots of their own, and "one" makes a folder one shoot of
+	// everything beneath it. Folders not here follow the rules in
+	// shoottree.go. Only meaningful on a parent.
+	FolderModes map[string]string `json:"folderModes,omitempty"`
 }
 
 // RootStatus is the live reachability of one stored root, and what the rail
@@ -246,6 +252,15 @@ type Shoot struct {
 	// folder's catalogued photos, 0 until the metadata pass has read one.
 	// Display only — feeds the rail's date sort and time grouping.
 	EarliestTakenAt int64 `json:"earliestTakenAt"`
+	// Group is the folders between the library folder and the shoot, "/"
+	// between them, as "2019" or "Client/Project"; "" for a shoot right in
+	// the library folder.
+	Group string `json:"group,omitempty"`
+	// Subfolders says the shoot has folders in it, which can be shown as
+	// shoots of their own; Split says they are, and the shoot is its own
+	// RAWs alone.
+	Subfolders bool `json:"subfolders,omitempty"`
+	Split      bool `json:"split,omitempty"`
 	// Picked and Rejected count the shoot's photos flagged so, for the
 	// rail's cull progress; 0 until the folder is scanned.
 	Picked   int `json:"picked"`

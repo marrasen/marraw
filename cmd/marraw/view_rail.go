@@ -229,6 +229,12 @@ func railMenu(it RailItem) ([]widget.MenuItem, []string) {
 		add(widget.MenuItem{Label: label + " (the files stay on disk)", Icon: icon.Trash2, Break: true}, "remove")
 	case "time":
 		return nil, nil
+	case "dir":
+		add(widget.MenuItem{Label: "Show as one shoot", Icon: icon.Folder}, "folderOne")
+		add(widget.MenuItem{Label: "Locate on disk", Icon: icon.ExternalLink}, "reveal")
+		add(widget.MenuItem{Label: "Copy path", Icon: icon.Copy}, "copyPath")
+		add(widget.MenuItem{Label: "Hide from library (the files stay on disk)", Icon: icon.EyeOff, Break: true}, "hide")
+		return items, acts
 	case "shoot", "root":
 		add(widget.MenuItem{Label: "Open in Cull", Icon: icon.Play, Hint: "Enter", Disabled: it.Offline}, "cull")
 		add(widget.MenuItem{Label: "Open in new window", Icon: icon.AppWindow, Disabled: it.Offline}, "newWindow")
@@ -240,6 +246,12 @@ func railMenu(it RailItem) ([]widget.MenuItem, []string) {
 		}
 		if !it.Self {
 			add(widget.MenuItem{Label: "Rename on disk…", Icon: icon.FolderPen, Disabled: it.Offline}, "renameDisk")
+		}
+		switch {
+		case it.Split:
+			add(widget.MenuItem{Label: "Show as one shoot", Icon: icon.Folder}, "folderDefault")
+		case it.CanSplit:
+			add(widget.MenuItem{Label: "Show its folders as separate shoots", Icon: icon.FolderTree}, "folderSplit")
 		}
 		add(widget.MenuItem{Label: "Locate on disk", Icon: icon.ExternalLink, Disabled: it.Offline}, "reveal")
 		add(widget.MenuItem{Label: "Copy path", Icon: icon.Copy}, "copyPath")
@@ -467,6 +479,12 @@ func (r *railRow) set(e railEntry, u *gunim.UI) {
 		if e.Count > 0 {
 			r.n.Text = fmt.Sprint(e.Count)
 		}
+	case "dir":
+		// A year's or a client's folder over its shoots.
+		r.name.Color, r.name.Size = widget.Ink, railSize
+		if e.Count > 0 {
+			r.n.Text = fmt.Sprint(e.Count)
+		}
 	case "note":
 		r.name.Color, r.name.Size, r.name.MaxLines = noteInk, railCount, 3
 	default:
@@ -524,6 +542,11 @@ func (r *railRow) indent() float32 {
 	if r.isShoot() {
 		return r.coverAt().Max.X + 10
 	}
+	if r.item.Kind == "dir" {
+		// The chevron where a cover of its depth starts, so its shoots'
+		// covers sit a step in, under its name.
+		return treeX(r.item.Depth) + 20
+	}
 	x := float32(16 + 14*r.item.Depth)
 	if r.item.Kind != "note" {
 		x += 20
@@ -536,9 +559,12 @@ func (r *railRow) isShoot() bool { return r.item.Kind == "shoot" || r.item.Kind 
 
 // coverAt is where a shoot's cover is.
 func (r *railRow) coverAt() geom.Rect {
-	x := float32(14 + 12*max(0, r.item.Depth-1))
-	return geom.Rc(x, (shootH-coverH)/2, coverW, coverH)
+	return geom.Rc(treeX(r.item.Depth), (shootH-coverH)/2, coverW, coverH)
 }
+
+// treeX is where a row of the library's tree starts at depth: a step in for
+// each folder above it.
+func treeX(depth int) float32 { return float32(14 + 18*max(0, depth-1)) }
 
 // Layout implements [gunim.Node].
 func (r *railRow) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
@@ -627,7 +653,7 @@ func (r *railRow) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gun
 	ink := noteInk.Get(f.Theme)
 	x := r.indent() - 20
 	switch r.item.Kind {
-	case "parent", "group", "time":
+	case "parent", "group", "time", "dir":
 		// The chevron, turning down as the header opens.
 		cy := box.H / 2
 		func() {

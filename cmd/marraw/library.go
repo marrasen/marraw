@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -68,6 +69,9 @@ type (
 		// Busy that it is being opened or worked on in the background.
 		Outside bool
 		Busy    bool
+		// CanSplit says a shoot has folders in it that could be shoots of
+		// their own, and Split that they are.
+		CanSplit, Split bool
 		// Title is a shoot's name as it shows, without a date it starts
 		// with, and Line the date and count under it. Picked and Rejected
 		// are its cull counts, for its bar, and Cover its cover's key.
@@ -334,13 +338,37 @@ func (cu *culler) railItems() []RailItem {
 				title, line := shootLabels(name, s.EarliestTakenAt, s.PhotoCount)
 				return RailItem{Key: s.Path, Path: s.Path, Name: name, Kind: "shoot", Count: s.PhotoCount, Depth: depth,
 					Self: s.IsSelf, Shared: shared(s.Path), Parent: r.Path, Title: title, Line: line,
-					Picked: s.Picked, Rejected: s.Rejected, ref: s.Cover}
+					Picked: s.Picked, Rejected: s.Rejected, ref: s.Cover, CanSplit: s.Subfolders && !s.IsSelf, Split: s.Split}
 			}
 			by := string(ui.ShootGroup)
 			if by == "" || by == "none" {
-				for _, s := range rows {
-					items = append(items, shoot(s, 1))
+				// The folders as they lie on disk: a year's or a
+				// client's folder a header over its shoots.
+				var walk func(n *shootNode, depth int)
+				walk = func(n *shootNode, depth int) {
+					for _, k := range n.kids {
+						if k.shoot != nil {
+							items = append(items, shoot(*k.shoot, depth))
+							// A split shoot's own shoots, under it.
+							walk(k, depth+1)
+							continue
+						}
+						gk := key + "|dir:" + strings.ToLower(k.rel)
+						gOpen := open(gk)
+						items = append(items, RailItem{Key: gk, Path: filepath.Join(r.Path, filepath.FromSlash(k.rel)), Name: k.name,
+							Kind: "dir", Group: true, Open: gOpen, Count: k.count, Depth: depth, Parent: r.Path})
+						if gOpen {
+							walk(k, depth+1)
+						}
+					}
 				}
+				tree := shootTree(rows, string(ui.ShootSort))
+				for _, s := range rows {
+					if s.IsSelf {
+						items = append(items, shoot(s, 1))
+					}
+				}
+				walk(tree, 1)
 				continue
 			}
 			for _, s := range rows {
@@ -505,6 +533,98 @@ func rootName(r marrawclient.LibraryRoot) string {
 
 // sortShoots orders shoots as by says: by name, or by date with those
 // with none last; a library folder's own loose photos stay first.
+// shootNode is a folder in a library folder's tree of shoots: a shoot, a
+// group of them, as a year's or a client's folder, or both, as a split
+// shoot with shoots in its subfolders.
+type shootNode struct {
+	name, rel string
+	shoot     *marrawclient.Shoot
+	kids      []*shootNode
+	// count is the photos under it, and latest the newest capture, for
+	// the date sort.
+	count  int
+	latest int64
+}
+
+// shootTree arranges a library folder's shoots by their folders, each
+// level in the order by says.
+func shootTree(shoots []marrawclient.Shoot, by string) *shootNode {
+	root := &shootNode{}
+	child := func(n *shootNode, name string) *shootNode {
+		for _, k := range n.kids {
+			if strings.EqualFold(k.name, name) {
+				return k
+			}
+		}
+		rel := name
+		if n.rel != "" {
+			rel = n.rel + "/" + name
+		}
+		k := &shootNode{name: name, rel: rel}
+		n.kids = append(n.kids, k)
+		return k
+	}
+	for i := range shoots {
+		s := &shoots[i]
+		if s.IsSelf {
+			continue
+		}
+		n := root
+		if s.Group != "" {
+			for _, seg := range strings.Split(s.Group, "/") {
+				n = child(n, seg)
+			}
+		}
+		child(n, s.Name).shoot = s
+	}
+	var settle func(n *shootNode)
+	settle = func(n *shootNode) {
+		if n.shoot != nil {
+			n.count, n.latest = n.shoot.PhotoCount, n.shoot.EarliestTakenAt
+		}
+		for _, k := range n.kids {
+			settle(k)
+			n.count += k.count
+			n.latest = max(n.latest, k.latest)
+		}
+		slices.SortStableFunc(n.kids, func(a, b *shootNode) int { return compareNodes(a, b, by) })
+	}
+	settle(root)
+	return root
+}
+
+// compareNodes orders two folders of one level as by orders shoots: by
+// name, or by date, a group by its newest shoot, the undated last.
+func compareNodes(a, b *shootNode, by string) int {
+	byName := strings.Compare(strings.ToLower(a.name), strings.ToLower(b.name))
+	switch by {
+	case "nameDesc":
+		return -byName
+	case "dateAsc", "dateDesc":
+		if a.latest == 0 || b.latest == 0 {
+			switch {
+			case a.latest == b.latest:
+				return byName
+			case a.latest == 0:
+				return 1
+			}
+			return -1
+		}
+		d := a.latest - b.latest
+		if by == "dateDesc" {
+			d = -d
+		}
+		switch {
+		case d < 0:
+			return -1
+		case d > 0:
+			return 1
+		}
+		return byName
+	}
+	return byName
+}
+
 func sortShoots(shoots []marrawclient.Shoot, by string) []marrawclient.Shoot {
 	out := slices.Clone(shoots)
 	byName := func(a, b marrawclient.Shoot) int {
@@ -772,6 +892,28 @@ func (cu *culler) railAct(in RailAct) {
 		})
 		cu.saveRoots(next, nil)
 		cu.notify("Removed " + it.Name + " from the library. The files stay on disk.")
+	case "folderOne", "folderSplit", "folderDefault":
+		// How a folder shows: one shoot, its folders as shoots of their
+		// own, or as the rules have it.
+		mode := map[string]string{"folderOne": "one", "folderSplit": "split"}[in.Act]
+		next := slices.Clone(roots)
+		for i := range next {
+			if !strings.EqualFold(next[i].Path, it.Parent) {
+				continue
+			}
+			m := maps.Clone(next[i].FolderModes)
+			if m == nil {
+				m = map[string]string{}
+			}
+			k := strings.ToLower(filepath.Clean(it.Path))
+			if mode == "" {
+				delete(m, k)
+			} else {
+				m[k] = mode
+			}
+			next[i].FolderModes = m
+		}
+		cu.saveRoots(next, nil)
 	case "hide":
 		next := slices.Clone(roots)
 		for i := range next {

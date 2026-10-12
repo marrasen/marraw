@@ -5,6 +5,17 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - Shoots at any depth in a library folder, as you keep them: by year
+    (2019 / 2019-11-08 Wedding), by client (Client / Project / Date), or
+    mixed. Folders without photos directly in them, as a year or a
+    client, show as headers that fold, with a count; the shoots under
+    them indent. A folder with photos in it is a shoot, its subfolders
+    part of it. A dated folder whose photos are all in subfolders (as
+    CamA and CamB) is one shoot too.
+  - Right-click to say otherwise: "Show its folders as separate shoots"
+    on a shoot, "Show as one shoot" on a header or on a split shoot, and
+    "Hide from library" on a header too. Grouping by date in the sort
+    menu still lists every shoot by date, folders aside.
   - What you do to photos is now kept in ONE file per folder, marraw.json,
     instead of a .marraw.json beside each RAW. It holds the ratings,
     flags and develop settings, each photo's fingerprint, and the photos

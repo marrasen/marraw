@@ -46,6 +46,12 @@ type Deps struct {
 	// WatermarkDir stores the user's watermark images (under the app data
 	// dir); AddWatermarkAsset writes it, exports and GET /wm/{name} read it.
 	WatermarkDir string
+	// dirs caches the folders' listings for finding shoots at any depth,
+	// and groupDirs are the group folders found under each library folder
+	// (by its lowercased path), watched as the library folders are.
+	dirs      dirCache
+	groupMu   sync.Mutex
+	groupDirs map[string][]string
 	// Watch notices new folders and new photos on disk. Nil is valid: a
 	// zero-value Deps is used for TypeScript generation, and a daemon whose
 	// watch handle failed to open still works through manual rescans.

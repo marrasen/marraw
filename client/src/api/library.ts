@@ -62,6 +62,7 @@ export interface LibraryRoot {
     photoCount: number;
     isParent: boolean;
     excludedChildren?: string[];
+    folderModes?: Record<string, string>;
 }
 
 export interface Photo {
@@ -149,6 +150,9 @@ export interface Shoot {
     photoCount: number;
     isSelf: boolean;
     earliestTakenAt: number;
+    group?: string;
+    subfolders?: boolean;
+    split?: boolean;
     picked: number;
     rejected: number;
     cover?: ShootCover;
