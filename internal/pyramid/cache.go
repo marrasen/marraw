@@ -5,9 +5,9 @@
 package pyramid
 
 import (
-	"encoding/hex"
-	"crypto/sha1"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"image"
 	"image/jpeg"
