@@ -41,8 +41,12 @@ type overviewView struct {
 	gridW float32
 }
 
-// ovTextH is the band under a card's cover, for its name and line.
-const ovTextH = 54
+// ovTextH is the band under a card's cover, for its name and line, and
+// ovTop the room above the cover, clear of the header over its row.
+const (
+	ovTextH = 54
+	ovTop   = 12
+)
 
 func newOverviewView(v *gridView) *overviewView {
 	o := &overviewView{v: v, filter: widget.NewTextField(), big: map[string]*paint.Image{}}
@@ -54,7 +58,7 @@ func newOverviewView(v *gridView) *overviewView {
 	}
 	o.none = widget.NewLabel("")
 	o.none.Color, o.none.Size = noteInk, noteSize
-	o.grid = widget.NewTileGrid(geom.Sz(ovCardW, ovCoverH+ovTextH))
+	o.grid = widget.NewTileGrid(geom.Sz(ovCardW, ovTop+ovCoverH+ovTextH))
 	o.grid.Pace = 2
 	o.grid.Tile = o.newCard
 	o.grid.Header = o.newHeader
@@ -209,9 +213,9 @@ func (c *ovCard) Children() []gunim.Node { return []gunim.Node{c.title, c.line} 
 func (c *ovCard) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	box := cs.Max
 	ts := kids.At(0).Layout(gunim.Loose(geom.Sz(box.W-4, 20)))
-	kids.At(0).Place(geom.Pt(2, ovCoverH+9))
+	kids.At(0).Place(geom.Pt(2, ovTop+ovCoverH+9))
 	kids.At(1).Layout(gunim.Loose(geom.Sz(box.W-4, 18)))
-	kids.At(1).Place(geom.Pt(2, ovCoverH+9+ts.H+2))
+	kids.At(1).Place(geom.Pt(2, ovTop+ovCoverH+9+ts.H+2))
 	return box
 }
 
@@ -221,7 +225,7 @@ func (c *ovCard) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids guni
 		return
 	}
 	card := c.o.cards[c.i]
-	at := geom.Rc(0, 0, box.W, ovCoverH)
+	at := geom.Rc(0, ovTop, box.W, ovCoverH)
 	op := float32(1)
 	if card.Offline {
 		op = 0.45
@@ -241,7 +245,7 @@ func (c *ovCard) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids guni
 	// How far it is culled, along the cover's foot.
 	if done := card.Picked + card.Rejected; done > 0 {
 		total := float32(max(card.Count, done))
-		track := geom.Rc(8, ovCoverH-11, box.W-16, 4)
+		track := geom.Rc(8, ovTop+ovCoverH-11, box.W-16, 4)
 		p.RRect(track, 2, paint.Solid(color.NRGBA{A: 0x90}))
 		pw := track.Size().W * float32(card.Picked) / total
 		rw := track.Size().W * float32(card.Rejected) / total
