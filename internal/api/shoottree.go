@@ -22,6 +22,9 @@ import (
 //   - A folder without RAWs directly in it whose name starts with a full
 //     date, as "2019-11-08 Wedding" holding "CamA" and "CamB", is one shoot
 //     of its subfolders.
+//   - So is a folder holding a DCIM folder, whatever its name: a memory
+//     card copied as it is, with the photos in DCIM/100MSDCF and the
+//     camera's own folders, as PRIVATE and AVF_INFO, beside it.
 //   - Any other folder without RAWs directly in it is a group, such as a
 //     year or a client, and the folders in it are looked at the same way.
 //
@@ -162,7 +165,7 @@ func (w *shootWalk) visit(dir, group string, depth int) bool {
 			w.visit(filepath.Join(dir, s), inner, depth+1)
 		}
 		return true
-	case mode == FolderOne || mode != FolderSplit && datedName.MatchString(filepath.Base(dir)):
+	case mode == FolderOne || mode != FolderSplit && (datedName.MatchString(filepath.Base(dir)) || cardCopy(in)):
 		if n, _ := w.l.deps.dirs.below(w.ctx, dir, shootDepth-depth); n == 0 {
 			return false
 		}
@@ -205,6 +208,17 @@ func (w *shootWalk) add(dir, group string, split, subfolders bool) {
 		EarliestTakenAt: orEstimate(earliestFor(w.earliest, dir, split), oldest)}
 	summarize(&sh, w.sums, split)
 	w.shoots = append(w.shoots, sh)
+}
+
+// cardCopy says a folder holds a memory card's DCIM folder, as a card copied
+// whole does.
+func cardCopy(in dirInfo) bool {
+	for _, s := range in.subdirs {
+		if strings.EqualFold(s, "DCIM") {
+			return true
+		}
+	}
+	return false
 }
 
 // joinGroup is group with name below it.

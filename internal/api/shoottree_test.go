@@ -54,6 +54,8 @@ func TestShootsAtAnyDepth(t *testing.T) {
 		"Exports/x.ARW",
 		"Mixed/m.ARW",
 		"Mixed/Second/s.ARW",
+		"Music video/DCIM/100MSDCF/v1.ARW",
+		"Music video/DCIM/100MSDCF/v2.ARW",
 	} {
 		touchRaw(t, filepath.Join(lib, p))
 	}
@@ -79,6 +81,8 @@ func TestShootsAtAnyDepth(t *testing.T) {
 		"Launch":             {group: "Clients/Acme", n: 2, subs: true},
 		"Mixed":              {n: 1, split: true, subs: true},
 		"Second":             {group: "Mixed", n: 1},
+		// A card copied whole, its name undated: one shoot.
+		"Music video": {n: 2, subs: true},
 	}
 	if len(got) != len(expect) {
 		t.Fatalf("listed %d shoots, want %d: %+v", len(got), len(expect), got)

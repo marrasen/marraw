@@ -5,6 +5,13 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - A memory card copied whole into a library folder (DCIM, PRIVATE,
+    AVF_INFO and the rest beside each other) is one shoot under the
+    folder's own name, dated or not, rather than a DCIM header over a
+    100MSDCF shoot.
+  - The update's last page ("It opens in a moment") has no Open Now
+    button any more: it opened by itself anyway. You see this on the
+    update after this one, as that page is the new version's.
   - One marraw at a time: starting marraw while it runs (Start menu,
     taskbar) opens a new window in the one running instead of a second
     copy with its own backend. A second copy is what kept the old version
