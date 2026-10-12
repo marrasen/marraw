@@ -609,7 +609,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		}); err != nil {
 			return err
 		}
-		if err := c.WriteLevels(rgba, photo.CacheKey, editHash, 2048, 1024, 512, 256); err != nil {
+		if err := c.writeRendered(rgba, photo.CacheKey, editHash, edits == nil); err != nil {
 			return err
 		}
 		report(1)
@@ -621,10 +621,33 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	scaled := scaleToLongEdge(rgba, 2048)
 	ApplyFinish(scaled, gamma, edits, ai, fills)
 	report(0.92)
-	if err := c.WriteLevels(scaled, photo.CacheKey, editHash, 2048, 1024, 512, 256); err != nil {
+	if err := c.writeRendered(scaled, photo.CacheKey, editHash, edits == nil); err != nil {
 		return err
 	}
 	report(1)
+	return nil
+}
+
+// writeRendered writes a RAW render's small levels, 2048 down to 256.
+// Unedited, it writes over the ones the camera's embedded JPEG gave
+// (deriveFromThumb, tryThumbRoute): the grid's thumbnail then shows the
+// photo as marraw renders it, as the photo view does, rather than as the
+// camera did. Those files keep their names, so a client holding one must
+// ask for it again (the gunim client does; a browser's cache, told the
+// URL is immutable, would not).
+func (c *Cache) writeRendered(src *image.RGBA, cacheKey, editHash string, base bool) error {
+	cur := src
+	for _, l := range []int{2048, 1024, 512, 256} {
+		cur = scaleToLongEdge(cur, l)
+		q := 80
+		if l >= 1024 {
+			q = 85
+		}
+		path := c.PathFor(cacheKey, strconv.Itoa(l), editHash)
+		if err := writeJPEGFileOver(path, cur, q, base); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1000,7 +1023,14 @@ func (c *Cache) FilePreview(ctx context.Context, path string) ([]byte, error) {
 var tmpSeq atomic.Uint64
 
 func writeJPEGFile(path string, img image.Image, quality int) error {
-	if _, err := os.Stat(path); err == nil {
+	return writeJPEGFileOver(path, img, quality, false)
+}
+
+// writeJPEGFileOver is writeJPEGFile, writing over a file there already
+// where over is set. The rename is atomic, so a reader gets the old file
+// or the new, never half of one.
+func writeJPEGFileOver(path string, img image.Image, quality int, over bool) error {
+	if _, err := os.Stat(path); err == nil && !over {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -1026,7 +1056,16 @@ func writeJPEGFile(path string, img image.Image, quality int) error {
 		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		if over {
+			// Windows will not rename over a file a reader holds open: the
+			// old one stays, as good as before, and the render goes on.
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // previewFrameEdge is the long edge to downscale a FULL frame to so that,

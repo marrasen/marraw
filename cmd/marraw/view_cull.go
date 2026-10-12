@@ -1713,6 +1713,16 @@ func (q *cullPic) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, _ gunim.
 	// The picture and its tiles come in as one, so no tile's edge shows
 	// through another as they fade.
 	frame := r.Add(geom.Pt(q.slide*(1-k), 0))
+	if q.v.hero.Flying() && math.Abs(float64(q.v.spin.Value())) <= 0.01 {
+		// Flying from a tile or back to one, the picture fills its box,
+		// cropped, as a cropped tile does: the box turns from the tile's
+		// shape to the photo's, and lands where crop and fit are one.
+		// The sharp tiles wait for the landing.
+		faded(p, frame, min(1, k*1.6), func() {
+			p.Image(q.img, frame, paint.ImageOpts{Opacity: 1, Src: coverSrc(q.img, frame)})
+		})
+		return
+	}
 	base := pixelFit(frame, q.img)
 	if deg := float64(q.v.spin.Value()); math.Abs(deg) > 0.01 {
 		// Turning a quarter, the picture keeps to the frame as it turns.

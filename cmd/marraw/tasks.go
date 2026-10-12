@@ -82,6 +82,14 @@ func (cu *culler) trackTasks(ts []marrawclient.SharedTaskState) {
 		}
 		switch t.Status {
 		case marrawclient.TaskNodeStatusCompleted:
+			if t.Meta != nil && t.Meta.Kind == "prerender" && !cu.prerendered[t.ID] {
+				// Its photos' thumbnails are marraw's renders now.
+				if cu.prerendered == nil {
+					cu.prerendered = map[string]bool{}
+				}
+				cu.prerendered[t.ID] = true
+				cu.renewThumbs(t.Meta.FolderPath)
+			}
 			if time.Since(run.seen) < taskShowAfter {
 				// Done before it ever showed: nothing to tell.
 				delete(cu.tasks, t.ID)

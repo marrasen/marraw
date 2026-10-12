@@ -558,7 +558,15 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 			}
 		})
 		return false
+	case input.HistoryStep:
+		// The mouse's back button goes back to the overview the shoot
+		// was opened from, as the Back button does.
+		return !e.Forward && v.head.goBack(u)
 	case input.KeyPress:
+		// Backspace goes back too, where nothing typed takes it.
+		if e.Key == input.KeyBackspace && e.Mods == 0 && v.head.goBack(u) {
+			return true
+		}
 		// Ctrl and C copies the edit of the photo the keyboard is on, and
 		// Ctrl and V pastes it on the photos selected.
 		if e.Mods.Has(input.ModControl) && !e.Mods.Has(input.ModAlt) {
@@ -1021,7 +1029,10 @@ type gridHead struct {
 }
 
 var (
-	headTitleSize = theme.Length("marraw.head.size", 17)
+	// The shoot's name in the title bar: a step over the sidebar's names,
+	// and a soft white, so it labels the view rather than shouts.
+	headTitleSize = theme.Length("marraw.head.size", 14)
+	headTitleInk  = theme.Color("marraw.head.ink", color.NRGBA{R: 0xd2, G: 0xd6, B: 0xde, A: 0xff})
 	ratedInk      = starInk
 )
 
@@ -1038,7 +1049,7 @@ func newGridHead() *gridHead {
 	h.views.KeepFocus = true
 	h.views.OnChange = func(i int, _ *gunim.UI) gunim.Intent { return FolderView{Photos: i == 0} }
 	h.viewsNode = frosted(h.views, marrawTheme().With(theme.Set(widget.SegmentedHeight, 28)))
-	h.title.Size = headTitleSize
+	h.title.Size, h.title.Color = headTitleSize, headTitleInk
 	// A long shoot name ends in an ellipsis on its one line, and the
 	// count beside it stays whole.
 	h.title.MaxLines = 1
@@ -1101,7 +1112,7 @@ func (h *gridHead) subText() {
 		h.sub.Text = ""
 		return
 	}
-	s := fmt.Sprintf("%d photos", h.total)
+	s := fmt.Sprintf("%d %s", h.total, map[bool]string{false: "photos", true: "photo"}[h.total == 1])
 	if h.folderTotal > h.total {
 		s = fmt.Sprintf("%d of %d photos", h.total, h.folderTotal)
 	}
@@ -1134,6 +1145,16 @@ func (h *gridHead) showSet(on bool, shoots int, u *gunim.UI) {
 
 // backOn says the way back to an overview shows.
 func (h *gridHead) backOn() bool { return h.backKey != "" && h.over == "" }
+
+// goBack goes back to the overview, where the way back shows, and says
+// whether it did.
+func (h *gridHead) goBack(u *gunim.UI) bool {
+	if !h.backOn() {
+		return false
+	}
+	u.Send(h, OpenOverview{Key: h.backKey})
+	return true
+}
 
 // overview shows the overview's name and count while it shows, and the
 // shoot's own, st's, with a way back where in names one, once it is put

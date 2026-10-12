@@ -18,8 +18,8 @@ import (
 
 // overviewView is the overview of a folder, where the photos show: a filter
 // over a grid of the folder's shoots, a card each, under a header for each
-// folder between. A click on a card opens its shoot, as Enter does on the
-// card the keyboard is on.
+// folder between. A click on a card selects it, and a double click opens
+// its shoot, as Enter does on the card the keyboard is on.
 type overviewView struct {
 	v      *gridView
 	st     OverviewIn
@@ -194,7 +194,6 @@ type ovCard struct {
 	i           int
 	title, line *widget.Label
 	hot         *anim.Float
-	pressed     bool
 }
 
 func (o *overviewView) newCard(i int) gunim.Node {
@@ -263,31 +262,17 @@ func (c *ovCard) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids guni
 	}
 }
 
-// Handle implements [gunim.Handler]: it lights under the pointer, and a
-// click opens its shoot. It keeps the press, so it hears the button come
-// up: a card is a way into its shoot, not one to select.
+// Handle implements [gunim.Handler]: it lights under the pointer. The
+// grid takes the clicks: one selects the card, as a photo's, and a double
+// click or Enter opens its shoot.
 func (c *ovCard) Handle(e input.Event, u *gunim.UI) bool {
-	switch e := e.(type) {
+	switch e.(type) {
 	case input.PointerEnter, input.PointerMove:
 		c.hot.Animate(1, widget.Quick.Get(u.Theme()))
 		u.Invalidate()
 	case input.PointerLeave:
 		c.hot.Animate(0, widget.Settle.Get(u.Theme()))
-		c.pressed = false
 		u.Invalidate()
-	case input.PointerDown:
-		if e.Button == input.ButtonPrimary {
-			c.pressed = true
-			return true
-		}
-	case input.PointerUp:
-		if c.pressed && e.Button == input.ButtonPrimary {
-			c.pressed = false
-			if in := c.o.open(c.i); in != nil {
-				u.Send(c, in)
-			}
-			return true
-		}
 	}
 	return false
 }

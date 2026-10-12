@@ -256,6 +256,11 @@ type culler struct {
 	thumbOrder   []int64
 	thumbsWanted map[int64]bool
 	thumbSlots   chan struct{}
+	// rendered are the photos whose thumbnail was asked for again once
+	// marraw had rendered them (a render writes over the camera's), and
+	// prerendered the pre-render tasks seen to their end.
+	rendered    map[int64]bool
+	prerendered map[string]bool
 	// gridStop cancels the grid's fetches when it scrolls on.
 	gridStop context.CancelFunc
 
@@ -933,6 +938,10 @@ func (cu *culler) take(a arrival) {
 	}
 	cu.cache.put(p.ID, cacheEntry{img: a.got.img, rank: a.rank, note: note})
 	cu.learnShape(p.ID, a.got.w, a.got.h)
+	if a.rank >= rankSharp {
+		// Rendered sharp, unedited: its thumbnail is marraw's render now.
+		cu.renewThumb(p)
+	}
 	if a.index != cu.at {
 		return
 	}
@@ -1001,7 +1010,8 @@ func (cu *culler) record(what string, sharp bool) {
 // hands.
 // scriptStep takes a step of -keys that is not a key: click:x:y and
 // move:x:y move the pointer, in the window, and click there, dclick:x:y
-// twice, rclick:x:y with the secondary button; drag:x:y:x:y
+// twice, rclick:x:y with the secondary button, mouseback:x:y with the
+// back side button; drag:x:y:x:y
 // drags from one point to another; type:text
 // types; shift+plus presses Shift and + as a Swedish keyboard does, which
 // types ?; shift+ a key presses it with Shift; ctrl+z, ctrl+shift+n and w press those; wait:ms waits; and shot:name writes the window to name.png. It
@@ -1019,6 +1029,16 @@ func (cu *culler) scriptStep(k string) bool {
 		time.Sleep(50 * time.Millisecond)
 		_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonSecondary, Clicks: 1, Time: now})
 		_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: at, Button: input.ButtonSecondary, Time: now})
+	case ok && verb == "mouseback":
+		// mouseback:x:y presses the mouse's back side button at x, y.
+		xs, ys, _ := strings.Cut(arg, ":")
+		x, _ := strconv.ParseFloat(xs, 32)
+		y, _ := strconv.ParseFloat(ys, 32)
+		at := geom.Pt(float32(x), float32(y))
+		_ = cu.c.Input(cu.ctx, input.PointerMove{Pos: at, Time: now})
+		time.Sleep(50 * time.Millisecond)
+		_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonBack, Clicks: 1, Time: now})
+		_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: at, Button: input.ButtonBack, Time: now})
 	case ok && (verb == "click" || verb == "move" || verb == "dclick"):
 		xs, ys, _ := strings.Cut(arg, ":")
 		x, _ := strconv.ParseFloat(xs, 32)
@@ -1355,6 +1375,29 @@ func (cu *culler) loadThumb(ctx context.Context, i int) {
 	}()
 }
 
+// renewThumb asks once more for unedited photo p's thumbnail, rendered
+// now, once a session: the one held may be the camera's embedded JPEG.
+func (cu *culler) renewThumb(p marrawclient.Photo) {
+	if p.EditHash != "" && p.EditHash != "base" || cu.rendered[p.ID] || cu.thumbs[p.ID] == nil {
+		return
+	}
+	if cu.rendered == nil {
+		cu.rendered = map[int64]bool{}
+	}
+	cu.rendered[p.ID] = true
+	cu.refreshThumb(p)
+}
+
+// renewThumbs renews the thumbnails of the photos showing from the
+// folder at path, once the backend has pre-rendered it.
+func (cu *culler) renewThumbs(path string) {
+	for _, p := range cu.photos {
+		if strings.EqualFold(cu.folderOf(p), path) {
+			cu.renewThumb(p)
+		}
+	}
+}
+
 // refreshThumb brings photo p's small picture of its new edit, the old
 // one showing until it comes: the backend renders it as the edit is
 // saved, so it is asked for from what is rendered, every little while,
@@ -1362,7 +1405,15 @@ func (cu *culler) loadThumb(ctx context.Context, i int) {
 func (cu *culler) refreshThumb(p marrawclient.Photo) {
 	go func() {
 		for range 40 {
+			// A slot of the thumbnails', so a folder's worth asked again
+			// at once goes a few at a time.
+			select {
+			case cu.thumbSlots <- struct{}{}:
+			case <-cu.ctx.Done():
+				return
+			}
 			g, err := cu.im.get(cu.ctx, p, want{level: "256", cacheOnly: true})
+			<-cu.thumbSlots
 			if err == nil {
 				select {
 				case cu.do <- func() {

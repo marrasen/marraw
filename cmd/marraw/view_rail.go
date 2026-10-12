@@ -60,7 +60,6 @@ type railView struct {
 	empty        *widget.Label
 	filter       *widget.TextField
 	order        *widget.MenuButton
-	hide         *widget.IconButton
 	list         *widget.List
 	menu         *widget.ContextMenu
 	body         gunim.Node
@@ -81,6 +80,37 @@ type railView struct {
 	dropIn   *anim.Float
 	// covers are the shoots' covers' pictures, by their keys.
 	covers map[string]*paint.Image
+	// footY is where the foot's hairline runs.
+	footY float32
+}
+
+// railFootH is the foot's height, and railFootInk its buttons' ink, a
+// step under the rows' names.
+const railFootH = 34
+
+var railFootInk = theme.Color("marraw.rail.foot", color.NRGBA{R: 0xa8, G: 0xae, B: 0xb8, A: 0xff})
+
+// railFoot is the sidebar's foot: Add folder at the left, the settings'
+// gear at the right.
+type railFoot struct{ add, gear gunim.Node }
+
+// Children implements [gunim.Composite].
+func (f *railFoot) Children() []gunim.Node { return []gunim.Node{f.add, f.gear} }
+
+// Layout implements [gunim.Node].
+func (f *railFoot) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	box := c.Max
+	gs := kids.At(1).Layout(gunim.Loose(box))
+	kids.At(1).Place(geom.Pt(box.W-gs.W, (box.H-gs.H)/2))
+	as := kids.At(0).Layout(gunim.Loose(geom.Sz(max(0, box.W-gs.W-8), box.H)))
+	kids.At(0).Place(geom.Pt(0, (box.H-as.H)/2))
+	return box
+}
+
+// Paint implements [gunim.Node].
+func (f *railFoot) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
+	kids.At(0).Paint(p)
+	kids.At(1).Paint(p)
 }
 
 // railHeadH is the room above the rows: the title, the filter, and the
@@ -98,8 +128,6 @@ func newRailView() *railView {
 	v.order = widget.NewMenuButton("", nil)
 	v.order.Icon, v.order.Tooltip = icon.ArrowUpDown, "Sort and group the folders"
 	v.order.OnPick = func(i int, _ *gunim.UI) gunim.Intent { return railOrderPick(i) }
-	v.hide = widget.NewIconButton(icon.PanelLeft, "Hide the library")
-	v.hide.KeepFocus, v.hide.OnClick = true, widget.Sends(RailHide{Hidden: true})
 	v.list.SkipFocus, v.list.ClickOnce = true, true
 	v.list.OnActivate = func(k widget.Key, _ *gunim.UI) gunim.Intent {
 		it, ok := v.item(string(k))
@@ -141,11 +169,16 @@ func newRailView() *railView {
 		return RailAct{Key: it.Key, Act: v.acts[i]}
 	}
 	v.body = v.menu
+	// The foot's two, quiet as the sidebar's own rows: no fill till the
+	// pointer is over them.
 	add := widget.NewButton("Add folder")
 	add.Icon, add.KeepFocus, add.OnClick = icon.FolderPlus, true, widget.Sends(AskAddFolder{})
 	gear := widget.NewButton("")
 	gear.Icon, gear.KeepFocus, gear.Tooltip, gear.OnClick = icon.Settings, true, "Settings", widget.Sends(AskSettings{})
-	v.add = &hflow{items: []gunim.Node{glassButton(add), glassButton(gear)}, gap: 8}
+	for _, b := range []*widget.Button{add, gear} {
+		b.Ghost, b.Ink = true, railFootInk
+	}
+	v.add = &railFoot{add: add, gear: gear}
 	return v
 }
 
@@ -325,16 +358,14 @@ func (v *railView) show(s RailState, u *gunim.UI) {
 
 // Children implements [gunim.Composite].
 func (v *railView) Children() []gunim.Node {
-	return []gunim.Node{v.title, v.count, v.order, v.hide, v.filter, v.empty, v.body, v.add}
+	return []gunim.Node{v.title, v.count, v.order, v.filter, v.empty, v.body, v.add}
 }
 
 // Layout implements [gunim.Node]: the title and its buttons, the filter,
 // then the rows, scrolling, and Add folder at the foot.
 func (v *railView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
-	title, count, order, hide, filter, empty, body, add := kids.At(0), kids.At(1), kids.At(2), kids.At(3), kids.At(4), kids.At(5), kids.At(6), kids.At(7)
-	hs := hide.Layout(gunim.Loose(geom.Sz(28, 28)))
-	hide.Place(geom.Pt(box.W-10-hs.W, v.top+(gridHeadHeight-hs.H)/2))
+	title, count, order, filter, empty, body, add := kids.At(0), kids.At(1), kids.At(2), kids.At(3), kids.At(4), kids.At(5), kids.At(6)
 	ts := title.Layout(gunim.Loose(geom.Sz(box.W-80, 40)))
 	title.Place(geom.Pt(16, v.top+(gridHeadHeight-ts.H)/2))
 	fs := filter.Layout(gunim.Tight(geom.Sz(box.W-24, 30)))
@@ -345,9 +376,10 @@ func (v *railView) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	count.Place(geom.Pt(16, v.top+gridHeadHeight+6+fs.H+4+(os.H-cs.H)/2))
 	empty.Layout(gunim.Loose(geom.Sz(box.W-32, 200)))
 	empty.Place(geom.Pt(16, v.top+railHeadH+8))
-	as := add.Layout(gunim.Loose(geom.Sz(box.W-24, 40)))
-	add.Place(geom.Pt(12, box.H-12-as.H))
-	body.Layout(gunim.Tight(geom.Sz(box.W, max(0, box.H-railHeadH-v.top-as.H-24))))
+	add.Layout(gunim.Tight(geom.Sz(box.W-16, railFootH)))
+	add.Place(geom.Pt(8, box.H-railFootH-6))
+	v.footY = box.H - railFootH - 12
+	body.Layout(gunim.Tight(geom.Sz(box.W, max(0, v.footY-railHeadH-v.top))))
 	body.Place(geom.Pt(0, v.top+railHeadH))
 	return box
 }
@@ -361,6 +393,8 @@ func (v *railView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	}
 	p.RRect(geom.Rc(box.W-1, 0, 1, box.H), 0, paint.Solid(edge))
 	p.RRect(geom.Rc(0, v.top+gridHeadHeight-1, box.W, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x12}))
+	// A hairline over the foot, as under the title.
+	p.RRect(geom.Rc(0, v.footY, box.W-1, 1), 0, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x0e}))
 	for k := range kids.All {
 		k.Paint(p)
 	}

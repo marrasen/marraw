@@ -5,6 +5,25 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - Shoots view: one click on a card selects it, so the arrow keys move
+    from there; a double click or Enter opens the shoot.
+  - In a shoot opened from a folder (the "< Clients" button shows),
+    Backspace or the mouse's back button goes back, as the button does.
+  - Crop framing: opening a photo, its picture grows from the cropped
+    tile to the whole photo, instead of jumping from cropped to fitted.
+  - Thumbnails show the photo as marraw renders it, the same as the photo
+    view, once marraw has rendered it (opening it, or the "Pre-rendering"
+    pass after a shoot opens). Before, they stayed the camera's own small
+    JPEG, which can differ in colour and contrast. Photos rendered before
+    this build change over the next time each is rendered.
+  - The sidebar has one hide button, the one at the left of the bar. The
+    one at the top of the sidebar is gone.
+  - Add folder and Settings at the foot of the sidebar are quiet, with no
+    button frame until the pointer is over them.
+  - The shoot's name in the title bar is smaller and softer.
+  - "1 photo", not "1 photos".
+
+From the build before (v0.1.19)
   - The Photos | Shoots switch has moved to the start of the bar under
     the folder's name, beside the sidebar button. It stays in the same
     place in both views, and slides between them.
@@ -16,7 +35,7 @@ New in this build
     the photo view names its own shoot. Before, they gave the folder
     you clicked.
 
-From the build before (v0.1.18)
+From earlier builds (v0.1.18)
   - A folder's photos as one shoot: click the name of a library folder's
     heading, or of a folder header (a year, a client) in the sidebar,
     and the photos of all its shoots show in one grid, under a header
