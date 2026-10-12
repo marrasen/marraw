@@ -5,6 +5,16 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - The overview of a folder: click the name of a library folder's
+    heading, or of a folder header (a year, a client) in the sidebar,
+    and its shoots show where the photos do, a card each, with cover,
+    name, date, count and cull bar, under a header for each folder
+    between. Type in "Filter shoots" to narrow them. The order is the
+    sidebar's. A click on a card, or Enter on the one the keyboard is
+    on, opens the shoot; "< Clients" at the top left goes back.
+    The chevron at the left of a header still folds it.
+  - Covers of shoots never opened are read at 512 pixels now, sharp
+    on the overview's larger cards (read once more for each).
   - Folding a header in the sidebar and opening it again: its rows open
     where they belong, rather than gliding down from the top of the list.
   - A memory card copied whole into a library folder (DCIM, PRIVATE,

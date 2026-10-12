@@ -958,7 +958,7 @@ func encodeJPEG(w io.Writer, img image.Image, quality int) error {
 
 // coverEdge is the long edge of a folder's cover read from a RAW's
 // embedded preview; see FilePreview.
-const coverEdge = 256
+const coverEdge = 512
 
 // FilePreview returns a small JPEG of the embedded preview of the RAW at
 // path, coverEdge on its long edge: the library sidebar's cover of a

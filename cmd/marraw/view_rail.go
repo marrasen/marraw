@@ -106,8 +106,12 @@ func newRailView() *railView {
 		switch {
 		case !ok || it.Kind == "note":
 			return nil
-		case it.Group:
+		case it.Kind == "time":
 			return RailToggle{Key: it.Key}
+		case it.Group:
+			// A folder: its shoots, side by side, where the photos show.
+			// Its chevron folds it.
+			return OpenOverview{Key: it.Key}
 		}
 		return OpenShoot{Path: it.Path}
 	}
@@ -288,7 +292,13 @@ func (v *railView) show(s RailState, u *gunim.UI) {
 	v.st = s
 	entries := make([]railEntry, len(s.Items))
 	for i, it := range s.Items {
-		entries[i] = railEntry{RailItem: it, current: !it.Group && strings.EqualFold(it.Path, s.Current)}
+		// The row of what shows: the folder whose overview shows, or else
+		// the shoot open.
+		current := !it.Group && s.Overview == "" && strings.EqualFold(it.Path, s.Current)
+		if it.Group {
+			current = s.Overview != "" && it.Key == s.Overview
+		}
+		entries[i] = railEntry{RailItem: it, current: current}
 	}
 	widget.Sync(v.list, u, entries,
 		func(e railEntry) widget.Key { return widget.Key(e.Key) },
@@ -521,6 +531,13 @@ func (r *railRow) Children() []gunim.Node { return []gunim.Node{r.name, r.n, r.s
 // Handle implements [gunim.Handler]: the row lights under the pointer,
 // and is the one its menu is for.
 func (r *railRow) Handle(e input.Event, u *gunim.UI) bool {
+	// A header's chevron folds it; a click on the rest of a folder's row
+	// shows its overview.
+	if d, ok := e.(input.PointerDown); ok && d.Button == input.ButtonPrimary && r.item.Group && r.item.Kind != "time" &&
+		d.Pos.X < r.indent()-2 {
+		u.Send(r, RailToggle{Key: r.item.Key})
+		return true
+	}
 	switch e.(type) {
 	case input.PointerEnter, input.PointerMove:
 		r.v.hotKey = r.item.Key

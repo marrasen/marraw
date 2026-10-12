@@ -75,6 +75,11 @@ type gridView struct {
 	rwTo float32
 	// dim fades the tiles while another shoot opens.
 	dim *anim.Float
+	// ov is the overview of a folder, over the photos while ovOn, coming
+	// in as ovIn does.
+	ov   *overviewView
+	ovIn *anim.Float
+	ovOn bool
 }
 
 const (
@@ -99,6 +104,7 @@ func newGridView(GridState) *gridView {
 	v.selIn, v.asideIn, v.rw, v.rwTo = anim.NewFloat(0), anim.NewFloat(1), anim.NewFloat(railWidth), railWidth
 	v.asideOn = true
 	v.dim = anim.NewFloat(1)
+	v.ov, v.ovIn = newOverviewView(v), anim.NewFloat(0)
 	v.sel = newSelBar(func(u *gunim.UI) { u.Send(v, AsideToggle{}) })
 	v.batch = newBatchCard(func(u *gunim.UI) { u.Send(v, AsideToggle{}) })
 	v.aside = newLibAside(v.batch)
@@ -390,7 +396,7 @@ func (v *gridView) newTile(i int) gunim.Node {
 func (v *gridView) Children() []gunim.Node {
 	// The cards come last, over the info panel and the rest, so a click
 	// on one reaches it wherever it lies.
-	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.selGate, v.asideGate, v.status, v.band, v.errors}
+	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.selGate, v.asideGate, v.status, v.band, v.ov, v.errors}
 }
 
 // asideIn shows the info panel, or puts it away.
@@ -423,6 +429,34 @@ func (v *gridView) libInfoIn(l LibInfo, u *gunim.UI) {
 	v.aside.has = l.ID != 0
 	if l.ID != 0 {
 		v.aside.info.show(l, u)
+	}
+	u.Invalidate()
+}
+
+// overviewIn shows a folder's overview over the photos, or puts it away,
+// leaving the shoot's head a way back to it where one is named.
+func (v *gridView) overviewIn(in OverviewIn, u *gunim.UI) {
+	v.ov.show(in, u)
+	if in.On != v.ovOn {
+		v.ovOn = in.On
+		v.ovIn.Animate(map[bool]float32{false: 0, true: 1}[in.On], widget.Quick.Get(u.Theme()))
+		focus := gunim.Node(v.grid)
+		if in.On {
+			focus = v.ov.grid
+		}
+		u.After(0, func(u *gunim.UI) { u.Focus(focus) })
+	}
+	v.head.overview(in, v.st)
+	u.Invalidate()
+}
+
+// bigCoverIn takes a large cover for the overview's cards, or, nil, lets
+// one go.
+func (v *gridView) bigCoverIn(c BigCoverIn, u *gunim.UI) {
+	if c.Img == nil {
+		delete(v.ov.big, c.Key)
+	} else {
+		v.ov.big[c.Key] = c.Img
 	}
 	u.Invalidate()
 }
@@ -478,7 +512,8 @@ func (v *gridView) Step(dt time.Duration) bool {
 	d := v.asideIn.Step(dt)
 	e := v.rw.Step(dt)
 	g := v.dim.Step(dt)
-	return a || b || c || d || e || g
+	h := v.ovIn.Step(dt)
+	return a || b || c || d || e || g || h
 }
 
 // gridNotice pops a note in over the grid, and lets it fade after a
@@ -622,14 +657,26 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	empty := kids.At(5)
 	es := empty.Layout(gunim.Loose(geom.Sz(w, 40)))
 	empty.Place(geom.Pt(railWidth+w/2-es.W/2, gridTop+top+80))
-	kids.At(10).Layout(gunim.Tight(box))
-	kids.At(10).Place(geom.Point{})
+	kids.At(11).Layout(gunim.Tight(box))
+	kids.At(11).Place(geom.Point{})
 	sel := kids.At(6)
 	sel.Layout(gunim.Tight(geom.Sz(w, barHeight)))
 	sel.Place(geom.Pt(railWidth, gridHeadHeight+top))
 	aside := kids.At(7)
 	aside.Layout(gunim.Tight(geom.Sz(asideW, max(0, box.H-gridTop-top-statusH))))
 	aside.Place(geom.Pt(box.W-aw, gridTop+top))
+	// The overview over the filter bar and the photos, while it shows.
+	ovk := kids.At(10)
+	if v.ovOn || v.ovIn.Value() > 0.001 {
+		// Its bar across the window, as the filter bar it covers; its
+		// cards where the photos are, beside the info panel.
+		v.ov.gridW = gw
+		ovk.Layout(gunim.Tight(geom.Sz(w, max(0, box.H-gridHeadHeight-top-statusH))))
+		ovk.Place(geom.Pt(railWidth, gridHeadHeight+top))
+	} else {
+		ovk.Layout(gunim.Tight(geom.Size{}))
+		ovk.Place(geom.Pt(-10000, 0))
+	}
 	st := kids.At(8)
 	st.Layout(gunim.Tight(geom.Sz(w, statusH)))
 	st.Place(geom.Pt(railWidth, box.H-statusH))
@@ -682,6 +729,12 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 			kids.At(6).Paint(p)
 		}()
 	}
+	if k := v.ovIn.Value(); k > 0.01 {
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(k, 1)})()
+			kids.At(10).Paint(p)
+		}()
+	}
 	kids.At(2).Paint(p)
 	paintNote(p, kids.At(3), v.noteRect, v.noticeIn.Value())
 	if k := v.noneIn.Value(); k > 0.01 {
@@ -697,7 +750,7 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 	}
 	kids.At(8).Paint(p)
 	kids.At(9).Paint(p)
-	kids.At(10).Paint(p)
+	kids.At(11).Paint(p)
 }
 
 // photoTile is one photo in the grid: its picture, fitted, as a hero, and
@@ -922,6 +975,13 @@ type gridHead struct {
 	pop   *widget.IconButton
 	mid   float32
 	holes []geom.Rect
+	// over and overSub are the overview's name and count while it
+	// shows; back is the way back to the overview the shoot was opened
+	// from, backKey that overview's row, or "" for none.
+	over, overSub string
+	back          *widget.Button
+	backNode      gunim.Node
+	backKey       string
 }
 
 var (
@@ -933,6 +993,11 @@ func newGridHead() *gridHead {
 	h := &gridHead{title: widget.NewLabel(""), sub: widget.NewLabel(""), modes: newModeSwitch(modeLibrary)}
 	h.win, h.pop = newWindowPill()
 	h.jump = newJumpButton("Jump to anything")
+	h.back = widget.NewButton("")
+	h.back.Icon, h.back.KeepFocus = icon.ChevronLeft, true
+	h.back.Tooltip = "Back to the folder's shoots"
+	h.back.OnClick = func(*gunim.UI) gunim.Intent { return OpenOverview{Key: h.backKey} }
+	h.backNode = glassButton(h.back)
 	h.title.Size = headTitleSize
 	// A long shoot name ends in an ellipsis on its one line, and the
 	// count beside it stays whole.
@@ -951,6 +1016,9 @@ func (h *gridHead) set(s GridState, animate bool, th *theme.Live) {
 	h.none, h.folderTotal = s.FolderID == 0, s.Total
 	if h.none {
 		h.title.Text = "No shoot open"
+	}
+	if h.over != "" {
+		h.title.Text = h.over
 	}
 	h.total = len(s.Photos)
 	h.subText()
@@ -980,6 +1048,10 @@ func (h *gridHead) selected(n int) {
 }
 
 func (h *gridHead) subText() {
+	if h.over != "" {
+		h.sub.Text = h.overSub
+		return
+	}
 	if h.opening != "" {
 		h.sub.Text = "Opening…"
 		return
@@ -1000,7 +1072,31 @@ func (h *gridHead) subText() {
 
 // Children implements [gunim.Composite].
 func (h *gridHead) Children() []gunim.Node {
-	return []gunim.Node{h.title, h.sub, h.modes.node, h.jump, h.win}
+	return []gunim.Node{h.title, h.sub, h.modes.node, h.jump, h.win, h.backNode}
+}
+
+// backOn says the way back to an overview shows.
+func (h *gridHead) backOn() bool { return h.backKey != "" && h.over == "" }
+
+// overview shows the overview's name and count while it shows, and the
+// shoot's own, st's, with a way back where in names one, once it is put
+// away.
+func (h *gridHead) overview(in OverviewIn, st GridState) {
+	if in.On {
+		h.over, h.overSub, h.backKey = in.Title, in.Sub, ""
+		h.title.Text, h.sub.Text = in.Title, in.Sub
+		return
+	}
+	h.over, h.overSub = "", ""
+	h.backKey, h.back.Label = in.BackKey, in.BackTitle
+	h.title.Text = st.Folder
+	if h.opening != "" {
+		h.title.Text = baseName(h.opening)
+	}
+	if h.none {
+		h.title.Text = "No shoot open"
+	}
+	h.subText()
 }
 
 // Layout implements [gunim.Node]: the name and the count on the left,
@@ -1025,8 +1121,17 @@ func (h *gridHead) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	ms := kids.At(2).Layout(gunim.Loose(box))
 	mx := min(max(h.mid-ms.W/2, 0), right-16-ms.W)
 	place(kids.At(2), ms, mx, true)
-	// The count keeps its own width; the name takes what is left.
+	// The way back to the overview first, where there is one; the count
+	// keeps its own width; the name takes what is left.
 	x := float32(20)
+	if h.backOn() {
+		bs := kids.At(5).Layout(gunim.Loose(geom.Sz(max(0, mx-x-16)/2, 32)))
+		place(kids.At(5), bs, x, true)
+		x += bs.W + 12
+	} else {
+		kids.At(5).Layout(gunim.Tight(geom.Size{}))
+		kids.At(5).Place(geom.Pt(-10000, 0))
+	}
 	room := max(0, mx-x-16)
 	ss := kids.At(1).Layout(gunim.Loose(geom.Sz(room, box.H)))
 	h.noSub = room-ss.W-14 < 120
@@ -1044,7 +1149,7 @@ func (h *gridHead) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 // Paint implements [gunim.Node].
 func (h *gridHead) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
 	for i := range kids.Len() {
-		if i != 1 || !h.noSub {
+		if (i != 1 || !h.noSub) && (i != 5 || h.backOn()) {
 			kids.At(i).Paint(p)
 		}
 	}

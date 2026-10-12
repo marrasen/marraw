@@ -37,6 +37,8 @@ type (
 		Hidden bool
 		// Opening is the folder on its way to the grid, or "".
 		Opening string
+		// Overview is the key of the folder row whose overview shows, or "".
+		Overview string
 	}
 	// RailItem is one row: a header over rows, a shoot, or a note.
 	RailItem struct {
@@ -128,6 +130,12 @@ type library struct {
 	// previewSlots bounds the folders' previews asked for at once, so
 	// they never hold up the grid's own pictures.
 	previewSlots chan struct{}
+	// big are the overview's large covers held, bigWant those on their
+	// way, and bigOrder the order they were asked for in, the oldest
+	// first to go.
+	big      map[string]*paint.Image
+	bigWant  map[string]bool
+	bigOrder []string
 }
 
 // followLibrary keeps the sidebar up to date: the library's folders, the
@@ -240,6 +248,10 @@ func (cu *culler) railChanged() {
 		cu.rail.Current = cu.opening
 	}
 	cu.rail.Opening = cu.opening
+	cu.rail.Overview = ""
+	if cu.ov != nil {
+		cu.rail.Overview = cu.ov.key
+	}
 	// The open folder's counts and cover as culled here, newer than the
 	// backend's listing, and kept for it until a newer listing comes.
 	if cu.folder != 0 && cu.folderPath != "" {
@@ -263,6 +275,8 @@ func (cu *culler) railChanged() {
 		}
 	}
 	_ = cu.c.Patch("grid", cu.rail)
+	// The overview follows the library as it changes.
+	cu.showOverview()
 }
 
 // railItems are the sidebar's rows: each block of the library in its

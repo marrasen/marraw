@@ -142,6 +142,11 @@ const dwell = 350 * time.Millisecond
 // and the pipeline that brings each photo's pixels in without ever making
 // navigation wait on a RAW decode.
 type culler struct {
+	// ov is the overview of a folder showing in the library, or nil;
+	// ovBack the one the shoot showing was opened from, for the way back;
+	// ovSources where each of its covers comes from.
+	ov, ovBack *overviewSel
+	ovSources  map[string]coverSource
 	// secondary says this window is not the first: it leaves telling of
 	// updates to that one. newWindow opens another window on the folder
 	// at path, or on the library for "".
@@ -579,7 +584,14 @@ func (cu *culler) serve() error {
 			case EditPaste:
 				cu.editPaste()
 			case OpenShoot:
+				cu.closeOverview(false)
 				cu.openShoot(in.Path)
+			case OpenOverview:
+				cu.openOverview(in.Key)
+			case OpenFromOverview:
+				cu.openFromOverview(in.Path)
+			case WantBigCovers:
+				cu.wantBigCovers(in.Keys)
 			case SetLibView:
 				cu.setView(in.View)
 			case AskDelete:
