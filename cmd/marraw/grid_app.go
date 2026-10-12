@@ -38,6 +38,10 @@ type (
 		// a shoot each.
 		Set    bool
 		Shoots int
+		// Reading says the backend is reading shoots of the set not read
+		// yet, and Unread how many are left unread.
+		Reading bool
+		Unread  int
 		// Path is the folder's path, for the status bar, and Aside says
 		// the info panel is out.
 		Path  string
@@ -109,6 +113,7 @@ func (cu *culler) gridState() GridState {
 		// A folder's photos: a group a shoot, the folder's name over them.
 		st.Groups = cu.shootGroups(cu.photos)
 		st.Folder, st.Shoots, st.Set = cu.set.title, len(cu.set.shoots), true
+		st.Reading, st.Unread = cu.set.stopRead != nil && len(cu.set.unread) > 0, len(cu.set.unread)
 	}
 	st.Off = cu.featuresOff()
 	st.Crop = cu.ui != nil && cu.ui.ThumbFit == "crop"

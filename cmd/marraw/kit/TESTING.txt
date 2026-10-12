@@ -5,6 +5,19 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - A folder's photos now include the shoots marraw had never opened.
+    Click a folder (a year, a client) whose shoots you have not opened:
+    marraw reads them in the background, one at a time, and their photos
+    join the grid as each is read. The tray shows "Reading 6 shoots in
+    Clients" with its progress; its X stops it. Leaving the folder stops
+    it too, and coming back goes on where it left off.
+  - Reading only lists the photos and their details (capture time,
+    camera). It does not render them, and the shoots do not show up in
+    recent folders.
+  - Worth trying on a big folder: does the grid stay usable while it
+    fills, and does the order (oldest shoot first) hold as shoots join?
+
+From the build before (v0.1.20)
   - Shoots view: one click on a card selects it, so the arrow keys move
     from there; a double click or Enter opens the shoot.
   - In a shoot opened from a folder (the "< Clients" button shows),
@@ -23,7 +36,7 @@ New in this build
   - The shoot's name in the title bar is smaller and softer.
   - "1 photo", not "1 photos".
 
-From the build before (v0.1.19)
+From earlier builds (v0.1.19)
   - The Photos | Shoots switch has moved to the start of the bar under
     the folder's name, beside the sidebar button. It stays in the same
     place in both views, and slides between them.
@@ -43,9 +56,6 @@ From earlier builds (v0.1.18)
     culling work across them all as in one shoot. Sorting by time puts
     the oldest shoot first (newest first flips it); by name sorts the
     shoots by name. The heading says how many photos and shoots.
-  - Only shoots marraw has already read show their photos here. A shoot
-    you have never opened is left out for now; reading those in the
-    background comes in a later build.
   - A "Photos | Shoots" switch changes between this view and the
     overview of cards. marraw remembers your choice
     for the next folder you click.

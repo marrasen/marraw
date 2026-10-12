@@ -31,7 +31,7 @@ import (
 // TaskMeta is the typed metadata attached to shared background tasks so the
 // client task tray can render kind-specific UI (reveal export folder, …).
 type TaskMeta struct {
-	Kind string `json:"kind"` // "scan" | "calibrate" | "prerender" | "fullres" | "export" | "aimask" | "subjects" | "eyes" | "fill"
+	Kind string `json:"kind"` // "scan" | "readshoots" | "calibrate" | "prerender" | "fullres" | "export" | "aimask" | "subjects" | "eyes" | "fill"
 	// Folder is the album's display name (base of FolderPath), shown in the
 	// tray sub-label.
 	Folder string `json:"folder,omitempty"`
@@ -81,6 +81,71 @@ func (l *Library) folderPasses(ctx context.Context, folderID int64, path string)
 	if raw, _ := l.deps.DB.GetSetting(ctx, settingUIPrerenderFull); raw == "true" {
 		l.fullresPass(ctx, folderID, path)
 	}
+}
+
+// ReadShoots reads into the catalogue those of the shoots at paths it has
+// not read yet, one at a time, under one shared task named for folder: their
+// photos and metadata, and nothing more. Nothing is rendered, and the shoots
+// are neither remembered as recent nor watched, as opening one would. It is
+// how a folder's photos shown as one fill in: the client looks again as the
+// task moves on. Only paths in the library are read. It returns when every
+// one is read, or the task is cancelled from the tray.
+func (l *Library) ReadShoots(ctx context.Context, folder string, paths []string) error {
+	var todo []string
+	for _, p := range paths {
+		p = filepath.Clean(p)
+		if _, inLib := l.libraryFolderOf(ctx, p); !inLib {
+			if _, isRoot := l.rootFor(ctx, p); !isRoot {
+				continue
+			}
+		}
+		if _, _, read, err := l.deps.DB.FolderByPath(ctx, p); err != nil {
+			return err
+		} else if !read {
+			todo = append(todo, p)
+		}
+	}
+	if len(todo) == 0 {
+		return nil
+	}
+	name := filepath.Base(filepath.Clean(folder))
+	title := fmt.Sprintf("Reading %d shoots in %s", len(todo), name)
+	if len(todo) == 1 {
+		title = "Reading " + filepath.Base(todo[0])
+	}
+	tctx, task := tasks.StartTask[TaskMeta](ctx, title, tasks.Shared())
+	task.SetMeta(TaskMeta{Kind: "readshoots", Folder: name, FolderPath: filepath.Clean(folder)})
+	task.Progress(0, len(todo))
+	var err error
+	for i, p := range todo {
+		if err = tctx.Err(); err != nil {
+			break
+		}
+		id, _, oerr := l.deps.Scanner.OpenFolder(tctx, p, l.scanRecursionFor(tctx, p))
+		if oerr != nil {
+			if err = tctx.Err(); err != nil {
+				break
+			}
+			// One shoot that will not read (its drive gone, say) leaves
+			// the rest to go on.
+			task.Output(filepath.Base(p) + ": " + oerr.Error())
+		} else {
+			if berr := l.deps.Scanner.Backfill(tctx, id, func(int, int) {}); berr != nil {
+				if err = tctx.Err(); err != nil {
+					break
+				}
+				task.Output(filepath.Base(p) + ": " + berr.Error())
+			}
+			l.deps.TriggerRefresh(photosKey(id))
+			if r, ok := l.libraryFolderOf(ctx, p); ok {
+				l.deps.TriggerRefresh(shootsKey(r.Path))
+			}
+		}
+		task.Progress(i+1, len(todo))
+	}
+	l.deps.TriggerRefresh(rootStatusKey)
+	task.Err(err)
+	return err
 }
 
 // RenderFolderFullres pre-renders 1:1 full-resolution tiles for every photo in

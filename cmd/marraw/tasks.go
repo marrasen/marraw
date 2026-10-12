@@ -2,6 +2,7 @@ package main
 
 import (
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -64,6 +65,12 @@ func (cu *culler) trackTasks(ts []marrawclient.SharedTaskState) {
 		unit := ""
 		if t.Meta != nil {
 			unit = t.Meta.Unit
+			// Reading the shoots of the folder showing: those read since
+			// join it as the task moves on.
+			if t.Meta.Kind == "readshoots" && cu.set != nil && strings.EqualFold(t.Meta.FolderPath, filepath.Clean(cu.set.path)) &&
+				(t.Current != run.note.Current || !ok) {
+				cu.setCatchUp()
+			}
 		}
 		run.note = TaskNote{ID: t.ID, Title: t.Title, Unit: unit, Current: t.Current, Total: t.Total, Done: run.note.Done}
 		// A subtask under way, as a model downloading inside a scan, shows

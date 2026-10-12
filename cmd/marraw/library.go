@@ -1241,6 +1241,7 @@ func (cu *culler) showFolder(id int64, path string, photos []marrawclient.Photo)
 	cu.gridStop, cu.load, cu.warm, cu.stopLive = nil, nil, nil, nil
 	cu.stopTiles()
 	cu.folder, cu.folderPath = id, path
+	cu.stopSetRead()
 	cu.set = nil
 	cu.setAll(photos)
 	cu.libView = viewFor(cu.ui, path)

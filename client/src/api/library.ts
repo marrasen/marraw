@@ -365,6 +365,19 @@ export function subscribeOpenFolder(client: ApiClient, path: string, callback: (
 }
 
 
+export function readShoots(client: ApiClient, folder: string, paths: string[], options?: RequestOptions): Promise<void> {
+    return client.request<void>('Library.ReadShoots', [folder, paths], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+readShoots.method = 'Library.ReadShoots' as const;
+
+export function subscribeReadShoots(client: ApiClient, folder: string, paths: string[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Library.ReadShoots', [folder, paths], callback, onError, options);
+}
+
+
 export function renameFolderOnDisk(client: ApiClient, path: string, newName: string, options?: RequestOptions): Promise<RenameResult> {
     return client.request<RenameResult>('Library.RenameFolderOnDisk', [path, newName], options);
 }
@@ -733,6 +746,21 @@ export function useOpenFolder(path: string, options?: UseQueryOptions<FolderInfo
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Library.OpenFolder', params: [path] } });
+}
+
+/**
+ * Subscribes to `Library.ReadShoots` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useReadShoots(folder: string, paths: string[], options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, folder: string, paths: string[]) => readShoots(client, folder, paths, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [folder, paths], _subscribe: { method: 'Library.ReadShoots', params: [folder, paths] } });
 }
 
 /**

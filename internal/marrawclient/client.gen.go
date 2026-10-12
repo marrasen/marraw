@@ -733,6 +733,18 @@ func (h LibraryClient) SubscribeOpenFolder(ctx context.Context, path string, opt
 	return client.Subscribe[*FolderInfo](ctx, h.c, "Library.OpenFolder", []any{path}, opts...)
 }
 
+// ReadShoots reads into the catalogue those of the shoots at paths it has
+// not read yet, one at a time, under one shared task named for folder: their
+// photos and metadata, and nothing more. Nothing is rendered, and the shoots
+// are neither remembered as recent nor watched, as opening one would. It is
+// how a folder's photos shown as one fill in: the client looks again as the
+// task moves on. Only paths in the library are read. It returns when every
+// one is read, or the task is cancelled from the tray.
+func (h LibraryClient) ReadShoots(ctx context.Context, folder string, paths []string) error {
+	_, err := client.Call[struct{}](ctx, h.c, "Library.ReadShoots", []any{folder, paths})
+	return err
+}
+
 // RenameFolderOnDisk renames the folder itself (not the display alias). The
 // catalog rows and any stored roots follow the new path; preview cache keys
 // change with the path and regenerate lazily.
@@ -2411,7 +2423,7 @@ type Suggestion struct {
 // TaskMeta is the typed metadata attached to shared background tasks so the
 // client task tray can render kind-specific UI (reveal export folder, …).
 type TaskMeta struct {
-	// "scan" | "calibrate" | "prerender" | "fullres" | "export" | "aimask" | "subjects" | "eyes" | "fill"
+	// "scan" | "readshoots" | "calibrate" | "prerender" | "fullres" | "export" | "aimask" | "subjects" | "eyes" | "fill"
 	Kind string `json:"kind"`
 	// Folder is the album's display name (base of FolderPath), shown in the
 	// tray sub-label.

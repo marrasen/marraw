@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -35,6 +37,15 @@ type photoSet struct {
 	// shoots are the shoots, by their catalog folder's id: each one's
 	// path, name and place in the order.
 	shoots map[int64]setShoot
+	// unread are the paths of the shoots the catalog has not read yet,
+	// which the backend reads as the set shows, and byPath every shoot by
+	// its path. stopRead stops the reading; catching says the set is
+	// looking for shoots read since, and again that it should look once
+	// more when done.
+	unread          []string
+	byPath          map[string]setShoot
+	stopRead        context.CancelFunc
+	catching, again bool
 }
 
 // setShoot is one shoot of a set.
@@ -185,10 +196,129 @@ func (cu *culler) openSet(key string) {
 			cu.set = set
 			cu.stopLive()
 			cu.stopLive = cu.followSet()
+			set.byPath = byPath
+			read := map[string]bool{}
+			for _, f := range folders {
+				read[strings.ToLower(filepath.Clean(f.Path))] = true
+			}
+			for _, p := range paths {
+				if !read[strings.ToLower(filepath.Clean(p))] {
+					set.unread = append(set.unread, p)
+				}
+			}
+			cu.readSet(set)
 			_ = cu.c.Update("grid", cu.gridState())
 			cu.railChanged()
 		})
 	}()
+}
+
+// readSet has the backend read the set's shoots not read yet, under a task
+// in the tray; their photos join the set as each is read (setCatchUp).
+// Leaving the set stops it.
+func (cu *culler) readSet(set *photoSet) {
+	if len(set.unread) == 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(cu.ctx)
+	set.stopRead = cancel
+	paths := slices.Clone(set.unread)
+	go func() {
+		err := cu.api.Library.ReadShoots(ctx, set.path, paths)
+		cu.onDo(func() {
+			if err != nil && ctx.Err() == nil {
+				log.Printf("reading the shoots of %s: %v", set.path, err)
+			}
+			set.stopRead = nil
+			cancel()
+			if cu.set == set {
+				_ = cu.c.Update("grid", cu.gridState())
+				cu.setCatchUp()
+			}
+		})
+	}()
+}
+
+// stopSetRead stops the reading of the set showing's shoots, as it goes.
+func (cu *culler) stopSetRead() {
+	if cu.set != nil && cu.set.stopRead != nil {
+		cu.set.stopRead()
+		cu.set.stopRead = nil
+	}
+}
+
+// setCatchUp adds to the set showing the shoots the backend has read since
+// it looked: their photos, in their places, and their live listings.
+func (cu *culler) setCatchUp() {
+	set := cu.set
+	if set == nil || len(set.unread) == 0 {
+		return
+	}
+	if set.catching {
+		set.again = true
+		return
+	}
+	set.catching = true
+	paths := slices.Clone(set.unread)
+	go func() {
+		got := &photoSet{shoots: map[int64]setShoot{}}
+		folders, err := cu.api.Library.ScannedFolders(cu.ctx, paths)
+		var photos []marrawclient.Photo
+		if err == nil && len(folders) > 0 {
+			photos, err = cu.setPhotos(folders, got, set.byPath)
+		}
+		cu.onDo(func() {
+			set.catching = false
+			if cu.set != set {
+				return
+			}
+			if err != nil {
+				log.Printf("adding read shoots to %s: %v", set.path, err)
+			} else if len(folders) > 0 {
+				cu.addToSet(folders, photos, got)
+			}
+			if set.again {
+				set.again = false
+				cu.setCatchUp()
+			}
+		})
+	}()
+}
+
+// addToSet adds the shoots of folders, just read, to the set showing: their
+// photos, but a file the set holds already, and their live listings.
+func (cu *culler) addToSet(folders []marrawclient.FolderInfo, photos []marrawclient.Photo, got *photoSet) {
+	set := cu.set
+	done := map[string]bool{}
+	for _, f := range folders {
+		if _, ok := set.shoots[f.FolderID]; ok {
+			continue
+		}
+		set.shoots[f.FolderID] = got.shoots[f.FolderID]
+		done[strings.ToLower(filepath.Clean(f.Path))] = true
+		stop, follow := cu.stopLive, cu.followFolderID(f.FolderID)
+		cu.stopLive = func() {
+			if stop != nil {
+				stop()
+			}
+			follow()
+		}
+	}
+	set.unread = slices.DeleteFunc(set.unread, func(p string) bool { return done[strings.ToLower(filepath.Clean(p))] })
+	held := make(map[string]bool, len(cu.all))
+	for _, p := range cu.all {
+		held[strings.ToLower(filepath.Join(cu.folderOf(p), p.FileName))] = true
+	}
+	for _, p := range photos {
+		if held[strings.ToLower(filepath.Join(cu.folderOf(p), p.FileName))] {
+			continue
+		}
+		cu.allIndex[p.ID] = len(cu.all)
+		cu.all = append(cu.all, p)
+	}
+	cu.refilter()
+	_ = cu.c.Update("grid", cu.gridState())
+	cu.railChanged()
 }
 
 // setPhotos lists the photos of folders, a few at a time, as one list, a

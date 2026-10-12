@@ -229,9 +229,18 @@ func (v *gridView) showNone(s GridState, u *gunim.UI) {
 	none := s.FolderID != 0 && len(s.Photos) == 0 && s.Total > 0
 	// A folder's photos as one show only the shoots read already.
 	unread := s.Set && s.Total == 0
-	v.empty.Text = "No photos match the filter"
-	if unread {
+	// The words change only as the note comes: going, it keeps those it
+	// came with.
+	switch {
+	case !none && !unread:
+	case !unread:
+		v.empty.Text = "No photos match the filter"
+	case s.Reading:
+		v.empty.Text = "Reading these shoots… their photos show here as each is read."
+	case s.Unread > 0:
 		v.empty.Text = "marraw has not read these shoots yet. Open one to see its photos here."
+	default:
+		v.empty.Text = "There are no photos in these shoots."
 	}
 	none = none || unread
 	v.noneIn.Animate(on(none), widget.Settle.Get(u.Theme()))
