@@ -34,6 +34,10 @@ type (
 		// Presets are the presets the batch card can lay over a
 		// selection.
 		Presets []PresetCard
+		// Set says the photos are a folder's, of Shoots shoots, grouped
+		// a shoot each.
+		Set    bool
+		Shoots int
 		// Path is the folder's path, for the status bar, and Aside says
 		// the info panel is out.
 		Path  string
@@ -101,6 +105,11 @@ func (cu *culler) gridState() GridState {
 		st.Folder = ""
 	}
 	st.Groups = gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)
+	if cu.set != nil {
+		// A folder's photos: a group a shoot, the folder's name over them.
+		st.Groups = cu.shootGroups(cu.photos)
+		st.Folder, st.Shoots, st.Set = cu.set.title, len(cu.set.shoots), true
+	}
 	st.Off = cu.featuresOff()
 	st.Crop = cu.ui != nil && cu.ui.ThumbFit == "crop"
 	st.Natural = cu.ui != nil && cu.ui.ThumbFit == "natural"

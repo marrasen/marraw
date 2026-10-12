@@ -142,6 +142,11 @@ const dwell = 350 * time.Millisecond
 // and the pipeline that brings each photo's pixels in without ever making
 // navigation wait on a RAW decode.
 type culler struct {
+	// set is the shoots whose photos the grid shows together, a folder's,
+	// or nil for one shoot; openingSet the key of a folder whose photos
+	// are on their way.
+	set        *photoSet
+	openingSet string
 	// ov is the overview of a folder showing in the library, or nil;
 	// ovBack the one the shoot showing was opened from, for the way back;
 	// ovSources where each of its covers comes from.
@@ -587,7 +592,9 @@ func (cu *culler) serve() error {
 				cu.closeOverview(false)
 				cu.openShoot(in.Path)
 			case OpenOverview:
-				cu.openOverview(in.Key)
+				cu.openFolderView(in.Key)
+			case FolderView:
+				cu.folderView(in.Photos)
 			case OpenFromOverview:
 				cu.openFromOverview(in.Path)
 			case WantBigCovers:
@@ -821,7 +828,7 @@ func (cu *culler) goTo(i int) {
 	p := cu.photos[i]
 	// Where the user is, so the backend's pre-render works outward from
 	// here.
-	go func(folder, id int64) { _ = cu.api.Library.SetFocus(cu.ctx, folder, id) }(cu.folder, p.ID)
+	go func(folder, id int64) { _ = cu.api.Library.SetFocus(cu.ctx, folder, id) }(p.FolderID, p.ID)
 	if e, ok := cu.cache.get(p.ID); ok && e.rank >= rankSharp {
 		cu.record(e.note, true)
 		// Here, on the culler's goroutine, at once: warmNeighbours would

@@ -51,16 +51,21 @@ type liveSum struct {
 // by capture time, untimed last, then by file name.
 func (cu *culler) liveSummary() liveSum {
 	cu.syncAll()
+	return summaryOf(cu.all)
+}
+
+// summaryOf is photos' cull counts and cover, chosen as the backend chooses.
+func summaryOf(photos []marrawclient.Photo) liveSum {
 	var s liveSum
-	if len(cu.all) == 0 {
+	if len(photos) == 0 {
 		return s
 	}
-	order := make([]int, len(cu.all))
+	order := make([]int, len(photos))
 	for i := range order {
 		order[i] = i
 	}
 	sort.SliceStable(order, func(a, b int) bool {
-		p, q := cu.all[order[a]], cu.all[order[b]]
+		p, q := photos[order[a]], photos[order[b]]
 		if pp, qp := p.Flag == "pick", q.Flag == "pick"; pp != qp {
 			return pp
 		}
@@ -72,7 +77,7 @@ func (cu *culler) liveSummary() liveSum {
 		}
 		return p.FileName < q.FileName
 	})
-	for _, p := range cu.all {
+	for _, p := range photos {
 		switch p.Flag {
 		case "pick":
 			s.picked++
@@ -80,7 +85,7 @@ func (cu *culler) liveSummary() liveSum {
 			s.rejected++
 		}
 	}
-	c := cu.all[order[0]]
+	c := photos[order[0]]
 	s.cover = &marrawclient.ShootCover{PhotoID: c.ID, CacheKey: c.CacheKey, EditHash: c.EditHash}
 	return s
 }

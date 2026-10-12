@@ -147,6 +147,8 @@ func newGridView(GridState) *gridView {
 
 func (v *gridView) show(s GridState, u *gunim.UI) {
 	lastOf(u).grid = s
+	v.bar.gapBox.hidden = s.Set
+	v.head.showSet(s.Set, s.Shoots, u)
 	v.bar.set(s.View, u)
 	v.bar.setOff(s.Off, u)
 	v.setCrop(s.Crop || s.Natural, u)
@@ -224,6 +226,13 @@ func (v *gridView) reorder(s GridState, u *gunim.UI) {
 // showNone brings the note in that the filter shows nothing, or out.
 func (v *gridView) showNone(s GridState, u *gunim.UI) {
 	none := s.FolderID != 0 && len(s.Photos) == 0 && s.Total > 0
+	// A folder's photos as one show only the shoots read already.
+	unread := s.Set && s.Total == 0
+	v.empty.Text = "No photos match the filter"
+	if unread {
+		v.empty.Text = "marraw has not read these shoots yet. Open one to see its photos here."
+	}
+	none = none || unread
 	v.noneIn.Animate(on(none), widget.Settle.Get(u.Theme()))
 	u.Invalidate()
 }
@@ -956,6 +965,9 @@ func pixelFit(r geom.Rect, img *paint.Image) geom.Rect {
 // are the status bar's, each popping as it changes.
 type gridHead struct {
 	title, sub *widget.Label
+	// subFull is the count line in full, subShort its photos alone, for
+	// a heading too narrow for the rest; both empty for other lines.
+	subFull, subShort string
 	// noSub leaves the count out where the name needs the room.
 	noSub      bool
 	pills      [3]*countPill
@@ -982,6 +994,13 @@ type gridHead struct {
 	back          *widget.Button
 	backNode      gunim.Node
 	backKey       string
+	// views switches a folder between its photos and its shoots; it shows
+	// while a folder's photos or its overview do. shoots is how many
+	// shoots a folder's photos are of, nought for one shoot.
+	views     *widget.Segmented
+	viewsNode gunim.Node
+	inFolder  bool
+	shoots    int
 }
 
 var (
@@ -998,6 +1017,10 @@ func newGridHead() *gridHead {
 	h.back.Tooltip = "Back to the folder's shoots"
 	h.back.OnClick = func(*gunim.UI) gunim.Intent { return OpenOverview{Key: h.backKey} }
 	h.backNode = glassButton(h.back)
+	h.views = widget.NewSegmented("Photos", "Shoots")
+	h.views.KeepFocus = true
+	h.views.OnChange = func(i int, _ *gunim.UI) gunim.Intent { return FolderView{Photos: i == 0} }
+	h.viewsNode = frosted(h.views, marrawTheme().With(theme.Set(widget.SegmentedHeight, 28)))
 	h.title.Size = headTitleSize
 	// A long shoot name ends in an ellipsis on its one line, and the
 	// count beside it stays whole.
@@ -1048,6 +1071,7 @@ func (h *gridHead) selected(n int) {
 }
 
 func (h *gridHead) subText() {
+	h.subFull, h.subShort = "", ""
 	if h.over != "" {
 		h.sub.Text = h.overSub
 		return
@@ -1064,15 +1088,31 @@ func (h *gridHead) subText() {
 	if h.folderTotal > h.total {
 		s = fmt.Sprintf("%d of %d photos", h.total, h.folderTotal)
 	}
+	h.subFull, h.subShort = "", s
+	if h.shoots > 0 {
+		s += fmt.Sprintf(" · %d %s", h.shoots, map[bool]string{false: "shoots", true: "shoot"}[h.shoots == 1])
+	}
 	if h.sel > 1 {
 		s += fmt.Sprintf(" · %d selected", h.sel)
 	}
-	h.sub.Text = s
+	h.sub.Text, h.subFull = s, s
 }
 
 // Children implements [gunim.Composite].
 func (h *gridHead) Children() []gunim.Node {
-	return []gunim.Node{h.title, h.sub, h.modes.node, h.jump, h.win, h.backNode}
+	return []gunim.Node{h.title, h.sub, h.modes.node, h.jump, h.win, h.backNode, h.viewsNode}
+}
+
+// showSet says whether a folder's photos show, of shoots shoots, for the
+// switch and the count.
+func (h *gridHead) showSet(on bool, shoots int, u *gunim.UI) {
+	h.shoots = 0
+	if on {
+		h.shoots = shoots
+		h.views.SetSelected(0, u)
+	}
+	h.inFolder = on || h.over != ""
+	h.subText()
 }
 
 // backOn says the way back to an overview shows.
@@ -1085,9 +1125,12 @@ func (h *gridHead) overview(in OverviewIn, st GridState) {
 	if in.On {
 		h.over, h.overSub, h.backKey = in.Title, in.Sub, ""
 		h.title.Text, h.sub.Text = in.Title, in.Sub
+		h.inFolder = true
+		h.views.SetSelected(1, nil)
 		return
 	}
 	h.over, h.overSub = "", ""
+	h.inFolder = st.Set
 	h.backKey, h.back.Label = in.BackKey, in.BackTitle
 	h.title.Text = st.Folder
 	if h.opening != "" {
@@ -1133,8 +1176,30 @@ func (h *gridHead) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 		kids.At(5).Place(geom.Pt(-10000, 0))
 	}
 	room := max(0, mx-x-16)
+	// A folder's switch first, where it shows: the count goes before it
+	// does, and the name keeps 100 at least.
+	vs := geom.Size{}
+	if h.inFolder {
+		vs = kids.At(6).Layout(gunim.Loose(geom.Sz(200, 32)))
+		if room-vs.W-16 < 100 {
+			vs = geom.Size{}
+		}
+	}
+	if vs.W > 0 {
+		room -= vs.W + 16
+	}
+	// The name keeps its own width, up to 120; the count goes short
+	// (the photos only) before it goes.
+	name := min(kids.At(0).Layout(gunim.Loose(geom.Sz(room, box.H))).W, 120)
+	if h.subFull != "" {
+		h.sub.Text = h.subFull
+	}
 	ss := kids.At(1).Layout(gunim.Loose(geom.Sz(room, box.H)))
-	h.noSub = room-ss.W-14 < 120
+	if room-ss.W-14 < name && h.subShort != "" && h.subShort != h.sub.Text {
+		h.sub.Text = h.subShort
+		ss = kids.At(1).Layout(gunim.Loose(geom.Sz(room, box.H)))
+	}
+	h.noSub = room-ss.W-14 < name
 	if h.noSub {
 		// Too narrow for both: the name, as much of it as fits.
 		ss = geom.Size{}
@@ -1143,13 +1208,24 @@ func (h *gridHead) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childre
 	kids.At(0).Place(geom.Pt(x, mid-ts.H/2))
 	x += ts.W + 14
 	kids.At(1).Place(geom.Pt(x, mid-ss.H/2))
+	if vs.W > 0 {
+		if ss.W > 0 {
+			x += ss.W + 16
+		} else {
+			x += 2
+		}
+		place(kids.At(6), vs, x, true)
+	} else {
+		kids.At(6).Layout(gunim.Tight(geom.Size{}))
+		kids.At(6).Place(geom.Pt(-10000, 0))
+	}
 	return box
 }
 
 // Paint implements [gunim.Node].
 func (h *gridHead) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gunim.Children) {
 	for i := range kids.Len() {
-		if (i != 1 || !h.noSub) && (i != 5 || h.backOn()) {
+		if (i != 1 || !h.noSub) && (i != 5 || h.backOn()) && (i != 6 || h.inFolder && kids.At(6).Size().W > 0) {
 			kids.At(i).Paint(p)
 		}
 	}

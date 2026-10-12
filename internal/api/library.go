@@ -368,6 +368,7 @@ func toAPIPhoto(p store.Photo) Photo {
 	rotate, cropW, cropH := photoGeometry(p.EditParams)
 	return Photo{
 		ID:               p.ID,
+		FolderID:         p.FolderID,
 		FileName:         p.FileName,
 		CacheKey:         p.CacheKey,
 		EditHash:         p.EditHash,

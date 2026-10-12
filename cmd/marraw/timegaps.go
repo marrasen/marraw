@@ -24,6 +24,9 @@ type GapGroup struct {
 	Start, Count int
 	From, To     int64
 	GapBefore    int
+	// Title is the shoot's name, where a folder's photos are grouped a
+	// shoot each, or "" for a run of time.
+	Title string
 }
 
 // gapChoices are the gaps the grid can group by, in minutes, nought for
@@ -167,6 +170,16 @@ func (h *gapHeader) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 		g := gs[h.k]
 		h.when.Text = rangeLabel(g, spansDays(gs))
 		h.count.Text = fmt.Sprintf("%d %s", g.Count, map[bool]string{false: "frames", true: "frame"}[g.Count == 1])
+		if g.Title != "" {
+			// A shoot of a folder's photos: its name, then its day and
+			// how many.
+			h.when.Text = g.Title
+			day := ""
+			if g.From > 0 {
+				day = dayLabel(time.Unix(g.From, 0)) + " · "
+			}
+			h.count.Text = day + h.count.Text
+		}
 		if g.GapBefore >= 0 {
 			h.gap.Text = gapLabel(g.GapBefore, h.v.st.View.Sort == "captureDesc")
 		}
@@ -189,7 +202,11 @@ func (h *gapHeader) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Childr
 // Paint implements [gunim.Node].
 func (h *gapHeader) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
 	mid := box.H/2 + 3
-	p.Mask(icon.Stroke{Icon: icon.Clock, Width: 2, Progress: 1}, geom.Rc(2, mid-7, 14, 14), noteInk.Get(f.Theme))
+	mark := icon.Clock
+	if h.k < len(h.v.st.Groups) && h.v.st.Groups[h.k].Title != "" {
+		mark = icon.Folder
+	}
+	p.Mask(icon.Stroke{Icon: mark, Width: 2, Progress: 1}, geom.Rc(2, mid-7, 14, 14), noteInk.Get(f.Theme))
 	kids.At(0).Paint(p)
 	kids.At(1).Paint(p)
 	if g := kids.At(2); h.gap.Text != "" {

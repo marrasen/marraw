@@ -249,12 +249,23 @@ func (cu *culler) railChanged() {
 	}
 	cu.rail.Opening = cu.opening
 	cu.rail.Overview = ""
-	if cu.ov != nil {
+	switch {
+	case cu.ov != nil:
 		cu.rail.Overview = cu.ov.key
+	case cu.openingSet != "":
+		cu.rail.Overview = cu.openingSet
+	case cu.set != nil:
+		cu.rail.Overview = cu.set.key
 	}
 	// The open folder's counts and cover as culled here, newer than the
 	// backend's listing, and kept for it until a newer listing comes.
-	if cu.folder != 0 && cu.folderPath != "" {
+	switch {
+	case cu.set != nil:
+		// Each shoot of a folder's photos, as culled here.
+		for path, s := range cu.setLive() {
+			cu.lib.live[path] = s
+		}
+	case cu.folder != 0 && cu.folderPath != "":
 		cu.lib.live[strings.ToLower(cu.folderPath)] = cu.liveSummary()
 	}
 	for i := range cu.rail.Items {
@@ -431,8 +442,9 @@ func (cu *culler) railItems() []RailItem {
 				Title: title, Line: line, Picked: st.Picked, Rejected: st.Rejected, ref: st.Cover})
 		}
 	}
-	// A folder opened that the library does not hold shows at the top.
-	if cu.folderPath != "" && q == "" && !cu.libraryHolds(cu.folderPath) {
+	// A folder opened that the library does not hold shows at the top (a
+	// folder's photos as one are of the library's shoots, so never).
+	if cu.folderPath != "" && cu.set == nil && q == "" && !cu.libraryHolds(cu.folderPath) {
 		title, line := shootLabels(baseName(cu.folderPath), 0, len(cu.all))
 		items = append([]RailItem{{Key: cu.folderPath, Path: cu.folderPath, Name: baseName(cu.folderPath), Kind: "root", Count: len(cu.all), Outside: true,
 			Title: title, Line: line}}, items...)
@@ -1162,7 +1174,8 @@ func (cu *culler) railHas(path string) bool {
 // openShoot opens the folder at path in the grid in place of the one
 // showing, the cull view closing first if it is open.
 func (cu *culler) openShoot(path string) {
-	if strings.EqualFold(path, cu.folderPath) {
+	cu.openingSet = ""
+	if strings.EqualFold(path, cu.folderPath) && cu.set == nil {
 		return
 	}
 	if it, ok := cu.railItem(path); ok && it.Offline {
@@ -1228,6 +1241,7 @@ func (cu *culler) showFolder(id int64, path string, photos []marrawclient.Photo)
 	cu.gridStop, cu.load, cu.warm, cu.stopLive = nil, nil, nil, nil
 	cu.stopTiles()
 	cu.folder, cu.folderPath = id, path
+	cu.set = nil
 	cu.setAll(photos)
 	cu.libView = viewFor(cu.ui, path)
 	cu.applyView()

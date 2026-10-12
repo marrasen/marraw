@@ -105,6 +105,10 @@ func (cu *culler) viewList() []marrawclient.Photo {
 			out = append(out, p)
 		}
 	}
+	if cu.set != nil {
+		cu.setOrder(out)
+		return out
+	}
 	sort.SliceStable(out, func(i, j int) bool { return cu.libView.less(out[i], out[j]) })
 	return out
 }

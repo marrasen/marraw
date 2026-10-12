@@ -50,3 +50,25 @@ func TestFingerprintsAndDeletedPhotos(t *testing.T) {
 		t.Fatalf("WasDeleted = %+v, %v, %v", got, ok, err)
 	}
 }
+
+func TestFolderByPath(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	id, err := db.UpsertFolder(ctx, "/photos/shoot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SyncFolder(ctx, id, "/photos/shoot", []FileEntry{{Name: "A.ARW", Size: 1, MtimeNs: 1}, {Name: "B.ARW", Size: 1, MtimeNs: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, n, ok, err := db.FolderByPath(ctx, "/PHOTOS/shoot"); err != nil || !ok || got != id || n != 2 {
+		t.Fatalf("FolderByPath = %d, %d, %v, %v; want %d, 2, true", got, n, ok, err, id)
+	}
+	if _, _, ok, err := db.FolderByPath(ctx, "/photos/never"); err != nil || ok {
+		t.Fatalf("a folder never read was found: %v, %v", ok, err)
+	}
+}

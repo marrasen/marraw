@@ -108,7 +108,10 @@ func ExifModeValues() []ExifMode {
 
 // Photo is the client-facing photo record.
 type Photo struct {
-	ID         int64  `json:"id"`
+	ID int64 `json:"id"`
+	// FolderID is the catalog folder the photo was read in: a folder's
+	// photos as one view tell its shoots apart by it.
+	FolderID   int64  `json:"folderId"`
 	FileName   string `json:"fileName"`
 	CacheKey   string `json:"cacheKey"`
 	EditHash   string `json:"editHash"`

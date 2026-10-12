@@ -67,6 +67,7 @@ export interface LibraryRoot {
 
 export interface Photo {
     id: number;
+    folderId: number;
     fileName: string;
     cacheKey: string;
     editHash: string;
@@ -387,6 +388,19 @@ renderFolderFullres.method = 'Library.RenderFolderFullres' as const;
 
 export function subscribeRenderFolderFullres(client: ApiClient, path: string, callback: (data: FolderInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<FolderInfo>('Library.RenderFolderFullres', [path], callback, onError, options);
+}
+
+
+export function scannedFolders(client: ApiClient, paths: string[], options?: RequestOptions): Promise<FolderInfo[]> {
+    return client.request<FolderInfo[]>('Library.ScannedFolders', [paths], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+scannedFolders.method = 'Library.ScannedFolders' as const;
+
+export function subscribeScannedFolders(client: ApiClient, paths: string[], callback: (data: FolderInfo[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<FolderInfo[]>('Library.ScannedFolders', [paths], callback, onError, options);
 }
 
 
@@ -749,6 +763,21 @@ export function useRenderFolderFullres(path: string, options?: UseQueryOptions<F
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Library.RenderFolderFullres', params: [path] } });
+}
+
+/**
+ * Subscribes to `Library.ScannedFolders` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useScannedFolders(paths: string[], options?: UseQueryOptions<FolderInfo[]>): UseQueryResult<FolderInfo[]> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, paths: string[]) => scannedFolders(client, paths, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [paths], _subscribe: { method: 'Library.ScannedFolders', params: [paths] } });
 }
 
 /**

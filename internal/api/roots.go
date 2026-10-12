@@ -261,6 +261,28 @@ func (l *Library) ShootPreview(ctx context.Context, path string) (*ShootPreview,
 	return &ShootPreview{JPEG: b}, nil
 }
 
+// ScannedFolders are the folders among paths the catalog has read, each with
+// its id and how many photos it holds; the rest are left out. A folder's
+// photos as one view, as a year's or a client's, is the photos of its
+// shoots, which the client names here.
+func (l *Library) ScannedFolders(ctx context.Context, paths []string) ([]FolderInfo, error) {
+	out := []FolderInfo{}
+	for _, p := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		p = filepath.Clean(p)
+		id, n, ok, err := l.deps.DB.FolderByPath(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, FolderInfo{FolderID: id, Path: p, PhotoCount: n})
+		}
+	}
+	return out, nil
+}
+
 // summarize fills in a shoot's cull counts and cover from the per-folder
 // summaries: its own folder row and, unless selfOnly, those beneath it, as
 // earliestFor matches them.

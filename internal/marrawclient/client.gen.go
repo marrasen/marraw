@@ -761,6 +761,20 @@ func (h LibraryClient) SubscribeRenderFolderFullres(ctx context.Context, path st
 	return client.Subscribe[*FolderInfo](ctx, h.c, "Library.RenderFolderFullres", []any{path}, opts...)
 }
 
+// ScannedFolders are the folders among paths the catalog has read, each with
+// its id and how many photos it holds; the rest are left out. A folder's
+// photos as one view, as a year's or a client's, is the photos of its
+// shoots, which the client names here.
+func (h LibraryClient) ScannedFolders(ctx context.Context, paths []string) ([]FolderInfo, error) {
+	return client.Call[[]FolderInfo](ctx, h.c, "Library.ScannedFolders", []any{paths})
+}
+
+// SubscribeScannedFolders runs ScannedFolders as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h LibraryClient) SubscribeScannedFolders(ctx context.Context, paths []string, opts ...client.SubscribeOption) *client.Subscription[[]FolderInfo] {
+	return client.Subscribe[[]FolderInfo](ctx, h.c, "Library.ScannedFolders", []any{paths}, opts...)
+}
+
 // SetFavoriteFolders replaces the favourite list (add, remove, and reorder are
 // all "send the new list").
 func (h LibraryClient) SetFavoriteFolders(ctx context.Context, paths []string) error {
@@ -1945,7 +1959,10 @@ type Params struct {
 
 // Photo is the client-facing photo record.
 type Photo struct {
-	ID         int64  `json:"id"`
+	ID int64 `json:"id"`
+	// FolderID is the catalog folder the photo was read in: a folder's
+	// photos as one view tell its shoots apart by it.
+	FolderID   int64  `json:"folderId"`
 	FileName   string `json:"fileName"`
 	CacheKey   string `json:"cacheKey"`
 	EditHash   string `json:"editHash"`

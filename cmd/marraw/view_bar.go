@@ -58,7 +58,10 @@ type gridBar struct {
 	// gapCtl groups the photos by the time between them, and panelBtn
 	// puts the info panel away or brings it back. sizeBox holds the
 	// tiles' size slider and sizeN its width in pixels.
-	gapCtl   *gapControl
+	gapCtl *gapControl
+	// gapBox holds the gap control, put away while a folder's photos
+	// show, grouped a shoot each.
+	gapBox   *hideable
 	panelBtn *widget.IconButton
 	sizeBox  *hideable
 	sizeN    *widget.Label
@@ -299,7 +302,8 @@ func newGridBar(g *gridView) *gridBar {
 	b.flagBox = &measured{child: frosted(b.flags, marrawTheme())}
 	left := widget.Row(&rigid{child: b.railBtn}, &rigid{child: b.sorts}, b.flagBox, &rigid{child: b.starBox}, &rigid{child: aids})
 	left.Cross = widget.CrossCenter
-	right := widget.Row(b.gapCtl, spacerW(4), b.sizeBox, b.panelBtn)
+	b.gapBox = &hideable{child: b.gapCtl}
+	right := widget.Row(b.gapBox, spacerW(4), b.sizeBox, b.panelBtn)
 	right.Cross = widget.CrossCenter
 	b.right = right
 	row := &barRow{left: left, right: right, bar: b}

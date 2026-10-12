@@ -13,7 +13,11 @@ import (
 // followFolder subscribes to the folder's photos, and hands the patches
 // and the listings to the culler's goroutine, in order. It returns the
 // way to stop.
-func (cu *culler) followFolder() func() {
+func (cu *culler) followFolder() func() { return cu.followFolderID(cu.folder) }
+
+// followFolderID follows folder id's photos, as followFolder does the
+// folder showing's: a set follows each of its shoots so.
+func (cu *culler) followFolderID(id int64) func() {
 	// The patches arrive on the client's read goroutine, which must not
 	// wait: a queue carries them on, a listing's place kept by the same.
 	queue := make(chan func(), 1024)
@@ -24,7 +28,7 @@ func (cu *culler) followFolder() func() {
 			log.Print("marraw: photo patches fell behind; one dropped")
 		}
 	}
-	sub := cu.api.Library.SubscribeListPhotos(cu.ctx, cu.folder,
+	sub := cu.api.Library.SubscribeListPhotos(cu.ctx, id,
 		client.WithPatch(func(cur []marrawclient.Photo, raw jsontext.Value) ([]marrawclient.Photo, error) {
 			var ev marrawclient.PhotoPatchEvent
 			if err := json.Unmarshal(raw, &ev); err != nil {

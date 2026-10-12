@@ -5,9 +5,24 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
-  - The overview of a folder: click the name of a library folder's
+  - A folder's photos as one shoot: click the name of a library folder's
     heading, or of a folder header (a year, a client) in the sidebar,
-    and its shoots show where the photos do, a card each, with cover,
+    and the photos of all its shoots show in one grid, under a header
+    for each shoot (its name, day and count). Filters, stars, sort and
+    culling work across them all as in one shoot. Sorting by time puts
+    the oldest shoot first (newest first flips it); by name sorts the
+    shoots by name. The heading says how many photos and shoots.
+  - Only shoots marraw has already read show their photos here. A shoot
+    you have never opened is left out for now; reading those in the
+    background comes in a later build.
+  - A "Photos | Shoots" switch beside the folder's name changes between
+    this view and the overview of cards. marraw remembers your choice
+    for the next folder you click.
+  - The overview's cards sit a little further from the line above them.
+
+From the last builds, if you have not tried them yet
+  - The overview of a folder ("Shoots" in the switch above): its shoots
+    show where the photos do, a card each, with cover,
     name, date, count and cull bar, under a header for each folder
     between. Type in "Filter shoots" to narrow them. The order is the
     sidebar's. A click on a card, or Enter on the one the keyboard is
