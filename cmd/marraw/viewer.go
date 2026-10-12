@@ -27,6 +27,9 @@ type (
 		Img    *paint.Image
 		Pinned bool
 	}
+	// ViewerOpen says the pop-out viewer opened or closed, for the
+	// windows' buttons that pop it out.
+	ViewerOpen struct{ On bool }
 	// ViewerClose closes the viewer, from its own Ctrl+N or its close
 	// button; ViewerPin keeps it over other windows, or not.
 	ViewerClose struct{}
@@ -116,6 +119,7 @@ func (cu *culler) openViewer() {
 	gunim.RegisterView(w, "viewer", newViewerView, (*viewerView).show)
 	pv.win, pv.c, pv.key = w, w.Client(), ""
 	pv.st = ViewerState{Pinned: pinned}
+	cu.viewerShown()
 	_ = pv.c.SetTheme("marraw")
 	_ = pv.c.Mount(gunim.Root, "viewer", "viewer", pv.st)
 	_ = pv.c.Focus("viewer")
@@ -180,6 +184,16 @@ func (cu *culler) viewerGone() {
 		pv.stop()
 	}
 	pv.win, pv.c, pv.stop, pv.key = nil, gunim.Client{}, nil, ""
+	cu.viewerShown()
+}
+
+// viewerShown tells the window's views whether the viewer is open, for
+// their buttons that pop it out.
+func (cu *culler) viewerShown() {
+	_ = cu.c.Patch("grid", ViewerOpen{On: cu.viewer.win != nil})
+	if cu.culling {
+		cu.showCull()
+	}
 }
 
 // viewerTarget is the photo the viewer follows: the one showing in the

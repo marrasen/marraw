@@ -140,7 +140,7 @@ func newGridView(GridState) *gridView {
 }
 
 func (v *gridView) show(s GridState, u *gunim.UI) {
-	lastGrid = s
+	lastOf(u).grid = s
 	v.bar.set(s.View, u)
 	v.bar.setOff(s.Off, u)
 	v.setCrop(s.Crop || s.Natural, u)
@@ -279,7 +279,7 @@ func (v *gridView) enter(s GridState, u *gunim.UI) {
 
 // railIn shows the library.
 func (v *gridView) railIn(s RailState, u *gunim.UI) {
-	lastRail = s
+	lastOf(u).rail = s
 	v.rail.show(s, u)
 	// A shoot on its way: its name heads the grid at once, and the photos
 	// of the one leaving dim until the new ones come.
@@ -427,6 +427,12 @@ func (v *gridView) libInfoIn(l LibInfo, u *gunim.UI) {
 	u.Invalidate()
 }
 
+// viewerOpenIn lights the pop-out button while the photo's window is open.
+func (v *gridView) viewerOpenIn(o ViewerOpen, u *gunim.UI) {
+	showPop(v.head.pop, o.On)
+	u.Invalidate()
+}
+
 // libMarksIn takes a photo's rating and flag, changed: the info panel
 // shows them at once where it shows that photo.
 func (v *gridView) libMarksIn(m LibMarks, u *gunim.UI) {
@@ -535,7 +541,12 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 				u.Send(v, AskExport{})
 				return true
 			case input.KeyN:
-				u.Send(v, ToggleViewer{})
+				if e.Mods.Has(input.ModShift) {
+					// Ctrl+Shift+N: another window, on the library.
+					u.Send(v, NewWindow{})
+				} else {
+					u.Send(v, ToggleViewer{})
+				}
 				return true
 			case input.KeyK:
 				_, cursor := v.grid.Selected()
@@ -908,6 +919,7 @@ type gridHead struct {
 	modes *modeSwitch
 	jump  *jumpButton
 	win   gunim.Node
+	pop   *widget.IconButton
 	mid   float32
 	holes []geom.Rect
 }
@@ -918,7 +930,8 @@ var (
 )
 
 func newGridHead() *gridHead {
-	h := &gridHead{title: widget.NewLabel(""), sub: widget.NewLabel(""), modes: newModeSwitch(modeLibrary), win: newWindowPill()}
+	h := &gridHead{title: widget.NewLabel(""), sub: widget.NewLabel(""), modes: newModeSwitch(modeLibrary)}
+	h.win, h.pop = newWindowPill()
 	h.jump = newJumpButton("Jump to anything")
 	h.title.Size = headTitleSize
 	// A long shoot name ends in an ellipsis on its one line, and the

@@ -31,6 +31,7 @@ func registerViews(w *gunim.Window) {
 	gunim.RegisterPatch(w, "grid", (*gridView).colourIn)
 	gunim.RegisterPatch(w, "grid", (*gridView).libInfoIn)
 	gunim.RegisterPatch(w, "grid", (*gridView).libMarksIn)
+	gunim.RegisterPatch(w, "grid", (*gridView).viewerOpenIn)
 	gunim.RegisterPatch(w, "grid", (*gridView).coveredIn)
 	gunim.RegisterPatch(w, "grid", (*gridView).coverIn)
 	gunim.RegisterView(w, "cull", newCullView, (*cullView).show)

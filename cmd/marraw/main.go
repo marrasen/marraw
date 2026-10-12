@@ -43,6 +43,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/marrasen/aprot/client"
@@ -197,28 +198,77 @@ func run(o options) error {
 	log.Printf("marraw: build %s; %d photos in %q, backend at %s", build(), len(photos), path, host)
 
 	err = gunim.Main(ctx, func(a *gunim.App) error {
-		var keep string
-		if o.place {
-			keep = placeFile()
+		// Every window is a library of its own on the one backend, as
+		// marraw's Open in new window makes: the app runs until the last
+		// one closes.
+		var (
+			wins     sync.WaitGroup
+			firstWin *gunim.Window
+			open     func(path string) error
+		)
+		im := newImages("http://"+host, token)
+		open = func(path string) error {
+			first := firstWin == nil
+			wo := gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: parseSize(o.size), Root: newFullSurface(),
+				Icons: appIcons(), TitleBar: bareTitleBar{},
+				// The photo runs under the title bar, as in marraw.
+				UnderTitleBar: true}
+			if first && o.place {
+				// The first window keeps its place; another opens a step
+				// down and to the right of it.
+				wo.PlaceFile = placeFile()
+			} else if !first {
+				if p, ok := firstWin.Placement(); ok {
+					p.Bounds = p.Bounds.Add(geom.Pt(36, 36))
+					p.Maximized = false
+					wo.Place = &p
+				}
+			}
+			w, err := a.NewWindow(wo)
+			if err != nil {
+				return err
+			}
+			registerViews(w)
+			var cu *culler
+			if first {
+				firstWin = w
+				cu = newCuller(ctx, w.Client(), api, im, info.FolderID, path, photos)
+				if proc != nil {
+					proc.onRestart = func(why string) { cu.onDo(func() { cu.fail("The backend restarted", errors.New(why)) }) }
+				}
+				if o.skim > 0 || o.shot != "" || o.zoom || o.keys != "" {
+					go cu.script(o)
+				}
+			} else {
+				cu = newCuller(ctx, w.Client(), api, im, 0, "", nil)
+				// Updates are told of in the first window alone.
+				cu.secondary = true
+				if path != "" {
+					go cu.onDo(func() { cu.openShoot(path) })
+				}
+			}
+			cu.viewer.app = a
+			cu.newWindow = func(path string) {
+				go func() {
+					if err := open(path); err != nil {
+						cu.onDo(func() { cu.fail("A new window could not open", err) })
+					}
+				}()
+			}
+			wins.Add(1)
+			go func() {
+				defer wins.Done()
+				if err := cu.serve(); err != nil && !errors.Is(err, context.Canceled) {
+					log.Printf("window: %v", err)
+				}
+			}()
+			return nil
 		}
-		w, err := a.NewWindow(gunim.WindowOptions{Title: "marraw (gunim test build " + build() + ")", Size: parseSize(o.size), PlaceFile: keep, Root: newFullSurface(),
-			Icons: appIcons(), TitleBar: bareTitleBar{},
-			// The photo runs under the title bar, as in marraw.
-			UnderTitleBar: true})
-		if err != nil {
+		if err := open(path); err != nil {
 			return err
 		}
-		registerViews(w)
-		c := w.Client()
-		cu := newCuller(ctx, c, api, newImages("http://"+host, token), info.FolderID, path, photos)
-		cu.viewer.app = a
-		if proc != nil {
-			proc.onRestart = func(why string) { cu.onDo(func() { cu.fail("The backend restarted", errors.New(why)) }) }
-		}
-		if o.skim > 0 || o.shot != "" || o.zoom || o.keys != "" {
-			go cu.script(o)
-		}
-		return cu.serve()
+		wins.Wait()
+		return nil
 	})
 	if errors.Is(err, driver.ErrNoDriver) || errors.Is(err, context.Canceled) {
 		return nil

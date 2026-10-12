@@ -5,6 +5,16 @@ New since the last build you tried. Everything else in README.txt still
 applies. Try it on these test photos: deleting and exporting change files.
 
 New in this build
+  - Open in new window: right-click a shoot in the sidebar, or press
+    Ctrl+Shift+N for a window on the library, or use Jump to anything
+    ("New window", "Open this shoot in a new window"). Each window is a
+    library of its own on the same backend; marraw keeps running until
+    the last window closes. A new window opens a step down and right of
+    the first.
+  - The pop-out photo window has a button of its own, left of minimize
+    in the window's buttons, in the library and in Cull and Develop. It
+    is lit while the photo's window is open, and closes it again.
+    Ctrl+N still does the same.
   - Shoots you have never opened get a cover in the sidebar too: the
     preview the camera put in the folder's first RAW, read without
     scanning the folder. It is kept in the cache, so it is read once.

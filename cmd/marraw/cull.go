@@ -26,6 +26,8 @@ type (
 	// Cull is what the window shows: the photo at Index of Total, the best
 	// pixels of it so far, and what they are.
 	Cull struct {
+		// Viewer says the pop-out viewer is open.
+		Viewer       bool
 		Index, Total int
 		ID           int64
 		Name         string
@@ -140,6 +142,11 @@ const dwell = 350 * time.Millisecond
 // and the pipeline that brings each photo's pixels in without ever making
 // navigation wait on a RAW decode.
 type culler struct {
+	// secondary says this window is not the first: it leaves telling of
+	// updates to that one. newWindow opens another window on the folder
+	// at path, or on the library for "".
+	secondary  bool
+	newWindow  func(path string)
 	ctx        context.Context
 	c          gunim.Client
 	api        *marrawclient.Client
@@ -383,7 +390,9 @@ func (cu *culler) serve() error {
 	}()
 	cu.followLibrary()
 	cu.watchColour()
-	cu.tellUpdates()
+	if !cu.secondary {
+		cu.tellUpdates()
+	}
 	for {
 		// The pop-out viewer follows the photo in hand.
 		cu.viewerTick()
@@ -503,6 +512,10 @@ func (cu *culler) serve() error {
 				cu.shareCreate(in)
 			case ShareDone:
 				cu.shareDone()
+			case NewWindow:
+				if cu.newWindow != nil {
+					cu.newWindow(in.Path)
+				}
 			case ToggleViewer:
 				cu.toggleViewer()
 			case SetMode:
@@ -693,7 +706,7 @@ func (cu *culler) serve() error {
 // state is what the window shows now.
 func (cu *culler) state() Cull {
 	p := cu.photos[cu.at]
-	st := Cull{Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Exif: exifLine(p), Errors: cu.errs, Tasks: cu.shownTasks(), Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
+	st := Cull{Viewer: cu.viewer.win != nil, Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Exif: exifLine(p), Errors: cu.errs, Tasks: cu.shownTasks(), Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
 		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p),
 		Shoot: baseName(cu.folderPath), Taken: takenAt(p.TakenAt), Gap: cu.libView.Gap}
 	gapAt := map[int]int{}
@@ -972,7 +985,7 @@ func (cu *culler) record(what string, sharp bool) {
 // twice, rclick:x:y with the secondary button; drag:x:y:x:y
 // drags from one point to another; type:text
 // types; shift+plus presses Shift and + as a Swedish keyboard does, which
-// types ?; shift+ a key presses it with Shift; ctrl+z and w press those; wait:ms waits; and shot:name writes the window to name.png. It
+// types ?; shift+ a key presses it with Shift; ctrl+z, ctrl+shift+n and w press those; wait:ms waits; and shot:name writes the window to name.png. It
 // reports whether k was one.
 func (cu *culler) scriptStep(k string) bool {
 	verb, arg, ok := strings.Cut(k, ":")
@@ -1057,6 +1070,9 @@ func (cu *culler) scriptStep(k string) bool {
 		return true
 	case strings.HasPrefix(k, "shift+") && namedKeys[strings.TrimPrefix(k, "shift+")] != 0:
 		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: namedKeys[strings.TrimPrefix(k, "shift+")], Mods: input.ModShift, Time: now})
+	case strings.HasPrefix(k, "ctrl+shift+") && len(k) == 12 && k[11] >= 'a' && k[11] <= 'z':
+		// Ctrl, Shift and a letter.
+		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyA + input.Key(k[11]-'a'), Mods: input.ModControl | input.ModShift, Time: now})
 	case strings.HasPrefix(k, "ctrl+") && len(k) == 6 && k[5] >= 'a' && k[5] <= 'z':
 		// Ctrl and a letter.
 		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyA + input.Key(k[5]-'a'), Mods: input.ModControl, Time: now})

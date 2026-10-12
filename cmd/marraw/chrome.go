@@ -8,6 +8,7 @@ import (
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/geom"
+	"github.com/marrasen/gunim/icon"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
 	"github.com/marrasen/gunim/theme"
@@ -109,12 +110,27 @@ func (g *glassPill) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids g
 }
 
 // newWindowPill is the window's minimize, maximize and close buttons in a
-// pill of glass, for the top right of a view.
-func newWindowPill() gunim.Node {
+// pill of glass, for the top right of a view, after a button that pops
+// the photo out into a window of its own, as marraw's has: for those who
+// don't reach for Ctrl+N, and at hand in Cull and Develop too, where
+// this pill is the only chrome. pop is that button, lit while the
+// photo's window is open.
+func newWindowPill() (node gunim.Node, pop *widget.IconButton) {
+	pop = widget.NewIconButton(icon.PictureInPicture2, "Pop the photo out into its own window (Ctrl+N)")
+	pop.KeepFocus, pop.OnClick = true, widget.Sends(ToggleViewer{})
 	wc := widget.NewWindowControls()
 	wc.Compact = true
-	th := marrawTheme().With(theme.Set(widget.TitleBarCompactHeight, 28))
-	return widget.NewThemed(&glassPill{child: &fixedHeight{h: 28, child: wc}, radius: 9, pad: 3}, th)
+	row := widget.Row(pop, wc)
+	row.Cross = widget.CrossCenter
+	th := marrawTheme().With(theme.Set(widget.TitleBarCompactHeight, 28), theme.Set(widget.ButtonHeight, 28), theme.Set(widget.IconSize, 14))
+	return widget.NewThemed(&glassPill{child: &fixedHeight{h: 28, child: row}, radius: 9, pad: 3}, th), pop
+}
+
+// showPop lights pop while the photo's window is open, and says what a
+// click on it does.
+func showPop(pop *widget.IconButton, open bool) {
+	pop.Active = open
+	pop.Tooltip = map[bool]string{false: "Pop the photo out into its own window (Ctrl+N)", true: "Close the photo's window (Ctrl+N)"}[open]
 }
 
 // fixedHeight lays its child out h tall, as wide as it likes.

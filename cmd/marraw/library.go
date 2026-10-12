@@ -705,6 +705,10 @@ func (cu *culler) railAct(in RailAct) {
 		cu.openShoot(it.Path)
 	case "cull":
 		cu.openShootCull(it.Path)
+	case "newWindow":
+		if cu.newWindow != nil {
+			cu.newWindow(it.Path)
+		}
 	case "reveal":
 		if err := cu.c.Reveal(it.Path); err != nil {
 			cu.fail("The folder could not be shown", err)

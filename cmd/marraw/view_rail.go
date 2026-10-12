@@ -231,6 +231,7 @@ func railMenu(it RailItem) ([]widget.MenuItem, []string) {
 		return nil, nil
 	case "shoot", "root":
 		add(widget.MenuItem{Label: "Open in Cull", Icon: icon.Play, Hint: "Enter", Disabled: it.Offline}, "cull")
+		add(widget.MenuItem{Label: "Open in new window", Icon: icon.AppWindow, Disabled: it.Offline}, "newWindow")
 		if it.Outside {
 			add(widget.MenuItem{Label: "Add to the library", Icon: icon.FolderPlus}, "addLib")
 		}

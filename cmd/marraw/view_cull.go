@@ -140,6 +140,7 @@ type cullView struct {
 	modes                         *modeSwitch
 	gap                           *gapControl
 	winPill                       gunim.Node
+	pop                           *widget.IconButton
 	confirm                       *confirmBar
 	band                          *dragBand
 	shootRect, modesRect, topRect geom.Rect
@@ -192,7 +193,8 @@ func newCullView(s Cull) *cullView {
 		filmIn: anim.NewFloat(1), idle: anim.NewFloat(1), lastInput: time.Now(), adjust: newAdjustHUD(), adjustIn: anim.NewFloat(0),
 		headName: widget.NewLabel(s.Name), headExif: widget.NewLabel(s.Exif), errors: newErrorTray(),
 		shoot: newShootPill(), modes: newModeSwitch(map[bool]int{false: modeCull, true: modeDevelop}[s.Panel]), gap: newGapControl(),
-		winPill: newWindowPill(), confirm: newConfirmBar(), band: &dragBand{}}
+		confirm: newConfirmBar(), band: &dragBand{}}
+	v.winPill, v.pop = newWindowPill()
 	v.confirm.onZoom = func(pct float32, u *gunim.UI) {
 		v.zoomTo(pct/max(v.percent(1), 0.01), v.room().Center(), u)
 	}
@@ -240,6 +242,7 @@ func newCullView(s Cull) *cullView {
 func (v *cullView) show(s Cull, u *gunim.UI) {
 	prev := v.st
 	v.st = s
+	showPop(v.pop, s.Viewer)
 	th := u.Theme()
 	if s.ID != prev.ID {
 		v.flinging = false
@@ -659,7 +662,12 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 				u.Send(v, AskExport{})
 				return true
 			case input.KeyN:
-				u.Send(v, ToggleViewer{})
+				if e.Mods.Has(input.ModShift) {
+					// Ctrl+Shift+N: another window, on the library.
+					u.Send(v, NewWindow{})
+				} else {
+					u.Send(v, ToggleViewer{})
+				}
 				return true
 			case input.KeyK:
 				openPalette(v, v.room(), u, paletteFor{culling: true, panel: v.st.Panel})

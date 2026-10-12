@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/geom"
@@ -12,19 +13,44 @@ import (
 // ShowShortcuts opens the overlay of the keys, as ? does in marraw.
 type ShowShortcuts struct{}
 
+// NewWindow opens another window on the library, and on the shoot at
+// Path where it names one.
+type NewWindow struct{ Path string }
+
 // paletteFor says where the palette opens: in the cull view, with the
 // develop panel open, or in the grid with the keyboard on a photo.
 type paletteFor struct {
 	culling, panel bool
 	cursor         int
+	// last is what the window's views last had.
+	last windowLast
 }
 
-// The grid's state and the library as the window last had them, for the
-// palette to offer views and shoots wherever it opens.
+// windowLast is the grid's state and the library as a window last had
+// them, for the palette to offer views and shoots wherever it opens in
+// that window. Each window's views run on its own UI goroutine, so each
+// has its own, by its UI.
+type windowLast struct {
+	grid GridState
+	rail RailState
+}
+
 var (
-	lastGrid GridState
-	lastRail RailState
+	lastMu   sync.Mutex
+	lastByUI = map[*gunim.UI]*windowLast{}
 )
+
+// lastOf is what window u's views last had.
+func lastOf(u *gunim.UI) *windowLast {
+	lastMu.Lock()
+	defer lastMu.Unlock()
+	l := lastByUI[u]
+	if l == nil {
+		l = &windowLast{}
+		lastByUI[u] = l
+	}
+	return l
+}
 
 // paletteEntry is one thing the palette offers, and the intent it sends.
 type paletteEntry struct {
@@ -51,11 +77,15 @@ func paletteEntries(at paletteFor) []paletteEntry {
 	}
 	add("Export…", "Ctrl+E", AskExport{}, "save", "jpeg")
 	add("Pop-out viewer", "Ctrl+N", ToggleViewer{}, "window", "second screen", "monitor")
+	add("New window", "Ctrl+Shift+N", NewWindow{}, "library", "another")
+	if at.last.rail.Current != "" {
+		add("Open this shoot in a new window", "", NewWindow{Path: at.last.rail.Current}, "window", "another")
+	}
 	add("Copy the photo as an image", "Ctrl+Shift+C", CopyImage{}, "clipboard", "paste")
 	add("Watermarks…", "", AskWatermarks{}, "logo", "signature", "frame")
 	add("Add a folder to the library…", "", AskAddFolder{}, "import", "library", "shoot")
-	if lastRail.Current != "" {
-		add("Share this shoot…", "", RailAct{Key: lastRail.Current, Act: "share"}, "link", "album", "guest")
+	if at.last.rail.Current != "" {
+		add("Share this shoot…", "", RailAct{Key: at.last.rail.Current, Act: "share"}, "link", "album", "guest")
 	}
 	add("Undo", "Ctrl+Z", DevUndo{})
 	add("Redo", "Ctrl+Shift+Z", DevUndo{Redo: true})
@@ -89,8 +119,8 @@ func paletteEntries(at paletteFor) []paletteEntry {
 	add("Judge the bursts: pick the sharpest of each, reject the rest", "", JudgeBursts{}, "burst", "auto")
 	add("Look for closed eyes", "", CheckEyes{}, "blink", "eyes", "analyse")
 	add("Find the subjects, to judge their sharpness", "", CheckSubjects{}, "focus", "sharp", "analyse")
-	if lastGrid.FolderID != 0 {
-		v := lastGrid.View
+	if at.last.grid.FolderID != 0 {
+		v := at.last.grid.View
 		sortNames := []string{"capture time, oldest first", "capture time, newest first", "file name, A to Z", "file name, Z to A"}
 		sortKeys := []string{"captureAsc", "captureDesc", "nameAsc", "nameDesc"}
 		ratingKeys := []string{"any rating", "★ and up", "★★ and up", "★★★ and up", "★★★★ and up", "★★★★★"}
@@ -127,7 +157,7 @@ func paletteEntries(at paletteFor) []paletteEntry {
 			add("Show "+name, "", SetLibView{View: nv}, "filter", "stars", "rating")
 		}
 	}
-	for _, it := range lastRail.Items {
+	for _, it := range at.last.rail.Items {
 		if it.Kind != "shoot" && it.Kind != "root" {
 			continue
 		}
@@ -142,6 +172,7 @@ func paletteEntries(at paletteFor) []paletteEntry {
 // where it opens, found by typing part of its name, as Ctrl+K does in
 // marraw.
 func openPalette(opener gunim.Node, room geom.Rect, u *gunim.UI, at paletteFor) {
+	at.last = *lastOf(u)
 	entries := paletteEntries(at)
 	p := &widget.Palette{Placeholder: "Jump to anything…"}
 	for _, e := range entries {
