@@ -25,60 +25,112 @@ func ApplyGeometry(src *image.RGBA, e *edit.Params) *image.RGBA {
 		return src
 	}
 	origW, origH := src.Bounds().Dx(), src.Bounds().Dy()
+	src = turnFrame(src, e)
+	if !e.HasCrop() && e.CropAngle == 0 {
+		return src
+	}
+	g := newCropGeom(src.Bounds().Dx(), src.Bounds().Dy(), origW, origH, e)
+	return geometryInto(src, g, image.Rect(0, 0, g.outW, g.outH))
+}
+
+// turnFrame applies the edit's quarter turns and mirror.
+func turnFrame(src *image.RGBA, e *edit.Params) *image.RGBA {
 	if code := rotateFlipCode(e.RotateTurns()); code != 0 {
 		src = rotateFlip(src, code)
 	}
 	if e.FlipH {
 		src = flipHorizontal(src)
 	}
-	if !e.HasCrop() && e.CropAngle == 0 {
-		return src
-	}
-	b := src.Bounds()
-	fullW, fullH := b.Dx(), b.Dy()
+	return src
+}
 
+// cropGeom is where the output sits in the turned frame (fullW×fullH):
+// the crop rectangle, straightened by angle about the frame centre.
+type cropGeom struct {
+	fullW, fullH int
+	angle        float64 // degrees; 0 is a plain crop
+	cx0, cy0     float64 // crop origin in frame pixels
+	x0, y0       int     // the same, rounded, for a plain crop
+	outW, outH   int     // output size
+}
+
+func newCropGeom(fullW, fullH, origW, origH int, e *edit.Params) cropGeom {
+	g := cropGeom{fullW: fullW, fullH: fullH, angle: e.CropAngle, outW: fullW, outH: fullH}
 	// Crop rectangle in source pixels (full frame when only straightening).
 	// OutputDims takes the pre-rotation dims — it applies the axis swap itself.
-	cx0, cy0 := 0.0, 0.0
-	cropW, cropH := fullW, fullH
 	if e.HasCrop() {
-		cx0 = e.CropX * float64(fullW)
-		cy0 = e.CropY * float64(fullH)
-		cropW, cropH = e.OutputDims(origW, origH)
+		g.cx0 = e.CropX * float64(fullW)
+		g.cy0 = e.CropY * float64(fullH)
+		g.outW, g.outH = e.OutputDims(origW, origH)
 	}
-
-	// Fast path: a pure axis-aligned crop is a clamped sub-image copy.
-	if e.CropAngle == 0 {
-		x0 := clampInt(int(math.Round(cx0)), 0, fullW-1)
-		y0 := clampInt(int(math.Round(cy0)), 0, fullH-1)
-		x1 := clampInt(x0+cropW, x0+1, fullW)
-		y1 := clampInt(y0+cropH, y0+1, fullH)
-		return copyRGBA(src, image.Rect(b.Min.X+x0, b.Min.Y+y0, b.Min.X+x1, b.Min.Y+y1))
+	if g.angle == 0 {
+		// A plain crop is a clamped sub-image copy.
+		g.x0 = clampInt(int(math.Round(g.cx0)), 0, fullW-1)
+		g.y0 = clampInt(int(math.Round(g.cy0)), 0, fullH-1)
+		g.outW = clampInt(g.x0+g.outW, g.x0+1, fullW) - g.x0
+		g.outH = clampInt(g.y0+g.outH, g.y0+1, fullH) - g.y0
 	}
+	return g
+}
 
+// geometryInto renders the part out of the output (in output pixels) from
+// src: the turned frame, or a part of it in the frame's own coordinates
+// holding every pixel out samples (cropGeom.source). The result starts at
+// (0, 0).
+func geometryInto(src *image.RGBA, g cropGeom, out image.Rectangle) *image.RGBA {
+	if g.angle == 0 {
+		return copyRGBA(src, out.Add(image.Pt(g.x0, g.y0)))
+	}
 	// Rotate-sample: for each output pixel, find its point in the rotated
 	// frame, un-rotate about the frame center to a source coordinate, and
 	// bilinearly sample. cos(-θ), sin(-θ) invert the frame rotation.
-	rad := e.CropAngle * math.Pi / 180
-	cos, sin := math.Cos(-rad), math.Sin(-rad)
-	fcx, fcy := float64(fullW)/2, float64(fullH)/2
-
-	dst := image.NewRGBA(image.Rect(0, 0, cropW, cropH))
-	for oy := range cropH {
-		fy := cy0 + float64(oy) + 0.5 - fcy
-		for ox := range cropW {
-			fx := cx0 + float64(ox) + 0.5 - fcx
-			sx := fcx + fx*cos - fy*sin - 0.5
-			sy := fcy + fx*sin + fy*cos - 0.5
-			r, g, bl, a := sampleBilinear(src, sx, sy)
-			o := dst.PixOffset(ox, oy)
-			dst.Pix[o+0] = r
-			dst.Pix[o+1] = g
-			dst.Pix[o+2] = bl
-			dst.Pix[o+3] = a
+	cos, sin, fcx, fcy := g.rotation()
+	dst := image.NewRGBA(image.Rect(0, 0, out.Dx(), out.Dy()))
+	bands(out.Dy(), func(y0, y1 int) {
+		for ly := y0; ly < y1; ly++ {
+			fy := g.cy0 + float64(out.Min.Y+ly) + 0.5 - fcy
+			for lx := range out.Dx() {
+				fx := g.cx0 + float64(out.Min.X+lx) + 0.5 - fcx
+				sx := fcx + fx*cos - fy*sin - 0.5
+				sy := fcy + fx*sin + fy*cos - 0.5
+				r, gr, bl, a := sampleBilinear(src, sx, sy)
+				o := dst.PixOffset(lx, ly)
+				dst.Pix[o+0] = r
+				dst.Pix[o+1] = gr
+				dst.Pix[o+2] = bl
+				dst.Pix[o+3] = a
+			}
 		}
-	}
+	})
 	return dst
+}
+
+func (g cropGeom) rotation() (cos, sin, fcx, fcy float64) {
+	rad := g.angle * math.Pi / 180
+	return math.Cos(-rad), math.Sin(-rad), float64(g.fullW) / 2, float64(g.fullH) / 2
+}
+
+// source is the part of the turned frame geometryInto reads for out.
+func (g cropGeom) source(out image.Rectangle) image.Rectangle {
+	frame := image.Rect(0, 0, g.fullW, g.fullH)
+	if g.angle == 0 {
+		return out.Add(image.Pt(g.x0, g.y0)).Intersect(frame)
+	}
+	// The map is affine, so the corner pixels bound the samples; the
+	// bilinear taps reach one pixel past them.
+	cos, sin, fcx, fcy := g.rotation()
+	minX, minY := math.Inf(1), math.Inf(1)
+	maxX, maxY := math.Inf(-1), math.Inf(-1)
+	for _, p := range [4]image.Point{out.Min, {out.Max.X - 1, out.Min.Y}, {out.Min.X, out.Max.Y - 1}, out.Max.Sub(image.Pt(1, 1))} {
+		fx := g.cx0 + float64(p.X) + 0.5 - fcx
+		fy := g.cy0 + float64(p.Y) + 0.5 - fcy
+		sx := fcx + fx*cos - fy*sin - 0.5
+		sy := fcy + fx*sin + fy*cos - 0.5
+		minX, maxX = math.Min(minX, sx), math.Max(maxX, sx)
+		minY, maxY = math.Min(minY, sy), math.Max(maxY, sy)
+	}
+	return image.Rect(int(math.Floor(minX))-1, int(math.Floor(minY))-1,
+		int(math.Ceil(maxX))+2, int(math.Ceil(maxY))+2).Intersect(frame)
 }
 
 // copyRGBA returns a tightly-packed copy of the given rectangle of src so the
@@ -104,6 +156,25 @@ func sampleBilinear(src *image.RGBA, x, y float64) (r, g, b, a uint8) {
 	y0f := math.Floor(y)
 	x0, y0 := int(x0f), int(y0f)
 	fx, fy := x-x0f, y-y0f
+
+	if x0 >= bnd.Min.X && y0 >= bnd.Min.Y && x0+1 < bnd.Max.X && y0+1 < bnd.Max.Y {
+		// All four taps inside: the same sums in the same order as the loop
+		// below, read straight from the pixel slice.
+		w00, w10 := (1-fx)*(1-fy), fx*(1-fy)
+		w01, w11 := (1-fx)*fy, fx*fy
+		p := src.Pix
+		o00 := src.PixOffset(x0, y0)
+		o01 := o00 + src.Stride
+		var out [4]uint8
+		for c := range out {
+			acc := float64(p[o00+c]) * w00
+			acc += float64(p[o00+4+c]) * w10
+			acc += float64(p[o01+c]) * w01
+			acc += float64(p[o01+4+c]) * w11
+			out[c] = uint8(acc + 0.5)
+		}
+		return out[0], out[1], out[2], out[3]
+	}
 
 	var acc [4]float64
 	for _, s := range [4]struct {
@@ -136,11 +207,13 @@ func flipHorizontal(src *image.RGBA) *image.RGBA {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := range h {
-		for x := range w {
-			dst.SetRGBA(w-1-x, y, src.RGBAAt(b.Min.X+x, b.Min.Y+y))
+	bands(h, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			for x := range w {
+				dst.SetRGBA(w-1-x, y, src.RGBAAt(b.Min.X+x, b.Min.Y+y))
+			}
 		}
-	}
+	})
 	return dst
 }
 

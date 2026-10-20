@@ -38,6 +38,8 @@ const fullDecodeIdle = 2 * time.Minute
 type fullDecode struct {
 	cacheKey string
 	key      string      // fullDecodeKey
+	noExpKey string      // fullDecodeKeyNoExp
+	baked    float64     // the exposure LibRaw baked in (edit.BakedExpEV)
 	wbCompEV float64     // edit.WBCompEV for this decode's WB
 	rgba     *image.RGBA // never changed once kept
 	used     time.Time   // last render from it; guarded by fullMu
@@ -73,6 +75,17 @@ func fullDecodeKey(edits *edit.Params) string {
 		key += "|" + edits.LibrawInputsHash()
 	}
 	return key
+}
+
+// fullDecodeKeyNoExp is fullDecodeKey with the exposure left out: decodes
+// that differ only in exposure share it.
+func fullDecodeKeyNoExp(edits *edit.Params) string {
+	if edits == nil {
+		return fullDecodeKey(nil)
+	}
+	flat := *edits
+	flat.ExpEV, flat.ExpPreserve = 0, 0
+	return fmt.Sprintf("%+v", fullDecodeParams(&flat)) + "|" + edits.LibrawInputsHashNoExp()
 }
 
 // fullDecodeParams are the LibRaw params of a full-resolution render.
@@ -183,6 +196,28 @@ func (c *Cache) keptFull(cacheKey, key string) *fullDecode {
 	return f
 }
 
+// KeptForWindow returns photo's kept full-resolution decode when a window
+// of edits can render from it (RenderWindow): the decode of edits' LibRaw
+// inputs, or of the same ones but for exposure. expEV is what the window
+// folds in after the decode — the exposure the decode lacks, and its WB
+// compensation. exact reports the decode is edits' own, so the window
+// matches the 1:1 tiles; otherwise the exposure is folded into 8-bit
+// pixels, as the drafts fold it. The pixels are shared: only read them.
+func (c *Cache) KeptForWindow(photo store.Photo, edits *edit.Params) (src *image.RGBA, expEV float64, exact, ok bool) {
+	if edits == nil {
+		return nil, 0, false, false // the base look is never kept
+	}
+	key, noExpKey := fullDecodeKey(edits), fullDecodeKeyNoExp(edits)
+	c.fullMu.Lock()
+	defer c.fullMu.Unlock()
+	f := c.fullEntry
+	if f == nil || f.cacheKey != photo.CacheKey || f.noExpKey != noExpKey {
+		return nil, 0, false, false
+	}
+	f.used = time.Now()
+	return f.rgba, edits.ExpEV - f.baked + f.wbCompEV, f.key == key, true
+}
+
 // keepFull makes f the kept decode, in place of any other, when it is the
 // one the editor is on — its photo still held, and the decode the editor
 // asked for last — and reports whether it is kept. A closed cache keeps
@@ -256,7 +291,10 @@ func (c *Cache) decodeFull(ctx context.Context, proc *libraw.Processor, photo st
 		return nil, err
 	}
 	c.fullDecodes.Add(1)
-	return &fullDecode{cacheKey: photo.CacheKey, key: fullDecodeKey(edits), wbCompEV: wbCompEV, rgba: rgba}, nil
+	return &fullDecode{
+		cacheKey: photo.CacheKey, key: fullDecodeKey(edits), noExpKey: fullDecodeKeyNoExp(edits),
+		baked: edits.BakedExpEV(), wbCompEV: wbCompEV, rgba: rgba,
+	}, nil
 }
 
 // How a full render got its decode, for the render log.
