@@ -102,16 +102,13 @@ type developer struct {
 	note  string
 	// The panel's own saves (saves.go): saveSeq numbers them; last is each
 	// photo's latest, failed its error while it fails, and retry the timer
-	// sending it again; out counts the own saves of a photo not answered
-	// yet, ownHashes the hashes they came back with, and heldPatch a patch
-	// that came while some were out, judged once they are all in.
-	saveSeq   int
-	last      map[int64]ownSave
-	failed    map[int64]error
-	retry     map[int64]*time.Timer
-	out       map[int64]int
-	ownHashes map[int64][]string
-	heldPatch map[int64]string
+	// sending it again; ledger counts them out and in and holds a patch
+	// that came while some were out.
+	saveSeq int
+	last    map[int64]ownSave
+	failed  map[int64]error
+	retry   map[int64]*time.Timer
+	ledger  saveLedger
 	// edits counts the changes made, committed what it was at the last
 	// save, and confirmed what it was at the last save the backend has
 	// confirmed: while they differ, the edit showing is not the saved

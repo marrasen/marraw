@@ -1657,10 +1657,9 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 				_ = cu.c.Patch("grid", LibMarks{ID: p.ID, Rating: p.Rating, Flag: string(p.Flag)})
 			}
 			if pp.EditHash != nil {
-				// An own save's patch is taken from its answer (saveBack);
-				// one that may be is judged once the saves out answer.
-				own, held := cu.judgePatch(p.ID, *pp.EditHash)
-				if !own && !held && *pp.EditHash != p.EditHash {
+				// An own save's hash is taken from its answer; a patch
+				// that may be one is judged once the saves out answer.
+				if !cu.judgePatch(p.ID, *pp.EditHash) && *pp.EditHash != p.EditHash {
 					cu.editedElsewhere(i, *pp.EditHash)
 				}
 			}

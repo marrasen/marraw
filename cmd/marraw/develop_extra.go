@@ -87,32 +87,35 @@ func exifLine(p marrawclient.Photo) string {
 	return strings.Join(parts, " · ")
 }
 
-// resetLoad takes a reset of photo id, own save seq saved as hash, into the
-// panel once it has the edit as the backend gives it now (the measured
-// exposure, say), asking again while that fails: the edit counts as saved
-// only then, never with the panel still showing the edit before.
-func (cu *culler) resetLoad(id int64, seq int, hash string, tries int) {
+// resetLoad takes a reset of photo id, own save seq, into the panel once
+// it has the edit as the backend gives it now (the measured exposure, say),
+// asking again while that fails: the edit counts as saved only then, never
+// with the panel still showing the edit before. The first failure is told:
+// the panel goes on showing the old edit meanwhile, and an edit made on it
+// is the user's (a newer own save) and stands.
+func (cu *culler) resetLoad(id int64, seq int, tries int) {
 	go func() {
 		p, err := cu.api.Edits.GetEditParams(cu.ctx, id)
 		select {
 		case cu.do <- func() {
 			d := &cu.dev
 			last, ok := d.last[id]
-			if ok && last.seq != seq {
-				return // edited again since: the newer save says
-			}
-			if !ok || !d.open || d.id != id {
-				// Left: the photo is on the reset all the same.
-				cu.savedAs(id, hash)
+			if !ok || last.seq != seq || !d.open || d.id != id {
+				// Edited again since, or left: the newer save or the
+				// photo's own hash says.
 				return
 			}
 			if err != nil {
 				if canceled(err) {
 					return
 				}
-				log.Printf("develop: loading photo %d's edit after the reset (try %d): %v", id, tries+1, err)
+				if tries == 0 {
+					cu.fail("Reset saved, but the panel could not reload it — retrying", err)
+				} else {
+					log.Printf("develop: loading photo %d's edit after the reset (try %d): %v", id, tries+1, err)
+				}
 				wait := saveRetryWaits[min(tries+1, len(saveRetryWaits))-1]
-				time.AfterFunc(wait, func() { cu.resetLoad(id, seq, hash, tries+1) })
+				time.AfterFunc(wait, func() { cu.resetLoad(id, seq, tries+1) })
 				return
 			}
 			d.params = marrawclient.Params{}
@@ -123,7 +126,7 @@ func (cu *culler) resetLoad(id int64, seq int, hash string, tries int) {
 			// Saved by the reset itself: the preview only.
 			d.edits++
 			d.committed = d.edits
-			cu.savedAs(id, hash)
+			cu.confirmSaved(id)
 			cu.preview(true)
 			cu.remember("Reset")
 			cu.tell("Reset")
@@ -139,33 +142,36 @@ func (cu *culler) devReset() {
 	d := &cu.dev
 	if cu.culling && d.open && d.mounted && d.id == cu.photos[cu.at].ID {
 		id := d.id
-		// Saved as the neutral edit, which clears it as a reset does, so the
-		// answer says the hash the photo is on. It is the photo's latest own
-		// save: one before it answering late says nothing.
-		d.saveSeq++
-		seq, prev, prevErr := d.saveSeq, d.last[id], d.failed[id]
-		if d.last == nil {
-			d.last = map[int64]ownSave{}
-		}
-		d.last[id] = ownSave{seq: seq}
-		cu.stopRetry(id)
-		cu.queueOwn(id, marrawclient.Params{}, func(hash string, err error) {
+		// Saved as the neutral edit, which clears it as a reset does: an own
+		// save like any, so its answer sets the hash the photo is on, and
+		// one before it answering late cannot undo it.
+		prev, prevErr := d.last[id], d.failed[id]
+		seq := cu.recordOwn(id, marrawclient.Params{})
+		cu.sendOwn(id, seq, marrawclient.Params{}, func(_ string, err error) {
+			if d.last[id].seq != seq {
+				return // edited again since: the newer save says
+			}
 			if err != nil {
-				// Left as it is: the panel keeps the edit it shows, and a
-				// save of it failing before goes on being sent.
+				// Left as it was: the panel keeps the edit it shows. An
+				// earlier save answered well is the photo's already; one
+				// failing goes on being sent; one out says when it answers.
 				if !canceled(err) {
 					cu.fail("Could not reset the edit", err)
 				}
-				if d.last[id].seq == seq {
-					d.last[id] = prev
-					if prevErr != nil {
-						cu.retrySave(id, max(prev.tries, 1))
-					}
+				if prev.seq == 0 {
+					delete(d.last, id)
+					return
+				}
+				d.last[id] = prev
+				if prevErr != nil {
+					cu.retrySave(id, max(prev.tries, 1))
+				} else {
+					cu.confirmSaved(id)
 				}
 				return
 			}
 			delete(d.failed, id)
-			cu.resetLoad(id, seq, hash, 0)
+			cu.resetLoad(id, seq, 0)
 		})
 		return
 	}
