@@ -29,7 +29,7 @@ const fullDecodeIdle = 2 * time.Minute
 //
 // One rule decides what is kept: the decode the editor asked for last. The
 // editor holds its photo open (HoldEditor); its warm-up (WarmFull) and each
-// settle of a state (WantFull) say which decode it is on now. 1:1 renders
+// settle or save of a state (WantFull) say which decode it is on now. 1:1 renders
 // do not ask — a share-link guest or the pre-render pass renders the photo
 // too — but a render of the state the editor is on keeps its decode. A
 // decode of anything else — a state the user has left, another photo, the
@@ -151,17 +151,15 @@ func (c *Cache) WantFull(photo store.Photo, edits *edit.Params) {
 }
 
 // wantLocked makes key what the editor on cacheKey is on, if it is held.
-// It reports whether the photo is held.
-func (c *Cache) wantLocked(cacheKey, key string) bool {
+func (c *Cache) wantLocked(cacheKey, key string) {
 	ed := c.fullEditors[cacheKey]
 	if ed == nil {
-		return false
+		return
 	}
 	if ed.want != key {
 		ed.want = key
 		c.callOffWarmsLocked(cacheKey, key)
 	}
-	return true
 }
 
 // callOffWarmsLocked calls off the warm-ups of cacheKey that decode

@@ -270,12 +270,18 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 	}
 	// The editor settles on this state, an undo back to one rendered before
 	// included: a full-resolution warm-up of another one is called off, and
-	// it is the decode to keep.
-	e.deps.Cache.WantFull(photo, ep)
+	// it is the decode to keep. Not a settle called off meanwhile: a newer
+	// one has said already. The neutral state's own decode is an edit's (the
+	// first edit starts from it), not the base look's.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	e.deps.Cache.WantFull(photo, &params)
 	path := e.deps.Cache.PathFor(photo.CacheKey, "2048", hash)
 	if _, err := os.Stat(path); err == nil {
 		return path, nil // already rendered
 	}
+	defer e.deps.settling(photo.CacheKey + "|" + hash)()
 
 	rgba, wbComp, err := e.previewDecode(ctx, photoID, photo, ep)
 	if err != nil {
@@ -1338,11 +1344,18 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 	if err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli()); err != nil {
 		return err
 	}
+	saved := params
+	if saved == nil {
+		saved = &edit.Params{}
+	}
 
 	// Warm the grid thumb for the new state so the grid updates without a
 	// scroll-triggered fetch racing the patch, and mirror the new intent to
 	// the photo's portable sidecar.
 	if p, err := e.deps.DB.GetPhoto(context.WithoutCancel(ctx), photoID); err == nil {
+		// A photo open in the editor is now on the saved state, a reset
+		// that renders no settle included.
+		e.deps.Cache.WantFull(p, saved)
 		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{editPatch(photoID, hash, params)})
 		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)
 		e.deps.warmEdit(p, hash)
@@ -1365,26 +1378,66 @@ func editPatch(photoID int64, hash string, params *edit.Params) PhotoPatch {
 	return PhotoPatch{ID: photoID, EditHash: &hash, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
 }
 
-// settleWait bounds how long the post-save warm of a photo open in the
-// editor waits for the editor's 2048 settle of the same state.
-const settleWait = 5 * time.Second
+// How long the post-save warm of a photo open in the editor waits for the
+// editor's 2048 settle of the same state: for it to start (the save and the
+// settle leave the editor together, in either order), and in all.
+const (
+	settleStartWait = 500 * time.Millisecond
+	settleWait      = 5 * time.Second
+)
 
-// waitForSettle waits until photo's 2048 of hash is on disk, the editor
-// lets go of the photo (no settle is coming), ctx ends or settleWait passes.
+// settling marks the editor's 2048 settle of key (CacheKey|hash) under way
+// until the returned func is called.
+func (d *Deps) settling(key string) (done func()) {
+	ch := make(chan struct{})
+	d.warmMu.Lock()
+	if d.settles == nil {
+		d.settles = map[string]chan struct{}{}
+	}
+	d.settles[key] = ch
+	d.warmMu.Unlock()
+	return func() {
+		d.warmMu.Lock()
+		if d.settles[key] == ch {
+			delete(d.settles, key)
+		}
+		d.warmMu.Unlock()
+		close(ch)
+	}
+}
+
+// waitForSettle waits for the editor's 2048 settle of photo under hash, if
+// one starts within settleStartWait, to end. Some saves have none (a reset,
+// a commit made while cropping settles the flattened frame), so a settle
+// that does not start is not waited for long.
 func (d *Deps) waitForSettle(ctx context.Context, p store.Photo, hash string) {
+	key := p.CacheKey + "|" + hash
 	path := d.Cache.PathFor(p.CacheKey, "2048", hash)
 	deadline := time.NewTimer(settleWait)
 	defer deadline.Stop()
-	tick := time.NewTicker(100 * time.Millisecond)
+	start := time.Now()
+	tick := time.NewTicker(50 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		if _, err := os.Stat(path); err == nil || !d.Cache.HeldInEditor(p) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		d.warmMu.Lock()
+		ch := d.settles[key]
+		d.warmMu.Unlock()
+		if ch != nil {
+			select {
+			case <-ch:
+			case <-ctx.Done():
+			case <-deadline.C:
+			}
+			return
+		}
+		if time.Since(start) >= settleStartWait {
 			return
 		}
 		select {
 		case <-ctx.Done():
-			return
-		case <-deadline.C:
 			return
 		case <-tick.C:
 		}
