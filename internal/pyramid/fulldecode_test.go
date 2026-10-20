@@ -134,8 +134,10 @@ func TestFullRenderReusesKeptDecode(t *testing.T) {
 func TestWarmFullServesTheNextRender(t *testing.T) {
 	f := newFullTestCatalog(t)
 	p := f.edit(edit.Params{Contrast: 0.1})
+	start := &edit.Params{Contrast: 0.1}
+	start.Normalize()
 	for range 2 {
-		if err := f.cache.WarmFull(t.Context(), p, decode.PriorityPrefetch); err != nil {
+		if err := f.cache.WarmFull(t.Context(), p, start); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -153,11 +155,49 @@ func TestWarmFullCancelled(t *testing.T) {
 	p := f.edit(edit.Params{Contrast: 0.1})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := f.cache.WarmFull(ctx, p, decode.PriorityPrefetch); err == nil {
+	if err := f.cache.WarmFull(ctx, p, &edit.Params{}); err == nil {
 		t.Fatal("cancelled WarmFull returned no error")
 	}
 	f.tile()
 	if n := f.cache.fullDecodes.Load(); n != 1 {
 		t.Errorf("render after a cancelled warm-up ran %d decodes, want 1", n)
+	}
+}
+
+// TestWarmFullUneditedServesFirstEdit: the editor warms an unedited photo
+// from the neutral starting state, and its first look-stage edit renders
+// from that decode. Warming the base look would not serve it: no edit
+// decodes auto-brightened.
+func TestWarmFullUneditedServesFirstEdit(t *testing.T) {
+	f := newFullTestCatalog(t)
+	if err := f.cache.WarmFull(t.Context(), f.photo(), &edit.Params{}); err != nil {
+		t.Fatal(err)
+	}
+	f.edit(edit.Params{Contrast: 0.3})
+	f.tile()
+	if n := f.cache.fullDecodes.Load(); n != 1 {
+		t.Errorf("first edit after warming an unedited photo: %d decodes, want 1", n)
+	}
+}
+
+// TestBackgroundRenderKeepsEditorsDecode: a background 1:1 render (the
+// pre-render pass) decodes for itself and leaves the kept decode alone.
+func TestBackgroundRenderKeepsEditorsDecode(t *testing.T) {
+	f := newFullTestCatalog(t)
+	f.edit(edit.Params{Contrast: 0.1})
+	f.tile()
+
+	p := f.edit(edit.Params{ExpEV: 0.7})
+	if _, err := f.cache.EnsureTile(t.Context(), p, 0, 0, p.EditHash, decode.PriorityBackground); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.cache.fullDecodes.Load(); n != 2 {
+		t.Fatalf("background render of a new decode: %d decodes in all, want 2", n)
+	}
+
+	f.edit(edit.Params{Contrast: 0.5})
+	f.tile()
+	if n := f.cache.fullDecodes.Load(); n != 2 {
+		t.Errorf("the background render pushed out the kept decode: %d decodes in all, want 2", n)
 	}
 }

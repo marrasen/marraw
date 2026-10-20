@@ -40,8 +40,10 @@ keyed by photo and every LibRaw input, and goes after two idle minutes. An edit
 that leaves the LibRaw inputs alone — crop, lens, masks, healing, every
 look-stage slider — renders its tiles from it without a second demosaic: 1.4 s
 instead of 3.8 s on a 42 MP ARW. The pixels are the ones a fresh decode gives.
-The editor calls `Edits.WarmFull` as it opens a photo, so even the first edit
-starts after the decode.
+Only renders someone waits on keep their decode, so the background 1:1 pass
+never pushes out the photo being edited. `Edits.WarmFull` decodes a photo as
+the editor will start from it, for the editor to call as it opens a photo, so
+even the first edit starts after the decode.
 
 ### Adaptive base look
 

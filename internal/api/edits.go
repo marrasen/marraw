@@ -354,9 +354,9 @@ func (e *Edits) decodePreview(ctx context.Context, photoID int64, photo store.Ph
 // nil/base decode keys as "base" with zero exposure.
 func decodeKeys(ep *edit.Params) (key, noExpKey string, expEV float64) {
 	if ep == nil {
-		return "base", "base", 0
+		return pyramid.DecodeKey(nil), pyramid.DecodeKey(nil), 0
 	}
-	return ep.LibrawInputsHash(), ep.LibrawInputsHashNoExp(), ep.BakedExpEV()
+	return pyramid.DecodeKey(ep), ep.LibrawInputsHashNoExp(), ep.BakedExpEV()
 }
 
 // cachedDecodeComp returns the cached half-size decode for (photoID, key)
@@ -1144,17 +1144,29 @@ func (e *Edits) AutoAdjust(ctx context.Context, photoID int64, params edit.Param
 }
 
 // WarmFull gets a photo's 1:1 render ready for the edits to come: it
-// decodes the photo at full resolution under its saved edit and keeps the
-// decode, which the 1:1 render of any edit that leaves the LibRaw inputs as
-// they are starts from. The editor calls it as it opens a photo, and the
-// first edit's full-resolution tiles then come seconds sooner. It returns
-// once the decode is kept; cancelling the call stops the decode.
+// decodes the photo at full resolution as the editor starts from it — its
+// saved edit, or the seeded or neutral starting state of an unedited photo
+// — and keeps the decode. The 1:1 render of any edit that leaves those
+// LibRaw inputs as they are starts from it. For the editor to call as it
+// opens a photo; the first edit's tiles then come seconds sooner. It
+// returns once the decode is kept; cancelling the call stops the decode.
 func (e *Edits) WarmFull(ctx context.Context, photoID int64) error {
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
 	if err != nil {
 		return err
 	}
-	return e.deps.Cache.WarmFull(ctx, photo, decode.PriorityPrefetch)
+	// An unedited photo's base look (auto-brightened) is a decode no edit
+	// uses: the first edit starts from GetEditParams' state.
+	start := &edit.Params{}
+	if photo.EditParams.Valid {
+		if start, err = edit.Parse(photo.EditParams.String); err != nil {
+			return err
+		}
+	} else if seeded := seededParams(photo); seeded != nil {
+		start = seeded
+	}
+	start.Normalize()
+	return e.deps.Cache.WarmFull(ctx, photo, start)
 }
 
 // SetEditParams persists the edit state (neutral params clear it).

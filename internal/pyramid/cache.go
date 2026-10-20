@@ -108,6 +108,7 @@ type Cache struct {
 	fullMu      sync.Mutex
 	fullEntry   *fullDecode
 	fullFlights map[string]chan struct{}
+	fullClosed  bool
 	fullDecodes atomic.Int64 // full-resolution decodes run, for tests
 }
 
@@ -123,7 +124,7 @@ func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
 // Close joins the fast pool's workers. The main pool is owned by the caller.
 func (c *Cache) Close() {
 	c.fastPool.Close()
-	c.dropFull()
+	c.closeFull()
 }
 
 func (c *Cache) Dir() string { return *c.dir.Load() }
@@ -438,9 +439,11 @@ func editsForHash(photo store.Photo, editHash string) (*edit.Params, error) {
 // levels that fall out of the same decode for free. ctx is checked before
 // the expensive stages, and cancellation also aborts the LibRaw decode
 // itself mid-flight (Process returns ctx.Err() at LibRaw's next progress
-// checkpoint); once the decode has been paid for, the write-out always
-// completes — the cache files stay useful for the next visit, and tile (0,0)
-// is never written without its siblings (it is the grid-complete sentinel).
+// checkpoint). A full render also stops between the stages after the decode,
+// which the kept decode makes most of its cost. Once the write-out starts it
+// always completes — the cache files stay useful for the next visit, and
+// tile (0,0) is never written without its siblings (it is the grid-complete
+// sentinel).
 func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo store.Photo, level, editHash string, prio decode.Priority) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -536,7 +539,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	var rgba *image.RGBA
 	var wbCompEV float64
 	if level == "full" {
-		rgba, wbCompEV, err = c.decodeFull(ctx, proc, photo, edits, ready, true)
+		rgba, wbCompEV, err = c.fullDecodeFor(ctx, proc, photo, edits, ready, prio)
 		if err != nil {
 			return err
 		}
@@ -586,15 +589,27 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	if level == "full" {
 		// Mirrors ApplyFinish stage for stage — kept inline only for the
 		// progress ticks between the stages.
+		// With the decode kept, these stages are most of the render, so a
+		// render called off (the next edit came) stops between them. The
+		// write-out below always completes: tile (0,0) is the sentinel.
 		report(0.72)
 		ApplyHeal(rgba, edits, ai, fills)
 		ApplyLook(rgba, gamma, edits)
 		report(0.78)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		suppress := ApplyMasks(rgba, edits, ai)
 		ApplyBW(rgba, edits)
 		report(0.82)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		ApplyDetail(rgba, edits, suppress)
 		report(0.90)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := c.writeTiles(rgba, photo.CacheKey, editHash, func(done, total int) {
 			// The downscale chain after the tiles claims the last 2 %.
 			report(0.90 + 0.08*float64(done)/float64(total))
