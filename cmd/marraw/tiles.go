@@ -119,6 +119,11 @@ func (cu *culler) stopTiles() {
 // render and all. A probe of p under way stays, unless it would wait where
 // now asks not to.
 func (cu *culler) probeTiles(p marrawclient.Photo, now bool) {
+	cu.probeTilesAt(p, now, image.Point{})
+}
+
+// probeTilesAt is probeTiles by the tile at t.
+func (cu *culler) probeTilesAt(p marrawclient.Photo, now bool, t image.Point) {
 	if cu.probing == p.ID && (!now || cu.probeNow) {
 		return
 	}
@@ -136,13 +141,13 @@ func (cu *culler) probeTiles(p marrawclient.Photo, now bool) {
 	}
 	go func() {
 		start := time.Now()
-		_, err := cu.im.tile(ctx, p, image.Point{}, true)
+		_, err := cu.im.tile(ctx, p, t, true)
 		rendered := false
 		if err == errMissing {
 			cu.say(gen, "tiles: rendering the full resolution")
 			select {
 			case <-time.After(wait):
-				_, err = cu.im.tile(ctx, p, image.Point{}, false)
+				_, err = cu.im.tile(ctx, p, t, false)
 				rendered = err == nil
 			case <-ctx.Done():
 				err = ctx.Err()
@@ -216,19 +221,23 @@ func (cu *culler) fetchTiles(p marrawclient.Photo) {
 				if err == errMissing {
 					// Rendered once, since cleaned out of the cache (the
 					// janitor goes tile by tile): the set is cold again, for
-					// a window to bridge while it renders — once, for every
-					// tile missing (the backend renders the set as one).
+					// a window to bridge while it renders. The render is the
+					// probe's, by this tile, which a pan leaves alone; once a
+					// set, as a tile still missing after it never comes.
 					select {
 					case cu.do <- func() {
-						if set := tileSet(p); cu.tileWarm[set] && cu.at == at {
+						set := tileSet(p)
+						if cu.tileWarm[set] && !cu.tileRedone[set] && cu.at == at {
 							delete(cu.tileWarm, set)
+							cu.tileRedone[set] = true
 							cu.wantWindow()
+							cu.probeTilesAt(p, true, t)
 						}
 					}:
 					case <-ctx.Done():
 						return
 					}
-					img, err = cu.im.tile(ctx, p, t, false)
+					continue
 				}
 				if err != nil {
 					continue

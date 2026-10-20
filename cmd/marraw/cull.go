@@ -208,6 +208,9 @@ type culler struct {
 	tiles    *tileCache
 	tileWant WantTiles
 	tileWarm map[string]bool
+	// tileRedone are the tile sets rendered again this session, having
+	// lost tiles to the cache's janitor (fetchTiles).
+	tileRedone map[string]bool
 	// win is the sharp window over a zoomed-in edit.
 	win winState
 	// fitEdge is what FitEdge last said.
@@ -362,7 +365,7 @@ type timing struct {
 func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im *images, folder int64, folderPath string, photos []marrawclient.Photo) *culler {
 	cu := &culler{aspects: map[int64]float32{}, ctx: ctx, c: c, api: api, im: im, folder: folder, folderPath: folderPath,
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
-		tiles: newTileCache(48), tileWarm: map[string]bool{},
+		tiles: newTileCache(48), tileWarm: map[string]bool{}, tileRedone: map[string]bool{},
 		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), editThumbSlots: make(chan struct{}, 2), cursor: -1,
 		libView: defaultView("", defaultGap), masks: maskState{sel: -1, brush: defaultBrush, hover: -1, tintOf: -1}, heal: newHealState()}
 	cu.setAll(photos)
