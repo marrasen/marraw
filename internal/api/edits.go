@@ -169,12 +169,15 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 const draftEdgeMax = 4096
 
 // PreviewDraft renders a draft of the (unsaved) edit state at any long
-// edge up to draftEdgeMax, entirely in memory and never cached: the frames
+// edge up to draftEdgeMax (0 is 2048), entirely in memory and never cached: the frames
 // of a slider drag, sized to what the photo covers on screen. Unlike
 // PreviewEdit, a draft of 2048 or more is still a fast draft, not the
 // exact, cached 2048. The JPEG rides the WebSocket as a binary Blob.
 func (e *Edits) PreviewDraft(ctx context.Context, photoID int64, params edit.Params, longEdge int) (*aprot.Blob, error) {
 	params.Normalize()
+	if longEdge <= 0 {
+		longEdge = previewLongEdge // as PreviewEdit reads 0
+	}
 	return e.previewInMemory(ctx, photoID, params, min(max(longEdge, 64), draftEdgeMax))
 }
 
@@ -270,6 +273,9 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 	if !params.IsNeutral() {
 		ep = &params
 	}
+	// The editor settles on this state: a full-resolution warm-up of
+	// another one is called off, and it is the decode to keep.
+	e.deps.Cache.WantFull(photo, ep)
 
 	rgba, wbComp, err := e.previewDecode(ctx, photoID, photo, ep)
 	if err != nil {
@@ -1397,6 +1403,30 @@ func editPatch(photoID int64, hash string, params *edit.Params) PhotoPatch {
 	return PhotoPatch{ID: photoID, EditHash: &hash, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
 }
 
+// settleWait bounds how long the post-save warm of a photo open in the
+// editor waits for the editor's 2048 settle of the same state.
+const settleWait = 10 * time.Second
+
+// waitForFile waits until path exists, ctx ends or limit passes.
+func waitForFile(ctx context.Context, path string, limit time.Duration) {
+	deadline := time.NewTimer(limit)
+	defer deadline.Stop()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline.C:
+			return
+		case <-tick.C:
+		}
+	}
+}
+
 // warmSlot holds the cancel func of one in-flight post-save warm so a
 // superseding warm can be matched by pointer identity (func values are not
 // comparable).
@@ -1423,6 +1453,12 @@ func (d *Deps) warmEdit(p store.Photo, hash string) {
 	d.warmCancels[p.ID] = slot
 	d.warmMu.Unlock()
 	go func() {
+		if d.Cache.HeldInEditor(p) {
+			// The editor's settle is writing this state's 2048: the thumbs
+			// come from it in ~30 ms, where rendering them now would run a
+			// RAW decode beside the settle and slow it and the 1:1 render.
+			waitForFile(ctx, d.Cache.PathFor(p.CacheKey, "2048", hash), settleWait)
+		}
 		d.Cache.Ensure(ctx, p, "512", hash, decode.PriorityPrefetch)
 		cancel()
 		d.warmMu.Lock()

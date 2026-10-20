@@ -40,12 +40,16 @@ memory (`internal/pyramid/fulldecode.go`), keyed by every LibRaw input. An edit
 that leaves the LibRaw inputs alone — crop, lens, masks, healing, every
 look-stage slider — renders its tiles from it without a second demosaic: 1.4 s
 instead of 3.8 s on a 42 MP ARW. The pixels are the ones a fresh decode gives.
-The editor holds `Edits.OpenInEditor` open while it shows a photo. That marks
-the one photo whose 1:1 renders keep their decode, and decodes it at once as
-the editor will start from it, so even the first edit starts after the decode.
-1:1 renders of any other photo (the pre-render pass, neighbour prefetch,
+The editor holds `Edits.OpenInEditor` open while it shows a photo, which also
+decodes the photo at once as the editor will start from it, so even the first
+edit starts after the decode. One rule decides what is kept: the decode of the
+held photo that the editor asked for last, through a 1:1 render, a 2048 settle
+or that warm-up. A warm-up of a state the editor has left is called off. 1:1
+renders of any other photo (the pre-render pass, neighbour prefetch,
 share-link guests) and of the base look never replace the kept decode. It goes
-two idle minutes after the editor leaves the photo.
+two idle minutes after the editor leaves the photo. While a photo is held, the
+post-save thumbnail render waits for the editor's 2048 settle and derives from
+it, instead of running a RAW decode beside it.
 
 Slider drags render through `Edits.PreviewDraft`, always in memory, at the size
 the photo covers on screen (up to 4096 px). `PreviewEdit` treats 2048 and up as

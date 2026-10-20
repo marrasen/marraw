@@ -53,9 +53,9 @@ func ApplyHeal(img *image.RGBA, e *edit.Params, ai AIMapSet, fills FillSet) {
 			continue
 		}
 		// Skip kinds and modes this build doesn't know — the newMaskEvaluator
-		// precedent. A sidecar from a newer version renders here without a
-		// Normalize pass (editsForHash parses stored JSON as-is), so an
-		// unknown future spot must be ignored, not misrendered as a circle.
+		// precedent. Normalize drops them already on the cache render path
+		// (editsForHash), but not every caller normalizes, so an unknown
+		// future spot must be ignored here too, not misrendered as a circle.
 		switch s.Kind {
 		case "":
 			applyHealSpot(img, w, h, &f, long, s)
