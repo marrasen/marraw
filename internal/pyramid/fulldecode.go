@@ -28,11 +28,13 @@ const fullDecodeIdle = 2 * time.Minute
 // gives: the key is every input LibRaw reads.
 //
 // One rule decides what is kept: the decode the editor asked for last. The
-// editor holds its photo open (HoldEditor); its 1:1 renders, its settles
-// (WantFull) and its warm-up each say which decode it is on now. A decode
-// of anything else — a state the user has left, another photo, the base
-// look — is never kept, and a warm-up of a state the editor has left is
-// called off.
+// editor holds its photo open (HoldEditor); its warm-up (WarmFull) and each
+// settle or save of a state (WantFull) say which decode it is on now. 1:1 renders
+// do not ask — a share-link guest or the pre-render pass renders the photo
+// too — but a render of the state the editor is on keeps its decode. A
+// decode of anything else — a state the user has left, another photo, the
+// base look — is never kept, and a warm-up of a state the editor has left
+// is called off.
 type fullDecode struct {
 	cacheKey string
 	key      string      // fullDecodeKey
@@ -47,6 +49,7 @@ type fullEditor struct {
 	holds int
 	want  string // fullDecodeKey of the decode it asked for last; "" none yet
 }
+
 
 // fullFlight is a decode under way that others wait for.
 type fullFlight struct {
@@ -102,6 +105,9 @@ func (c *Cache) HoldEditor(photo store.Photo) (release func()) {
 		c.fullEditors[photo.CacheKey] = ed
 	}
 	ed.holds++
+	// A new session starts from what it opens the photo in: what an earlier
+	// one, still letting go, asked for last says nothing about it.
+	ed.want = ""
 	released := false
 	return func() {
 		c.fullMu.Lock()
@@ -129,29 +135,29 @@ func (c *Cache) HeldInEditor(photo store.Photo) bool {
 }
 
 // WantFull records that the editor, on a held photo, is now on edits (its
-// settle renders them), so a warm-up of another state is called off and a
-// decode of another state finishing later is not kept.
+// settle or save of them), so a warm-up of another state is called off and
+// a decode of another state finishing later is not kept. edits is an edit,
+// the neutral one included: the base look's decode is never one to keep.
 func (c *Cache) WantFull(photo store.Photo, edits *edit.Params) {
 	if edits == nil {
-		return
+		edits = &edit.Params{}
 	}
+	key := fullDecodeKey(edits)
 	c.fullMu.Lock()
 	defer c.fullMu.Unlock()
-	c.wantLocked(photo.CacheKey, fullDecodeKey(edits))
+	c.wantLocked(photo.CacheKey, key)
 }
 
 // wantLocked makes key what the editor on cacheKey is on, if it is held.
-// It reports whether the photo is held.
-func (c *Cache) wantLocked(cacheKey, key string) bool {
+func (c *Cache) wantLocked(cacheKey, key string) {
 	ed := c.fullEditors[cacheKey]
 	if ed == nil {
-		return false
+		return
 	}
 	if ed.want != key {
 		ed.want = key
 		c.callOffWarmsLocked(cacheKey, key)
 	}
-	return true
 }
 
 // callOffWarmsLocked calls off the warm-ups of cacheKey that decode
@@ -265,20 +271,16 @@ const (
 // decode and the decodes under way: the kept one when it is the one; else
 // the one under way, waited for rather than run twice — if that one is
 // called off this one decodes itself, and if it fails this one fails the
-// same; else a decode of its own. ask says the editor asks for it now (a
-// render of the held photo); a warm-up only decodes what the editor is on.
+// same; else a decode of its own, kept when it is what the editor is on.
 // shared reports pixels others hold too (kept, or handed to waiters): copy
 // them before changing any. kept reports a decode the cache keeps.
-func (c *Cache) sharedFullDecode(ctx context.Context, proc *libraw.Processor, photo store.Photo, edits *edit.Params, open func() error, ask bool) (f *fullDecode, shared, kept bool, how string, err error) {
+func (c *Cache) sharedFullDecode(ctx context.Context, proc *libraw.Processor, photo store.Photo, edits *edit.Params, open func() error) (f *fullDecode, shared, kept bool, how string, err error) {
 	key := fullDecodeKey(edits)
 	flight := photo.CacheKey + "|" + key
 	how = fullKept
 	var mine *fullFlight
 	for {
 		c.fullMu.Lock()
-		if ask {
-			c.wantLocked(photo.CacheKey, key)
-		}
 		if e := c.fullEntry; e != nil && e.cacheKey == photo.CacheKey && e.key == key {
 			e.used = time.Now()
 			c.fullMu.Unlock()
@@ -331,13 +333,9 @@ func canceled(err error) bool {
 // WB compensation it was decoded under. shared reports pixels others hold
 // too: the caller copies them before changing any. kept reports a decode
 // the cache keeps, which a render called off after it does not lose. how
-// says where the decode came from (fullDecoded, fullKept, fullWaited). A
-// render of a photo held open in the editor asks for its decode (see
-// fullDecode); a render of the base look or of any other photo still uses
-// the kept decode, or one under way, when it is the one.
+// says where the decode came from (fullDecoded, fullKept, fullWaited).
 func (c *Cache) fullDecodeFor(ctx context.Context, proc *libraw.Processor, photo store.Photo, edits *edit.Params, open func() error) (rgba *image.RGBA, wbCompEV float64, shared, kept bool, how string, err error) {
-	ask := edits != nil && c.HeldInEditor(photo)
-	f, shared, kept, how, err := c.sharedFullDecode(ctx, proc, photo, edits, open, ask)
+	f, shared, kept, how, err := c.sharedFullDecode(ctx, proc, photo, edits, open)
 	if err != nil {
 		return nil, 0, false, false, how, err
 	}
@@ -386,7 +384,7 @@ func (c *Cache) WarmFull(ctx context.Context, photo store.Photo, edits *edit.Par
 	return c.pool.Do(ctx, photo.CacheKey+"|warmfull|"+key, prio, func(jctx context.Context, proc *libraw.Processor) error {
 		_, _, _, _, err := c.sharedFullDecode(jctx, proc, photo, edits, func() error {
 			return decode.OpenForDecode(jctx, c.IOGate, proc, photo.Path(), prio)
-		}, false)
+		})
 		return err
 	})
 }

@@ -129,6 +129,10 @@ type Deps struct {
 	// on the pool — the context.Background() no-watcher footgun.
 	warmMu      sync.Mutex
 	warmCancels map[int64]*warmSlot
+	// settles are the editor's 2048 settles under way, by CacheKey|hash,
+	// each closed when it ends; guarded by warmMu. The post-save warm of a
+	// photo open in the editor waits for one rather than decode beside it.
+	settles map[string]chan struct{}
 }
 
 // ingestState serialises watcher-driven passes for one folder. A pass already
