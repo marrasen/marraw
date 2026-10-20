@@ -102,6 +102,13 @@ type Cache struct {
 	// sequential per-device reads (see internal/diskio); nil is valid and
 	// keeps every open direct.
 	IOGate *diskio.Gate
+
+	// fullMu guards the kept full-resolution decode and the decodes of it
+	// under way (see fulldecode.go).
+	fullMu      sync.Mutex
+	fullEntry   *fullDecode
+	fullFlights map[string]chan struct{}
+	fullDecodes atomic.Int64 // full-resolution decodes run, for tests
 }
 
 func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
@@ -114,7 +121,10 @@ func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
 }
 
 // Close joins the fast pool's workers. The main pool is owned by the caller.
-func (c *Cache) Close() { c.fastPool.Close() }
+func (c *Cache) Close() {
+	c.fastPool.Close()
+	c.dropFull()
+}
 
 func (c *Cache) Dir() string { return *c.dir.Load() }
 
@@ -468,17 +478,27 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 
 	// RAW route reads ~the whole file: stage it through the per-device gate
 	// for background/prefetch work. A thumb miss at visible priority keeps
-	// the already-open handle (direct path, unchanged behavior).
-	if !opened || decode.ShouldBuffer(c.IOGate, prio) {
-		if err := decode.OpenForDecode(ctx, c.IOGate, proc, photo.Path(), prio); err != nil {
+	// the already-open handle (direct path, unchanged behavior). A full
+	// render opens only when it decodes: the kept decode may serve it.
+	readied := false
+	ready := func() error {
+		if readied {
+			return nil
+		}
+		readied = true
+		if opened && !decode.ShouldBuffer(c.IOGate, prio) {
+			return nil
+		}
+		return decode.OpenForDecode(ctx, c.IOGate, proc, photo.Path(), prio)
+	}
+	if level != "full" {
+		if err := ready(); err != nil {
 			return err
 		}
 	}
 
 	// RAW route: a half-size decode covers every fixed level; only "full"
-	// needs the full-resolution pipeline. Interactive full renders use PPG —
-	// roughly half AHD's cost, visually equivalent at loupe zoom; export
-	// keeps AHD.
+	// needs the full-resolution pipeline.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -490,13 +510,6 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		log.Printf("pyramid: RAW render %s level=%s hash=%s prio=%d took %s",
 			photo.FileName, level, editHash, prio, time.Since(rawStart).Round(time.Millisecond))
 	}()
-	params := edits.LibrawParams(level != "full")
-	if level == "full" && (edits == nil || edits.Demosaic == "") {
-		params.UserQual = libraw.DemosaicPPG
-	}
-	// Read the as-shot balance BEFORE Process resolves the chosen WB into
-	// pre_mul in place: the compensation below is measured against it.
-	wbCompEV := edits.WBCompEV(proc.CamMul(), proc.CamXYZ())
 	// Fraction budget across the whole render: decode 0–0.70, look/detail
 	// 0.70–0.90, write-out 0.90–1. Throttled here (not per source) so the
 	// parallel tile writers share one clock; the final 1 always goes out.
@@ -520,13 +533,24 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		proc.OnProgress(func(frac float64) { report(0.7 * frac) })
 		defer proc.OnProgress(nil)
 	}
-	img, err := proc.Process(ctx, params)
-	if err != nil {
-		return err
-	}
-	rgba, err := FromLibraw(img)
-	if err != nil {
-		return err
+	var rgba *image.RGBA
+	var wbCompEV float64
+	if level == "full" {
+		rgba, wbCompEV, err = c.decodeFull(ctx, proc, photo, edits, ready, true)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Read the as-shot balance BEFORE Process resolves the chosen WB into
+		// pre_mul in place: the compensation below is measured against it.
+		wbCompEV = edits.WBCompEV(proc.CamMul(), proc.CamXYZ())
+		img, err := proc.Process(ctx, edits.LibrawParams(true))
+		if err != nil {
+			return err
+		}
+		if rgba, err = FromLibraw(img); err != nil {
+			return err
+		}
 	}
 	// The exposure stops LibRaw's exp_shift couldn't bake fold in post-decode,
 	// before any look stage — same slot as RenderPreview's expDeltaEV — and
@@ -546,6 +570,12 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// Measuring an edited render's lift decodes again; that decode's
 	// progress is not this render's.
 	proc.OnProgress(nil)
+	if photo.LookGamma == 0 {
+		// Measuring reads the file, which a kept decode never opened.
+		if err := ready(); err != nil {
+			return err
+		}
+	}
 	gamma, err := c.lookGammaFor(ctx, proc, photo, edits == nil, rgba, nil)
 	if err != nil {
 		return err

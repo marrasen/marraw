@@ -1143,6 +1143,20 @@ func (e *Edits) AutoAdjust(ctx context.Context, photoID int64, params edit.Param
 	return &out, nil
 }
 
+// WarmFull gets a photo's 1:1 render ready for the edits to come: it
+// decodes the photo at full resolution under its saved edit and keeps the
+// decode, which the 1:1 render of any edit that leaves the LibRaw inputs as
+// they are starts from. The editor calls it as it opens a photo, and the
+// first edit's full-resolution tiles then come seconds sooner. It returns
+// once the decode is kept; cancelling the call stops the decode.
+func (e *Edits) WarmFull(ctx context.Context, photoID int64) error {
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return err
+	}
+	return e.deps.Cache.WarmFull(ctx, photo, decode.PriorityPrefetch)
+}
+
 // SetEditParams persists the edit state (neutral params clear it).
 func (e *Edits) SetEditParams(ctx context.Context, photoID int64, params edit.Params) error {
 	if err := e.saveEdit(ctx, photoID, &params); err != nil {

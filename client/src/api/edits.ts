@@ -405,6 +405,19 @@ export function subscribeWBPickFrame(client: ApiClient, photoID: number, base: P
     return client.subscribe<Blob>('Edits.WBPickFrame', [photoID, base], callback, onError, options);
 }
 
+
+export function warmFull(client: ApiClient, photoID: number, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Edits.WarmFull', [photoID], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+warmFull.method = 'Edits.WarmFull' as const;
+
+export function subscribeWarmFull(client: ApiClient, photoID: number, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Edits.WarmFull', [photoID], callback, onError, options);
+}
+
 export function onAIMapsGeneratedEvent(client: ApiClient, handler: PushHandler<AIMapsGeneratedEvent>): () => void {
     return client.onPush<AIMapsGeneratedEvent>('AIMapsGeneratedEvent', handler);
 }
@@ -768,6 +781,21 @@ export function useWBPickFrame(photoID: number, base: Params, options?: UseQuery
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, base], _subscribe: { method: 'Edits.WBPickFrame', params: [photoID, base] } });
+}
+
+/**
+ * Subscribes to `Edits.WarmFull` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useWarmFull(photoID: number, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number) => warmFull(client, photoID, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID], _subscribe: { method: 'Edits.WarmFull', params: [photoID] } });
 }
 
 export function useAIMapsGeneratedEvent(options?: { maxEvents?: number }): UsePushResult<AIMapsGeneratedEvent> {
