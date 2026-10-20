@@ -218,6 +218,20 @@ func (c *Cache) KeptForWindow(photo store.Photo, edits *edit.Params) (src *image
 	return f.rgba, edits.ExpEV - f.baked + f.wbCompEV, f.key == key, true
 }
 
+// EditorWants reports whether the editor holds photo and asked for edits'
+// own decode last (WantFull): the state it settled on or saved. WarmFull
+// of edits then gets it kept, joining a 1:1 render's decode under way.
+func (c *Cache) EditorWants(photo store.Photo, edits *edit.Params) bool {
+	if edits == nil {
+		return false
+	}
+	key := fullDecodeKey(edits)
+	c.fullMu.Lock()
+	defer c.fullMu.Unlock()
+	ed := c.fullEditors[photo.CacheKey]
+	return ed != nil && ed.want == key
+}
+
 // keepFull makes f the kept decode, in place of any other, when it is the
 // one the editor is on — its photo still held, and the decode the editor
 // asked for last — and reports whether it is kept. A closed cache keeps

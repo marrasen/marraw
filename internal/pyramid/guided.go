@@ -196,27 +196,30 @@ func boxBlurF32(p []float32, w, h, radius int) []float32 {
 	}
 	tmp := make([]float32, len(p))
 	out := make([]float32, len(p))
-	n := float32(2*radius + 1)
+	// The running sums are float64: a float32 sum drifts by where it
+	// started, and a window (RenderWindow) starts its rows and columns
+	// elsewhere than the whole frame does.
+	n := float64(2*radius + 1)
 	for y := 0; y < h; y++ {
 		row := p[y*w : (y+1)*w]
 		orow := tmp[y*w : (y+1)*w]
-		var sum float32
+		var sum float64
 		for x := -radius; x <= radius; x++ {
-			sum += row[min(max(x, 0), w-1)]
+			sum += float64(row[min(max(x, 0), w-1)])
 		}
 		for x := 0; x < w; x++ {
-			orow[x] = sum / n
-			sum += row[min(x+radius+1, w-1)] - row[max(x-radius, 0)]
+			orow[x] = float32(sum / n)
+			sum += float64(row[min(x+radius+1, w-1)]) - float64(row[max(x-radius, 0)])
 		}
 	}
 	for x := 0; x < w; x++ {
-		var sum float32
+		var sum float64
 		for y := -radius; y <= radius; y++ {
-			sum += tmp[min(max(y, 0), h-1)*w+x]
+			sum += float64(tmp[min(max(y, 0), h-1)*w+x])
 		}
 		for y := 0; y < h; y++ {
-			out[y*w+x] = sum / n
-			sum += tmp[min(y+radius+1, h-1)*w+x] - tmp[max(y-radius, 0)*w+x]
+			out[y*w+x] = float32(sum / n)
+			sum += float64(tmp[min(y+radius+1, h-1)*w+x]) - float64(tmp[max(y-radius, 0)*w+x])
 		}
 	}
 	return out

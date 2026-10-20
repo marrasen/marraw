@@ -1,6 +1,7 @@
 package pyramid
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"math"
@@ -60,6 +61,17 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 		t.Fatal("no lens profile")
 	}
 	store, key := testStoreWithMap(t, edit.AIClass, "m1", paintedClassMap(300, 200))
+	// A second map, of another size, under the same photo.
+	matte := image.NewGray(image.Rect(0, 0, 480, 320))
+	for i := range matte.Pix {
+		x, y := i%480, i/480
+		if (x-200)*(x-200)+(y-150)*(y-150) < 90*90 {
+			matte.Pix[i] = 255
+		}
+	}
+	if err := store.Save(key, edit.AISubject, "s1", matte); err != nil {
+		t.Fatal(err)
+	}
 
 	look := edit.Params{Contrast: 0.3, ToneShadows: 0.4, ToneHighlights: -0.3, Vibrance: 0.2,
 		SplitShadowAmt: 0.3, SplitShadowHue: 200, Vignette: -0.4,
@@ -110,6 +122,13 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 			e.Masks = append(e.Masks, radial, linear, brush, rangeM)
 		}),
 		"ai": with(detail, func(e *edit.Params) { e.Masks = append(e.Masks, aiM, rangeM) }),
+		"ais": with(detail, func(e *edit.Params) {
+			second := aiM
+			second.Adjust = edit.MaskAdjust{ExpEV: -1.2, Contrast: 0.8}
+			subject := edit.Mask{Type: edit.MaskAI, AIKind: edit.AISubject, MapVer: "s1", Feather: 0.2,
+				Adjust: edit.MaskAdjust{ExpEV: 1.5, Saturation: -0.6}}
+			e.Masks = append(e.Masks, aiM, second, subject)
+		}),
 		"spots": with(detail, func(e *edit.Params) {
 			e.Spots = append(e.Spots,
 				spot(edit.SpotHeal, 0.5, 0.5, 0.1, 0.1, 0.03),
@@ -175,7 +194,7 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 				wins = append(wins, image.Rect(x, y, x+w, y+h))
 			}
 			for _, win := range wins {
-				got := RenderWindow(src, win, 0.72, &e, expEV, lc, ai, nil)
+				got := RenderWindow(t.Context(), src, win, 0.72, &e, expEV, lc, ai, nil)
 				want := copyRGBA(whole, win)
 				if got == nil {
 					t.Fatalf("window %v: nil", win)
@@ -208,7 +227,7 @@ func TestRenderWindowLargeStroke(t *testing.T) {
 			image.Rect(3450, 2250, 3550, 2350), // its middle
 			image.Rect(3800, 2300, 4000, 2500), // its right end
 		} {
-			got := RenderWindow(src, win, 0.72, &e, 0, nil, nil, nil)
+			got := RenderWindow(t.Context(), src, win, 0.72, &e, 0, nil, nil, nil)
 			if _, _, d := windowDiff(got, copyRGBA(whole, win)); d != "" {
 				t.Errorf("radius %v, window %v: %s", r, win, d)
 			}
@@ -222,15 +241,25 @@ func TestRenderWindowBaseLook(t *testing.T) {
 	src := windowTestSource(900, 600)
 	whole := renderWholeForTest(src, 0.72, nil, 0, nil, nil, nil)
 	win := image.Rect(100, 50, 400, 350)
-	got := RenderWindow(src, win, 0.72, nil, 0, nil, nil, nil)
+	got := RenderWindow(t.Context(), src, win, 0.72, nil, 0, nil, nil, nil)
 	if got == nil {
 		t.Fatal("nil window")
 	}
 	if _, _, d := windowDiff(got, copyRGBA(whole, win)); d != "" {
 		t.Error(d)
 	}
-	if RenderWindow(src, image.Rect(900, 0, 1000, 10), 0.72, nil, 0, nil, nil, nil) != nil {
+	if RenderWindow(t.Context(), src, image.Rect(900, 0, 1000, 10), 0.72, nil, 0, nil, nil, nil) != nil {
 		t.Error("a window outside the output rendered")
+	}
+}
+
+// TestRenderWindowCancelled: a cancelled window renders nothing.
+func TestRenderWindowCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	e := &edit.Params{Contrast: 0.3}
+	if RenderWindow(ctx, windowTestSource(64, 64), image.Rect(0, 0, 8, 8), 0.72, e, 0, nil, nil, nil) != nil {
+		t.Error("a cancelled window rendered")
 	}
 }
 
@@ -243,7 +272,7 @@ func TestNotWindowable(t *testing.T) {
 		if Windowable(e) {
 			t.Errorf("%s: windowable", name)
 		}
-		if RenderWindow(windowTestSource(64, 64), image.Rect(0, 0, 8, 8), 0.72, e, 0, nil, nil, nil) != nil {
+		if RenderWindow(t.Context(), windowTestSource(64, 64), image.Rect(0, 0, 8, 8), 0.72, e, 0, nil, nil, nil) != nil {
 			t.Errorf("%s: rendered a window", name)
 		}
 	}

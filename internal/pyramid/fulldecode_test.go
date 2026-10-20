@@ -510,3 +510,38 @@ func TestKeptForWindow(t *testing.T) {
 		t.Error("the base look renders from the kept decode")
 	}
 }
+
+// TestEditorWantsWindow: the state the editor settled on, its decode not
+// kept yet, is one a window waits for; WarmFull then keeps it.
+func TestEditorWantsWindow(t *testing.T) {
+	f := newFullTestCatalog(t)
+	f.open(0)
+	p := f.photo(0)
+	start := &edit.Params{Contrast: 0.1}
+	start.Normalize()
+	if err := f.cache.WarmFull(t.Context(), p, start); err != nil {
+		t.Fatal(err)
+	}
+	warmer := *start
+	warmer.WBMode, warmer.WBKelvin = edit.WBKelvin, 7000
+	warmer.Normalize()
+	if f.cache.EditorWants(p, &warmer) {
+		t.Error("a drag frame's state is wanted")
+	}
+	f.cache.WantFull(p, &warmer)
+	if !f.cache.EditorWants(p, &warmer) {
+		t.Fatal("the settled state is not wanted")
+	}
+	if _, _, _, ok := f.cache.KeptForWindow(p, &warmer); ok {
+		t.Fatal("kept before it was decoded")
+	}
+	if err := f.cache.WarmFull(t.Context(), p, &warmer); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, exact, ok := f.cache.KeptForWindow(p, &warmer); !ok || !exact {
+		t.Errorf("after the wait: ok %v exact %v", ok, exact)
+	}
+	if f.cache.EditorWants(f.photo(1), &warmer) {
+		t.Error("a photo not held is wanted")
+	}
+}
