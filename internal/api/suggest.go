@@ -41,9 +41,9 @@ func (e *Edits) SuggestEdits(ctx context.Context, photoID int64, params edit.Par
 	if err != nil {
 		return nil, err
 	}
-	gamma := photo.LookGamma
-	if gamma == 0 {
-		gamma = pyramid.FallbackLookGamma
+	gamma, err := e.lookGamma(ctx, photo)
+	if err != nil {
+		return nil, err
 	}
 	// Cached-map loads only — suggestions never trigger an inference.
 	var subject *pyramid.AIMap

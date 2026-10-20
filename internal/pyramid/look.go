@@ -7,10 +7,11 @@ import (
 
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/libraw"
+	"github.com/marrasen/marraw/internal/store"
 )
 
-// FallbackLookGamma is used when a photo has no calibrated gamma yet
-// (e.g. an edit preview requested before any base render finished).
+// FallbackLookGamma is the tone lift of a photo whose lift cannot be
+// measured, as one with no embedded JPEG to measure against.
 const FallbackLookGamma = 0.72
 
 // ComputeLookGamma calibrates the per-photo tone lift: the gamma that maps
@@ -26,26 +27,55 @@ func ComputeLookGamma(rawMean, cameraMean float64) float64 {
 	return math.Min(1.1, math.Max(0.5, g))
 }
 
+// LookGammaOf measures the photo's tone lift on proc, opened and
+// unpacked, as a base render measures it: the base look, decoded at half
+// size with the lens corrected, against the camera's embedded JPEG. base,
+// where set, is that decode made already, as MeasureAutoBrightEV makes it.
+// Where there is no usable embedded JPEG it returns FallbackLookGamma
+// without decoding.
+func LookGammaOf(ctx context.Context, proc *libraw.Processor, photo store.Photo, lenses *LensProfiles, base *libraw.Image) (float64, error) {
+	camera := cameraRGBA(proc)
+	if camera == nil {
+		return FallbackLookGamma, nil
+	}
+	var none *edit.Params
+	if base == nil {
+		var err error
+		if base, err = proc.Process(ctx, none.LibrawParams(true)); err != nil {
+			return 0, err
+		}
+	}
+	rgba, err := FromLibraw(base)
+	if err != nil {
+		return 0, err
+	}
+	b := rgba.Bounds()
+	rgba = ApplyLens(rgba, LensWarp(lenses.For(photo), none, b.Dx(), b.Dy()), none)
+	return ComputeLookGamma(MeanLuma(rgba), MeanLuma(camera)), nil
+}
+
 // MeasureAutoBrightEV measures LibRaw's auto-brighten lift on the opened
 // photo as the equivalent exposure-slider EV. The base look renders with
 // auto-brighten (histogram-normalizing, scene-dependent); any edit switches
 // to a deterministic ExpShift = 2^expEV. Seeding the exposure dial with this
 // EV makes that switch invisible — the mimic compensation shows in the dial
-// instead of silently vanishing on the first adjustment.
-func MeasureAutoBrightEV(ctx context.Context, proc *libraw.Processor) (float64, error) {
+// instead of silently vanishing on the first adjustment. It also returns
+// the auto-brightened decode, which is the base look's own at half size,
+// for LookGammaOf.
+func MeasureAutoBrightEV(ctx context.Context, proc *libraw.Processor) (float64, *libraw.Image, error) {
 	p := libraw.DefaultParams()
 	p.HalfSize = true // no demosaic — only the mean luma matters
 	bright, err := proc.Process(ctx, p)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	mb := meanLumaPacked(bright)
 	p.NoAutoBright = true
 	flat, err := proc.Process(ctx, p)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	return AutoBrightEV(mb, meanLumaPacked(flat)), nil
+	return AutoBrightEV(mb, meanLumaPacked(flat)), bright, nil
 }
 
 // AutoBrightEV converts the display-space mean ratio between the

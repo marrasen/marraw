@@ -295,9 +295,10 @@ func (db *DB) SetDimensions(ctx context.Context, id int64, w, h int) error {
 	return err
 }
 
-// SetLookGamma persists the calibrated tone lift for a photo.
+// SetLookGamma persists the calibrated tone lift for a photo that has none:
+// the first measurement stands, so renders made over it stay right.
 func (db *DB) SetLookGamma(ctx context.Context, id int64, gamma float64) error {
-	_, err := db.ExecContext(ctx, `UPDATE photos SET look_gamma = ? WHERE id = ?`, gamma, id)
+	_, err := db.ExecContext(ctx, `UPDATE photos SET look_gamma = ? WHERE id = ? AND look_gamma = 0`, gamma, id)
 	return err
 }
 
