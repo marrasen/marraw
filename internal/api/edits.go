@@ -108,6 +108,13 @@ func (e *Edits) GetEditParams(ctx context.Context, photoID int64) (*edit.Params,
 	return edit.Parse(p.EditParams.String)
 }
 
+// lookGamma is the photo's tone lift, measured first where it never was,
+// so a preview never renders an edit over a lift its tiles and thumbnails
+// will not have (see pyramid.Cache.LookGamma).
+func (e *Edits) lookGamma(ctx context.Context, photo store.Photo) (float64, error) {
+	return e.deps.Cache.LookGamma(ctx, photo, decode.PriorityInteractive)
+}
+
 // seededParams is the starting edit state of an untouched photo: neutral
 // except for the measured base exposure compensation. Nil when unmeasured
 // or when the measurement was a no-op (then base-look rendering applies).
@@ -163,9 +170,9 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 	if !params.IsNeutral() {
 		ep = &params
 	}
-	gamma := photo.LookGamma
-	if gamma == 0 {
-		gamma = pyramid.FallbackLookGamma
+	gamma, err := e.lookGamma(ctx, photo)
+	if err != nil {
+		return nil, err
 	}
 
 	// Fold path: a deterministic edit whose WB is fold-able decodes ONCE to a
@@ -254,9 +261,9 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	gamma := photo.LookGamma
-	if gamma == 0 {
-		gamma = pyramid.FallbackLookGamma
+	gamma, err := e.lookGamma(ctx, photo)
+	if err != nil {
+		return "", err
 	}
 	// WritePreview never mutates its input, so handing it the shared cached
 	// decode is safe.
@@ -636,9 +643,9 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params, bas
 	// Back out the look to approximately linear light: the sample is a
 	// developed pixel, so the display curve and the look's saturation boost
 	// have to come off before the channels are a ratio of scene light.
-	lookGamma := photo.LookGamma
-	if lookGamma == 0 {
-		lookGamma = pyramid.FallbackLookGamma
+	lookGamma, err := e.lookGamma(ctx, photo)
+	if err != nil {
+		return nil, err
 	}
 	satFactor := math.Max(0.2, 1.15*(1+base.Saturation))
 	rl, gl, bl := samplePatchLinear(frame.rgba, x, y, lookGamma, satFactor)
@@ -780,9 +787,9 @@ func (e *Edits) wbPickFrame(ctx context.Context, photoID int64, photo store.Phot
 	if err != nil {
 		return nil, err
 	}
-	gamma := photo.LookGamma
-	if gamma == 0 {
-		gamma = pyramid.FallbackLookGamma
+	gamma, err := e.lookGamma(ctx, photo)
+	if err != nil {
+		return nil, err
 	}
 	m, minv, hasM := foldMatrix(rgbCam)
 	c := &pickCache{
@@ -912,9 +919,9 @@ func (e *Edits) developedBaseForMask(ctx context.Context, photoID int64, photo s
 	if !params.IsNeutral() {
 		ep = &params
 	}
-	gamma := photo.LookGamma
-	if gamma == 0 {
-		gamma = pyramid.FallbackLookGamma
+	gamma, err := e.lookGamma(ctx, photo)
+	if err != nil {
+		return nil, err
 	}
 	if img, ok, err := e.previewLinear(ctx, photoID, photo, ep, longEdge, gamma); err != nil {
 		return nil, err
@@ -1161,9 +1168,9 @@ func (e *Edits) AutoAdjust(ctx context.Context, photoID int64, params edit.Param
 	if err != nil {
 		return nil, err
 	}
-	gamma := photo.LookGamma
-	if gamma == 0 {
-		gamma = pyramid.FallbackLookGamma
+	gamma, err := e.lookGamma(ctx, photo)
+	if err != nil {
+		return nil, err
 	}
 	// Subject-aware metering: use the AI subject matte when one was already
 	// generated for this photo (auto never triggers an inference itself).

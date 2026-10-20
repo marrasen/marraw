@@ -193,9 +193,14 @@ func renderPhoto(ctx context.Context, photo store.Photo, req Request) (*image.RG
 		return nil, err
 	}
 
+	// A photo whose lift was never measured is measured here, as the app
+	// would measure it before showing the edit: the fallback in its place
+	// exports a different picture from the one on screen.
 	gamma := photo.LookGamma
 	if gamma == 0 {
-		gamma = pyramid.FallbackLookGamma
+		if gamma, err = pyramid.LookGammaOf(ctx, proc, photo, req.Lenses, nil); err != nil {
+			return nil, err
+		}
 	}
 
 	return renderFinal(img, gamma, params, photo, req, wbCompEV)

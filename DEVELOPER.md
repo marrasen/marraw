@@ -38,10 +38,14 @@ neighboring photos' tile sets pre-render while browsing at 1:1.
 ### Adaptive base look
 
 LibRaw output is flat next to camera JPEGs — manufacturer tone curves are
-proprietary and adaptive (e.g. Sony DRO). On the first RAW render of each
-photo, marraw calibrates a per-photo tone lift by matching mean luminance
-against the camera's own embedded JPEG, stores it (`photos.look_gamma`), and
-applies it consistently to previews, edit renders, and exports.
+proprietary and adaptive (e.g. Sony DRO). marraw calibrates a per-photo tone
+lift by matching the mean luminance of its base-look render against the
+camera's own embedded JPEG, stores it (`photos.look_gamma`), and applies it
+consistently to previews, edit renders, and exports. It is measured on the
+first base render, by the background calibrate pass, or before the first
+edited render, whichever comes first. Nothing renders an edit before the lift
+is known: a photo whose edit came from a sidecar may never get a base render,
+and the same edit over a different lift is a different picture.
 
 > **Bump `renderVersion` (Go) and `RENDER_VERSION` (TS) together whenever the
 > render pipeline changes.** Image URLs are served as immutable and will

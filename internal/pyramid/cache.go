@@ -198,7 +198,7 @@ func nested(a, b string) bool {
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r13"
+const renderVersion = "r14"
 
 // RenderVersion is renderVersion for a client in Go, which puts it in its
 // image URLs as the TypeScript client's RENDER_VERSION does.
@@ -587,7 +587,13 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// lens's vignetting already taken out, so comparing an uncorrected
 	// render to it would read the dark corners as a tone difference.
 	rgba = ApplyLens(rgba, LensWarp(c.Lenses.For(photo), edits, rgba.Bounds().Dx(), rgba.Bounds().Dy()), edits)
-	gamma := c.lookGammaFor(proc, photo, edits == nil, rgba)
+	// Measuring an edited render's lift decodes again; that decode's
+	// progress is not this render's.
+	proc.OnProgress(nil)
+	gamma, err := c.lookGammaFor(ctx, proc, photo, edits == nil, rgba, nil)
+	if err != nil {
+		return err
+	}
 	ai := c.AIMaps.SetFor(photo.CacheKey, edits)
 	fills := c.Fills.SetFor(photo.CacheKey, edits)
 	rgba = ApplyGeometry(rgba, edits)
@@ -673,31 +679,106 @@ func (c *Cache) healDimensions(photo store.Photo, renderedW, renderedH int) {
 }
 
 // lookGammaFor returns the photo's calibrated tone lift, computing and
-// persisting it on the first base render (the only moment we hold both the
-// camera's rendering and our own of the same scene). Edited renders reuse
-// the stored value so sliders behave deterministically.
-func (c *Cache) lookGammaFor(proc *libraw.Processor, photo store.Photo, isBase bool, rendered *image.RGBA) float64 {
+// persisting it where it never was. A base render measures it on its own
+// pixels, the camera's rendering and ours of the same scene being both in
+// hand. An edited render first measures it on a base decode of its own: an
+// edit is only the same edit with the same lift under it, and a photo that
+// arrives with an edit already on it, read from a sidecar, may never get a
+// base render at all. Rendered with the fallback instead, it showed
+// brighter in that catalog than in the one that had measured it, and the
+// edit made to look right there came out dark here.
+func (c *Cache) lookGammaFor(ctx context.Context, proc *libraw.Processor, photo store.Photo, isBase bool, rendered *image.RGBA, baseDecode *libraw.Image) (float64, error) {
 	if photo.LookGamma > 0 {
-		return photo.LookGamma
+		return photo.LookGamma, nil
 	}
-	if !isBase {
-		return FallbackLookGamma
-	}
-	thumb, err := proc.EmbeddedThumb()
-	if err != nil {
-		return FallbackLookGamma
-	}
-	cameraRGBA, err := jpegturbo.DecodeRGBA(thumb)
-	if err != nil {
-		return FallbackLookGamma
-	}
-	gamma := ComputeLookGamma(MeanLuma(rendered), MeanLuma(cameraRGBA))
-	if c.db != nil {
-		if err := c.db.SetLookGamma(context.Background(), photo.ID, gamma); err == nil {
-			return gamma
+	var gamma float64
+	if isBase {
+		gamma = FallbackLookGamma
+		if camera := cameraRGBA(proc); camera != nil {
+			gamma = ComputeLookGamma(MeanLuma(rendered), MeanLuma(camera))
+		}
+	} else {
+		var err error
+		if gamma, err = LookGammaOf(ctx, proc, photo, c.Lenses, baseDecode); err != nil {
+			return 0, err
 		}
 	}
-	return gamma
+	c.storeLookGamma(photo, gamma)
+	return gamma, nil
+}
+
+// storeLookGamma persists a photo's measured tone lift, unless another
+// measurement got there first.
+func (c *Cache) storeLookGamma(photo store.Photo, gamma float64) {
+	if c.db == nil {
+		return
+	}
+	if err := c.db.SetLookGamma(context.Background(), photo.ID, gamma); err != nil {
+		log.Printf("pyramid: store look gamma %s: %v", photo.FileName, err)
+	}
+}
+
+// LookGamma returns the photo's tone lift, measuring and persisting it
+// first where it never was, on a decode handle from the pool (see
+// lookGammaFor). It must not be called from inside a pool job. Only a
+// cancelled ctx fails it; a measurement that fails otherwise falls back to
+// FallbackLookGamma, unstored, so the next render tries again.
+func (c *Cache) LookGamma(ctx context.Context, photo store.Photo, prio decode.Priority) (float64, error) {
+	if photo.LookGamma > 0 {
+		return photo.LookGamma, nil
+	}
+	if c.pool == nil {
+		return FallbackLookGamma, nil
+	}
+	err := c.pool.Do(ctx, photo.CacheKey+"|lookgamma", prio, func(jctx context.Context, proc *libraw.Processor) error {
+		if c.db != nil {
+			// Measured since the caller read the row.
+			if p, err := c.db.GetPhoto(jctx, photo.ID); err == nil && p.LookGamma > 0 {
+				return nil
+			}
+		}
+		if err := decode.OpenForDecode(jctx, c.IOGate, proc, photo.Path(), prio); err != nil {
+			return err
+		}
+		_, err := c.MeasureLookGamma(jctx, proc, photo, nil)
+		return err
+	})
+	if ctx.Err() != nil {
+		return 0, ctx.Err()
+	}
+	if err != nil {
+		log.Printf("pyramid: measure look gamma %s: %v", photo.FileName, err)
+		return FallbackLookGamma, nil
+	}
+	// The job that ran may have been another caller's, so read what it stored.
+	if c.db != nil {
+		if p, err := c.db.GetPhoto(ctx, photo.ID); err == nil && p.LookGamma > 0 {
+			return p.LookGamma, nil
+		}
+	}
+	return FallbackLookGamma, nil
+}
+
+// MeasureLookGamma measures and persists the photo's tone lift on proc,
+// opened and unpacked, unless the photo has one already. It runs inside a
+// pool job, such as the calibrate pass's. base is the base look's half-size
+// decode where one is in hand (see LookGammaOf), or nil.
+func (c *Cache) MeasureLookGamma(ctx context.Context, proc *libraw.Processor, photo store.Photo, base *libraw.Image) (float64, error) {
+	return c.lookGammaFor(ctx, proc, photo, false, nil, base)
+}
+
+// cameraRGBA decodes the open file's embedded JPEG preview, as the camera
+// rendered it, or returns nil where there is no usable one.
+func cameraRGBA(proc *libraw.Processor) *image.RGBA {
+	thumb, err := proc.EmbeddedThumb()
+	if err != nil {
+		return nil
+	}
+	camera, err := jpegturbo.DecodeRGBA(thumb)
+	if err != nil {
+		return nil
+	}
+	return camera
 }
 
 // thumbRGBA decodes the open file's embedded JPEG preview and corrects its

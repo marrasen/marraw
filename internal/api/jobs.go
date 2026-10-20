@@ -239,7 +239,7 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 	var work []calibItem
 	for _, p := range photos {
 		subj := needSubject(p)
-		if !p.BaseExpEV.Valid || !p.Sharpness.Valid || !p.PHash.Valid || subj {
+		if !p.BaseExpEV.Valid || p.LookGamma == 0 || !p.Sharpness.Valid || !p.PHash.Valid || subj {
 			work = append(work, calibItem{p: p, subject: subj})
 		}
 	}
@@ -285,9 +285,10 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 						return err
 					}
 					var err error
-					if !p.BaseExpEV.Valid {
-						// First calibration runs MeasureAutoBrightEV — a full
-						// unpack — so stage the whole file through the I/O gate.
+					if !p.BaseExpEV.Valid || p.LookGamma == 0 {
+						// First calibration runs MeasureAutoBrightEV and the
+						// tone lift's measurement — a full unpack — so stage
+						// the whole file through the I/O gate.
 						err = decode.OpenForDecode(jctx, l.deps.IOGate, proc, p.Path(), decode.PriorityBackground)
 					} else {
 						// Steady state only reads the embedded thumb; buffering
@@ -325,17 +326,30 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 						}
 					}
 					thumbD = time.Since(fnStart) - readD
-					if p.BaseExpEV.Valid {
-						return nil // only the thumb-based backfills were missing
-					}
 					mStart := time.Now()
-					ev, err := pyramid.MeasureAutoBrightEV(jctx, proc)
-					measureD = time.Since(mStart)
-					if err != nil {
-						return err
+					// The tone lift is measured here, not only on a base
+					// render: a photo that came with an edit from a sidecar
+					// may never get one, and its edit would render over the
+					// fallback. A first calibration's auto-bright probe
+					// decodes the base look, which the lift measures on.
+					var base *libraw.Image
+					var ev float64
+					if !p.BaseExpEV.Valid {
+						if ev, base, err = pyramid.MeasureAutoBrightEV(jctx, proc); err != nil {
+							return err
+						}
+						if err := l.deps.DB.SetBaseExpEV(context.WithoutCancel(jctx), p.ID, ev); err != nil {
+							return err
+						}
 					}
-					if err := l.deps.DB.SetBaseExpEV(context.WithoutCancel(jctx), p.ID, ev); err != nil {
-						return err
+					if p.LookGamma == 0 {
+						if _, err := l.deps.Cache.MeasureLookGamma(jctx, proc, p, base); err != nil {
+							return err
+						}
+					}
+					measureD = time.Since(mStart)
+					if p.BaseExpEV.Valid {
+						return nil
 					}
 					// First calibration of this photo: seed the configured
 					// default preset (no-op when none matches; SetEditSeed's
