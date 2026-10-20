@@ -49,18 +49,27 @@ func TestLedgerHoldsPatchesInOrder(t *testing.T) {
 		t.Fatalf("patches handed back with a save still out: %v", h)
 	}
 	l.answered(1, 2, "b", true)
-	if h := l.release(1); !slices.Equal(h, []string{"a", "b"}) {
-		t.Errorf("released %v; want [a b] in order", h)
+	var got []string
+	for _, p := range l.release(1) {
+		got = append(got, p.hash)
+	}
+	if !slices.Equal(got, []string{"a", "b"}) {
+		t.Errorf("released %v; want [a b] in order", got)
 	}
 	if h := l.release(1); h != nil {
 		t.Error("held patches were handed back twice")
 	}
 }
 
-// judge mirrors culler.judgeHash's rule on the ledger alone: own, else an
-// outside edit when the hash is not the photo's.
+// judge mirrors culler.judgeHash's rule on the ledger alone, for a patch
+// that comes now: own, else an outside edit when the hash is not the
+// photo's.
 func judge(l *saveLedger, id int64, current, hash string) (outside bool) {
-	return !l.isOwn(id, hash) && hash != current
+	return judgeAt(l, id, current, hash, l.clock())
+}
+
+func judgeAt(l *saveLedger, id int64, current, hash string, came time.Time) (outside bool) {
+	return !l.isOwn(id, hash, came) && hash != current
 }
 
 // TestAnswersBeforePatches: two quick own saves whose answers both reach
@@ -98,9 +107,9 @@ func TestHeldPatchesJudged(t *testing.T) {
 	current := "h2"
 	var outside []string
 	for _, h := range l.release(1) {
-		if judge(&l, 1, current, h) {
-			outside = append(outside, h)
-			current = h
+		if judgeAt(&l, 1, current, h.hash, h.at) {
+			outside = append(outside, h.hash)
+			current = h.hash
 		}
 	}
 	if !slices.Equal(outside, []string{"x"}) {
@@ -126,5 +135,44 @@ func TestOwnHashesExpire(t *testing.T) {
 	}
 	if !judge(&l, 1, "h2", "fresh") {
 		t.Error("a fresh outside hash was not taken for an edit made elsewhere")
+	}
+}
+
+// TestHeldPatchJudgedAsOfArrival: an own patch held while a later save of
+// the photo sits out longer than ownHashTTL is still the panel's own: it is
+// judged as of when it came, not when the last save answered.
+func TestHeldPatchJudgedAsOfArrival(t *testing.T) {
+	now := time.Unix(1000, 0)
+	l := saveLedger{now: func() time.Time { return now }}
+	l.sent(1)
+	l.answered(1, 1, "h1", true)
+	l.sent(1) // save 2, stuck behind a slow save
+	now = now.Add(time.Second)
+	if !l.patch(1, "h1") {
+		t.Fatal("h1's patch not held with save 2 out")
+	}
+	now = now.Add(ownHashTTL + 10*time.Second)
+	l.answered(1, 2, "h2", true)
+	for _, h := range l.release(1) {
+		if judgeAt(&l, 1, "h2", h.hash, h.at) {
+			t.Errorf("own patch %s, held past ownHashTTL, taken for an edit made elsewhere", h.hash)
+		}
+	}
+}
+
+// TestHeldPatchOwnAnswerWhileHeld: a patch that comes before its own save
+// answers — held for exactly that — is the panel's own, the answer coming
+// after it.
+func TestHeldPatchOwnAnswerWhileHeld(t *testing.T) {
+	now := time.Unix(1000, 0)
+	l := saveLedger{now: func() time.Time { return now }}
+	l.sent(1)
+	l.patch(1, "h1")
+	now = now.Add(2 * time.Second)
+	l.answered(1, 1, "h1", true)
+	for _, h := range l.release(1) {
+		if judgeAt(&l, 1, "h1", h.hash, h.at) || judgeAt(&l, 1, "h0", h.hash, h.at) {
+			t.Errorf("own patch %s answered while held taken for an edit made elsewhere", h.hash)
+		}
 	}
 }

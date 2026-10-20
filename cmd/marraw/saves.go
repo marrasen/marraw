@@ -19,10 +19,10 @@ import (
 // the folder's queue, each answer on its own. So a patch is judged against
 // the own saves' hashes, not only the photo's: while own saves of the photo
 // are out, its patches are held, in order, since one may be theirs; once
-// none is out each is judged in turn. A hash an own save answered with in
-// the last ownHashTTL is the panel's own, and nothing to do — its answer
-// set the hash already; any other hash than the photo's is an edit made
-// elsewhere.
+// none is out each is judged in turn, as of when it came. A hash an own
+// save answered with within ownHashTTL before the patch came, or while it
+// was held, is the panel's own, and nothing to do — its answer set the hash
+// already; any other hash than the photo's is an edit made elsewhere.
 
 // saveJob is an edit to save. done, if set, gets the answer on the culler
 // loop.
@@ -43,8 +43,9 @@ type ownSave struct {
 // ownHashTTL is how long after its answer an own save's hash is still taken
 // as the panel's own when its patch comes: long enough for a patch held up
 // in a busy folder queue, short enough that an edit made elsewhere back to
-// an earlier own state is not taken for one for long.
-const ownHashTTL = 10 * time.Second
+// exactly an earlier own state, which is not a likely thing, is not taken
+// for one for long.
+const ownHashTTL = 60 * time.Second
 
 // heldCap bounds the patches held per photo while own saves are out; the
 // oldest go first.
@@ -56,13 +57,20 @@ type ownHash struct {
 	at   time.Time
 }
 
+// heldPatch is a patch's edit hash held while own saves are out, and when
+// it came: it is judged as of then.
+type heldPatch struct {
+	hash string
+	at   time.Time
+}
+
 // saveLedger counts own saves out per photo, which answer is the newest
 // applied, the hashes own saves answered with lately, and the patches held
 // while saves are out. It decides; the culler acts.
 type saveLedger struct {
 	out     map[int64]int
 	applied map[int64]int // highest own save seq answered well
-	held    map[int64][]string
+	held    map[int64][]heldPatch
 	own     map[int64][]ownHash
 	now     func() time.Time // time.Now unless a test sets it
 }
@@ -114,9 +122,9 @@ func (l *saveLedger) patch(id int64, hash string) (held bool) {
 		return false
 	}
 	if l.held == nil {
-		l.held = map[int64][]string{}
+		l.held = map[int64][]heldPatch{}
 	}
-	h := append(l.held[id], hash)
+	h := append(l.held[id], heldPatch{hash: hash, at: l.clock()})
 	if len(h) > heldCap {
 		h = h[len(h)-heldCap:]
 	}
@@ -126,7 +134,7 @@ func (l *saveLedger) patch(id int64, hash string) (held bool) {
 
 // release hands back the patches of id held, in the order they came, once
 // no own save of it is out.
-func (l *saveLedger) release(id int64) []string {
+func (l *saveLedger) release(id int64) []heldPatch {
 	if l.out[id] > 0 {
 		return nil
 	}
@@ -135,22 +143,31 @@ func (l *saveLedger) release(id int64) []string {
 	return h
 }
 
-// isOwn reports whether hash is one an own save of id answered with lately.
-func (l *saveLedger) isOwn(id int64, hash string) bool {
-	for _, o := range l.pruned(id) {
-		if o.hash == hash {
+// isOwn reports whether hash, of a patch of id that came at came, is one
+// an own save of id answered with within ownHashTTL before it came, or
+// since: a patch held is held for the answers that come while it is.
+func (l *saveLedger) isOwn(id int64, hash string, came time.Time) bool {
+	// Not pruned here: patches just released are judged as of when they
+	// came, which may be longer ago than ownHashTTL. answered prunes.
+	for _, o := range l.own[id] {
+		if o.hash == hash && came.Sub(o.at) < ownHashTTL {
 			return true
 		}
 	}
 	return false
 }
 
-// pruned drops id's own hashes older than ownHashTTL and returns the rest.
+// pruned drops id's own hashes no patch can still count as its own and
+// returns the rest: older than ownHashTTL, before the oldest patch held, if
+// one is, or now.
 func (l *saveLedger) pruned(id int64) []ownHash {
-	now := l.clock()
+	cutoff := l.clock()
+	if h := l.held[id]; len(h) > 0 {
+		cutoff = h[0].at
+	}
 	keep := l.own[id][:0]
 	for _, o := range l.own[id] {
-		if now.Sub(o.at) < ownHashTTL {
+		if cutoff.Sub(o.at) < ownHashTTL {
 			keep = append(keep, o)
 		}
 	}
@@ -204,12 +221,18 @@ func (cu *culler) sendOwn(id int64, seq int, params marrawclient.Params, done fu
 			cu.setHashOf(id, hash)
 		}
 		done(hash, err)
-		changed := false
+		shown, listed := false, false
 		for _, held := range d.ledger.release(id) {
-			changed = cu.judgeHash(id, held) || changed
+			s, l := cu.judgeHash(id, held.hash, held.at)
+			shown, listed = shown || s, listed || l
 		}
-		if changed {
+		if shown {
 			cu.showCull()
+		}
+		if shown || listed {
+			// As patched() does for an edit: the shoot's cover and the
+			// filtered view may change.
+			cu.railChanged()
 			cu.refilter()
 		}
 	}})
@@ -372,35 +395,38 @@ func (cu *culler) saveForget(id int64) {
 }
 
 // patchHash takes a patch of photo id's edit hash: held while own saves of
-// the photo are out (it may be theirs), judged at once otherwise. It
-// reports whether the photo showing changed, for the caller to redraw.
-func (cu *culler) patchHash(id int64, hash string) (changed bool) {
-	if cu.dev.ledger.patch(id, hash) {
-		return false
+// the photo are out (it may be theirs), judged at once otherwise. The
+// caller, patched(), redraws and re-filters.
+func (cu *culler) patchHash(id int64, hash string) {
+	l := &cu.dev.ledger
+	if l.patch(id, hash) {
+		return
 	}
-	return cu.judgeHash(id, hash)
+	cu.judgeHash(id, hash, l.clock())
 }
 
-// judgeHash judges a patch of photo id's edit hash with no own save of it
-// out. A hash an own save answered with lately is the panel's own: its
-// answer set the hash already, and a late patch of an earlier save must not
-// undo the later one. Any other hash than the photo's is an edit made
-// elsewhere. It reports whether the photo showing changed.
-func (cu *culler) judgeHash(id int64, hash string) (changed bool) {
-	if cu.dev.ledger.isOwn(id, hash) {
-		return false
+// judgeHash judges a patch of photo id's edit hash, which came at came,
+// with no own save of it out. A hash an own save answered with lately is
+// the panel's own: its answer set the hash already, and a late patch of an
+// earlier save must not undo the later one. Any other hash than the
+// photo's is an edit made elsewhere. It reports whether the photo showing
+// changed (shown), or the folder's list of the photos not showing (listed).
+func (cu *culler) judgeHash(id int64, hash string, came time.Time) (shown, listed bool) {
+	if cu.dev.ledger.isOwn(id, hash, came) {
+		return false, false
 	}
 	if i, ok := cu.index[id]; ok {
 		if hash == cu.photos[i].EditHash {
-			return false
+			return false, false
 		}
 		cu.editedElsewhere(i, hash)
-		return true
+		return true, false
 	}
-	if ai, ok := cu.allIndex[id]; ok {
+	if ai, ok := cu.allIndex[id]; ok && cu.all[ai].EditHash != hash {
 		cu.all[ai].EditHash = hash
+		return false, true
 	}
-	return false
+	return false, false
 }
 
 // editedElsewhere takes the photo showing at i as edited elsewhere, to
