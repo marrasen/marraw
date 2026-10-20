@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { Photo } from '@/api/library';
 import { imgUrl, tileUrl, type Level } from '@/lib/backend';
+import { heldPhotoId } from '@/lib/editorHold';
 
 // When a full-resolution tile set is worth having, and how to get one without
 // stalling the browse. The tile layer itself is in components/TileLayer.
@@ -29,6 +30,10 @@ export function levelForPx(px: number): Level | 'tiles' {
 // `kick` is also the guest-side bound: an unrendered photo behind a share
 // link must not let a visitor start work on the owner's decode pool for
 // anything short of a deliberate deep zoom.
+// KICK_DWELL_MS is how long the user stays on a photo before its missing
+// tile set is rendered.
+const KICK_DWELL_MS = 350;
+
 export function useTilesWarm(photo: Photo | null | undefined, want: boolean, kick: boolean): boolean {
   const [warm, setWarm] = useState(false);
   // Key the probe on the tile URL, not the photo OBJECT: it encodes id +
@@ -37,6 +42,16 @@ export function useTilesWarm(photo: Photo | null | undefined, want: boolean, kic
   // same rendered state — resetting `warm` on that identity change would drop
   // wantTiles false→true for a frame, flashing the tile layer off and on.
   const url0 = photo ? tileUrl(photo, 0, 0) : '';
+  // The photo held open in the editor, under a new edit: the user is on it
+  // and just changed it, so its 1:1 render starts at once, without the
+  // skimming dwell. The previous render's photo is kept in a ref.
+  const last = useRef<{ id: number; hash: string } | null>(null);
+  const editedHere =
+    photo != null && last.current?.id === photo.id && last.current.hash !== photo.editHash && heldPhotoId() === photo.id;
+  const dwellMs = editedHere ? 0 : KICK_DWELL_MS;
+  useEffect(() => {
+    last.current = photo ? { id: photo.id, hash: photo.editHash } : null;
+  });
   useEffect(() => {
     // New render state starts cold before the async probe/kick below.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -63,7 +78,7 @@ export function useTilesWarm(photo: Photo | null | undefined, want: boolean, kic
           } catch {
             // aborted: the user moved on mid-render
           }
-        }, 350);
+        }, dwellMs);
       } catch {
         // aborted: the user moved on
       }
@@ -72,6 +87,8 @@ export function useTilesWarm(photo: Photo | null | undefined, want: boolean, kic
       window.clearTimeout(dwell);
       ac.abort();
     };
+    // dwellMs is read when the URL changes, not a reason to probe again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url0, want, kick]);
   return warm;
 }

@@ -28,6 +28,7 @@ import {
   esWBPickReset,
   useEditSession,
 } from '@/lib/editSession';
+import { setDraftEdge } from '@/lib/previewScheduler';
 import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
 import { displayDims as fullDisplayDims, renderedDims, rotatedDims, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
@@ -999,6 +1000,11 @@ export function CinemaImage({
   useEffect(() => {
     if (haveDims) useUIStore.getState().setLoupeFitScale(fitScale);
   }, [fitScale, haveDims]);
+  // Drag frames are rendered at the size the photo covers at fit, in device
+  // pixels: a fixed 1024 is too soft to judge an edit by on a large screen.
+  useEffect(() => {
+    if (haveDims) setDraftEdge(Math.max(dw, dh) * fitScale * window.devicePixelRatio);
+  }, [dw, dh, fitScale, haveDims]);
 
   // Navigator drag / click pans the viewport to the pointed-at fraction.
   const panTo = (fx: number, fy: number) => {

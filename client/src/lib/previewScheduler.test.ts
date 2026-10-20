@@ -18,13 +18,18 @@ import type { ApiClient } from '@/api/client';
 import type { Params } from '@/api/edit';
 
 const previewEdit = vi.fn();
+const previewDraft = vi.fn();
 
 vi.mock('@/api/edits', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/edits')>()),
   previewEdit: (...args: unknown[]) => previewEdit(...args),
+  previewDraft: (...args: unknown[]) => previewDraft(...args),
 }));
 
 type Render = {
+  // 'settle' went through PreviewEdit (the cached exact 2048), 'draft'
+  // through PreviewDraft (in memory, never a settle).
+  via: 'settle' | 'draft';
   px: number;
   params: Params;
   signal: AbortSignal;
@@ -51,19 +56,23 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(async () => {
   renders = [];
-  previewEdit.mockReset();
-  previewEdit.mockImplementation(
+  const render =
+    (via: Render['via']) =>
     (_client: unknown, _id: number, params: Params, px: number, opts: { signal: AbortSignal }) =>
       new Promise<Blob>((resolve, reject) => {
         renders.push({
+          via,
           px,
           params,
           signal: opts.signal,
           resolve: () => resolve(new Blob(['x'])),
           reject: (e) => reject(e ?? new Error('aborted')),
         });
-      }),
-  );
+      });
+  previewEdit.mockReset();
+  previewEdit.mockImplementation(render('settle'));
+  previewDraft.mockReset();
+  previewDraft.mockImplementation(render('draft'));
   // jsdom has no object URLs.
   URL.createObjectURL = vi.fn(() => 'blob:test');
   URL.revokeObjectURL = vi.fn();
@@ -209,5 +218,55 @@ describe('recovery', () => {
     await tick();
 
     expect(live().some((r) => r.px === DRAFT_PX && r.params.expEV === 0.5)).toBe(true);
+  });
+});
+
+describe('what renders through which call', () => {
+  it('sends drag frames through PreviewDraft and the settle through PreviewEdit', async () => {
+    es.useEditSession.setState({ hoverParams: draftParams({ expEV: 9 }) });
+    es.esHoverEnd(client); // a drag frame and a settle of the draft
+    await tick();
+    expect(renders[0]).toMatchObject({ via: 'draft', px: DRAFT_PX });
+    renders[0].resolve();
+    await tick();
+    expect(renders[1]).toMatchObject({ via: 'settle', px: FULL_PX });
+  });
+
+  it('sizes drag frames to the screen, within 1024 and 2560', async () => {
+    const { setDraftEdge } = await import('@/lib/previewScheduler');
+    setDraftEdge(1800);
+    es.esUpdate(client, { expEV: 0.1 });
+    await tick();
+    expect(renders[0].px).toBe(1792);
+    renders[0].resolve();
+    await tick();
+    setDraftEdge(5000);
+    es.esUpdate(client, { expEV: 0.2 });
+    await tick();
+    expect(renders[1].px).toBe(2560);
+    renders[1].resolve();
+    await tick();
+    setDraftEdge(300);
+    es.esUpdate(client, { expEV: 0.3 });
+    await tick();
+    expect(renders[2].px).toBe(DRAFT_PX);
+  });
+
+  // The server reads a PreviewEdit settle as "the editor is now on this
+  // state": a hovered look must never be one.
+  it('renders a hovered look sharp through PreviewDraft, never as a settle', async () => {
+    const { schedulePreview } = await import('@/lib/previewScheduler');
+    es.useEditSession.setState({ hoverParams: draftParams({ expEV: 4 }) });
+    schedulePreview(client, 'settle'); // a settle owed when the hover began
+    await tick();
+    expect(renders[0]).toMatchObject({ via: 'draft', px: FULL_PX });
+    expect(renders[0].params.expEV).toBe(4);
+    renders[0].resolve();
+    await tick();
+    // It was no settle: the draft's own still renders when asked for.
+    es.useEditSession.setState({ hoverParams: null });
+    schedulePreview(client, 'settle');
+    await tick();
+    expect(renders[1]).toMatchObject({ via: 'settle', px: FULL_PX });
   });
 });

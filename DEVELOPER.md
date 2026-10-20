@@ -54,8 +54,14 @@ state, when one starts, and derives from it instead of running a RAW decode
 beside it.
 
 Slider drags render through `Edits.PreviewDraft`, always in memory, at the size
-the photo covers on screen (up to 4096 px). `PreviewEdit` treats 2048 and up as
-the exact, cached 2048 settle.
+the photo covers on screen (up to 4096 px; the Electron loupe asks for its fit
+size in device pixels, between 1024 and 2560). `PreviewEdit` treats 2048 and up
+as the exact, cached 2048 settle, and the backend reads every settle as "the
+editor is now on this state", so a hovered preset's sharp frame is a
+`PreviewDraft` at 2048, never a settle. The Develop panel holds
+`Edits.OpenInEditor` for its photo after a 350 ms dwell (`client/src/lib/editorHold.ts`),
+and the 1:1 render after an edit of the held photo starts without the skimming
+dwell.
 
 ### Adaptive base look
 
@@ -100,7 +106,7 @@ by the mask's exposure. That pass
 materializes the mask's weight plane and gathers *through* it: weight-normalized
 (`Σw·c / Σw`, so a masked-out subject cannot bleed into the blurred surround)
 and in linear light. That pass runs at a fixed `fxPlaneLongEdge` working
-resolution, so the 1024 draft, the 2048 settle, the 1:1 tiles and the export all
+resolution, so the drag draft, the 2048 settle, the 1:1 tiles and the export all
 compute the identical effect. `ApplyMasks` returns a detail-suppression plane
 that damps `ApplyDetail` where a mask deliberately destroyed detail — otherwise
 clarity re-etches a rim around a sharp subject against a defocused background.
