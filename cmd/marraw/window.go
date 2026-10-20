@@ -41,6 +41,53 @@ type winState struct {
 	again bool
 	gen   int
 	stop  context.CancelFunc
+	// paramsKey and run are the edit img shows, as JSON, and the run of
+	// edits it was asked in (editClock); clock outlives a drop.
+	paramsKey string
+	run       int
+	clock     editClock
+}
+
+// editClock tells drag frames from one-shot changes. A change that is not
+// a drag frame — one after an edit that stayed on screen dragFrame or
+// longer, or into or out of a hovered preset — starts a new run. A window
+// of an earlier edit of the same run shows on over the new edit until
+// that one's comes, so a drag keeps a sharp, slightly late view; one of an
+// earlier run does not, so a one-shot change (a preset, paste, the
+// eyedropper) shows its preview at once rather than the old look over it.
+type editClock struct {
+	run   int
+	key   string
+	since time.Time
+	hover bool
+}
+
+const dragFrame = 400 * time.Millisecond
+
+// noteShown notes the edit the photo shows now.
+func (cu *culler) noteShown() {
+	c := &cu.win.clock
+	key, hover := paramsJSON(cu.shownParams()), cu.dev.hover != nil
+	if key == c.key {
+		return
+	}
+	now := time.Now()
+	if now.Sub(c.since) >= dragFrame || hover || c.hover {
+		c.run++
+	}
+	c.key, c.since, c.hover = key, now, hover
+}
+
+// windowShows reports whether the window held may show over the edit the
+// photo shows now: its own edit, or an earlier one of the same run.
+func (cu *culler) windowShows() bool {
+	w := &cu.win
+	return w.paramsKey == paramsJSON(cu.shownParams()) || w.run == w.clock.run
+}
+
+func paramsJSON(p marrawclient.Params) string {
+	b, _ := json.Marshal(p)
+	return string(b)
 }
 
 // frameKey is the shape of an edit's output: its quarter turns and crop
@@ -100,7 +147,7 @@ func (cu *culler) dropWindow() {
 	if w.stop != nil {
 		w.stop()
 	}
-	*w = winState{gen: w.gen + 1}
+	*w = winState{gen: w.gen + 1, clock: w.clock}
 }
 
 // wantWindow asks for a window of the edit and view showing, after the one
@@ -157,7 +204,7 @@ func (cu *culler) startWindow() {
 	if !cu.windowWanted() {
 		return
 	}
-	id, view, params, key, gen := cu.dev.id, cu.tileWant.View, cu.shownParams(), cu.windowKey(), w.gen
+	id, view, params, key, gen, run := cu.dev.id, cu.tileWant.View, cu.shownParams(), cu.windowKey(), w.gen, w.clock.run
 	full := cu.fullOf(cu.photos[cu.at])
 	ctx, cancel := context.WithCancel(cu.ctx)
 	w.busy, w.key, w.stop, w.again = true, key, cancel, false
@@ -199,6 +246,7 @@ func (cu *culler) startWindow() {
 				w.want = w.want || w.again
 			default:
 				w.img, w.at, w.id, w.frame, w.full = img, view, id, frameOf(params), full
+				w.paramsKey, w.run = paramsJSON(params), run
 				cu.dev.note = fmt.Sprintf("window · %dx%d · %d ms", view.Dx(), view.Dy(), took.Milliseconds())
 			}
 			cu.showCull()

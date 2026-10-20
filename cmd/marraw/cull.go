@@ -803,7 +803,7 @@ func (cu *culler) state() Cull {
 		}
 	}
 	st.WBFrame, st.WBPix = cu.wb.frame, cu.wb.pix
-	if w := &cu.win; w.img != nil && w.id == p.ID && w.frame == photoFrame(p) && w.full == st.Full && cu.windowWanted() {
+	if w := &cu.win; w.img != nil && w.id == p.ID && w.frame == photoFrame(p) && w.full == st.Full && cu.windowShows() && cu.windowWanted() {
 		st.Window, st.WindowAt = w.img, w.at
 	}
 	if img := cu.originalShowing(p.ID); img != nil {
