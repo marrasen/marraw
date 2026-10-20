@@ -134,10 +134,14 @@ func (g *guidedEval) weightRow(y int, wrow []uint16) (int, int) {
 		return 0, 0
 	}
 
-	// Bilinear taps into the coefficient grid walk linearly along the row.
-	fy := (float32(y) - float32(g.s)/2) / float32(g.s)
-	ly0 := int(fy)
-	ty := fy - float32(ly0)
+	// Bilinear taps into the coefficient grid, at (y - s/2) / s blocks: in
+	// integers, then the fraction, so a buffer whose origin sits on the
+	// block grid (a window, RenderWindow) gets the same taps as the whole
+	// frame — float32 coordinates rounded differently by where they start.
+	s2 := 2 * g.s
+	ny := 2*y - g.s
+	ly0 := ny / s2
+	ty := float32(ny-ly0*s2) / float32(s2)
 	if ly0 < 0 {
 		ly0, ty = 0, 0
 	}
@@ -148,9 +152,9 @@ func (g *guidedEval) weightRow(y int, wrow []uint16) (int, int) {
 
 	row := g.img.Pix[y*g.img.Stride:]
 	for x := x0; x < x1; x++ {
-		fx := (float32(x) - float32(g.s)/2) / float32(g.s)
-		lx0 := int(fx)
-		tx := fx - float32(lx0)
+		nx := 2*x - g.s
+		lx0 := nx / s2
+		tx := float32(nx-lx0*s2) / float32(s2)
 		if lx0 < 0 {
 			lx0, tx = 0, 0
 		}

@@ -6,7 +6,6 @@ import (
 	"image"
 	"math"
 	"math/rand/v2"
-	"slices"
 	"testing"
 
 	"github.com/marrasen/marraw/internal/edit"
@@ -169,10 +168,6 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 				e.LensMode = edit.LensOff
 			}
 			ai := store.SetFor(key, &e)
-			// The AI edge refinement sums floats over its own window, so a
-			// weight at a mask edge can land a step off, and sharpening
-			// spreads it: allow a value in a thousand off by up to three.
-			aiCase := slices.ContainsFunc(e.Masks, func(m edit.Mask) bool { return m.Type == edit.MaskAI })
 			const expEV = 0.35
 			whole := renderWholeForTest(src, 0.72, &e, expEV, lc, ai, nil)
 			ow, oh := whole.Bounds().Dx(), whole.Bounds().Dy()
@@ -199,7 +194,7 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 				if got == nil {
 					t.Fatalf("window %v: nil", win)
 				}
-				if n, worst, d := windowDiff(got, want); d != "" && !(aiCase && worst <= 3 && n*1000 <= len(want.Pix)) {
+				if _, _, d := windowDiff(got, want); d != "" {
 					t.Errorf("window %v: %s", win, d)
 				}
 			}
