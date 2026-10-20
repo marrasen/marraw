@@ -92,9 +92,10 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 		Strokes: []edit.Stroke{{Radius: 0.02, Pts: []float64{0.55, 0.25, 0.65, 0.35}}}}
 
 	cases := map[string]edit.Params{
-		"look":   look,
-		"detail": detail,
-		"crop":   with(detail, func(e *edit.Params) { e.CropX, e.CropY, e.CropW, e.CropH = 0.1, 0.15, 0.7, 0.6 }),
+		"look":    look,
+		"sharpen": with(look, func(e *edit.Params) { e.Sharpen = 0.8 }),
+		"detail":  detail,
+		"crop":    with(detail, func(e *edit.Params) { e.CropX, e.CropY, e.CropW, e.CropH = 0.1, 0.15, 0.7, 0.6 }),
 		"angle": with(detail, func(e *edit.Params) {
 			e.CropX, e.CropY, e.CropW, e.CropH, e.CropAngle = 0.1, 0.1, 0.8, 0.8, 4.5
 		}),
@@ -164,6 +165,9 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 				image.Rect(0, 0, 300, 200),                 // corner
 				image.Rect(ow-257, oh-129, ow, oh),         // far corner
 				image.Rect(ow/2-1, oh/2, ow/2+1, oh/2+300), // a sliver
+				image.Rect(ow/3, 100, ow/3+1, 150),         // a pixel wide
+				image.Rect(0, 100, 2, 150),                 // two, at the edge
+				image.Rect(0, 0, 1, 1),                     // one pixel
 			}
 			for range 8 {
 				w, h := 1+rnd.IntN(500), 1+rnd.IntN(400)
@@ -181,6 +185,34 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRenderWindowLargeStroke: a painted heal spot on a large frame, where
+// one pixel of the brush plane its heal fit samples on spans several
+// output pixels.
+func TestRenderWindowLargeStroke(t *testing.T) {
+	if testing.Short() {
+		t.Skip("renders a 32 MP frame")
+	}
+	src := windowTestSource(7000, 4600)
+	for _, r := range []float64{0.0015, 0.002, 0.003} {
+		e := edit.Params{Contrast: 0.2, LensMode: edit.LensOff, Spots: []edit.Spot{{
+			Kind: "stroke", Mode: edit.SpotHeal, CX: 0.5, CY: 0.5, SX: 0.3, SY: 0.4,
+			Strokes: []edit.Stroke{{Radius: r, Pts: []float64{0.45, 0.48, 0.55, 0.52}}},
+		}}}
+		e.Normalize()
+		whole := renderWholeForTest(src, 0.72, &e, 0, nil, nil, nil)
+		for _, win := range []image.Rectangle{
+			image.Rect(3300, 2200, 3600, 2400), // the stroke's left end
+			image.Rect(3450, 2250, 3550, 2350), // its middle
+			image.Rect(3800, 2300, 4000, 2500), // its right end
+		} {
+			got := RenderWindow(src, win, 0.72, &e, 0, nil, nil, nil)
+			if _, _, d := windowDiff(got, copyRGBA(whole, win)); d != "" {
+				t.Errorf("radius %v, window %v: %s", r, win, d)
+			}
+		}
 	}
 }
 

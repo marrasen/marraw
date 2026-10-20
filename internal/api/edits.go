@@ -250,7 +250,9 @@ const windowMaxPixels = 16 << 20
 // uses dehaze or mask effects, which work over the whole frame. Neutral
 // params (the base look) are never kept either.
 func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Params, x, y, w, h int) (*aprot.Blob, error) {
-	if w <= 0 || h <= 0 || w*h > windowMaxPixels {
+	// Each side first: a product of two huge sides wraps around.
+	if w <= 0 || h <= 0 || w > windowMaxPixels || h > windowMaxPixels || w*h > windowMaxPixels ||
+		x < -windowMaxPixels || y < -windowMaxPixels || x > math.MaxInt32 || y > math.MaxInt32 {
 		return nil, fmt.Errorf("preview window: %dx%d is not 1 to %d pixels", w, h, windowMaxPixels)
 	}
 	params.Normalize()
