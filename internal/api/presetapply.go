@@ -180,15 +180,22 @@ func (d *Deps) seedDefaultPreset(ctx context.Context, photoID int64, up UserPres
 	if err != nil {
 		return err
 	}
-	saveMu.Lock() // numbered in write order, as saveEdit does
-	landed, err := d.DB.SetEditSeed(ctx, photoID, string(b), params.Hash(), time.Now().UnixMilli())
-	saved := EditSaved{Hash: params.Hash(), Save: editSaves.Add(1)}
-	saveMu.Unlock()
-	if err != nil || !landed {
+	before, err := d.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return err
+	}
+	landed := false
+	if _, err := d.numberedSave(before.FolderID, func() (bool, error) {
+		var err error
+		landed, err = d.DB.SetEditSeed(ctx, photoID, string(b), params.Hash(), time.Now().UnixMilli())
+		return landed, err
+	}, func(saved EditSaved) PhotoPatch {
+		saved.Hash = params.Hash()
+		return editPatch(photoID, saved, &params)
+	}); err != nil || !landed {
 		return err
 	}
 	if p, err := d.DB.GetPhoto(ctx, photoID); err == nil {
-		d.patchFolderPhotos(p.FolderID, []PhotoPatch{editPatch(photoID, saved, &params)})
 		d.writeSidecarFor(ctx, p)
 		// No warmEdit here (unlike a user edit commit): the calibrate pass is
 		// the sole caller, and a per-seed Prefetch warm would outrank the
