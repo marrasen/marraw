@@ -279,8 +279,9 @@ func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Pa
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Seen at 1:1, so finer than a whole-frame draft.
-	return jpegBlobAt(img, 85)
+	// Seen at 1:1, as the tiles that take its place are: at their quality,
+	// so nothing shifts as they come.
+	return jpegBlobAt(img, 90)
 }
 
 // previewInMemory renders a transient frame of params, already normalized,
