@@ -36,17 +36,25 @@ beforeEach(async () => {
   es.esShownHash(1, 'h1');
 });
 
+// Let the save promises answer.
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
 describe('the committed state', () => {
-  it('records a save of the photo with the hash it was made over', () => {
+  it('records a save of the photo with the hash it was made over', async () => {
     es.esCommit(client);
-    expect(es.useEditSession.getState().committed).toEqual({ photoId: 1, fromHash: 'h1' });
+    expect(es.useEditSession.getState().committed).toMatchObject({ photoId: 1, fromHash: 'h1', seq: 1, out: 1 });
+    await settle();
+    expect(es.useEditSession.getState().committed).toMatchObject({ out: 0, resultHash: 'h2' });
   });
 
-  it('records a save made with several photos selected', () => {
+  it('records a save made with several photos selected', async () => {
     es.useEditSession.setState({ applyIds: [1, 2, 3] });
     es.esCommit(client);
     expect(pasteEditParams).toHaveBeenCalled();
-    expect(es.useEditSession.getState().committed).toEqual({ photoId: 1, fromHash: 'h1' });
+    expect(es.useEditSession.getState().committed).toMatchObject({ photoId: 1, fromHash: 'h1', out: 1 });
+    await settle();
+    const c = es.useEditSession.getState().committed;
+    expect(es.savedHere(c, 1, 'h2')).toBe(true);
   });
 
   it('is forgotten when the session moves to another photo', async () => {
@@ -55,9 +63,36 @@ describe('the committed state', () => {
     expect(es.useEditSession.getState().committed).toBeNull();
   });
 
-  it('is forgotten once its tiles are warm', () => {
+  it('is forgotten once the saved state\'s tiles are warm', async () => {
     es.esCommit(client);
-    es.esCommittedWarm(1);
+    await settle();
+    es.esCommittedWarm(1, 'h1'); // the old state's warmth says nothing
+    expect(es.useEditSession.getState().committed).not.toBeNull();
+    es.esCommittedWarm(1, 'h2');
     expect(es.useEditSession.getState().committed).toBeNull();
+  });
+});
+
+// A burst of saves (holding undo, stepping the history) skips the dwell
+// only for the newest save's result, once no save is out.
+describe('a burst of saves', () => {
+  it('waits for the last save before its result counts', async () => {
+    const answers: Array<(v: { hash: string; save: number }) => void> = [];
+    setEditParams.mockImplementation(() => new Promise((r) => answers.push(r)));
+    es.esCommit(client);
+    es.esCommit(client, { contrast: 0.4 } as Partial<Params>);
+    let c = es.useEditSession.getState().committed;
+    expect(c).toMatchObject({ seq: 2, out: 2 });
+    answers[0]({ hash: 'h2', save: 1 });
+    await settle();
+    c = es.useEditSession.getState().committed;
+    // The first save's result shows, but the newer save is still out.
+    expect(es.savedHere(c, 1, 'h2')).toBe(false);
+    answers[1]({ hash: 'h3', save: 2 });
+    await settle();
+    c = es.useEditSession.getState().committed;
+    expect(es.savedHere(c, 1, 'h2')).toBe(false); // not the newest save's result
+    expect(es.savedHere(c, 1, 'h3')).toBe(true);
+    setEditParams.mockImplementation(async () => ({ hash: 'h2', save: 1 }));
   });
 });

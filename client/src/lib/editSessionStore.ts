@@ -45,6 +45,14 @@ export interface HistoryEntry {
   index: number;
 }
 
+export interface Committed {
+  photoId: number;
+  seq: number;
+  fromHash: string;
+  out: number;
+  resultHash: string | null;
+}
+
 export interface EditSessionState {
   photoId: number | null;
   applyIds: number[]; // commit targets; >1 when multiple photos selected
@@ -85,12 +93,15 @@ export interface EditSessionState {
   // The edit hash the loupe shows for the session's photo, kept current by
   // the loupe (esShownHash): the hash a save is made over.
   shown: { photoId: number; hash: string } | null;
-  // The user's last own save of the session's photo, at any selection size,
-  // and the hash it was made over. Once the photo's hash moves past fromHash
-  // the loupe starts the new state's 1:1 render without the skimming dwell:
-  // the user is on the photo and just changed it. Cleared by a photo switch
-  // and once those tiles are warm.
-  committed: { photoId: number; fromHash: string } | null;
+  // The user's own saves of the session's photo, at any selection size: the
+  // newest one's number (seq) and the hash it was made over, how many are
+  // still out, and the hash the newest answered with (a single-photo save;
+  // null otherwise or until it answers). Once no save is out and the photo
+  // shows the newest save's result, the loupe starts its 1:1 render without
+  // the skimming dwell: the user is on the photo and just changed it. A
+  // burst of saves (holding undo) waits for its last. Cleared by a photo
+  // switch and once that state's tiles are warm.
+  committed: Committed | null;
   cropping: boolean; // crop overlay active: loupe shows the uncropped frame
   // Heal/retouch tool active: pointer-down on the loupe places or grabs a spot
   // (draft.spots) instead of panning.

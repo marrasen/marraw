@@ -56,9 +56,16 @@ import {
   schedulerIdle,
 } from '@/lib/previewScheduler';
 export { esFlushDraft } from '@/lib/previewScheduler';
-import { useEditSession, type AIPickKind, type EditSessionState, type HistorySnapshot, type SpotMode } from '@/lib/editSessionStore';
+import {
+  useEditSession,
+  type AIPickKind,
+  type Committed,
+  type EditSessionState,
+  type HistorySnapshot,
+  type SpotMode,
+} from '@/lib/editSessionStore';
 export { useEditSession } from '@/lib/editSessionStore';
-export type { AIPickKind, EditSessionState, HistorySnapshot, SpotMode } from '@/lib/editSessionStore';
+export type { AIPickKind, Committed, EditSessionState, HistorySnapshot, SpotMode } from '@/lib/editSessionStore';
 // The control catalog (NEUTRAL params, the ControlId union, CONTROL_SPECS,
 // CONTROL_ORDER) lives in lib/controlSpecs — a leaf module shared with the
 // toolbar dial catalog (lib/dials) — and is re-exported here so edit-state
@@ -842,15 +849,50 @@ function pushHistory(photoId: number, params: Params, label: string) {
 // callers can sequence work that must not race the write.
 function persist(client: ApiClient, params: Params, ids: number[]): Promise<void> {
   const s = useEditSession.getState();
-  if (s.photoId != null && ids.includes(s.photoId) && s.shown?.photoId === s.photoId) {
-    setState({ committed: { photoId: s.photoId, fromHash: s.shown.hash } });
+  const photoId = s.photoId;
+  let seq: number | null = null;
+  if (photoId != null && ids.includes(photoId) && s.shown?.photoId === photoId) {
+    const prev = s.committed?.photoId === photoId ? s.committed : null;
+    seq = (prev?.seq ?? 0) + 1;
+    setState({
+      committed: { photoId, seq, fromHash: s.shown.hash, out: (prev?.out ?? 0) + 1, resultHash: null },
+    });
   }
-  const p = ids.length > 1 ? pasteEditParams(client, ids, params) : setEditParams(client, ids[0], params);
-  return p.then(
-    () => undefined,
+  // The save is back: one fewer out, and the newest save's own result.
+  const back = (hash: string | null) => {
+    if (seq == null) return;
+    setState((st) => {
+      const c = st.committed;
+      if (c?.photoId !== photoId) return {};
+      return { committed: { ...c, out: Math.max(0, c.out - 1), resultHash: c.seq === seq ? hash : c.resultHash } };
+    });
+  };
+  if (ids.length > 1) {
+    return pasteEditParams(client, ids, params).then(
+      () => back(null),
+      (err) => {
+        back(null);
+        toast.error(`Save failed: ${(err as Error).message}`);
+      },
+    );
+  }
+  return setEditParams(client, ids[0], params).then(
+    (saved) => back(saved.hash),
     (err) => {
+      back(null);
       toast.error(`Save failed: ${(err as Error).message}`);
     },
+  );
+}
+
+/**
+ * Whether the photo, showing hash, shows the result of the user's newest own
+ * save of it with no save still out: its 1:1 render may skip the skimming
+ * dwell.
+ */
+export function savedHere(c: Committed | null, photoId: number, hash: string): boolean {
+  return (
+    c?.photoId === photoId && c.out === 0 && c.fromHash !== hash && (c.resultHash == null || c.resultHash === hash)
   );
 }
 
@@ -860,9 +902,12 @@ export function esShownHash(photoId: number, hash: string) {
   if (s?.photoId !== photoId || s.hash !== hash) setState({ shown: { photoId, hash } });
 }
 
-/** The tiles of the committed state are warm: no more reason to skip the dwell. */
-export function esCommittedWarm(photoId: number) {
-  if (useEditSession.getState().committed?.photoId === photoId) setState({ committed: null });
+/**
+ * The tiles of photoId under hash are warm. When that is the newest own
+ * save's result, there is no more reason to skip the dwell.
+ */
+export function esCommittedWarm(photoId: number, hash: string) {
+  if (savedHere(useEditSession.getState().committed, photoId, hash)) setState({ committed: null });
 }
 
 // esCommit persists the draft (merged with an optional final patch) to every

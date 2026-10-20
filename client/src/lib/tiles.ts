@@ -30,9 +30,13 @@ export function levelForPx(px: number): Level | 'tiles' {
 // link must not let a visitor start work on the owner's decode pool for
 // anything short of a deliberate deep zoom.
 // KICK_DWELL_MS is how long the user stays on a photo before its missing
-// tile set is rendered. `immediate` skips it, for a caller that knows the
-// user is on the photo: the editor, right after its own save of it.
+// tile set is rendered. `immediate` shortens it to IMMEDIATE_DWELL_MS, for a
+// caller that knows the user is on the photo: the editor, right after its
+// own save of it. Not to zero: a burst of saves (holding undo, stepping the
+// history) still coalesces into one render instead of starting and
+// aborting one per step.
 const KICK_DWELL_MS = 350;
+const IMMEDIATE_DWELL_MS = 120;
 
 export function useTilesWarm(
   photo: Photo | null | undefined,
@@ -40,7 +44,10 @@ export function useTilesWarm(
   kick: boolean,
   immediate = false,
 ): boolean {
-  const [warm, setWarm] = useState(false);
+  // The tile URL the warmth was found for: warm answers for that state
+  // only, so a caller never reads the last state's warmth in the render the
+  // next state's hash arrives in, before the effect below has run.
+  const [warmUrl, setWarmUrl] = useState('');
   // Key the probe on the tile URL, not the photo OBJECT: it encodes id +
   // cacheKey + editHash, the only things that change which tiles exist. A
   // background metadata/rating push hands down a fresh photo object with the
@@ -49,27 +56,24 @@ export function useTilesWarm(
   const url0 = photo ? tileUrl(photo, 0, 0) : '';
   // Read when the kick is set, whenever `want` turns true: not a reason to
   // probe again on its own. A dwell already under way when `immediate`
-  // turns true is cut short (kickNow, below): the save that makes it true
+  // turns true is shortened (shorten, below): the save that makes it true
   // can land after the tiles came to be wanted.
   const immediateRef = useRef(immediate);
-  const kickNow = useRef<(() => void) | null>(null);
+  const shorten = useRef<(() => void) | null>(null);
   useEffect(() => {
     immediateRef.current = immediate;
-    if (immediate) kickNow.current?.();
+    if (immediate) shorten.current?.();
   }, [immediate]);
   useEffect(() => {
-    // New render state starts cold before the async probe/kick below.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWarm(false);
     if (!want || !url0) return;
     const ac = new AbortController();
     let dwell = 0;
     const render = async () => {
-      kickNow.current = null;
+      shorten.current = null;
       window.clearTimeout(dwell);
       try {
         const res = await fetch(url0, { signal: ac.signal });
-        if (res.ok) setWarm(true);
+        if (res.ok) setWarmUrl(url0);
       } catch {
         // aborted: the user moved on mid-render
       }
@@ -78,7 +82,7 @@ export function useTilesWarm(
       try {
         const probe = await fetch(url0 + '&cacheOnly=1', { signal: ac.signal });
         if (probe.ok) {
-          setWarm(true);
+          setWarmUrl(url0);
           return;
         }
         if (!kick) return;
@@ -87,22 +91,28 @@ export function useTilesWarm(
         // step and racing to cancel it (a render that slips past its
         // cancellation checkpoint blocks the pipeline for seconds).
         if (immediateRef.current) {
-          void render();
+          dwell = window.setTimeout(() => void render(), IMMEDIATE_DWELL_MS);
           return;
         }
-        kickNow.current = () => void render();
+        const start = Date.now();
+        shorten.current = () => {
+          shorten.current = null;
+          window.clearTimeout(dwell);
+          const left = Math.max(0, IMMEDIATE_DWELL_MS - (Date.now() - start));
+          dwell = window.setTimeout(() => void render(), left);
+        };
         dwell = window.setTimeout(() => void render(), KICK_DWELL_MS);
       } catch {
         // aborted: the user moved on
       }
     })();
     return () => {
-      kickNow.current = null;
+      shorten.current = null;
       window.clearTimeout(dwell);
       ac.abort();
     };
   }, [url0, want, kick]);
-  return warm;
+  return want && url0 !== '' && warmUrl === url0;
 }
 
 // useTilePrefetch warms the photos adjacent to the focused one so stepping

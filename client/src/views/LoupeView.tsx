@@ -28,6 +28,7 @@ import {
   esWBPickCancel,
   esWBPickDone,
   esWBPickReset,
+  savedHere,
   useEditSession,
 } from '@/lib/editSession';
 import { setDraftEdge } from '@/lib/previewScheduler';
@@ -568,17 +569,15 @@ export function CinemaImage({
   const tileDepth = plan.tileDepth;
   // Warmth is asked about only once tile depth is known, so it follows the
   // plan rather than feeding it.
-  // A state the user's own save of this photo just produced (its hash moved
-  // past the one the save was made over): its 1:1 render starts the moment
-  // tiles are wanted, without the skimming dwell.
+  // The state the user's newest own save of this photo produced, with no
+  // save still out: its 1:1 render starts soon after tiles are wanted,
+  // without the skimming dwell (see savedHere).
   useEffect(() => esShownHash(photo.id, photo.editHash), [photo.id, photo.editHash]);
-  const savedHere = useEditSession(
-    (s) => s.committed?.photoId === photo.id && s.committed.fromHash !== photo.editHash,
-  );
-  const tilesWarm = useTilesWarm(photo, tileDepth, plan.allowDwellKick, savedHere);
+  const justSaved = useEditSession((s) => savedHere(s.committed, photo.id, photo.editHash));
+  const tilesWarm = useTilesWarm(photo, tileDepth, plan.allowDwellKick, justSaved);
   useEffect(() => {
-    if (tilesWarm && savedHere) esCommittedWarm(photo.id);
-  }, [tilesWarm, savedHere, photo.id]);
+    if (tilesWarm) esCommittedWarm(photo.id, photo.editHash);
+  }, [tilesWarm, photo.id, photo.editHash]);
   const wantTiles = tilesEngaged(tileDepth, tilesWarm);
   const src = previewUrl ?? imgUrl(photo, plan.srcLevel);
   // The pyramid level fit displays (never 'tiles' in the fit branch below).
