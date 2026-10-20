@@ -408,7 +408,9 @@ func (cu *culler) ensureFills(download bool) {
 				cu.askFillModel()
 			}
 			if made && d.id == id {
-				// The photo with the fill made.
+				// The photo with the fill made, a window of it too: the
+				// one showing was made without it, under the same params.
+				cu.win.key = ""
 				cu.preview(true)
 			}
 			cu.healChanged()

@@ -28,8 +28,10 @@ type winState struct {
 	// at the wrong scale.
 	frame frameKey
 	// key names the edit and view of the window showing or rendering, so
-	// the same one is not asked for twice.
-	key string
+	// the same one is not asked for twice. full is the photo's size the
+	// view laid it out in when asked: the window shows only in that one.
+	key  string
+	full image.Point
 	// busy says a window is rendering, and want that another is wanted
 	// after it: the newest edit and view win. gen counts the windows let
 	// go: an answer from before one is dropped.
@@ -82,8 +84,11 @@ func (cu *culler) windowWanted() bool {
 	if !d.open || !cu.culling || cu.crop.on || w.Index != cu.at || d.id != cu.photos[cu.at].ID {
 		return false
 	}
-	v := w.View
-	return !v.Empty() && v.Dx()*v.Dy() <= windowMaxPixels && frameOf(cu.shownParams()) == photoFrame(cu.photos[cu.at])
+	v, p := w.View, cu.photos[cu.at]
+	// The view's size of the photo is the edit's real one only once the
+	// shape it learned agrees with the saved edit (fullOf).
+	return !v.Empty() && v.Dx()*v.Dy() <= windowMaxPixels &&
+		frameOf(cu.shownParams()) == photoFrame(p) && cu.fullOf(p) == size(p)
 }
 
 // dropWindow lets the window go, and the one rendering.
@@ -109,7 +114,9 @@ func (cu *culler) wantWindow() {
 		return
 	}
 	if cu.windowKey() == w.key {
-		return // showing or rendering already
+		// Showing or rendering already: back to it, nothing else is.
+		w.want = false
+		return
 	}
 	w.want = true
 	if !w.busy {
@@ -143,6 +150,7 @@ func (cu *culler) startWindow() {
 		return
 	}
 	id, view, params, key, gen := cu.dev.id, cu.tileWant.View, cu.shownParams(), cu.windowKey(), w.gen
+	full := cu.fullOf(cu.photos[cu.at])
 	ctx, cancel := context.WithCancel(cu.ctx)
 	w.busy, w.key, w.stop = true, key, cancel
 	go func() {
@@ -180,7 +188,7 @@ func (cu *culler) startWindow() {
 				// a null answer is cheap, so the same one may be asked again.
 				w.img, w.key = nil, ""
 			default:
-				w.img, w.at, w.id, w.frame = img, view, id, frameOf(params)
+				w.img, w.at, w.id, w.frame, w.full = img, view, id, frameOf(params), full
 				cu.dev.note = fmt.Sprintf("window · %dx%d · %d ms", view.Dx(), view.Dy(), took.Milliseconds())
 			}
 			cu.showCull()

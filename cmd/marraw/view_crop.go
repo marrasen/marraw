@@ -151,6 +151,10 @@ func (v *cullView) cropShow(s, prev Cull, u *gunim.UI) {
 		v.z.Animate(1, widget.Settle.Get(th))
 		v.c.Animate(geom.Pt(0.5, 0.5), widget.Settle.Get(th))
 	}
+	if now != was {
+		// The view moved: what it wants of the tiles (and windows) with it.
+		v.askTiles(u)
+	}
 	v.cropIn.Animate(on(now), widget.Quick.Get(th))
 	// A quarter turn: the picture turns on to the frame's new way, and
 	// once the turned frame's pixels come, they take its place where it
