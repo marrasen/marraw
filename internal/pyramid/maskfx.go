@@ -302,7 +302,7 @@ func (d *fxDelta) complete(s *fxSource) {
 	if d == nil {
 		return
 	}
-	fxBands(d.h, func(y0, y1 int) {
+	bands(d.h, func(y0, y1 int) {
 		for j := y0 * d.w; j < y1*d.w; j++ {
 			d.r[j] += int32(s.r[j])
 			d.g[j] += int32(s.g[j])
@@ -407,7 +407,7 @@ func newFXSource(img *image.RGBA, plane []uint8, ww, wh int) *fxSource {
 	// straight row walk.
 	oneToOne := ww == w && wh == h
 
-	fxBands(wh, func(y0, y1 int) {
+	bands(wh, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			if oneToOne {
 				row := img.Pix[y*img.Stride : y*img.Stride+w*4]
@@ -465,7 +465,7 @@ func newFXSource(img *image.RGBA, plane []uint8, ww, wh int) *fxSource {
 	// much its neighbours weigh it — which is precisely the silhouette
 	// contamination it is there to suppress.
 	er := boxBlurPlane(cov, ww, wh, fxErodeRadius, 1)
-	fxBands(wh, func(y0, y1 int) {
+	bands(wh, func(y0, y1 int) {
 		for j := y0 * ww; j < y1*ww; j++ {
 			if s.a[j] == 0 {
 				continue
@@ -484,28 +484,10 @@ func newFXSource(img *image.RGBA, plane []uint8, ww, wh int) *fxSource {
 	return s
 }
 
-// fxBands runs fn over disjoint horizontal bands of rows concurrently — the
-// ApplyLens banding pattern. Every FX stage writes only the rows it was handed
-// and reads an immutable snapshot, so no stage needs any other synchronization.
-func fxBands(h int, fn func(y0, y1 int)) {
-	const band = 64
-	if h <= band {
-		fn(0, h)
-		return
-	}
-	var g errgroup.Group
-	g.SetLimit(runtime.NumCPU())
-	for y0 := 0; y0 < h; y0 += band {
-		y1 := min(y0+band, h)
-		g.Go(func() error { fn(y0, y1); return nil })
-	}
-	_ = g.Wait()
-}
-
 // resolve divides the premultiplied planes through by the accumulated weight,
 // leaving plain linear light in r/g/b and the coverage in a.
 func (s *fxSource) resolve() {
-	fxBands(s.h, func(y0, y1 int) {
+	bands(s.h, func(y0, y1 int) {
 		for j := y0 * s.w; j < y1*s.w; j++ {
 			a := int(s.a[j])
 			if a == 65535 {
@@ -804,7 +786,7 @@ func fxHighlights(s *fxSource) (planes [][]uint16, hw, hh int) {
 	knee := int(fxLin[fxStreakKnee])
 	hw, hh = max(1, (s.w+1)/2), max(1, (s.h+1)/2)
 	hi := [][]uint16{make([]uint16, hw*hh), make([]uint16, hw*hh), make([]uint16, hw*hh)}
-	fxBands(hh, func(y0, y1 int) {
+	bands(hh, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			for x := range hw {
 				var ar, ag, ab, n int
@@ -839,7 +821,7 @@ func fxAddLight(s *fxSource, hi [][]uint16, hw, hh int, gain float64) {
 	if gainQ <= 0 {
 		return
 	}
-	fxBands(s.h, func(y0, y1 int) {
+	bands(s.h, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			for x := range s.w {
 				j := y*s.w + x
@@ -872,7 +854,7 @@ func fxPrism(s *fxSource, cx, cy, amount float64) {
 	kMax := amount * fxPrismScale
 	or := make([]uint16, w*h)
 	ob := make([]uint16, w*h)
-	fxBands(h, func(y0, y1 int) {
+	bands(h, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			// This is a GATHER, so the signs are inverted against the effect:
 			// to throw red OUTWARD the red channel must sample INWARD.
@@ -967,7 +949,7 @@ func fxComposite(img *image.RGBA, plane []uint8, s *fxSource, delta *fxDelta) {
 	sx := float64(s.w) / float64(w)
 	sy := float64(s.h) / float64(h)
 
-	fxBands(h, func(y0, y1 int) {
+	bands(h, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			row := img.Pix[y*img.Stride : y*img.Stride+w*4]
 			prow := plane[y*w : (y+1)*w]

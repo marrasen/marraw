@@ -45,6 +45,13 @@ import (
 // the live image, so an earlier heavy blur degrades a later AI mask's edge
 // snapping — rare enough in practice to document rather than work around.
 func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) []uint8 {
+	return applyMasksIn(img, wholeRegion(img), e, ai)
+}
+
+// applyMasksIn is ApplyMasks for a buffer that is the part rg of the
+// output. RenderWindow never hands it a mask with spatial effects: those
+// gather over the whole frame.
+func applyMasksIn(img *image.RGBA, rg region, e *edit.Params, ai AIMapSet) []uint8 {
 	if !e.HasMasks() {
 		return nil
 	}
@@ -53,7 +60,7 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) []uint8 {
 	if w == 0 || h == 0 {
 		return nil
 	}
-	f := newMaskFrame(w, h, e)
+	f := newMaskFrameIn(rg, e)
 	// Range masks select by the developed pixel's own value. Masks apply in
 	// order and each mutates img, so a naive range mask would "see" earlier
 	// masks' adjustments. Snapshot the post-Look image once (only when a live
@@ -211,11 +218,23 @@ type maskFrame struct {
 	ox0, oy0       float64 // crop origin in frame pixels
 	fcx, fcy       float64 // frame center (straighten pivot)
 	cos, sin       float64 // rotation by -CropAngle (output → frame)
+	// The buffer's place in the full output (see region): its pixel (0, 0)
+	// is the output's pixel (bx, by), and the output is outW×outH. Zero
+	// offset for a buffer that is the whole output.
+	bx, by     float64
+	outW, outH int
 }
 
 func newMaskFrame(outW, outH int, e *edit.Params) maskFrame {
+	return newMaskFrameIn(region{outW: outW, outH: outH}, e)
+}
+
+// newMaskFrameIn is newMaskFrame for a buffer that is the part rg of the
+// output.
+func newMaskFrameIn(rg region, e *edit.Params) maskFrame {
+	outW, outH := rg.outW, rg.outH
 	fw, fh := float64(outW), float64(outH)
-	var f maskFrame
+	f := maskFrame{bx: float64(rg.off.X), by: float64(rg.off.Y), outW: outW, outH: outH}
 	if e.HasCrop() {
 		fw = float64(outW) / e.CropW
 		fh = float64(outH) / e.CropH
@@ -233,8 +252,8 @@ func newMaskFrame(outW, outH int, e *edit.Params) maskFrame {
 // The map is affine: stepping x by one output pixel steps the frame point by
 // (cos, sin), which the evaluators use to walk rows incrementally.
 func (f *maskFrame) framePoint(x, y float64) (fx, fy float64) {
-	px := f.ox0 + x + 0.5 - f.fcx
-	py := f.oy0 + y + 0.5 - f.fcy
+	px := f.ox0 + (x + f.bx) + 0.5 - f.fcx
+	py := f.oy0 + (y + f.by) + 0.5 - f.fcy
 	return f.fcx + px*f.cos - py*f.sin, f.fcy + px*f.sin + py*f.cos
 }
 
@@ -245,7 +264,7 @@ func (f *maskFrame) outputPoint(fx, fy float64) (x, y float64) {
 	// Transpose of the framePoint rotation.
 	px := dx*f.cos + dy*f.sin
 	py := -dx*f.sin + dy*f.cos
-	return px + f.fcx - f.ox0 - 0.5, py + f.fcy - f.oy0 - 0.5
+	return px + f.fcx - f.ox0 - 0.5 - f.bx, py + f.fcy - f.oy0 - 0.5 - f.by
 }
 
 // maskEvaluator fills one output row with Q8 weights (0..256) and returns the

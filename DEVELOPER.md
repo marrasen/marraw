@@ -79,6 +79,19 @@ set it was found for, so the render the next hash arrives in never reads the
 last one's. Leaving a state or the zoom, or a probe that finds its tiles gone,
 forgets it; a change of `kick` alone does not.
 
+Zoomed in, a draft of the whole frame is too soft. `Edits.PreviewWindow`
+renders just the visible part at full resolution from the kept decode
+(`pyramid.RenderWindow`): a 2560×1440 window of a 42 MP photo in 250–300 ms,
+against 1.4 s for the whole frame. It works backwards from the window through
+every stage (the detail and AI-mask margins, the spots that land in it and
+their sources, crop and straighten, quarter turns, lens) to the part of the
+decode it needs, and the stages take a `region` saying where their buffer sits
+in the frame. The pixels match the 1:1 tiles exactly. It answers null when it cannot help: no decode kept under the
+state's LibRaw inputs (an exposure change is folded in, as the drafts fold it),
+or dehaze and mask effects, which work over the whole frame. For the state the
+editor last settled on or saved it waits for that decode instead, so a window
+comes right after a white balance change too, well before the tiles.
+
 ### Adaptive base look
 
 LibRaw output is flat next to camera JPEGs — manufacturer tone curves are

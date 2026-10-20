@@ -28,6 +28,14 @@ import (
 // region from; it is nil when the edit has none or they are unavailable, in
 // which case those masks composite nothing.
 func ApplyHeal(img *image.RGBA, e *edit.Params, ai AIMapSet, fills FillSet) {
+	applyHealIn(img, wholeRegion(img), e, ai, fills)
+}
+
+// applyHealIn is ApplyHeal for a buffer that is the part rg of the output.
+// The buffer must hold every pixel a spot that lands in it reads (see
+// healParts): w and h below bound what the spots write and read, while
+// where a source may sit is bounded by the whole output.
+func applyHealIn(img *image.RGBA, rg region, e *edit.Params, ai AIMapSet, fills FillSet) {
 	if !e.HasSpots() && !e.HasMaskFills() {
 		return
 	}
@@ -36,7 +44,7 @@ func ApplyHeal(img *image.RGBA, e *edit.Params, ai AIMapSet, fills FillSet) {
 	if w == 0 || h == 0 {
 		return
 	}
-	f := newMaskFrame(w, h, e)
+	f := newMaskFrameIn(rg, e)
 	long := math.Max(f.frameW, f.frameH)
 	applyMaskFills(img, w, h, &f, e, ai, fills)
 	for i := range e.Spots {
@@ -305,11 +313,11 @@ func applyHealSpot(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edi
 	// the clone reads never fall outside (sampleBilinear would return black).
 	// A frame smaller than the disc is degenerate — the sub-pixel guard above
 	// already rejects the only sizes where that bites.
-	if float64(w) > 2*radPx {
-		scx = clampF(scx, radPx, float64(w)-radPx)
+	if float64(f.outW) > 2*radPx {
+		scx = clampF(scx, radPx-f.bx, float64(f.outW)-radPx-f.bx)
 	}
-	if float64(h) > 2*radPx {
-		scy = clampF(scy, radPx, float64(h)-radPx)
+	if float64(f.outH) > 2*radPx {
+		scy = clampF(scy, radPx-f.by, float64(f.outH)-radPx-f.by)
 	}
 	offX, offY := scx-dcx, scy-dcy
 
@@ -439,9 +447,11 @@ func applyHealStroke(img *image.RGBA, w, h int, f *maskFrame, long float64, s *e
 	offX, offY := scx-dcx, scy-dcy
 	// Keep the source region on the frame (the circle's source-center clamp):
 	// the covered box translated by the offset must fit inside the image. The
-	// box is clipped to the image, so the clamp range is never empty.
-	offX = clampF(offX, -float64(x0), float64(w)-float64(x1))
-	offY = clampF(offY, -float64(y0), float64(h)-float64(y1))
+	// box is clipped to the image, so the clamp range is never empty. The
+	// image is the whole output; in a window the box lies inside the buffer
+	// (healParts), so x0..x1 is the box clipped to the output too.
+	offX = clampF(offX, -f.bx-float64(x0), float64(f.outW)-f.bx-float64(x1))
+	offY = clampF(offY, -f.by-float64(y0), float64(f.outH)-f.by-float64(y1))
 
 	// The boundary band's width tracks the brush size: the circle fits over
 	// [1.0, 1.35]·radius, so use 0.35 of the largest stroke radius.

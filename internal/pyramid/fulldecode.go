@@ -38,6 +38,8 @@ const fullDecodeIdle = 2 * time.Minute
 type fullDecode struct {
 	cacheKey string
 	key      string      // fullDecodeKey
+	noExpKey string      // fullDecodeKeyNoExp
+	baked    float64     // the exposure LibRaw baked in (edit.BakedExpEV)
 	wbCompEV float64     // edit.WBCompEV for this decode's WB
 	rgba     *image.RGBA // never changed once kept
 	used     time.Time   // last render from it; guarded by fullMu
@@ -48,6 +50,9 @@ type fullDecode struct {
 type fullEditor struct {
 	holds int
 	want  string // fullDecodeKey of the decode it asked for last; "" none yet
+	// on is the edit hash of the state it settled on or opened in last:
+	// many states share a decode, and EditorWants is about this one.
+	on string
 }
 
 // fullFlight is a decode under way that others wait for.
@@ -73,6 +78,17 @@ func fullDecodeKey(edits *edit.Params) string {
 		key += "|" + edits.LibrawInputsHash()
 	}
 	return key
+}
+
+// fullDecodeKeyNoExp is fullDecodeKey with the exposure left out: decodes
+// that differ only in exposure share it.
+func fullDecodeKeyNoExp(edits *edit.Params) string {
+	if edits == nil {
+		return fullDecodeKey(nil)
+	}
+	flat := *edits
+	flat.ExpEV, flat.ExpPreserve = 0, 0
+	return fmt.Sprintf("%+v", fullDecodeParams(&flat)) + "|" + edits.LibrawInputsHashNoExp()
 }
 
 // fullDecodeParams are the LibRaw params of a full-resolution render.
@@ -106,7 +122,7 @@ func (c *Cache) HoldEditor(photo store.Photo) (release func()) {
 	ed.holds++
 	// A new session starts from what it opens the photo in: what an earlier
 	// one, still letting go, asked for last says nothing about it.
-	ed.want = ""
+	ed.want, ed.on = "", ""
 	released := false
 	return func() {
 		c.fullMu.Lock()
@@ -145,6 +161,9 @@ func (c *Cache) WantFull(photo store.Photo, edits *edit.Params) {
 	c.fullMu.Lock()
 	defer c.fullMu.Unlock()
 	c.wantLocked(photo.CacheKey, key)
+	if ed := c.fullEditors[photo.CacheKey]; ed != nil {
+		ed.on = edits.Hash()
+	}
 }
 
 // wantLocked makes key what the editor on cacheKey is on, if it is held.
@@ -181,6 +200,44 @@ func (c *Cache) keptFull(cacheKey, key string) *fullDecode {
 	}
 	f.used = time.Now()
 	return f
+}
+
+// KeptForWindow returns photo's kept full-resolution decode when a window
+// of edits can render from it (RenderWindow): the decode of edits' LibRaw
+// inputs, or of the same ones but for exposure. expEV is what the window
+// folds in after the decode — the exposure the decode lacks, and its WB
+// compensation. exact reports the decode is edits' own, so the window
+// matches the 1:1 tiles; otherwise the exposure is folded into 8-bit
+// pixels, as the drafts fold it. The pixels are shared: only read them.
+func (c *Cache) KeptForWindow(photo store.Photo, edits *edit.Params) (src *image.RGBA, expEV float64, exact, ok bool) {
+	if edits == nil {
+		return nil, 0, false, false // the base look is never kept
+	}
+	key, noExpKey := fullDecodeKey(edits), fullDecodeKeyNoExp(edits)
+	c.fullMu.Lock()
+	defer c.fullMu.Unlock()
+	f := c.fullEntry
+	if f == nil || f.cacheKey != photo.CacheKey || f.noExpKey != noExpKey {
+		return nil, 0, false, false
+	}
+	f.used = time.Now()
+	return f.rgba, edits.ExpEV - f.baked + f.wbCompEV, f.key == key, true
+}
+
+// EditorWants reports whether the editor holds photo and is on edits: the
+// state it settled on, saved or opened in last (WantFull, WarmFull), and
+// no other — a drag frame of a look slider shares its decode, but is not
+// one to decode for. WarmFull of edits then gets the decode kept, joining
+// a 1:1 render's decode under way.
+func (c *Cache) EditorWants(photo store.Photo, edits *edit.Params) bool {
+	if edits == nil {
+		return false
+	}
+	key, hash := fullDecodeKey(edits), edits.Hash()
+	c.fullMu.Lock()
+	defer c.fullMu.Unlock()
+	ed := c.fullEditors[photo.CacheKey]
+	return ed != nil && ed.want == key && ed.on == hash
 }
 
 // keepFull makes f the kept decode, in place of any other, when it is the
@@ -256,7 +313,10 @@ func (c *Cache) decodeFull(ctx context.Context, proc *libraw.Processor, photo st
 		return nil, err
 	}
 	c.fullDecodes.Add(1)
-	return &fullDecode{cacheKey: photo.CacheKey, key: fullDecodeKey(edits), wbCompEV: wbCompEV, rgba: rgba}, nil
+	return &fullDecode{
+		cacheKey: photo.CacheKey, key: fullDecodeKey(edits), noExpKey: fullDecodeKeyNoExp(edits),
+		baked: edits.BakedExpEV(), wbCompEV: wbCompEV, rgba: rgba,
+	}, nil
 }
 
 // How a full render got its decode, for the render log.
@@ -364,6 +424,9 @@ func (c *Cache) WarmFull(ctx context.Context, photo store.Photo, edits *edit.Par
 		return nil
 	}
 	ed.want = key
+	if ed.on == "" {
+		ed.on = edits.Hash() // the state it opens in
+	}
 	if c.fullWarms == nil {
 		c.fullWarms = map[string][]*fullWarm{}
 	}
