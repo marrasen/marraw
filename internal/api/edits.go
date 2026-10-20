@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -261,20 +262,20 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 	if err != nil {
 		return "", err
 	}
-	path := e.deps.Cache.PathFor(photo.CacheKey, "2048", hash)
-	if _, err := os.Stat(path); err == nil {
-		return path, nil // already rendered
-	}
-
 	// Neutral params must render the exact base look (auto-brighten), not
 	// the deterministic edit pipeline — they share the "base" cache slot.
 	var ep *edit.Params
 	if !params.IsNeutral() {
 		ep = &params
 	}
-	// The editor settles on this state: a full-resolution warm-up of
-	// another one is called off, and it is the decode to keep.
+	// The editor settles on this state, an undo back to one rendered before
+	// included: a full-resolution warm-up of another one is called off, and
+	// it is the decode to keep.
 	e.deps.Cache.WantFull(photo, ep)
+	path := e.deps.Cache.PathFor(photo.CacheKey, "2048", hash)
+	if _, err := os.Stat(path); err == nil {
+		return path, nil // already rendered
+	}
 
 	rgba, wbComp, err := e.previewDecode(ctx, photoID, photo, ep)
 	if err != nil {
@@ -1197,7 +1198,7 @@ func (e *Edits) OpenInEditor(ctx context.Context, photoID int64) error {
 		start = seeded
 	}
 	start.Normalize()
-	if err := e.deps.Cache.WarmFull(ctx, photo, start); err != nil && ctx.Err() == nil {
+	if err := e.deps.Cache.WarmFull(ctx, photo, start); err != nil && !errors.Is(err, context.Canceled) {
 		// The hold still serves: the first 1:1 render decodes and keeps.
 		log.Printf("edits: warming photo %d at full resolution: %v", photoID, err)
 	}
@@ -1366,16 +1367,18 @@ func editPatch(photoID int64, hash string, params *edit.Params) PhotoPatch {
 
 // settleWait bounds how long the post-save warm of a photo open in the
 // editor waits for the editor's 2048 settle of the same state.
-const settleWait = 10 * time.Second
+const settleWait = 5 * time.Second
 
-// waitForFile waits until path exists, ctx ends or limit passes.
-func waitForFile(ctx context.Context, path string, limit time.Duration) {
-	deadline := time.NewTimer(limit)
+// waitForSettle waits until photo's 2048 of hash is on disk, the editor
+// lets go of the photo (no settle is coming), ctx ends or settleWait passes.
+func (d *Deps) waitForSettle(ctx context.Context, p store.Photo, hash string) {
+	path := d.Cache.PathFor(p.CacheKey, "2048", hash)
+	deadline := time.NewTimer(settleWait)
 	defer deadline.Stop()
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		if _, err := os.Stat(path); err == nil {
+		if _, err := os.Stat(path); err == nil || !d.Cache.HeldInEditor(p) {
 			return
 		}
 		select {
@@ -1418,7 +1421,7 @@ func (d *Deps) warmEdit(p store.Photo, hash string) {
 			// The editor's settle is writing this state's 2048: the thumbs
 			// come from it in ~30 ms, where rendering them now would run a
 			// RAW decode beside the settle and slow it and the 1:1 render.
-			waitForFile(ctx, d.Cache.PathFor(p.CacheKey, "2048", hash), settleWait)
+			d.waitForSettle(ctx, p, hash)
 		}
 		d.Cache.Ensure(ctx, p, "512", hash, decode.PriorityPrefetch)
 		cancel()

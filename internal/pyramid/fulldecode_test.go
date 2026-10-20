@@ -98,9 +98,12 @@ func copyFile(t *testing.T, from, to string) {
 }
 
 // edit saves params as photo i's edit and returns the photo as it is now.
+// It settles on them as the editor does (a no-op unless the photo is held
+// open).
 func (f *fullTestCatalog) edit(i int, params edit.Params) store.Photo {
 	f.t.Helper()
 	params.Normalize()
+	f.cache.WantFull(f.photo(i), &params)
 	b, err := json.Marshal(&params)
 	if err != nil {
 		f.t.Fatal(err)
@@ -359,7 +362,7 @@ func TestFlightFailureShared(t *testing.T) {
 			close(inOpen)
 			<-fail
 			return broken
-		}, false)
+		})
 		owner <- err
 	}()
 	<-inOpen
@@ -368,7 +371,7 @@ func TestFlightFailureShared(t *testing.T) {
 	go func() {
 		_, _, _, _, err := c.sharedFullDecode(t.Context(), nil, photo, edits, func() error {
 			return reopened
-		}, false)
+		})
 		waiter <- err
 	}()
 	for waiting := false; !waiting; time.Sleep(time.Millisecond) {
@@ -438,4 +441,32 @@ func TestReleaseRestartsIdle(t *testing.T) {
 		t.Error("the decode went the moment the editor left")
 	}
 	c.closeFull()
+}
+
+// TestRenderDoesNotAsk: a 1:1 render of the held photo under a state the
+// editor is not on — a share-link guest's, the pre-render pass's — neither
+// moves what the editor is on nor calls off its warm-up.
+func TestRenderDoesNotAsk(t *testing.T) {
+	f := newFullTestCatalog(t)
+	f.open(0)
+	f.edit(0, edit.Params{Contrast: 0.1})
+	want := f.cache.fullEditors[f.photo(0).CacheKey].want
+	p := f.photo(0)
+	other := edit.Params{ExpEV: 0.8}
+	other.Normalize()
+	b, _ := json.Marshal(&other)
+	js := string(b)
+	if err := f.db.SetEdit(t.Context(), f.ids[0], &js, other.Hash(), 1); err != nil {
+		t.Fatal(err)
+	}
+	p = f.photo(0)
+	if _, err := f.cache.EnsureTile(t.Context(), p, 0, 0, p.EditHash, decode.PriorityVisible); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.cache.fullEditors[p.CacheKey].want; got != want {
+		t.Error("a render moved what the editor is on")
+	}
+	if f.cache.fullEntry != nil {
+		t.Error("a render of a state the editor is not on was kept")
+	}
 }
