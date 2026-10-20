@@ -212,7 +212,7 @@ func nested(a, b string) bool {
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r14"
+const renderVersion = "r15"
 
 // RenderVersion is renderVersion for a client in Go, which puts it in its
 // image URLs as the TypeScript client's RENDER_VERSION does.
