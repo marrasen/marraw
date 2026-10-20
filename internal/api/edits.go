@@ -1428,10 +1428,16 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 		jsonPtr = &s
 		hash = params.Hash()
 	}
-	if err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli()); err != nil {
+	// The write and its number go together, so numbers follow the order
+	// the edits were written in: an editor ignores a patch numbered below
+	// its own newest save as one that save overwrote.
+	saveMu.Lock()
+	err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli())
+	saved := EditSaved{Hash: hash, Save: editSaves.Add(1)}
+	saveMu.Unlock()
+	if err != nil {
 		return EditSaved{}, err
 	}
-	saved := EditSaved{Hash: hash, Save: editSaves.Add(1)}
 
 	// Warm the grid thumb for the new state so the grid updates without a
 	// scroll-triggered fetch racing the patch, and mirror the new intent to
@@ -1468,6 +1474,9 @@ func editPatch(photoID int64, saved EditSaved, params *edit.Params) PhotoPatch {
 	}
 	return PhotoPatch{ID: photoID, EditHash: &saved.Hash, EditSave: &saved.Save, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
 }
+
+// saveMu makes an edit save's write and its number one step.
+var saveMu sync.Mutex
 
 // editSaves numbers every edit save, for EditSaved.Save. It starts from the
 // clock (microseconds since the epoch, well inside a JavaScript number), so
