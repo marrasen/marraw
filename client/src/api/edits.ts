@@ -341,6 +341,19 @@ export function subscribePreviewEdit(client: ApiClient, photoID: number, params:
 }
 
 
+export function previewExact(client: ApiClient, photoID: number, params: Params, longEdge: number, options?: RequestOptions): Promise<Blob> {
+    return client.request<Blob>('Edits.PreviewExact', [photoID, params, longEdge], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+previewExact.method = 'Edits.PreviewExact' as const;
+
+export function subscribePreviewExact(client: ApiClient, photoID: number, params: Params, longEdge: number, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Blob>('Edits.PreviewExact', [photoID, params, longEdge], callback, onError, options);
+}
+
+
 export function resetEdits(client: ApiClient, ids: number[], options?: RequestOptions): Promise<void> {
     return client.request<void>('Edits.ResetEdits', [ids], options);
 }
@@ -719,6 +732,21 @@ export function usePreviewEdit(photoID: number, params: Params, longEdge: number
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, params, longEdge], _subscribe: { method: 'Edits.PreviewEdit', params: [photoID, params, longEdge] } });
+}
+
+/**
+ * Subscribes to `Edits.PreviewExact` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function usePreviewExact(photoID: number, params: Params, longEdge: number, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, longEdge: number) => previewExact(client, photoID, params, longEdge, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, longEdge], _subscribe: { method: 'Edits.PreviewExact', params: [photoID, params, longEdge] } });
 }
 
 /**
