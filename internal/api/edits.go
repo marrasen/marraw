@@ -1467,13 +1467,16 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 		jsonPtr = &s
 		hash = params.Hash()
 	}
-	// The write and its number go together, so numbers follow the order
-	// the edits were written in: an editor ignores a patch numbered below
-	// its own newest save as one that save overwrote.
-	saveMu.Lock()
-	err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli())
-	saved := EditSaved{Hash: hash, Save: editSaves.Add(1)}
-	saveMu.Unlock()
+	before, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return EditSaved{}, err
+	}
+	saved, err := e.deps.numberedSave(before.FolderID, func() (bool, error) {
+		return true, e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli())
+	}, func(saved EditSaved) PhotoPatch {
+		saved.Hash = hash
+		return editPatch(photoID, saved, params)
+	})
 	if err != nil {
 		return EditSaved{}, err
 	}
@@ -1492,7 +1495,6 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 			}
 		}
 		e.deps.Cache.WantFull(p, on)
-		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{editPatch(photoID, saved, params)})
 		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)
 		e.deps.warmEdit(p, hash)
 	}
@@ -1511,11 +1513,33 @@ func editPatch(photoID int64, saved EditSaved, params *edit.Params) PhotoPatch {
 	if params != nil {
 		cropW, cropH = params.CropW, params.CropH
 	}
-	return PhotoPatch{ID: photoID, EditHash: &saved.Hash, EditSave: &saved.Save, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
+	hash, save := saved.Hash, saved.Save
+	return PhotoPatch{ID: photoID, EditHash: &hash, EditSave: &save, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
 }
 
-// saveMu makes an edit save's write and its number one step.
+// saveMu makes an edit save's write, its number and its patch one step.
 var saveMu sync.Mutex
+
+// numberedSave runs write, an edit save of a photo in folderID, and when it
+// lands (true) numbers it and sends its patch, all under saveMu, so numbers
+// follow the order edits were written in. Delivery to each subscriber runs
+// on its own goroutine and may still reorder patches, so a client keeps the
+// highest number it has seen per photo and takes any patch numbered below
+// it as one a later save overwrote. A write that does not land still takes
+// a number, which no one sees.
+func (d *Deps) numberedSave(folderID int64, write func() (bool, error), patch func(EditSaved) PhotoPatch) (EditSaved, error) {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+	landed, err := write()
+	saved := EditSaved{Save: editSaves.Add(1)}
+	if err != nil || !landed {
+		return saved, err
+	}
+	p := patch(saved)
+	saved.Hash = *p.EditHash
+	d.patchFolderPhotos(folderID, []PhotoPatch{p})
+	return saved, nil
+}
 
 // editSaves numbers every edit save, for EditSaved.Save. It starts from the
 // clock (microseconds since the epoch, well inside a JavaScript number), so
