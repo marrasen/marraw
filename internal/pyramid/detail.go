@@ -24,6 +24,14 @@ import (
 // large-radius unsharp mask straddling a sharp subject against a deliberately
 // blurred background prints a bright rim around the subject.
 func ApplyDetail(img *image.RGBA, e *edit.Params, suppress []uint8) {
+	applyDetailIn(img, wholeRegion(img), e, suppress)
+}
+
+// applyDetailIn is ApplyDetail for a buffer that is the part rg of the
+// output, with a margin of at least detailMargin around the pixels that
+// must come out right. RenderWindow never hands it dehaze: the veil is
+// measured over the whole frame.
+func applyDetailIn(img *image.RGBA, rg region, e *edit.Params, suppress []uint8) {
 	if e == nil || (e.Dehaze == 0 && e.Clarity == 0 && e.Texture == 0 && e.Sharpen == 0) {
 		return
 	}
@@ -56,8 +64,7 @@ func ApplyDetail(img *image.RGBA, e *edit.Params, suppress []uint8) {
 		texB = boxBlurPlane(luma, w, h, 3, 2)
 	}
 	if clarQ != 0 {
-		r := max(8, max(w, h)/50)
-		clarB = boxBlurPlane(luma, w, h, r, 2)
+		clarB = boxBlurPlane(luma, w, h, clarityRadius(rg), 2)
 	}
 
 	pix := img.Pix
@@ -96,6 +103,28 @@ func ApplyDetail(img *image.RGBA, e *edit.Params, suppress []uint8) {
 			}
 		}
 	})
+}
+
+// clarityRadius is clarity's blur radius: it scales with the whole output,
+// so its look does not change with the rendition's size.
+func clarityRadius(rg region) int {
+	return max(8, max(rg.outW, rg.outH)/50)
+}
+
+// detailMargin is how far the detail stage reaches for the pixels around
+// one: its blurs run two passes (texture, clarity) or one (sharpen).
+func detailMargin(rg region, e *edit.Params) int {
+	switch {
+	case e == nil:
+		return 0
+	case e.Clarity != 0:
+		return 2 * clarityRadius(rg)
+	case e.Texture != 0:
+		return 2 * 3
+	case e.Sharpen != 0:
+		return 1
+	}
+	return 0
 }
 
 // lumaPlane extracts the Rec.601 luma of a zero-origin RGBA image as a

@@ -42,7 +42,10 @@ func newGuidedEval(base *brushEval, img *image.RGBA) *guidedEval {
 	}
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
-	outLong := max(w, h)
+	// The block size follows the whole output, so a window (whose origin
+	// RenderWindow puts on the block grid) refines on the grid the whole
+	// render does.
+	outLong := max(base.f.outW, base.f.outH)
 	mapLong := max(base.pw, base.ph)
 	if outLong < guidedMinLongEdge || outLong < 2*mapLong {
 		return nil

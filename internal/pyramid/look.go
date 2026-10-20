@@ -151,6 +151,11 @@ func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fi
 // the base look. Applied only to RAW-decoded renditions — embedded JPEG
 // thumbnails already carry the camera curve.
 func ApplyLook(img *image.RGBA, gamma float64, e *edit.Params) {
+	applyLookIn(img, wholeRegion(img), gamma, e)
+}
+
+// applyLookIn is ApplyLook for a buffer that is the part rg of the output.
+func applyLookIn(img *image.RGBA, rg region, gamma float64, e *edit.Params) {
 	lutR, lutG, lutB := buildLookLUTs(gamma, e)
 	satQ := int32(115) // base boost ×1.15 in 1/100 units
 	if e != nil {
@@ -172,7 +177,7 @@ func ApplyLook(img *image.RGBA, gamma float64, e *edit.Params) {
 	if e == nil || (e.Vibrance == 0 && e.SplitShadowAmt == 0 && e.SplitHighlightAmt == 0 && e.Vignette == 0) {
 		applyLookSimple(img, &lutR, &lutG, &lutB, satQ)
 	} else {
-		applyLookFull(img, &lutR, &lutG, &lutB, satQ, e)
+		applyLookFull(img, rg, &lutR, &lutG, &lutB, satQ, e)
 	}
 	// The HSL mixer runs last, over the developed color: gated so neutral
 	// mixers cost nothing and existing renders stay bit-identical. Under BW
@@ -202,7 +207,7 @@ func applyLookSimple(img *image.RGBA, lutR, lutG, lutB *[256]uint8, satQ int32) 
 // saturation boost by how unsaturated the pixel already is, split toning
 // pushes shadows/highlights toward their tint hues, and the vignette gain
 // falls off radially from the image center.
-func applyLookFull(img *image.RGBA, lutR, lutG, lutB *[256]uint8, satQ int32, e *edit.Params) {
+func applyLookFull(img *image.RGBA, rg region, lutR, lutG, lutB *[256]uint8, satQ int32, e *edit.Params) {
 	bnd := img.Bounds()
 	w, h := bnd.Dx(), bnd.Dy()
 	vibQ := int32(math.Round(e.Vibrance * 100))
@@ -217,12 +222,13 @@ func applyLookFull(img *image.RGBA, lutR, lutG, lutB *[256]uint8, satQ int32, e 
 	var vgain []int32
 	var colSq []int64
 	var maxR2 int64 = 1
+	// The vignette centres on the whole output, not on this buffer.
+	cx, cy := float64(rg.outW-1)/2, float64(rg.outH-1)/2
 	if e.Vignette != 0 {
-		cx, cy := float64(w-1)/2, float64(h-1)/2
 		maxR2 = int64(cx*cx+cy*cy) + 1
 		colSq = make([]int64, w)
 		for x := range colSq {
-			d := float64(x) - cx
+			d := float64(rg.off.X+x) - cx
 			colSq[x] = int64(d * d)
 		}
 		vgain = make([]int32, 1024)
@@ -238,7 +244,7 @@ func applyLookFull(img *image.RGBA, lutR, lutG, lutB *[256]uint8, satQ int32, e 
 			row := pix[y*img.Stride : y*img.Stride+w*4]
 			var rowSq int64
 			if vgain != nil {
-				d := float64(y) - float64(h-1)/2
+				d := float64(rg.off.Y+y) - cy
 				rowSq = int64(d * d)
 			}
 			for x := range w {
