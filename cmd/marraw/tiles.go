@@ -148,6 +148,12 @@ func (cu *culler) probeTilesAt(p marrawclient.Photo, now bool, t image.Point) {
 			select {
 			case <-time.After(wait):
 				_, err = cu.im.tile(ctx, p, t, false)
+				if err == errMissing {
+					// Rendered, and this tile is not in it (a grid a column
+					// longer than the render, say): the set is in all the
+					// same, and the fetches skip the tile.
+					err = nil
+				}
 				rendered = err == nil
 			case <-ctx.Done():
 				err = ctx.Err()
@@ -159,6 +165,11 @@ func (cu *culler) probeTilesAt(p marrawclient.Photo, now bool, t image.Point) {
 			latest := cu.probeSeq == seq
 			if latest {
 				cu.probing, cu.probeStop = 0, nil
+			}
+			if err != nil && t != (image.Point{}) {
+				// A re-render of a thinned set (fetchTiles) that did not
+				// finish: the next visit may try again.
+				delete(cu.tileRedone, tileSet(p))
 			}
 			if err != nil {
 				// Called off, as a step or an edit does, it is no error.
@@ -227,7 +238,7 @@ func (cu *culler) fetchTiles(p marrawclient.Photo) {
 					select {
 					case cu.do <- func() {
 						set := tileSet(p)
-						if cu.tileWarm[set] && !cu.tileRedone[set] && cu.at == at {
+						if cu.tileWarm[set] && !cu.tileRedone[set] && cu.at == at && ctx.Err() == nil {
 							delete(cu.tileWarm, set)
 							cu.tileRedone[set] = true
 							cu.wantWindow()
