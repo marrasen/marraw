@@ -185,7 +185,7 @@ func (d *Deps) seedDefaultPreset(ctx context.Context, photoID int64, up UserPres
 		return err
 	}
 	if p, err := d.DB.GetPhoto(ctx, photoID); err == nil {
-		d.patchFolderPhotos(p.FolderID, []PhotoPatch{editPatch(photoID, params.Hash(), &params)})
+		d.patchFolderPhotos(p.FolderID, []PhotoPatch{editPatch(photoID, EditSaved{Hash: params.Hash(), Save: editSaves.Add(1)}, &params)})
 		d.writeSidecarFor(ctx, p)
 		// No warmEdit here (unlike a user edit commit): the calibrate pass is
 		// the sole caller, and a per-seed Prefetch warm would outrank the

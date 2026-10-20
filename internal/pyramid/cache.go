@@ -259,10 +259,13 @@ func (c *Cache) Ensure(ctx context.Context, photo store.Photo, level, editHash s
 	}
 	if level != "full" && level != "2048" {
 		// A state the editor is settling on: its small renditions come from
-		// the settle's 2048 (generate's fast path) once it lands.
-		c.WaitForSettle(ctx, photo, editHash)
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
+		// the settle's 2048 once it lands, derived on the fast pool so they
+		// don't queue behind RAW decodes.
+		c.WaitForSettle(ctx, photo, editHash, false)
+		if _, err := os.Stat(c.PathFor(photo.CacheKey, "2048", editHash)); err == nil {
+			if p, provisional, err := c.EnsureFast(ctx, photo, level, editHash); err == nil && !provisional {
+				return p, nil
+			}
 		}
 	}
 	key := photo.CacheKey + "|" + level + "|" + editHash
