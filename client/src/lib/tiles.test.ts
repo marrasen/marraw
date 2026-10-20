@@ -64,4 +64,17 @@ describe('kicking the 1:1 render', () => {
     await act(() => vi.advanceTimersByTimeAsync(1));
     expect(renders).toHaveLength(1);
   });
+
+  // The save's new hash can reach the loupe after tiles came to be wanted
+  // (the patch, then the answer): the dwell under way is cut short.
+  it('cuts a dwell under way short when the save turns up', async () => {
+    await show(true, false);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(renders).toHaveLength(0);
+    await show(true, true);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(renders).toHaveLength(1);
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(renders).toHaveLength(1); // the cut-short timer does not fire again
+  });
 });

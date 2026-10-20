@@ -179,6 +179,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     photoId,
     applyIds,
     baseExpEV,
+    committed: s.committed?.photoId === photoId ? s.committed : null,
     hoverParams: null,
     lastPresetApply: null,
     draft: null,
@@ -840,18 +841,28 @@ function pushHistory(photoId: number, params: Params, label: string) {
 // the save is done (or has failed and been reported) — never rejects — so
 // callers can sequence work that must not race the write.
 function persist(client: ApiClient, params: Params, ids: number[]): Promise<void> {
-  const p =
-    ids.length > 1
-      ? pasteEditParams(client, ids, params)
-      : setEditParams(client, ids[0], params).then((saved) => {
-          setState({ savedHash: { photoId: ids[0], hash: saved.hash } });
-        });
+  const s = useEditSession.getState();
+  if (s.photoId != null && ids.includes(s.photoId) && s.shown?.photoId === s.photoId) {
+    setState({ committed: { photoId: s.photoId, fromHash: s.shown.hash } });
+  }
+  const p = ids.length > 1 ? pasteEditParams(client, ids, params) : setEditParams(client, ids[0], params);
   return p.then(
     () => undefined,
     (err) => {
       toast.error(`Save failed: ${(err as Error).message}`);
     },
   );
+}
+
+/** The loupe reports the hash it shows for a photo (see EditSessionState.shown). */
+export function esShownHash(photoId: number, hash: string) {
+  const s = useEditSession.getState().shown;
+  if (s?.photoId !== photoId || s.hash !== hash) setState({ shown: { photoId, hash } });
+}
+
+/** The tiles of the committed state are warm: no more reason to skip the dwell. */
+export function esCommittedWarm(photoId: number) {
+  if (useEditSession.getState().committed?.photoId === photoId) setState({ committed: null });
 }
 
 // esCommit persists the draft (merged with an optional final patch) to every

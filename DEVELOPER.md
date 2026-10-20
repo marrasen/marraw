@@ -65,8 +65,11 @@ the same pixels as the settle, never a settle. The Develop panel holds
 `Edits.OpenInEditor` for the photo its loupe shows after a 1 s dwell
 (`client/src/lib/editorHold.ts`), holds it again once a lost connection is
 back, and gives up after three backend errors. The 1:1 render of the state the
-user's own save just produced (`savedHash` in the edit session) starts without
-the skimming dwell.
+user's own save just produced starts without the skimming dwell. Each save of
+the session's photo, at any selection size, records the hash it was made over
+(`committed` in the edit session); once the photo's hash moves past it, the
+render starts at once, also when the new hash turns up during a dwell already
+under way. A photo switch, or warm tiles, forget it.
 
 ### Adaptive base look
 

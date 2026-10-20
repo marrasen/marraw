@@ -1,0 +1,63 @@
+// @vitest-environment jsdom
+//
+// The loupe skips the skimming dwell before the 1:1 render of a state the
+// user's own save just produced. The edit session records each save of its
+// photo, at any selection size, with the hash it was made over, and forgets
+// it on a photo switch.
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { ApiClient } from '@/api/client';
+import type { Params } from '@/api/edit';
+
+const setEditParams = vi.fn(async () => ({ hash: 'h2', save: 1 }));
+const pasteEditParams = vi.fn(async () => undefined);
+
+vi.mock('@/api/edits', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/edits')>()),
+  setEditParams: (...args: unknown[]) => setEditParams(...(args as [])),
+  pasteEditParams: (...args: unknown[]) => pasteEditParams(...(args as [])),
+  previewEdit: () => new Promise(() => {}),
+  previewDraft: () => new Promise(() => {}),
+  previewExact: () => new Promise(() => {}),
+  getEditParams: async () => null,
+  generateFill: async () => ({}),
+}));
+
+let es: typeof import('@/lib/editSession');
+const client = {} as ApiClient;
+const draft = { expEV: 0, contrast: 0.2 } as unknown as Params;
+
+beforeEach(async () => {
+  URL.createObjectURL = vi.fn(() => 'blob:test');
+  URL.revokeObjectURL = vi.fn();
+  vi.resetModules();
+  es = await import('@/lib/editSession');
+  es.useEditSession.setState({ photoId: 1, applyIds: [1], draft, rendering: 0 });
+  es.esShownHash(1, 'h1');
+});
+
+describe('the committed state', () => {
+  it('records a save of the photo with the hash it was made over', () => {
+    es.esCommit(client);
+    expect(es.useEditSession.getState().committed).toEqual({ photoId: 1, fromHash: 'h1' });
+  });
+
+  it('records a save made with several photos selected', () => {
+    es.useEditSession.setState({ applyIds: [1, 2, 3] });
+    es.esCommit(client);
+    expect(pasteEditParams).toHaveBeenCalled();
+    expect(es.useEditSession.getState().committed).toEqual({ photoId: 1, fromHash: 'h1' });
+  });
+
+  it('is forgotten when the session moves to another photo', async () => {
+    es.esCommit(client);
+    await es.esLoad(client, 2, [2]);
+    expect(es.useEditSession.getState().committed).toBeNull();
+  });
+
+  it('is forgotten once its tiles are warm', () => {
+    es.esCommit(client);
+    es.esCommittedWarm(1);
+    expect(es.useEditSession.getState().committed).toBeNull();
+  });
+});

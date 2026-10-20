@@ -82,10 +82,15 @@ export interface EditSessionState {
   // between base (the pre-apply draft) and result re-derives any strength
   // 0..200%. Invalidated by a photo switch, any other edit, undo, or reset.
   lastPresetApply: { photoId: number; base: Params; result: Params; name: string; amount: number } | null;
-  // The edit hash the user's last own save of a photo produced, as the
-  // backend answered it. The loupe starts that state's 1:1 render without
-  // the skimming dwell: the user is on the photo and just changed it.
-  savedHash: { photoId: number; hash: string } | null;
+  // The edit hash the loupe shows for the session's photo, kept current by
+  // the loupe (esShownHash): the hash a save is made over.
+  shown: { photoId: number; hash: string } | null;
+  // The user's last own save of the session's photo, at any selection size,
+  // and the hash it was made over. Once the photo's hash moves past fromHash
+  // the loupe starts the new state's 1:1 render without the skimming dwell:
+  // the user is on the photo and just changed it. Cleared by a photo switch
+  // and once those tiles are warm.
+  committed: { photoId: number; fromHash: string } | null;
   cropping: boolean; // crop overlay active: loupe shows the uncropped frame
   // Heal/retouch tool active: pointer-down on the loupe places or grabs a spot
   // (draft.spots) instead of panning.
@@ -186,7 +191,8 @@ export const useEditSession = create<EditSessionState>(() => ({
   rangePicking: false,
   hoverParams: null,
   lastPresetApply: null,
-  savedHash: null,
+  shown: null,
+  committed: null,
   cropping: false,
   healing: false,
   activeSpot: null,

@@ -16,10 +16,12 @@ import { levelForPx, useTilePrefetch, useTilesWarm } from '@/lib/tiles';
 import {
   esClearPreview,
   esCommit,
+  esCommittedWarm,
   esPickRangeColor,
   esPickWB,
   esPreviewSettled,
   esSetCropping,
+  esShownHash,
   esUpdate,
   esWBPickAsShot,
   esWBPickAuto,
@@ -566,12 +568,17 @@ export function CinemaImage({
   const tileDepth = plan.tileDepth;
   // Warmth is asked about only once tile depth is known, so it follows the
   // plan rather than feeding it.
-  // The state the user's own save of this photo just produced: its 1:1
-  // render starts the moment tiles are wanted, without the skimming dwell.
+  // A state the user's own save of this photo just produced (its hash moved
+  // past the one the save was made over): its 1:1 render starts the moment
+  // tiles are wanted, without the skimming dwell.
+  useEffect(() => esShownHash(photo.id, photo.editHash), [photo.id, photo.editHash]);
   const savedHere = useEditSession(
-    (s) => s.photoId === photo.id && s.savedHash?.photoId === photo.id && s.savedHash.hash === photo.editHash,
+    (s) => s.committed?.photoId === photo.id && s.committed.fromHash !== photo.editHash,
   );
   const tilesWarm = useTilesWarm(photo, tileDepth, plan.allowDwellKick, savedHere);
+  useEffect(() => {
+    if (tilesWarm && savedHere) esCommittedWarm(photo.id);
+  }, [tilesWarm, savedHere, photo.id]);
   const wantTiles = tilesEngaged(tileDepth, tilesWarm);
   const src = previewUrl ?? imgUrl(photo, plan.srcLevel);
   // The pyramid level fit displays (never 'tiles' in the fit branch below).

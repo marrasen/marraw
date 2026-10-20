@@ -48,11 +48,15 @@ export function useTilesWarm(
   // wantTiles false→true for a frame, flashing the tile layer off and on.
   const url0 = photo ? tileUrl(photo, 0, 0) : '';
   // Read when the kick is set, whenever `want` turns true: not a reason to
-  // probe again on its own.
-  const dwellMs = useRef(KICK_DWELL_MS);
+  // probe again on its own. A dwell already under way when `immediate`
+  // turns true is cut short (kickNow, below): the save that makes it true
+  // can land after the tiles came to be wanted.
+  const immediateRef = useRef(immediate);
+  const kickNow = useRef<(() => void) | null>(null);
   useEffect(() => {
-    dwellMs.current = immediate ? 0 : KICK_DWELL_MS;
-  });
+    immediateRef.current = immediate;
+    if (immediate) kickNow.current?.();
+  }, [immediate]);
   useEffect(() => {
     // New render state starts cold before the async probe/kick below.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -60,6 +64,16 @@ export function useTilesWarm(
     if (!want || !url0) return;
     const ac = new AbortController();
     let dwell = 0;
+    const render = async () => {
+      kickNow.current = null;
+      window.clearTimeout(dwell);
+      try {
+        const res = await fetch(url0, { signal: ac.signal });
+        if (res.ok) setWarm(true);
+      } catch {
+        // aborted: the user moved on mid-render
+      }
+    };
     (async () => {
       try {
         const probe = await fetch(url0 + '&cacheOnly=1', { signal: ac.signal });
@@ -72,19 +86,18 @@ export function useTilesWarm(
         // render ever STARTS — cheaper and more robust than starting one per
         // step and racing to cancel it (a render that slips past its
         // cancellation checkpoint blocks the pipeline for seconds).
-        dwell = window.setTimeout(async () => {
-          try {
-            const render = await fetch(url0, { signal: ac.signal });
-            if (render.ok) setWarm(true);
-          } catch {
-            // aborted: the user moved on mid-render
-          }
-        }, dwellMs.current);
+        if (immediateRef.current) {
+          void render();
+          return;
+        }
+        kickNow.current = () => void render();
+        dwell = window.setTimeout(() => void render(), KICK_DWELL_MS);
       } catch {
         // aborted: the user moved on
       }
     })();
     return () => {
+      kickNow.current = null;
       window.clearTimeout(dwell);
       ac.abort();
     };
