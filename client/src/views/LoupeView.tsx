@@ -32,6 +32,7 @@ import {
   useEditSession,
 } from '@/lib/editSession';
 import { setDraftEdge } from '@/lib/previewScheduler';
+import { dropWindow, useLoupeWindow, wantWindow } from '@/lib/previewWindow';
 import { useDevicePixelRatio } from '@/lib/useDevicePixelRatio';
 import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
@@ -638,6 +639,38 @@ export function CinemaImage({
     if (p && p.photoId === photo.id && esPreviewSettled()) esClearPreview();
   }, [level, cropping, photo.id, preview, esRendering]);
 
+  // The sharp window (lib/previewWindow): zoomed into tile depth on the photo
+  // being edited, the part in view at full resolution, over the draft and
+  // under the tiles — while a live preview shows, or until the saved edit's
+  // tiles are rendered. Asked again as the edit, the view or the save moves.
+  const shownParams = useEditSession((s) => s.hoverParams ?? s.draft);
+  const editingHere = esPhotoId === photo.id && shownParams != null;
+  const windowZone = editingHere && level === 'tiles' && !cropping && haveDims;
+  const wantsWindow = windowZone && (previewUrl != null || !tilesWarm);
+  useEffect(() => {
+    if (!windowZone) {
+      dropWindow(); // another photo, out of the editor, cropping, or zoomed out
+      return;
+    }
+    if (!wantsWindow || !shownParams) return; // the tiles serve it; keep what shows under them
+    const [vx, vy, vw, vh] = viewport;
+    const x0 = Math.max(0, Math.floor(vx * dw));
+    const y0 = Math.max(0, Math.floor(vy * dh));
+    const x1 = Math.min(dw, Math.ceil((vx + vw) * dw));
+    const y1 = Math.min(dh, Math.ceil((vy + vh) * dh));
+    wantWindow(client, { photoId: photo.id, params: shownParams, rect: [x0, y0, x1 - x0, y1 - y0], dims: [dw, dh] });
+  }, [windowZone, wantsWindow, shownParams, viewport, dw, dh, photo.id, photo.editHash, client]);
+  useEffect(() => dropWindow, [photo.id]);
+  const loupeWindow = useLoupeWindow((s) => s.win);
+  const showWindow =
+    loupeWindow != null &&
+    windowZone &&
+    loupeWindow.photoId === photo.id &&
+    loupeWindow.dims[0] === dw &&
+    loupeWindow.dims[1] === dh &&
+    !cropUI &&
+    !originalUI;
+
   // Restore the pan ratio whenever the geometry or photo changes. `container`
   // must be a dep: at a numeric zoom boxW is container-independent, so on a
   // fresh mount (mode switch) it is already final while the container still
@@ -1143,6 +1176,21 @@ export function CinemaImage({
               // would rotate the crop twice.
               style={cropUI && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
             />
+            {showWindow && (
+              <img
+                data-testid="loupe-window"
+                src={loupeWindow.url}
+                draggable={false}
+                alt=""
+                className="pointer-events-none absolute"
+                style={{
+                  left: (loupeWindow.rect[0] / dw) * boxW,
+                  top: (loupeWindow.rect[1] / dh) * boxH,
+                  width: (loupeWindow.rect[2] / dw) * boxW,
+                  height: (loupeWindow.rect[3] / dh) * boxH,
+                }}
+              />
+            )}
             {wantTiles && shownSrc.includes(`/img/${photo.id}/`) && (
               <TileLayer
                 key={`${photo.id}|${photo.cacheKey}|${photo.editHash}`}

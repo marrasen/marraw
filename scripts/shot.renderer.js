@@ -2164,6 +2164,43 @@ if (shot === 'cull') {
     copiedName: copied[2],
     captions,
   };
+} else if (shot === 'window') {
+  // Editing zoomed in to 1:1: a slider move must bring the sharp window
+  // (Edits.PreviewWindow) over the draft, the part in view at full
+  // resolution, and a white balance move (no kept decode) must take it down.
+  ui().setMode('develop');
+  const es = mw.useEditSession;
+  await until(() => es.getState().draft != null);
+  await sleep(6000); // the editor hold's full-resolution decode
+  ui().setLoupeZoom(1);
+  await sleep(2500);
+  const win = () => document.querySelector('[data-testid="loupe-window"]');
+  const base = es.getState().draft;
+  const t0 = Date.now();
+  mw.esUpdate({ contrast: (base.contrast ?? 0) + 0.3, clarity: 0.4 });
+  let shownAfter = null;
+  try {
+    await until(() => win() && win().complete && win().naturalWidth > 0, 15000);
+    shownAfter = Date.now() - t0;
+  } catch {}
+  const w = win();
+  const rect = w ? { left: w.style.left, top: w.style.top, width: w.style.width, height: w.style.height, natural: [w.naturalWidth, w.naturalHeight] } : null;
+  const box = w?.parentElement?.getBoundingClientRect();
+  await sleep(300);
+  window.__windowProbe = { shownAfter, rect, box: box && [Math.round(box.width), Math.round(box.height)], dpr: window.devicePixelRatio };
+  // A white balance the kept decode lacks: no window, the drafts show.
+  mw.esUpdate({ wbMode: 'kelvin', wbKelvin: 7000 });
+  await sleep(2500);
+  window.__windowProbe.windowAfterWB = !!win();
+  // Back to the white balance it has: the window comes back.
+  const t1 = Date.now();
+  mw.esUpdate({ wbMode: base.wbMode, wbKelvin: base.wbKelvin });
+  try {
+    await until(() => win() && win().complete && win().naturalWidth > 0, 15000);
+    window.__windowProbe.backAfter = Date.now() - t1;
+  } catch {
+    window.__windowProbe.backAfter = null;
+  }
 } else if (shot === 'render-progress') {
   // 1:1 on a photo whose tile grid is cold → the decoding indicator must
   // upgrade from indeterminate to a live percent (RenderProgressEvent), and
@@ -3013,6 +3050,7 @@ const probe =
   window.__cropProbe ??
   window.__naturalGridProbe ??
   window.__renderProbe ??
+  window.__windowProbe ??
   window.__settleProbe ??
   window.__restoreProbe ??
   window.__welcomeProbe ??
