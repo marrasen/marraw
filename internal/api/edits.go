@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1307,28 +1308,36 @@ func (e *Edits) SetEditParams(ctx context.Context, photoID int64, params edit.Pa
 	return &saved, nil
 }
 
-// ResetEdits clears the edit state of the given photos.
-func (e *Edits) ResetEdits(ctx context.Context, ids []int64) error {
+// ResetEdits clears the edit state of the given photos. It returns what
+// each save saved, in the order of ids, as SetEditParams does for one.
+func (e *Edits) ResetEdits(ctx context.Context, ids []int64) ([]EditSaved, error) {
+	out := make([]EditSaved, 0, len(ids))
 	for _, id := range ids {
-		if _, err := e.saveEdit(ctx, id, nil); err != nil {
-			return err
+		saved, err := e.saveEdit(ctx, id, nil)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, saved)
 		aprot.TriggerRefresh(ctx, editKey(id))
 	}
-	return nil
+	return out, nil
 }
 
 // PasteEditParams applies one edit state to many photos (the copy side is
-// client-local: GetEditParams into a clipboard).
-func (e *Edits) PasteEditParams(ctx context.Context, ids []int64, params edit.Params) error {
+// client-local: GetEditParams into a clipboard). It returns what each save
+// saved, in the order of ids, as SetEditParams does for one.
+func (e *Edits) PasteEditParams(ctx context.Context, ids []int64, params edit.Params) ([]EditSaved, error) {
+	out := make([]EditSaved, 0, len(ids))
 	for i, id := range ids {
-		if _, err := e.saveEdit(ctx, id, &params); err != nil {
-			return err
+		saved, err := e.saveEdit(ctx, id, &params)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, saved)
 		aprot.TriggerRefresh(ctx, editKey(id))
 		aprot.Progress(ctx).Update(i+1, len(ids), "")
 	}
-	return nil
+	return out, nil
 }
 
 // ApplyBatchEdit applies a relative adjustment to many photos, e.g.
@@ -1434,6 +1443,8 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 	folderID := int64(-1)
 	if before, err := e.deps.DB.GetPhoto(ctx, photoID); err == nil {
 		folderID = before.FolderID
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return EditSaved{}, err
 	}
 	saved, err := e.deps.numberedSave(folderID, func() (bool, error) {
 		return true, e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli())

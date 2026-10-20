@@ -281,16 +281,16 @@ export function subscribeOpenInEditor(client: ApiClient, photoID: number, callba
 }
 
 
-export function pasteEditParams(client: ApiClient, ids: number[], params: Params, options?: RequestOptions): Promise<void> {
-    return client.request<void>('Edits.PasteEditParams', [ids, params], options);
+export function pasteEditParams(client: ApiClient, ids: number[], params: Params, options?: RequestOptions): Promise<EditSaved[]> {
+    return client.request<EditSaved[]>('Edits.PasteEditParams', [ids, params], options);
 }
 // Wire-method tag consumed by useQuerySuspense to key the promise cache and
 // open the matching server subscription. Stable identifier across builds
 // (unaffected by minification, unlike Function.name).
 pasteEditParams.method = 'Edits.PasteEditParams' as const;
 
-export function subscribePasteEditParams(client: ApiClient, ids: number[], params: Params, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
-    return client.subscribe<void>('Edits.PasteEditParams', [ids, params], callback, onError, options);
+export function subscribePasteEditParams(client: ApiClient, ids: number[], params: Params, callback: (data: EditSaved[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<EditSaved[]>('Edits.PasteEditParams', [ids, params], callback, onError, options);
 }
 
 
@@ -359,16 +359,16 @@ export function subscribePreviewExact(client: ApiClient, photoID: number, params
 }
 
 
-export function resetEdits(client: ApiClient, ids: number[], options?: RequestOptions): Promise<void> {
-    return client.request<void>('Edits.ResetEdits', [ids], options);
+export function resetEdits(client: ApiClient, ids: number[], options?: RequestOptions): Promise<EditSaved[]> {
+    return client.request<EditSaved[]>('Edits.ResetEdits', [ids], options);
 }
 // Wire-method tag consumed by useQuerySuspense to key the promise cache and
 // open the matching server subscription. Stable identifier across builds
 // (unaffected by minification, unlike Function.name).
 resetEdits.method = 'Edits.ResetEdits' as const;
 
-export function subscribeResetEdits(client: ApiClient, ids: number[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
-    return client.subscribe<void>('Edits.ResetEdits', [ids], callback, onError, options);
+export function subscribeResetEdits(client: ApiClient, ids: number[], callback: (data: EditSaved[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<EditSaved[]>('Edits.ResetEdits', [ids], callback, onError, options);
 }
 
 
@@ -671,7 +671,7 @@ export function useOpenInEditor(photoID: number, options?: UseQueryOptions<void>
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function usePasteEditParams(ids: number[], params: Params, options?: UseQueryOptions<void>): UseQueryResult<void> {
+export function usePasteEditParams(ids: number[], params: Params, options?: UseQueryOptions<EditSaved[]>): UseQueryResult<EditSaved[]> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, ids: number[], params: Params) => pasteEditParams(client, ids, params, { signal }),
         [],
@@ -761,7 +761,7 @@ export function usePreviewExact(photoID: number, params: Params, longEdge: numbe
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useResetEdits(ids: number[], options?: UseQueryOptions<void>): UseQueryResult<void> {
+export function useResetEdits(ids: number[], options?: UseQueryOptions<EditSaved[]>): UseQueryResult<EditSaved[]> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, ids: number[]) => resetEdits(client, ids, { signal }),
         [],
