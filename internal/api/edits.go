@@ -235,6 +235,56 @@ func (e *Edits) PreviewExact(ctx context.Context, photoID int64, params edit.Par
 		e.deps.Cache.Lenses.For(photo)))
 }
 
+// windowMaxPixels bounds PreviewWindow: a 4K screen's worth of 1:1 pixels
+// and then some.
+const windowMaxPixels = 16 << 20
+
+// PreviewWindow renders the part (x, y, w, h) of the 1:1 render of the
+// (unsaved) edit state — in that render's pixels, clipped to it — in
+// memory and never cached: what a loupe zoomed in shows, sharp, while a
+// slider drags or the 1:1 tiles of a new state render. The JPEG covers the
+// clipped part. It renders from the full-resolution decode the backend
+// keeps for the photo open in the editor (OpenInEditor), so it answers
+// null when it cannot: no decode is kept under the state's LibRaw inputs
+// (exposure aside, which it folds in like the drafts do), or the edit
+// uses dehaze or mask effects, which work over the whole frame. Neutral
+// params (the base look) are never kept either.
+func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Params, x, y, w, h int) (*aprot.Blob, error) {
+	if w <= 0 || h <= 0 || w*h > windowMaxPixels {
+		return nil, fmt.Errorf("preview window: %dx%d is not 1 to %d pixels", w, h, windowMaxPixels)
+	}
+	params.Normalize()
+	if params.IsNeutral() || !pyramid.Windowable(&params) {
+		return nil, nil
+	}
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	cache := e.deps.Cache
+	src, expEV, _, ok := cache.KeptForWindow(photo, &params)
+	if !ok {
+		return nil, nil
+	}
+	gamma, err := e.lookGamma(ctx, photo)
+	if err != nil {
+		return nil, err
+	}
+	img := pyramid.RenderWindow(src, image.Rect(x, y, x+w, y+h), gamma, &params, expEV,
+		cache.Lenses.For(photo), cache.AIMaps.SetFor(photo.CacheKey, &params), cache.Fills.SetFor(photo.CacheKey, &params))
+	if img == nil {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
+		return nil, err
+	}
+	return &aprot.Blob{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
+}
+
 // previewInMemory renders a transient frame of params, already normalized,
 // at longEdge: the fold path where it applies, else the warm or a fresh
 // half-size decode.
