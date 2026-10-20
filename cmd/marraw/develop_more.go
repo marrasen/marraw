@@ -238,7 +238,8 @@ func (cu *culler) editPaste() {
 		return
 	}
 	go func() {
-		if err := cu.api.Edits.PasteEditParams(cu.ctx, ids, params); err != nil {
+		// Not the panel's own save: the patches tell the view.
+		if _, err := cu.api.Edits.PasteEditParams(cu.ctx, ids, params); err != nil {
 			log.Printf("paste: %v", err)
 		}
 	}()

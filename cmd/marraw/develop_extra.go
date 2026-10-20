@@ -187,7 +187,8 @@ func (cu *culler) devReset() {
 		return
 	}
 	go func() {
-		if err := cu.api.Edits.ResetEdits(cu.ctx, ids); err != nil {
+		// Not the panel's own save: the patches tell the view.
+		if _, err := cu.api.Edits.ResetEdits(cu.ctx, ids); err != nil {
 			log.Printf("reset: %v", err)
 		}
 	}()

@@ -337,10 +337,16 @@ func (h EditsClient) OpenInEditor(ctx context.Context, photoID int64) error {
 }
 
 // PasteEditParams applies one edit state to many photos (the copy side is
-// client-local: GetEditParams into a clipboard).
-func (h EditsClient) PasteEditParams(ctx context.Context, ids []int64, params_ Params) error {
-	_, err := client.Call[struct{}](ctx, h.c, "Edits.PasteEditParams", []any{ids, params_})
-	return err
+// client-local: GetEditParams into a clipboard). It returns what each save
+// saved, in the order of ids, as SetEditParams does for one.
+func (h EditsClient) PasteEditParams(ctx context.Context, ids []int64, params_ Params) ([]EditSaved, error) {
+	return client.Call[[]EditSaved](ctx, h.c, "Edits.PasteEditParams", []any{ids, params_})
+}
+
+// SubscribePasteEditParams runs PasteEditParams as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribePasteEditParams(ctx context.Context, ids []int64, params_ Params, opts ...client.SubscribeOption) *client.Subscription[[]EditSaved] {
+	return client.Subscribe[[]EditSaved](ctx, h.c, "Edits.PasteEditParams", []any{ids, params_}, opts...)
 }
 
 // PickRangeColor samples the developed colour at the clicked spot and seeds the
@@ -429,10 +435,16 @@ func (h EditsClient) SubscribePreviewExact(ctx context.Context, photoID int64, p
 	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.PreviewExact", []any{photoID, params_, longEdge}, opts...)
 }
 
-// ResetEdits clears the edit state of the given photos.
-func (h EditsClient) ResetEdits(ctx context.Context, ids []int64) error {
-	_, err := client.Call[struct{}](ctx, h.c, "Edits.ResetEdits", []any{ids})
-	return err
+// ResetEdits clears the edit state of the given photos. It returns what
+// each save saved, in the order of ids, as SetEditParams does for one.
+func (h EditsClient) ResetEdits(ctx context.Context, ids []int64) ([]EditSaved, error) {
+	return client.Call[[]EditSaved](ctx, h.c, "Edits.ResetEdits", []any{ids})
+}
+
+// SubscribeResetEdits runs ResetEdits as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribeResetEdits(ctx context.Context, ids []int64, opts ...client.SubscribeOption) *client.Subscription[[]EditSaved] {
+	return client.Subscribe[[]EditSaved](ctx, h.c, "Edits.ResetEdits", []any{ids}, opts...)
 }
 
 // SetEditParams persists the edit state (neutral params clear it).
