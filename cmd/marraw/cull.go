@@ -1633,7 +1633,7 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 			p.Flag = *pp.Flag
 		}
 		if pp.EditHash != nil {
-			p.EditHash = *pp.EditHash
+			cu.patchHash(pp.ID, *pp.EditHash)
 		}
 	}
 	if aided {
@@ -1659,9 +1659,7 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 			if pp.EditHash != nil {
 				// An own save's hash is taken from its answer; a patch
 				// that may be one is judged once the saves out answer.
-				if !cu.judgePatch(p.ID, *pp.EditHash) && *pp.EditHash != p.EditHash {
-					cu.editedElsewhere(i, *pp.EditHash)
-				}
+				cu.patchHash(p.ID, *pp.EditHash)
 			}
 			if i >= cu.at-stripReach && i <= cu.at+stripReach {
 				changed = true

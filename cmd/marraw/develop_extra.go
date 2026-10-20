@@ -148,16 +148,18 @@ func (cu *culler) devReset() {
 		prev, prevErr := d.last[id], d.failed[id]
 		seq := cu.recordOwn(id, marrawclient.Params{})
 		cu.sendOwn(id, seq, marrawclient.Params{}, func(_ string, err error) {
+			if err != nil && !canceled(err) {
+				// Told even when the panel has left the photo or edited
+				// it again since: the reset did not happen.
+				cu.fail("Could not reset the edit", err)
+			}
 			if d.last[id].seq != seq {
-				return // edited again since: the newer save says
+				return // edited again since, or left: the newer save says
 			}
 			if err != nil {
 				// Left as it was: the panel keeps the edit it shows. An
 				// earlier save answered well is the photo's already; one
 				// failing goes on being sent; one out says when it answers.
-				if !canceled(err) {
-					cu.fail("Could not reset the edit", err)
-				}
 				if prev.seq == 0 {
 					delete(d.last, id)
 					return

@@ -13,10 +13,16 @@ import (
 // saved (the one the photo's patch carries too); the answer of the
 // highest-numbered own save that has answered well sets the photo's hash,
 // in whatever order the answers come, and the edit counts as saved once the
-// latest own save is that one. A patch that comes while own saves of the
-// photo are out may be theirs: the latest such patch is held until they
-// have all answered, then compared with the hash they left the photo on —
-// the same is nothing to do, another is an edit made elsewhere.
+// latest own save is that one.
+//
+// Patches and answers reach the culler loop in any order: patches through
+// the folder's queue, each answer on its own. So a patch is judged against
+// the own saves' hashes, not only the photo's: while own saves of the photo
+// are out, its patches are held, in order, since one may be theirs; once
+// none is out each is judged in turn. A hash an own save answered with in
+// the last ownHashTTL is the panel's own, and nothing to do — its answer
+// set the hash already; any other hash than the photo's is an edit made
+// elsewhere.
 
 // saveJob is an edit to save. done, if set, gets the answer on the culler
 // loop.
@@ -34,13 +40,38 @@ type ownSave struct {
 	tries  int // failed sends of it so far
 }
 
+// ownHashTTL is how long after its answer an own save's hash is still taken
+// as the panel's own when its patch comes: long enough for a patch held up
+// in a busy folder queue, short enough that an edit made elsewhere back to
+// an earlier own state is not taken for one for long.
+const ownHashTTL = 10 * time.Second
+
+// heldCap bounds the patches held per photo while own saves are out; the
+// oldest go first.
+const heldCap = 16
+
+// ownHash is a hash an own save answered with, and when.
+type ownHash struct {
+	hash string
+	at   time.Time
+}
+
 // saveLedger counts own saves out per photo, which answer is the newest
-// applied, and the patch held while saves are out. It decides; the culler
-// acts.
+// applied, the hashes own saves answered with lately, and the patches held
+// while saves are out. It decides; the culler acts.
 type saveLedger struct {
 	out     map[int64]int
 	applied map[int64]int // highest own save seq answered well
-	held    map[int64]string
+	held    map[int64][]string
+	own     map[int64][]ownHash
+	now     func() time.Time // time.Now unless a test sets it
+}
+
+func (l *saveLedger) clock() time.Time {
+	if l.now != nil {
+		return l.now()
+	}
+	return time.Now()
 }
 
 // sent counts an own save of id out.
@@ -51,14 +82,22 @@ func (l *saveLedger) sent(id int64) {
 	l.out[id]++
 }
 
-// answered counts own save seq of id in, and reports whether its answer is
-// the newest so far, to apply: it answered well, and no later own save of
-// the photo has answered well before it.
-func (l *saveLedger) answered(id int64, seq int, ok bool) (apply bool) {
+// answered counts own save seq of id in, answering with hash, and reports
+// whether its answer is the newest so far, to apply: it answered well, and
+// no later own save of the photo has answered well before it. A hash
+// answered well is the panel's own for ownHashTTL, applied or not.
+func (l *saveLedger) answered(id int64, seq int, hash string, ok bool) (apply bool) {
 	if l.out[id]--; l.out[id] <= 0 {
 		delete(l.out, id)
 	}
-	if !ok || seq <= l.applied[id] {
+	if !ok {
+		return false
+	}
+	if l.own == nil {
+		l.own = map[int64][]ownHash{}
+	}
+	l.own[id] = append(l.pruned(id), ownHash{hash: hash, at: l.clock()})
+	if seq <= l.applied[id] {
 		return false
 	}
 	if l.applied == nil {
@@ -68,28 +107,59 @@ func (l *saveLedger) answered(id int64, seq int, ok bool) (apply bool) {
 	return true
 }
 
-// patch takes a patch of id's edit hash, holding it (only the latest: a
-// patch carries the whole state) while own saves of the photo are out. It
-// reports whether it was held.
+// patch takes a patch of id's edit hash, holding it, after any held before
+// it, while own saves of the photo are out. It reports whether it was held.
 func (l *saveLedger) patch(id int64, hash string) (held bool) {
 	if l.out[id] == 0 {
 		return false
 	}
 	if l.held == nil {
-		l.held = map[int64]string{}
+		l.held = map[int64][]string{}
 	}
-	l.held[id] = hash
+	h := append(l.held[id], hash)
+	if len(h) > heldCap {
+		h = h[len(h)-heldCap:]
+	}
+	l.held[id] = h
 	return true
 }
 
-// release hands back the patch of id held, once no own save of it is out.
-func (l *saveLedger) release(id int64) (hash string, ok bool) {
+// release hands back the patches of id held, in the order they came, once
+// no own save of it is out.
+func (l *saveLedger) release(id int64) []string {
 	if l.out[id] > 0 {
-		return "", false
+		return nil
 	}
-	hash, ok = l.held[id]
+	h := l.held[id]
 	delete(l.held, id)
-	return hash, ok
+	return h
+}
+
+// isOwn reports whether hash is one an own save of id answered with lately.
+func (l *saveLedger) isOwn(id int64, hash string) bool {
+	for _, o := range l.pruned(id) {
+		if o.hash == hash {
+			return true
+		}
+	}
+	return false
+}
+
+// pruned drops id's own hashes older than ownHashTTL and returns the rest.
+func (l *saveLedger) pruned(id int64) []ownHash {
+	now := l.clock()
+	keep := l.own[id][:0]
+	for _, o := range l.own[id] {
+		if now.Sub(o.at) < ownHashTTL {
+			keep = append(keep, o)
+		}
+	}
+	if len(keep) == 0 {
+		delete(l.own, id)
+		return nil
+	}
+	l.own[id] = keep
+	return keep
 }
 
 // saveRetryWaits are the waits before each new send of a failed own save,
@@ -130,12 +200,17 @@ func (cu *culler) sendOwn(id int64, seq int, params marrawclient.Params, done fu
 	d := &cu.dev
 	d.ledger.sent(id)
 	cu.queueSave(saveJob{id: id, params: params, done: func(hash string, err error) {
-		if d.ledger.answered(id, seq, err == nil) {
+		if d.ledger.answered(id, seq, hash, err == nil) {
 			cu.setHashOf(id, hash)
 		}
 		done(hash, err)
-		if held, ok := d.ledger.release(id); ok {
-			cu.judgeHeldPatch(id, held)
+		changed := false
+		for _, held := range d.ledger.release(id) {
+			changed = cu.judgeHash(id, held) || changed
+		}
+		if changed {
+			cu.showCull()
+			cu.refilter()
 		}
 	}})
 }
@@ -296,29 +371,36 @@ func (cu *culler) saveForget(id int64) {
 	delete(d.last, id)
 }
 
-// judgePatch takes a patch of photo id's edit hash. While own saves of the
-// photo are out it is held (it may be theirs) and judged once they have
-// answered; otherwise a hash other than the photo's is an edit made
-// elsewhere. It reports whether the patch was held.
-func (cu *culler) judgePatch(id int64, hash string) (held bool) {
-	return cu.dev.ledger.patch(id, hash)
+// patchHash takes a patch of photo id's edit hash: held while own saves of
+// the photo are out (it may be theirs), judged at once otherwise. It
+// reports whether the photo showing changed, for the caller to redraw.
+func (cu *culler) patchHash(id int64, hash string) (changed bool) {
+	if cu.dev.ledger.patch(id, hash) {
+		return false
+	}
+	return cu.judgeHash(id, hash)
 }
 
-// judgeHeldPatch judges the patch of photo id held while own saves of it
-// were out, now they have all answered and left the photo on their hash.
-func (cu *culler) judgeHeldPatch(id int64, hash string) {
-	i, ok := cu.index[id]
-	if !ok {
-		if ai, ok := cu.allIndex[id]; ok {
-			cu.all[ai].EditHash = hash
+// judgeHash judges a patch of photo id's edit hash with no own save of it
+// out. A hash an own save answered with lately is the panel's own: its
+// answer set the hash already, and a late patch of an earlier save must not
+// undo the later one. Any other hash than the photo's is an edit made
+// elsewhere. It reports whether the photo showing changed.
+func (cu *culler) judgeHash(id int64, hash string) (changed bool) {
+	if cu.dev.ledger.isOwn(id, hash) {
+		return false
+	}
+	if i, ok := cu.index[id]; ok {
+		if hash == cu.photos[i].EditHash {
+			return false
 		}
-		return
-	}
-	if hash != cu.photos[i].EditHash {
 		cu.editedElsewhere(i, hash)
-		cu.showCull()
-		cu.refilter()
+		return true
 	}
+	if ai, ok := cu.allIndex[id]; ok {
+		cu.all[ai].EditHash = hash
+	}
+	return false
 }
 
 // editedElsewhere takes the photo showing at i as edited elsewhere, to

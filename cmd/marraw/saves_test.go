@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"slices"
+	"testing"
+	"time"
+)
 
 // TestLedgerAppliesNewestAnswer: answers apply by save number, whatever
 // order they come in, and a failed latest leaves the earlier answer applied.
@@ -8,18 +12,18 @@ func TestLedgerAppliesNewestAnswer(t *testing.T) {
 	var l saveLedger
 	l.sent(1)
 	l.sent(1)
-	if !l.answered(1, 2, true) {
+	if !l.answered(1, 2, "h2", true) {
 		t.Fatal("the newest save's answer was not applied")
 	}
-	if l.answered(1, 1, true) {
+	if l.answered(1, 1, "h1", true) {
 		t.Error("an older save answering after a newer one was applied")
 	}
 	l.sent(1)
 	l.sent(1)
-	if !l.answered(1, 3, true) {
+	if !l.answered(1, 3, "h3", true) {
 		t.Fatal("save 3 answering well was not applied")
 	}
-	if l.answered(1, 4, false) {
+	if l.answered(1, 4, "", false) {
 		t.Error("a failed save was applied")
 	}
 	if l.applied[1] != 3 {
@@ -27,9 +31,10 @@ func TestLedgerAppliesNewestAnswer(t *testing.T) {
 	}
 }
 
-// TestLedgerHoldsLatestPatch: while own saves are out only the latest patch
-// is held, handed back once none is out; with none out nothing is held.
-func TestLedgerHoldsLatestPatch(t *testing.T) {
+// TestLedgerHoldsPatchesInOrder: while own saves are out every patch is
+// held, handed back in the order they came once none is out; with none out
+// nothing is held.
+func TestLedgerHoldsPatchesInOrder(t *testing.T) {
 	var l saveLedger
 	if l.patch(1, "x") {
 		t.Fatal("a patch was held with no own save out")
@@ -39,15 +44,87 @@ func TestLedgerHoldsLatestPatch(t *testing.T) {
 	if !l.patch(1, "a") || !l.patch(1, "b") {
 		t.Fatal("a patch with own saves out was not held")
 	}
-	l.answered(1, 1, true)
-	if _, ok := l.release(1); ok {
-		t.Fatal("the patch was handed back with a save still out")
+	l.answered(1, 1, "a", true)
+	if h := l.release(1); h != nil {
+		t.Fatalf("patches handed back with a save still out: %v", h)
 	}
-	l.answered(1, 2, true)
-	if h, ok := l.release(1); !ok || h != "b" {
-		t.Errorf("released %q, %v; want the latest patch b", h, ok)
+	l.answered(1, 2, "b", true)
+	if h := l.release(1); !slices.Equal(h, []string{"a", "b"}) {
+		t.Errorf("released %v; want [a b] in order", h)
 	}
-	if _, ok := l.release(1); ok {
-		t.Error("the held patch was handed back twice")
+	if h := l.release(1); h != nil {
+		t.Error("held patches were handed back twice")
+	}
+}
+
+// judge mirrors culler.judgeHash's rule on the ledger alone: own, else an
+// outside edit when the hash is not the photo's.
+func judge(l *saveLedger, id int64, current, hash string) (outside bool) {
+	return !l.isOwn(id, hash) && hash != current
+}
+
+// TestAnswersBeforePatches: two quick own saves whose answers both reach
+// the loop before their patches — h1's patch, then h2's — are not taken for
+// edits made elsewhere, though the photo is on h2 when h1's patch comes.
+func TestAnswersBeforePatches(t *testing.T) {
+	var l saveLedger
+	l.sent(1)
+	l.sent(1)
+	l.answered(1, 1, "h1", true)
+	l.answered(1, 2, "h2", true)
+	current := "h2"
+	for _, h := range []string{"h1", "h2"} {
+		if l.patch(1, h) {
+			t.Fatalf("patch %s held with no save out", h)
+		}
+		if judge(&l, 1, current, h) {
+			t.Errorf("own patch %s taken for an edit made elsewhere", h)
+		}
+	}
+}
+
+// TestHeldPatchesJudged: patches held while saves are out are judged in
+// order once none is: own ones are nothing, a fresh hash after them is an
+// edit made elsewhere.
+func TestHeldPatchesJudged(t *testing.T) {
+	var l saveLedger
+	l.sent(1)
+	l.sent(1)
+	l.patch(1, "h1")
+	l.patch(1, "h2")
+	l.patch(1, "x") // another client's edit, after both saves
+	l.answered(1, 2, "h2", true)
+	l.answered(1, 1, "h1", true)
+	current := "h2"
+	var outside []string
+	for _, h := range l.release(1) {
+		if judge(&l, 1, current, h) {
+			outside = append(outside, h)
+			current = h
+		}
+	}
+	if !slices.Equal(outside, []string{"x"}) {
+		t.Errorf("taken for edits made elsewhere: %v; want [x]", outside)
+	}
+}
+
+// TestOwnHashesExpire: an edit made elsewhere back to a state an own save
+// answered with more than ownHashTTL ago is an edit made elsewhere.
+func TestOwnHashesExpire(t *testing.T) {
+	now := time.Unix(1000, 0)
+	l := saveLedger{now: func() time.Time { return now }}
+	l.sent(1)
+	l.answered(1, 1, "h1", true)
+	l.sent(1)
+	l.answered(1, 2, "h2", true)
+	if judge(&l, 1, "h2", "h1") {
+		t.Fatal("a fresh own hash taken for an edit made elsewhere")
+	}
+	now = now.Add(ownHashTTL + time.Second)
+	if !judge(&l, 1, "h2", "h1") {
+		t.Error("an edit made elsewhere back to an old own state was taken for the panel's own")
+	}
+	if !judge(&l, 1, "h2", "fresh") {
+		t.Error("a fresh outside hash was not taken for an edit made elsewhere")
 	}
 }
