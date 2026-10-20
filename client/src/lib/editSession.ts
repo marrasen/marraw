@@ -843,8 +843,8 @@ function persist(client: ApiClient, params: Params, ids: number[]): Promise<void
   const p =
     ids.length > 1
       ? pasteEditParams(client, ids, params)
-      : setEditParams(client, ids[0], params).then((hash) => {
-          setState({ savedHash: { photoId: ids[0], hash } });
+      : setEditParams(client, ids[0], params).then((saved) => {
+          setState({ savedHash: { photoId: ids[0], hash: saved.hash } });
         });
   return p.then(
     () => undefined,
