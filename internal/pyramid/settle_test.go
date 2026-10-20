@@ -20,16 +20,22 @@ func TestWaitForSettle(t *testing.T) {
 	p := store.Photo{CacheKey: "abcdef"}
 
 	start := time.Now()
-	c.WaitForSettle(t.Context(), p, "h")
+	c.WaitForSettle(t.Context(), p, "h", true)
 	if took := time.Since(start); took > 50*time.Millisecond {
 		t.Errorf("a photo not held waited %v", took)
 	}
 
 	defer c.HoldEditor(p)()
 	start = time.Now()
-	c.WaitForSettle(t.Context(), p, "h")
+	c.WaitForSettle(t.Context(), p, "h", true)
 	if took := time.Since(start); took < settleStartWait || took > settleStartWait+time.Second {
 		t.Errorf("with no settle, waited %v; want about %v", took, settleStartWait)
+	}
+
+	start = time.Now()
+	c.WaitForSettle(t.Context(), p, "h", false)
+	if took := time.Since(start); took > 50*time.Millisecond {
+		t.Errorf("with no settle under way and none said to be coming, waited %v", took)
 	}
 
 	done := c.Settling(p, "h")
@@ -38,7 +44,7 @@ func TestWaitForSettle(t *testing.T) {
 		done()
 	}()
 	start = time.Now()
-	c.WaitForSettle(t.Context(), p, "h")
+	c.WaitForSettle(t.Context(), p, "h", true)
 	if took := time.Since(start); took < settleStartWait+300*time.Millisecond {
 		t.Errorf("left after %v, before the settle under way ended", took)
 	}

@@ -42,12 +42,14 @@ func (c *Cache) Settling(photo store.Photo, hash string) (done func()) {
 }
 
 // WaitForSettle waits, for a photo held open in the editor, until its 2048
-// under hash is on disk, or for a settle of it that starts within
-// settleStartWait to end. Some saves have none (a reset; a commit made while
-// cropping settles the flattened frame), so a settle that does not start is
-// not waited for long. It returns at once for a photo not held, the base
-// look, or a 2048 already there.
-func (c *Cache) WaitForSettle(ctx context.Context, photo store.Photo, hash string) {
+// under hash is on disk, or for a settle of it under way to end. With
+// coming, it also waits up to settleStartWait for one to start: a save and
+// its settle leave the editor together, so right after a save one may be
+// on its way. Some saves have none (a reset; a commit made while cropping
+// settles the flattened frame), so one that does not start is not waited
+// for long. It returns at once for a photo not held, the base look, or a
+// 2048 already there.
+func (c *Cache) WaitForSettle(ctx context.Context, photo store.Photo, hash string, coming bool) {
 	if hash == edit.BaseHash || !c.HeldInEditor(photo) {
 		return
 	}
@@ -76,7 +78,7 @@ func (c *Cache) WaitForSettle(ctx context.Context, photo store.Photo, hash strin
 			}
 			return
 		}
-		if time.Since(start) >= settleStartWait {
+		if !coming || time.Since(start) >= settleStartWait {
 			return
 		}
 		select {

@@ -53,6 +53,11 @@ export interface Delta {
     vibrance: number | null;
 }
 
+export interface EditSaved {
+    hash: string;
+    save: number;
+}
+
 export interface FillResult {
     fillVer: string;
     generated: boolean;
@@ -367,16 +372,16 @@ export function subscribeResetEdits(client: ApiClient, ids: number[], callback: 
 }
 
 
-export function setEditParams(client: ApiClient, photoID: number, params: Params, options?: RequestOptions): Promise<string> {
-    return client.request<string>('Edits.SetEditParams', [photoID, params], options);
+export function setEditParams(client: ApiClient, photoID: number, params: Params, options?: RequestOptions): Promise<EditSaved> {
+    return client.request<EditSaved>('Edits.SetEditParams', [photoID, params], options);
 }
 // Wire-method tag consumed by useQuerySuspense to key the promise cache and
 // open the matching server subscription. Stable identifier across builds
 // (unaffected by minification, unlike Function.name).
 setEditParams.method = 'Edits.SetEditParams' as const;
 
-export function subscribeSetEditParams(client: ApiClient, photoID: number, params: Params, callback: (data: string) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
-    return client.subscribe<string>('Edits.SetEditParams', [photoID, params], callback, onError, options);
+export function subscribeSetEditParams(client: ApiClient, photoID: number, params: Params, callback: (data: EditSaved) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<EditSaved>('Edits.SetEditParams', [photoID, params], callback, onError, options);
 }
 
 
@@ -771,7 +776,7 @@ export function useResetEdits(ids: number[], options?: UseQueryOptions<void>): U
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useSetEditParams(photoID: number, params: Params, options?: UseQueryOptions<string>): UseQueryResult<string> {
+export function useSetEditParams(photoID: number, params: Params, options?: UseQueryOptions<EditSaved>): UseQueryResult<EditSaved> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, photoID: number, params: Params) => setEditParams(client, photoID, params, { signal }),
         [],

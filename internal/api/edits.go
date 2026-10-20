@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/marrasen/aprot"
@@ -205,7 +206,9 @@ func (e *Edits) PreviewExact(ctx context.Context, photoID int64, params edit.Par
 	if err != nil {
 		return nil, err
 	}
-	rgba, wbComp, err := e.previewDecode(ctx, photoID, photo, ep)
+	// Read the editor's cached decode, never replace it: hovering looks
+	// must not cost the next drag frame or settle a demosaic.
+	rgba, wbComp, err := e.decodePreview(ctx, photoID, photo, ep, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1251,17 +1254,17 @@ func (e *Edits) OpenInEditor(ctx context.Context, photoID int64) error {
 
 // SetEditParams persists the edit state (neutral params clear it).
 //
-// It returns the saved state's edit hash — the one the photo's patch
-// carries — so the editor knows its own save landed, and which tiles are
-// now the photo's, without waiting for the patch or telling it apart from
-// an edit made elsewhere.
-func (e *Edits) SetEditParams(ctx context.Context, photoID int64, params edit.Params) (string, error) {
-	hash, err := e.saveEdit(ctx, photoID, &params)
+// It returns the saved state's edit hash and the save's number, both of
+// which the photo's patch carries, so the editor knows its own save landed
+// and which tiles are now the photo's, and tells its own saves' patches
+// from edits made elsewhere.
+func (e *Edits) SetEditParams(ctx context.Context, photoID int64, params edit.Params) (*EditSaved, error) {
+	saved, err := e.saveEdit(ctx, photoID, &params)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	aprot.TriggerRefresh(ctx, editKey(photoID))
-	return hash, nil
+	return &saved, nil
 }
 
 // ResetEdits clears the edit state of the given photos.
@@ -1371,23 +1374,24 @@ func (e *Edits) processKeepingHandleUsable(
 
 // saveEdit persists params (nil or neutral clears), pushes the patch to
 // folder subscribers, and warms the new grid thumbnail in the background.
-// It returns the saved edit hash.
-func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params) (string, error) {
+// It returns the saved edit hash and the save's number.
+func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params) (EditSaved, error) {
 	params.Normalize()
 	var jsonPtr *string
 	hash := edit.BaseHash
 	if !params.IsNeutral() {
 		b, err := json.Marshal(params)
 		if err != nil {
-			return "", err
+			return EditSaved{}, err
 		}
 		s := string(b)
 		jsonPtr = &s
 		hash = params.Hash()
 	}
 	if err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli()); err != nil {
-		return "", err
+		return EditSaved{}, err
 	}
+	saved := EditSaved{Hash: hash, Save: editSaves.Add(1)}
 
 	// Warm the grid thumb for the new state so the grid updates without a
 	// scroll-triggered fetch racing the patch, and mirror the new intent to
@@ -1396,18 +1400,18 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 		// A photo open in the editor is now on the saved state, a reset
 		// that renders no settle included. A cleared edit leaves the editor
 		// on the photo's starting state, as GetEditParams gives it.
-		saved := params
+		on := params
 		if params.IsNeutral() {
-			if saved = seededParams(p); saved == nil {
-				saved = &edit.Params{}
+			if on = seededParams(p); on == nil {
+				on = &edit.Params{}
 			}
 		}
-		e.deps.Cache.WantFull(p, saved)
-		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{editPatch(photoID, hash, params)})
+		e.deps.Cache.WantFull(p, on)
+		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{editPatch(photoID, saved, params)})
 		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)
 		e.deps.warmEdit(p, hash)
 	}
-	return hash, nil
+	return saved, nil
 }
 
 // editPatch is the folder broadcast for one photo's new edit state: the
@@ -1416,13 +1420,24 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 // fields are always set — a reset must deliver explicit zeros, and nil
 // params means exactly that (params are already normalized, so CropW/CropH
 // are 0 unless a real crop is present).
-func editPatch(photoID int64, hash string, params *edit.Params) PhotoPatch {
+func editPatch(photoID int64, saved EditSaved, params *edit.Params) PhotoPatch {
 	rotate := params.RotateTurns()
 	var cropW, cropH float64
 	if params != nil {
 		cropW, cropH = params.CropW, params.CropH
 	}
-	return PhotoPatch{ID: photoID, EditHash: &hash, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
+	return PhotoPatch{ID: photoID, EditHash: &saved.Hash, EditSave: &saved.Save, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
+}
+
+// editSaves numbers every edit save, for EditSaved.Save.
+var editSaves atomic.Int64
+
+// EditSaved is what SetEditParams saved: the edit hash, the one the photo's
+// patch carries, and the save's number, which that patch carries too
+// (PhotoPatch.EditSave).
+type EditSaved struct {
+	Hash string `json:"hash"`
+	Save int64  `json:"save"`
 }
 
 // warmSlot holds the cancel func of one in-flight post-save warm so a
@@ -1451,10 +1466,10 @@ func (d *Deps) warmEdit(p store.Photo, hash string) {
 	d.warmCancels[p.ID] = slot
 	d.warmMu.Unlock()
 	go func() {
-		// Ensure waits for the editor's settle of this state, if one is
-		// coming, and derives the thumbs from it. A state a newer save has
-		// replaced meanwhile is nobody's thumbnail: skip it.
-		d.Cache.WaitForSettle(ctx, p, hash)
+		// For a photo open in the editor, the settle of this state may be
+		// on its way: wait for it, then derive the thumbs from its 2048. A
+		// state a newer save has replaced meanwhile is nobody's thumbnail.
+		d.Cache.WaitForSettle(ctx, p, hash, true)
 		if now, err := d.DB.GetPhoto(ctx, p.ID); err == nil && now.EditHash == hash {
 			d.Cache.Ensure(ctx, p, "512", hash, decode.PriorityPrefetch)
 		}

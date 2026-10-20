@@ -103,6 +103,7 @@ export interface PhotoPatch {
     rotate: number | null;
     cropW: number | null;
     cropH: number | null;
+    editSave: number | null;
     subjectSharpness: number | null;
     subjectAnalyzed: boolean | null;
     eyesClosed: number | null;
