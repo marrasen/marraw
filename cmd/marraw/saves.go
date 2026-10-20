@@ -2,7 +2,6 @@ package main
 
 import (
 	"log"
-	"slices"
 	"time"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
@@ -18,16 +17,15 @@ import (
 //
 // Patches and answers reach the culler loop in any order: patches through
 // the folder's queue, each answer on its own. The backend numbers every
-// save, and both the answer and the photo's patch carry the number
-// (EditSave), so a patch is the panel's own exactly when its number is one
-// an own save answered with. While own saves of the photo are out their
-// numbers are not known yet, so its patches are held, in order, and judged
-// once none is out. An own patch is nothing to do — its answer set the
-// hash already, and a late one must not undo a later save. Nor is any patch
-// numbered below the newest own save that answered well: that save came
-// after it and overwrote it (a seed patch arriving late, or an own number
-// gone from the bounded list). Any other patch with another hash than the
-// photo's is an edit made elsewhere.
+// save, in the order the saves are written, and both the answer and the
+// photo's patch carry the number (EditSave). While own saves of the photo
+// are out their numbers are not known yet, so its patches are held, in
+// order, and judged once none is out. A patch numbered at or below the
+// newest own save that answered well is nothing to do: it is that save's
+// own (its answer set the hash already, and a late one must not undo a
+// later save), or one that save came after and overwrote (a seed patch
+// arriving late). Any other patch with another hash than the photo's is an
+// edit made elsewhere.
 
 // saveJob is an edit to save. done, if set, gets the answer on the culler
 // loop.
@@ -49,11 +47,6 @@ type ownSave struct {
 // oldest go first.
 const heldCap = 16
 
-// ownCap bounds the own save numbers kept per photo. Numbers are unique, so
-// keeping them does no harm; a patch late by more saves than this is
-// numbered below the newest own one, and ignored all the same.
-const ownCap = 32
-
 // heldPatch is a patch of a photo's edit hash, held while own saves of the
 // photo are out, and the number of the save that set it (0 when the patch
 // carries none).
@@ -63,14 +56,13 @@ type heldPatch struct {
 }
 
 // saveLedger counts own saves out per photo, which answer is the newest
-// applied, the numbers own saves answered with, and the patches held while
-// saves are out. It decides; the culler acts.
+// applied, the newest backend number own saves answered with, and the
+// patches held while saves are out. It decides; the culler acts.
 type saveLedger struct {
 	out     map[int64]int
 	applied map[int64]int // highest own save seq answered well
 	held    map[int64][]heldPatch
-	own     map[int64][]int64 // backend save numbers of own saves
-	newest  map[int64]int64   // highest backend save number an own save answered well with
+	newest  map[int64]int64 // highest backend save number an own save answered well with
 }
 
 // sent counts an own save of id out.
@@ -84,7 +76,7 @@ func (l *saveLedger) sent(id int64) {
 // answered counts own save seq of id in, answering with the backend's save
 // number, and reports whether its answer is the newest so far, to apply:
 // it answered well, and no later own save of the photo has answered well
-// before it. Its number is the panel's own, applied or not.
+// before it. Its number counts towards the newest own one, applied or not.
 func (l *saveLedger) answered(id int64, seq int, save int64, ok bool) (apply bool) {
 	if l.out[id]--; l.out[id] <= 0 {
 		delete(l.out, id)
@@ -92,14 +84,6 @@ func (l *saveLedger) answered(id int64, seq int, save int64, ok bool) (apply boo
 	if !ok {
 		return false
 	}
-	if l.own == nil {
-		l.own = map[int64][]int64{}
-	}
-	own := append(l.own[id], save)
-	if len(own) > ownCap {
-		own = own[len(own)-ownCap:]
-	}
-	l.own[id] = own
 	if l.newest == nil {
 		l.newest = map[int64]int64{}
 	}
@@ -143,21 +127,15 @@ func (l *saveLedger) release(id int64) []heldPatch {
 	return h
 }
 
-// isOwn reports whether save, the number a patch of id carries, is one an
-// own save of id answered with.
-func (l *saveLedger) isOwn(id, save int64) bool {
-	return save != 0 && slices.Contains(l.own[id], save)
-}
-
 // outside reports whether a patch of id's edit hash, set by save number
 // save (0 when it carries none), is an edit made elsewhere, the photo's
-// hash being current now: not an own save's, not older than the newest own
-// save that answered well, and another hash than the photo's.
+// hash being current now: numbered above the newest own save that answered
+// well, or not numbered, and another hash than the photo's.
 func (l *saveLedger) outside(id int64, hash string, save int64, current string) bool {
-	if l.isOwn(id, save) {
-		return false
-	}
-	if save != 0 && save < l.newest[id] {
+	// Numbers only grow: the backend takes them in write order, from the
+	// clock at start, so a clock stepped back across a restart is assumed
+	// not to happen.
+	if save != 0 && save <= l.newest[id] {
 		return false
 	}
 	return hash != current

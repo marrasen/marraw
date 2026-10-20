@@ -60,9 +60,10 @@ func TestLedgerHoldsPatchesInOrder(t *testing.T) {
 	}
 }
 
-// TestLedgerJudgesByNumber: a patch is the panel's own exactly when its save
-// number is one an own save answered with — held or late, and however long
-// after; an outside edit back to a hash an own save once had is not.
+// TestLedgerJudgesByNumber: a patch numbered at or below the newest own
+// save that answered well is never outside — a late own patch, held or not;
+// one numbered above it, or with no number, is outside when its hash
+// differs, an outside edit back to a hash an own save once had included.
 func TestLedgerJudgesByNumber(t *testing.T) {
 	var l saveLedger
 	// Two quick own saves answer before either patch comes.
@@ -70,37 +71,21 @@ func TestLedgerJudgesByNumber(t *testing.T) {
 	l.sent(1)
 	l.answered(1, 1, 101, true)
 	l.answered(1, 2, 102, true)
-	if !l.isOwn(1, 101) || !l.isOwn(1, 102) {
-		t.Error("a late patch of an own save was not taken as the panel's own")
+	if l.outside(1, "h1", 101, "h2") || l.outside(1, "h2", 102, "h2") {
+		t.Error("a late patch of an own save was judged outside")
 	}
 	// A reset made elsewhere (the grid, another client) to the cleared
-	// edit's hash, which an own save of the panel had too: another number.
-	if l.isOwn(1, 250) {
-		t.Error("an outside save was taken as the panel's own")
+	// edit's hash, which an own save of the panel had too: a later number.
+	if !l.outside(1, "base", 250, "h2") {
+		t.Error("an outside save numbered after the own ones was not judged outside")
 	}
-	// A patch with no number is never the panel's own by number.
-	if l.isOwn(1, 0) {
-		t.Error("a patch without a save number was taken as the panel's own")
+	// A patch with no number is judged by its hash.
+	if !l.outside(1, "x", 0, "h2") || l.outside(1, "h2", 0, "h2") {
+		t.Error("a patch without a save number was not judged by its hash")
 	}
 	// Another photo's numbers are not this one's.
-	if l.isOwn(2, 101) {
+	if !l.outside(2, "y", 101, "h0") {
 		t.Error("an own save of another photo counted for this one")
-	}
-}
-
-// TestLedgerBoundsOwnNumbers: the numbers kept per photo are bounded, the
-// newest kept.
-func TestLedgerBoundsOwnNumbers(t *testing.T) {
-	var l saveLedger
-	for i := 1; i <= ownCap+5; i++ {
-		l.sent(1)
-		l.answered(1, i, int64(1000+i), true)
-	}
-	if n := len(l.own[1]); n != ownCap {
-		t.Fatalf("kept %d numbers, want %d", n, ownCap)
-	}
-	if !l.isOwn(1, int64(1000+ownCap+5)) || l.isOwn(1, 1001) {
-		t.Error("the bound kept the oldest numbers instead of the newest")
 	}
 }
 
@@ -182,16 +167,16 @@ func TestStaleOutsidePatch(t *testing.T) {
 	}
 }
 
-// TestOwnNumberOutOfWindow: a late own patch whose number fell out of the
-// bounded list is still ignored, being older than the newest own save.
-func TestOwnNumberOutOfWindow(t *testing.T) {
+// TestManyOwnSavesLatePatch: a late own patch after many own saves is
+// still ignored, being at or below the newest own save.
+func TestManyOwnSavesLatePatch(t *testing.T) {
 	p := ledgerPhoto{hash: "h0"}
-	for i := 1; i <= ownCap+5; i++ {
+	for i := 1; i <= 40; i++ {
 		p.l.sent(1)
 		p.answer(i, int64(1000+i), "h")
 	}
 	p.patch("old", 1001)
 	if len(p.reloads) != 0 {
-		t.Errorf("a late own patch out of the window reloaded: %v", p.reloads)
+		t.Errorf("a late own patch reloaded: %v", p.reloads)
 	}
 }
