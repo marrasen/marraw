@@ -331,6 +331,9 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 		return "", err
 	}
 	e.deps.Cache.WantFull(photo, &params)
+	// A look considered meanwhile is applied now or left: its decode slot
+	// goes either way (decodePreview below promotes it if it is this one).
+	defer e.dropLook()
 	path := e.deps.Cache.PathFor(photo.CacheKey, "2048", hash)
 	if _, err := os.Stat(path); err == nil {
 		return path, nil // already rendered
@@ -482,6 +485,13 @@ func (e *Edits) approxDecode(photoID int64, ep *edit.Params) (rgba *image.RGBA, 
 		return e.decodeEntry.rgba, e.decodeEntry.expEV, e.decodeEntry.wbCompEV, true
 	}
 	return nil, 0, 0, false
+}
+
+// dropLook lets the considered look's decode go.
+func (e *Edits) dropLook() {
+	e.decodeMu.Lock()
+	e.lookEntry = nil
+	e.decodeMu.Unlock()
 }
 
 // cachedLook returns the considered look's decode for (photoID, key), or nil.
@@ -1457,10 +1467,16 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 		jsonPtr = &s
 		hash = params.Hash()
 	}
-	if err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli()); err != nil {
+	// The write and its number go together, so numbers follow the order
+	// the edits were written in: an editor ignores a patch numbered below
+	// its own newest save as one that save overwrote.
+	saveMu.Lock()
+	err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli())
+	saved := EditSaved{Hash: hash, Save: editSaves.Add(1)}
+	saveMu.Unlock()
+	if err != nil {
 		return EditSaved{}, err
 	}
-	saved := EditSaved{Hash: hash, Save: editSaves.Add(1)}
 
 	// Warm the grid thumb for the new state so the grid updates without a
 	// scroll-triggered fetch racing the patch, and mirror the new intent to
@@ -1497,6 +1513,9 @@ func editPatch(photoID int64, saved EditSaved, params *edit.Params) PhotoPatch {
 	}
 	return PhotoPatch{ID: photoID, EditHash: &saved.Hash, EditSave: &saved.Save, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
 }
+
+// saveMu makes an edit save's write and its number one step.
+var saveMu sync.Mutex
 
 // editSaves numbers every edit save, for EditSaved.Save. It starts from the
 // clock (microseconds since the epoch, well inside a JavaScript number), so
@@ -1542,11 +1561,14 @@ func (d *Deps) warmEdit(p store.Photo, hash string) {
 	d.warmCancels[p.ID] = slot
 	d.warmMu.Unlock()
 	go func() {
-		// For a photo open in the editor, Ensure waits for the settle of
-		// this state and derives the thumbs from its 2048. A newer save of
-		// the photo cancels this warm (above), so a replaced state is
-		// nobody's thumbnail.
-		d.Cache.Ensure(ctx, p, "512", hash, decode.PriorityPrefetch)
+		// For a photo open in the editor, the settle of this state may be
+		// on its way: wait for it, so the thumbs derive from its 2048. A
+		// newer save of the photo cancels this warm (above); a state replaced
+		// otherwise meanwhile (a synced sidecar) is nobody's thumbnail.
+		d.Cache.WaitForSettle(ctx, p, hash, true)
+		if now, err := d.DB.GetPhoto(ctx, p.ID); err == nil && now.EditHash == hash {
+			d.Cache.Ensure(ctx, p, "512", hash, decode.PriorityPrefetch)
+		}
 		cancel()
 		d.warmMu.Lock()
 		if d.warmCancels[p.ID] == slot { // still ours: clear the slot
