@@ -1143,8 +1143,9 @@ func (e *Edits) AutoAdjust(ctx context.Context, photoID int64, params edit.Param
 	return &out, nil
 }
 
-// WarmFull gets a photo's 1:1 render ready for the edits to come: it
-// decodes the photo at full resolution as the editor starts from it — its
+// WarmFull gets a photo's 1:1 render ready for the edits to come: it names
+// the photo the one open in the editor, whose 1:1 renders keep their
+// decode, and decodes it at full resolution as the editor starts from it — its
 // saved edit, or the seeded or neutral starting state of an unedited photo
 // — and keeps the decode. The 1:1 render of any edit that leaves those
 // LibRaw inputs as they are starts from it. For the editor to call as it
@@ -1156,9 +1157,8 @@ func (e *Edits) WarmFull(ctx context.Context, photoID int64) error {
 		return err
 	}
 	// An unedited photo's base look (auto-brightened) is a decode no edit
-	// uses: the first edit starts from GetEditParams' state. A saved edit
-	// is parsed as the 1:1 render parses it, un-normalized, so the two ask
-	// LibRaw for the same decode.
+	// uses: the first edit starts from GetEditParams' state. Normalized, as
+	// the next edit is saved.
 	start := &edit.Params{}
 	if photo.EditParams.Valid {
 		if start, err = edit.Parse(photo.EditParams.String); err != nil {
@@ -1166,8 +1166,8 @@ func (e *Edits) WarmFull(ctx context.Context, photoID int64) error {
 		}
 	} else if seeded := seededParams(photo); seeded != nil {
 		start = seeded
-		start.Normalize()
 	}
+	start.Normalize()
 	return e.deps.Cache.WarmFull(ctx, photo, start)
 }
 

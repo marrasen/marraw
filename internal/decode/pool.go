@@ -98,19 +98,16 @@ retry:
 		}
 	}
 	if ok {
-		// Promote a duplicate so the waiter isn't stuck behind background
-		// work; a running one learns it through JobPriority.
-		if prio > j.prio {
+		// Promote a queued duplicate so the waiter isn't stuck behind
+		// background work.
+		if j.index >= 0 && prio > j.prio {
 			j.prio = prio
-			if j.index >= 0 {
-				heap.Fix(&p.queue, j.index)
-			}
+			heap.Fix(&p.queue, j.index)
 		}
 	} else {
 		p.seq++
 		jctx, jcancel := context.WithCancel(context.Background())
-		j = &job{key: key, prio: prio, seq: p.seq, fn: fn, done: make(chan struct{}), cancel: jcancel}
-		j.ctx = context.WithValue(jctx, jobCtxKey{}, jobRef{p, j})
+		j = &job{key: key, prio: prio, seq: p.seq, fn: fn, done: make(chan struct{}), ctx: jctx, cancel: jcancel}
 		p.inflight[key] = j
 		heap.Push(&p.queue, j)
 		p.cond.Signal()
@@ -125,26 +122,6 @@ retry:
 		p.abandon(j)
 		return ctx.Err()
 	}
-}
-
-type jobCtxKey struct{}
-
-type jobRef struct {
-	pool *Pool
-	job  *job
-}
-
-// JobPriority is the priority of the pool job whose fn got ctx, as it is
-// now: a caller joining a running job raises it. ok is false for a ctx
-// that is not a job's.
-func JobPriority(ctx context.Context) (prio Priority, ok bool) {
-	ref, ok := ctx.Value(jobCtxKey{}).(jobRef)
-	if !ok {
-		return 0, false
-	}
-	ref.pool.mu.Lock()
-	defer ref.pool.mu.Unlock()
-	return ref.job.prio, true
 }
 
 // abandon releases one waiter. The last waiter to give up kills the job:

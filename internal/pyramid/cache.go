@@ -109,6 +109,7 @@ type Cache struct {
 	fullEntry   *fullDecode
 	fullFlights map[string]chan struct{}
 	fullClosed  bool
+	fullEditor  string // CacheKey of the photo open in the editor
 	fullDecodes atomic.Int64 // full-resolution decodes run, for tests
 }
 
@@ -506,9 +507,14 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// decode against a supposedly warm cache is a bug, and this line is how
 	// it gets caught (see the browse-stall hunt, 2026-07-14).
 	rawStart := time.Now()
+	decoded := true
 	defer func() {
-		log.Printf("pyramid: RAW render %s level=%s hash=%s prio=%d took %s",
-			photo.FileName, level, editHash, prio, time.Since(rawStart).Round(time.Millisecond))
+		what := "RAW render"
+		if !decoded {
+			what = "render from the kept decode"
+		}
+		log.Printf("pyramid: %s %s level=%s hash=%s prio=%d took %s",
+			what, photo.FileName, level, editHash, prio, time.Since(rawStart).Round(time.Millisecond))
 	}()
 	// Fraction budget across the whole render: decode 0–0.70, look/detail
 	// 0.70–0.90, write-out 0.90–1. Throttled here (not per source) so the
@@ -545,7 +551,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		}
 	}
 	if level == "full" {
-		rgba, wbCompEV, shared, err = c.fullDecodeFor(ctx, proc, photo, edits, openFull, prio)
+		rgba, wbCompEV, shared, decoded, err = c.fullDecodeFor(ctx, proc, photo, edits, openFull)
 		if err != nil {
 			return err
 		}

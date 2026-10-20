@@ -17,9 +17,9 @@ import (
 // 170 MB, so it goes once nobody has rendered from it for a while.
 const fullDecodeIdle = 2 * time.Minute
 
-// fullDecode is the last full-resolution LibRaw decode the user waited on,
-// kept so the next 1:1 render of the same photo under the same LibRaw
-// inputs skips the demosaic — ~2.5 s of a 42-megapixel render. Crop,
+// fullDecode is the last full-resolution LibRaw decode of the photo open in
+// the editor, kept so the next 1:1 render under the same LibRaw inputs
+// skips the demosaic — ~2.5 s of a 42-megapixel render. Crop,
 // straighten, lens, masks, healing and every look-stage slider leave the
 // decode as it is, so after an edit of any of them the tiles come back in
 // the time the stages after the decode take. The pixels are exactly the
@@ -29,7 +29,7 @@ type fullDecode struct {
 	key      string      // fullDecodeKey
 	wbCompEV float64     // edit.WBCompEV for this decode's WB
 	rgba     *image.RGBA // never changed once kept
-	used     time.Time   // last render someone waited on; guarded by fullMu
+	used     time.Time   // last render from it; guarded by fullMu
 	timer    *time.Timer // lets the decode go fullDecodeIdle after used
 }
 
@@ -58,21 +58,33 @@ func fullDecodeParams(edits *edit.Params) libraw.Params {
 	return params
 }
 
-// keptFull returns the kept decode of cacheKey under key, or nil. Its
-// pixels are shared: copy them before changing any. touch, for a render
-// someone waits on, restarts its idle time; the background pass using it
-// does not keep it alive.
-func (c *Cache) keptFull(cacheKey, key string, touch bool) *fullDecode {
+// keptFull returns the kept decode of cacheKey under key, or nil, and
+// restarts its idle time. Its pixels are shared: copy them before changing
+// any.
+func (c *Cache) keptFull(cacheKey, key string) *fullDecode {
 	c.fullMu.Lock()
 	defer c.fullMu.Unlock()
 	f := c.fullEntry
 	if f == nil || f.cacheKey != cacheKey || f.key != key {
 		return nil
 	}
-	if touch {
-		f.used = time.Now()
-	}
+	f.used = time.Now()
 	return f
+}
+
+// editorsFull reports whether a decode of photo under edits is one to keep:
+// the photo is the one open in the editor (WarmFull names it) and the
+// decode is an edit's. Any other 1:1 render — the pre-render pass, the
+// neighbours the loupe prefetches, a share-link guest — would only push the
+// editor's decode out. The base look's decode (auto-brightened) is never
+// one an edit can start from.
+func (c *Cache) editorsFull(photo store.Photo, edits *edit.Params) bool {
+	if edits == nil {
+		return false
+	}
+	c.fullMu.Lock()
+	defer c.fullMu.Unlock()
+	return photo.CacheKey == c.fullEditor
 }
 
 // keepFull makes f the kept decode, in place of any other. A closed cache
@@ -80,14 +92,14 @@ func (c *Cache) keptFull(cacheKey, key string, touch bool) *fullDecode {
 func (c *Cache) keepFull(f *fullDecode) {
 	c.fullMu.Lock()
 	defer c.fullMu.Unlock()
-	if c.fullClosed {
+	if c.fullClosed || c.fullEntry == f {
 		return
 	}
-	f.used = time.Now()
-	f.timer = time.AfterFunc(fullDecodeIdle, func() { c.expireFull(f) })
 	if old := c.fullEntry; old != nil {
 		old.timer.Stop()
 	}
+	f.used = time.Now()
+	f.timer = time.AfterFunc(fullDecodeIdle, func() { c.expireFull(f) })
 	c.fullEntry = f
 }
 
@@ -145,12 +157,12 @@ func (c *Cache) decodeFull(ctx context.Context, proc *libraw.Processor, photo st
 // keeping it first when it is not kept. A decode of it under way elsewhere
 // (WarmFull's, or another 1:1 render's) is waited for rather than run twice.
 // The pixels are shared: copy them before changing any.
-func (c *Cache) keptFullDecode(ctx context.Context, proc *libraw.Processor, photo store.Photo, edits *edit.Params, open func() error) (*fullDecode, error) {
+func (c *Cache) keptFullDecode(ctx context.Context, proc *libraw.Processor, photo store.Photo, edits *edit.Params, open func() error) (f *fullDecode, decoded bool, err error) {
 	key := fullDecodeKey(edits)
 	flight := photo.CacheKey + "|" + key
 	for {
-		if f := c.keptFull(photo.CacheKey, key, true); f != nil {
-			return f, nil
+		if f := c.keptFull(photo.CacheKey, key); f != nil {
+			return f, false, nil
 		}
 		c.fullMu.Lock()
 		wait, busy := c.fullFlights[flight]
@@ -174,67 +186,54 @@ func (c *Cache) keptFullDecode(ctx context.Context, proc *libraw.Processor, phot
 		select {
 		case <-wait:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, false, ctx.Err()
 		}
 	}
-	f, err := c.decodeFull(ctx, proc, photo, edits, open)
-	if err != nil {
-		return nil, err
+	if f, err = c.decodeFull(ctx, proc, photo, edits, open); err != nil {
+		return nil, false, err
 	}
 	c.keepFull(f)
-	return f, nil
+	return f, true, nil
 }
 
 // fullDecodeFor returns photo's full-resolution decode under edits and the
 // WB compensation it was decoded under. shared reports pixels the kept
-// decode owns too: the caller copies them before changing any. A render
-// someone waits on (its pool job at visible priority or up, joined since
-// or not) keeps its decode for the next one; the background pass uses the
-// kept decode when it is the one but never replaces it, or the 1:1
-// pre-render pass would push the photo being edited out within seconds.
-func (c *Cache) fullDecodeFor(ctx context.Context, proc *libraw.Processor, photo store.Photo, edits *edit.Params, open func() error, prio decode.Priority) (rgba *image.RGBA, wbCompEV float64, shared bool, err error) {
-	waited := func() bool {
-		if now, ok := decode.JobPriority(ctx); ok {
-			prio = now
-		}
-		return prio >= decode.PriorityVisible
-	}
-	if waited() {
-		f, err := c.keptFullDecode(ctx, proc, photo, edits, open)
+// decode owns too: the caller copies them before changing any; decoded
+// reports whether LibRaw ran. The editor's photo keeps its decode for the
+// next render (see editorsFull); any other photo decodes for itself.
+func (c *Cache) fullDecodeFor(ctx context.Context, proc *libraw.Processor, photo store.Photo, edits *edit.Params, open func() error) (rgba *image.RGBA, wbCompEV float64, shared, decoded bool, err error) {
+	if c.editorsFull(photo, edits) {
+		f, decoded, err := c.keptFullDecode(ctx, proc, photo, edits, open)
 		if err != nil {
-			return nil, 0, false, err
+			return nil, 0, false, false, err
 		}
-		return f.rgba, f.wbCompEV, true, nil
-	}
-	if f := c.keptFull(photo.CacheKey, fullDecodeKey(edits), false); f != nil {
-		return f.rgba, f.wbCompEV, true, nil
+		return f.rgba, f.wbCompEV, true, decoded, nil
 	}
 	f, err := c.decodeFull(ctx, proc, photo, edits, open)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, false, err
 	}
-	if waited() {
-		// Someone came to wait on it during the decode.
-		c.keepFull(f)
-		return f.rgba, f.wbCompEV, true, nil
-	}
-	return f.rgba, f.wbCompEV, false, nil
+	return f.rgba, f.wbCompEV, false, true, nil
 }
 
-// WarmFull decodes photo at full resolution under edits and keeps the
-// decode, so the 1:1 render of the next edit that leaves the LibRaw inputs
-// as edits has them starts after the demosaic. Nothing is decoded when the
-// decode is kept already; a 1:1 render asking for the same decode meanwhile
-// waits for this one. Cancelling ctx stops the decode. It runs at visible
-// priority: a 1:1 render may be waiting on it.
+// WarmFull names photo the one open in the editor, whose 1:1 renders keep
+// their decode, and decodes it at full resolution under edits, so the 1:1
+// render of the next edit that leaves the LibRaw inputs as edits has them
+// starts after the demosaic. Nothing is decoded when the decode is kept
+// already; a 1:1 render asking for the same decode meanwhile waits for
+// this one. Cancelling ctx stops the decode. It runs at visible priority: a
+// 1:1 render may be waiting on it. edits nil only names the photo.
 func (c *Cache) WarmFull(ctx context.Context, photo store.Photo, edits *edit.Params) error {
-	if c.pool == nil {
+	c.fullMu.Lock()
+	c.fullEditor = photo.CacheKey
+	c.fullMu.Unlock()
+	if c.pool == nil || edits == nil {
 		return nil
 	}
 	const prio = decode.PriorityVisible
 	key := photo.CacheKey + "|warmfull|" + fullDecodeKey(edits)
 	return c.pool.Do(ctx, key, prio, func(jctx context.Context, proc *libraw.Processor) error {
-		_, err := c.keptFullDecode(jctx, proc, photo, edits, func() error {
+		_, _, err := c.keptFullDecode(jctx, proc, photo, edits, func() error {
 			return decode.OpenForDecode(jctx, c.IOGate, proc, photo.Path(), prio)
 		})
 		return err
