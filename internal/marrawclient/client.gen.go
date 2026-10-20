@@ -413,6 +413,22 @@ func (h EditsClient) SubscribePreviewEdit(ctx context.Context, photoID int64, pa
 	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.PreviewEdit", []any{photoID, params_, longEdge}, opts...)
 }
 
+// PreviewExact renders the (unsaved) edit state exactly as the 2048 settle
+// does — the same decode, no fold or reuse approximations — at longEdge
+// (0 is 2048, up to draftEdgeMax), in memory and never cached. Unlike the
+// settle it does not tell the backend the editor is on this state: it is
+// for looks the user only considers, such as a hovered preset, which must
+// match what applying them gives but must not move the kept full decode.
+func (h EditsClient) PreviewExact(ctx context.Context, photoID int64, params_ Params, longEdge int) (*client.Blob, error) {
+	return client.Call[*client.Blob](ctx, h.c, "Edits.PreviewExact", []any{photoID, params_, longEdge})
+}
+
+// SubscribePreviewExact runs PreviewExact as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribePreviewExact(ctx context.Context, photoID int64, params_ Params, longEdge int, opts ...client.SubscribeOption) *client.Subscription[*client.Blob] {
+	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.PreviewExact", []any{photoID, params_, longEdge}, opts...)
+}
+
 // ResetEdits clears the edit state of the given photos.
 func (h EditsClient) ResetEdits(ctx context.Context, ids []int64) error {
 	_, err := client.Call[struct{}](ctx, h.c, "Edits.ResetEdits", []any{ids})
@@ -421,18 +437,18 @@ func (h EditsClient) ResetEdits(ctx context.Context, ids []int64) error {
 
 // SetEditParams persists the edit state (neutral params clear it).
 //
-// It returns the saved state's edit hash — the one the photo's patch
-// carries — so the editor knows its own save landed, and which tiles are
-// now the photo's, without waiting for the patch or telling it apart from
-// an edit made elsewhere.
-func (h EditsClient) SetEditParams(ctx context.Context, photoID int64, params_ Params) (string, error) {
-	return client.Call[string](ctx, h.c, "Edits.SetEditParams", []any{photoID, params_})
+// It returns the saved state's edit hash and the save's number, both of
+// which the photo's patch carries, so the editor knows its own save landed
+// and which tiles are now the photo's, and tells its own saves' patches
+// from edits made elsewhere.
+func (h EditsClient) SetEditParams(ctx context.Context, photoID int64, params_ Params) (*EditSaved, error) {
+	return client.Call[*EditSaved](ctx, h.c, "Edits.SetEditParams", []any{photoID, params_})
 }
 
 // SubscribeSetEditParams runs SetEditParams as a live query.
 // Each result arrives on the subscription's C; close it with Close.
-func (h EditsClient) SubscribeSetEditParams(ctx context.Context, photoID int64, params_ Params, opts ...client.SubscribeOption) *client.Subscription[string] {
-	return client.Subscribe[string](ctx, h.c, "Edits.SetEditParams", []any{photoID, params_}, opts...)
+func (h EditsClient) SubscribeSetEditParams(ctx context.Context, photoID int64, params_ Params, opts ...client.SubscribeOption) *client.Subscription[*EditSaved] {
+	return client.Subscribe[*EditSaved](ctx, h.c, "Edits.SetEditParams", []any{photoID, params_}, opts...)
 }
 
 // SubjectBounds locates the photo's subject as a bounding box for the crop
@@ -1624,6 +1640,14 @@ type DriveInfo struct {
 	Name string `json:"name"`
 }
 
+// EditSaved is what SetEditParams saved: the edit hash, the one the photo's
+// patch carries, and the save's number, which that patch carries too
+// (PhotoPatch.EditSave).
+type EditSaved struct {
+	Hash string `json:"hash"`
+	Save int64  `json:"save"`
+}
+
 // ExifMode selects what metadata an export carries: everything the catalog
 // has, only the artist/copyright credit, or a bare file with no EXIF at all.
 type ExifMode string
@@ -2090,6 +2114,10 @@ type PhotoPatch struct {
 	Rotate *int     `json:"rotate"`
 	CropW  *float64 `json:"cropW"`
 	CropH  *float64 `json:"cropH"`
+	// EditSave numbers the save that set EditHash, as SetEditParams returns
+	// it to the caller, so an editor tells its own saves' patches from edits
+	// made elsewhere exactly, not by guessing from the hash.
+	EditSave *int64 `json:"editSave"`
 	// SubjectSharpness delivers a just-measured subject focus score to the grid
 	// without a full folder-list refresh. Only ever a real score — the "-1
 	// unscoreable" sentinel is client-invisible (see SubjectAnalyzed).

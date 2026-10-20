@@ -147,7 +147,7 @@ func (cu *culler) devReset() {
 		// one before it answering late cannot undo it.
 		prev, prevErr := d.last[id], d.failed[id]
 		seq := cu.recordOwn(id, marrawclient.Params{})
-		cu.sendOwn(id, seq, marrawclient.Params{}, func(_ string, err error) {
+		cu.sendOwn(id, seq, marrawclient.Params{}, func(_ marrawclient.EditSaved, err error) {
 			last, onIt := d.last[id]
 			if err != nil && !canceled(err) && (!onIt || last.seq == seq) {
 				// Told while the reset is the latest save, or the panel has
