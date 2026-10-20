@@ -2,7 +2,7 @@
 //
 // jsdom: lib/backend.ts reads window.location at module scope, and the hook
 // renders through react-dom.
-import { act, createElement } from 'react';
+import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -102,5 +102,35 @@ describe('warmth', () => {
     await act(async () => root.render(createElement(W, { p: next, report })));
     // Not even the render the new hash arrives in reads the old warmth.
     expect(seen.slice(from)).not.toContain(true);
+  });
+});
+
+// A tile set found warm once can be evicted since (the janitor): the next
+// probe's miss must make it read cold again, not keep the old warmth.
+describe('warmth', () => {
+  const seen = { warm: false };
+  function WarmProbe(props: { want: boolean }) {
+    const warm = useTilesWarm(photo, props.want, false);
+    useEffect(() => {
+      seen.warm = warm;
+    });
+    return null;
+  }
+  const showWarm = (want: boolean) =>
+    act(async () => {
+      root.render(createElement(WarmProbe, { want }));
+    });
+
+  it('reads cold once a warm set is found gone', async () => {
+    let cached = true;
+    globalThis.fetch = vi.fn(async () => new Response(null, { status: cached ? 200 : 404 })) as typeof fetch;
+    await showWarm(true);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(seen.warm).toBe(true);
+    await showWarm(false);
+    cached = false;
+    await showWarm(true);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(seen.warm).toBe(false);
   });
 });

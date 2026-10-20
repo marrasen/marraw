@@ -85,6 +85,8 @@ export function useTilesWarm(
           setWarmUrl(url0);
           return;
         }
+        // Found warm once, gone since (the janitor evicted the tiles): cold.
+        setWarmUrl((w) => (w === url0 ? '' : w));
         if (!kick) return;
         // Kick only after a real dwell: while the user is skimming, no full
         // render ever STARTS — cheaper and more robust than starting one per
@@ -110,6 +112,9 @@ export function useTilesWarm(
       shorten.current = null;
       window.clearTimeout(dwell);
       ac.abort();
+      // Leaving the state (or the zoom) forgets its warmth: coming back
+      // probes again rather than trust tiles the janitor may have evicted.
+      setWarmUrl((w) => (w === url0 ? '' : w));
     };
   }, [url0, want, kick]);
   return want && url0 !== '' && warmUrl === url0;

@@ -844,29 +844,42 @@ function pushHistory(photoId: number, params: Params, label: string) {
   });
 }
 
+// Numbers the saves of the session's photo; never restarts (see Committed).
+let saveCounter = 0;
+
+// saveSent records a save of the session's photo, when ids includes it, in
+// `committed`, and returns the function to call when it is back with the
+// hash it saved (null: unknown, as for a paste or a reset).
+function saveSent(ids: number[]): (hash: string | null) => void {
+  const s = useEditSession.getState();
+  const photoId = s.photoId;
+  if (photoId == null || !ids.includes(photoId) || s.shown?.photoId !== photoId) return () => {};
+  const seq = ++saveCounter;
+  const prev = s.committed?.photoId === photoId ? s.committed : null;
+  setState({
+    committed: {
+      photoId,
+      seq,
+      firstSeq: prev?.firstSeq ?? seq,
+      fromHash: prev?.fromHash ?? s.shown.hash,
+      out: (prev?.out ?? 0) + 1,
+      resultHash: null,
+    },
+  });
+  // The save is back: one fewer out, and the newest save's own result.
+  return (hash) =>
+    setState((st) => {
+      const c = st.committed;
+      if (c?.photoId !== photoId || seq < c.firstSeq) return {};
+      return { committed: { ...c, out: Math.max(0, c.out - 1), resultHash: c.seq === seq ? hash : c.resultHash } };
+    });
+}
+
 // persist saves the params to every target. The returned promise settles when
 // the save is done (or has failed and been reported) — never rejects — so
 // callers can sequence work that must not race the write.
 function persist(client: ApiClient, params: Params, ids: number[]): Promise<void> {
-  const s = useEditSession.getState();
-  const photoId = s.photoId;
-  let seq: number | null = null;
-  if (photoId != null && ids.includes(photoId) && s.shown?.photoId === photoId) {
-    const prev = s.committed?.photoId === photoId ? s.committed : null;
-    seq = (prev?.seq ?? 0) + 1;
-    setState({
-      committed: { photoId, seq, fromHash: s.shown.hash, out: (prev?.out ?? 0) + 1, resultHash: null },
-    });
-  }
-  // The save is back: one fewer out, and the newest save's own result.
-  const back = (hash: string | null) => {
-    if (seq == null) return;
-    setState((st) => {
-      const c = st.committed;
-      if (c?.photoId !== photoId) return {};
-      return { committed: { ...c, out: Math.max(0, c.out - 1), resultHash: c.seq === seq ? hash : c.resultHash } };
-    });
-  };
+  const back = saveSent(ids);
   if (ids.length > 1) {
     return pasteEditParams(client, ids, params).then(
       () => back(null),
@@ -1328,7 +1341,11 @@ export function esReset(client: ApiClient) {
   setState({ draft: { ...NEUTRAL }, lastPresetApply: null });
   esClearPreview();
   const ids = s.applyIds.length > 1 ? s.applyIds : [photoId];
+  // The user's own save too: its result's hash is not returned, so whether
+  // the photo moved past the hash before it decides.
+  const back = saveSent(ids);
   resetEdits(client, ids)
+    .finally(() => back(null))
     .then(async () => {
       const params = await getEditParams(client, photoId).catch(() => null);
       if (useEditSession.getState().photoId !== photoId) return;

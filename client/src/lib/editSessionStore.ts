@@ -47,7 +47,14 @@ export interface HistoryEntry {
 
 export interface Committed {
   photoId: number;
+  // The newest save's number, and the first one this record counts: numbers
+  // come from one counter that never restarts, so a save sent before the
+  // record began (before a photo switch) cannot answer into it.
   seq: number;
+  firstSeq: number;
+  // The hash the photo showed before the first save of the record. Kept
+  // across the record's later saves, so a save that changes nothing (crop
+  // entered and left) does not hide the result of the real one before it.
   fromHash: string;
   out: number;
   resultHash: string | null;
