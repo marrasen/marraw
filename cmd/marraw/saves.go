@@ -20,12 +20,14 @@ import (
 // save, in the order the saves are written, and both the answer and the
 // photo's patch carry the number (EditSave). While own saves of the photo
 // are out their numbers are not known yet, so its patches are held, in
-// order, and judged once none is out. A patch numbered at or below the
-// newest own save that answered well is nothing to do: it is that save's
-// own (its answer set the hash already, and a late one must not undo a
-// later save), or one that save came after and overwrote (a seed patch
-// arriving late). Any other patch with another hash than the photo's is an
-// edit made elsewhere.
+// order, and judged once none is out. The ledger keeps the highest number
+// applied to the photo from any source, own answers and outside patches
+// alike. A patch numbered at or below it is nothing to do: it is an own
+// save's (its answer set the hash already, and a late one must not undo a
+// later save), or one a later save overwrote (a seed patch arriving late,
+// or two outside saves delivered out of order — aprot may reorder). Any
+// other patch with another hash than the photo's is an edit made
+// elsewhere; a numbered one raises the highest number.
 
 // saveJob is an edit to save. done, if set, gets the answer on the culler
 // loop.
@@ -56,13 +58,21 @@ type heldPatch struct {
 }
 
 // saveLedger counts own saves out per photo, which answer is the newest
-// applied, the newest backend number own saves answered with, and the
-// patches held while saves are out. It decides; the culler acts.
+// applied, the highest backend save number applied from any source, and
+// the patches held while saves are out. It decides; the culler acts.
 type saveLedger struct {
 	out     map[int64]int
 	applied map[int64]int // highest own save seq answered well
 	held    map[int64][]heldPatch
-	newest  map[int64]int64 // highest backend save number an own save answered well with
+	newest  map[int64]int64 // highest backend save number applied: own answers and outside patches
+}
+
+// raise makes save the highest number applied to id when it is higher.
+func (l *saveLedger) raise(id, save int64) {
+	if l.newest == nil {
+		l.newest = map[int64]int64{}
+	}
+	l.newest[id] = max(l.newest[id], save)
 }
 
 // sent counts an own save of id out.
@@ -74,9 +84,10 @@ func (l *saveLedger) sent(id int64) {
 }
 
 // answered counts own save seq of id in, answering with the backend's save
-// number, and reports whether its answer is the newest so far, to apply:
-// it answered well, and no later own save of the photo has answered well
-// before it. Its number counts towards the newest own one, applied or not.
+// number, and reports whether its hash is to apply: it answered well, no
+// later own save of the photo has answered well before it, and no save
+// numbered after it (an edit made elsewhere since) is applied already. Its
+// number raises the highest applied either way.
 func (l *saveLedger) answered(id int64, seq int, save int64, ok bool) (apply bool) {
 	if l.out[id]--; l.out[id] <= 0 {
 		delete(l.out, id)
@@ -84,10 +95,8 @@ func (l *saveLedger) answered(id int64, seq int, save int64, ok bool) (apply boo
 	if !ok {
 		return false
 	}
-	if l.newest == nil {
-		l.newest = map[int64]int64{}
-	}
-	l.newest[id] = max(l.newest[id], save)
+	fresh := save > l.newest[id]
+	l.raise(id, save)
 	if seq <= l.applied[id] {
 		return false
 	}
@@ -95,7 +104,7 @@ func (l *saveLedger) answered(id int64, seq int, save int64, ok bool) (apply boo
 		l.applied = map[int64]int{}
 	}
 	l.applied[id] = seq
-	return true
+	return fresh
 }
 
 // patch takes a patch of id's edit hash, set by save number save, holding
@@ -129,14 +138,18 @@ func (l *saveLedger) release(id int64) []heldPatch {
 
 // outside reports whether a patch of id's edit hash, set by save number
 // save (0 when it carries none), is an edit made elsewhere, the photo's
-// hash being current now: numbered above the newest own save that answered
-// well, or not numbered, and another hash than the photo's.
+// hash being current now: numbered above the highest number applied, or
+// not numbered, and another hash than the photo's. A numbered patch above
+// the highest is applied by the caller, so it raises the highest.
 func (l *saveLedger) outside(id int64, hash string, save int64, current string) bool {
 	// Numbers only grow: the backend takes them in write order, from the
 	// clock at start, so a clock stepped back across a restart is assumed
 	// not to happen.
-	if save != 0 && save <= l.newest[id] {
-		return false
+	if save != 0 {
+		if save <= l.newest[id] {
+			return false
+		}
+		l.raise(id, save)
 	}
 	return hash != current
 }
@@ -376,11 +389,11 @@ func (cu *culler) patchHash(id int64, hash string, save *int64) {
 }
 
 // judgeHash judges a patch of photo id's edit hash, set by save number save
-// (0 for none), with no own save of it out. A patch of an own save is
-// nothing to do: its answer set the hash already, and a late patch of an
-// earlier save must not undo the later one. So is one numbered below the
-// newest own save that answered well. Any other with another hash than the
-// photo's is an edit made elsewhere (saveLedger.outside). It reports whether the photo
+// (0 for none), with no own save of it out. A patch numbered at or below
+// the highest number applied to the photo is nothing to do: an own save's
+// (its answer set the hash already) or one a later save overwrote. Any
+// other with another hash than the photo's is an edit made elsewhere
+// (saveLedger.outside). It reports whether the photo
 // showing changed (shown), or the folder's list of the photos not showing
 // (listed).
 func (cu *culler) judgeHash(id int64, hash string, save int64) (shown, listed bool) {

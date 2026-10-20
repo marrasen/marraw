@@ -180,3 +180,42 @@ func TestManyOwnSavesLatePatch(t *testing.T) {
 		t.Errorf("a late own patch reloaded: %v", p.reloads)
 	}
 }
+
+// TestOutsidePatchesOutOfOrder: two edits made elsewhere, delivered in
+// reverse number order, leave the photo on the later one.
+func TestOutsidePatchesOutOfOrder(t *testing.T) {
+	p := ledgerPhoto{hash: "h0"}
+	p.patch("paste", 101)
+	p.patch("seed", 100)
+	if p.hash != "paste" || !slices.Equal(p.reloads, []string{"paste"}) {
+		t.Errorf("ended on %q with reloads %v; want paste, one reload", p.hash, p.reloads)
+	}
+}
+
+// TestOutsideAfterOwnSaves: an edit made elsewhere numbered after the
+// panel's own saves is applied, and a late own patch after it changes
+// nothing.
+func TestOutsideAfterOwnSaves(t *testing.T) {
+	p := ledgerPhoto{hash: "h0"}
+	p.l.sent(1)
+	p.l.sent(1)
+	p.answer(1, 101, "h1")
+	p.answer(2, 102, "h2")
+	p.patch("reset", 150)
+	p.patch("h2", 102)
+	if p.hash != "reset" || !slices.Equal(p.reloads, []string{"reset"}) {
+		t.Errorf("ended on %q with reloads %v; want reset, one reload", p.hash, p.reloads)
+	}
+}
+
+// TestOwnAnswerAfterOutside: an own save's answer arriving after an edit
+// made elsewhere numbered later was applied does not undo that edit.
+func TestOwnAnswerAfterOutside(t *testing.T) {
+	p := ledgerPhoto{hash: "h0"}
+	p.patch("elsewhere", 200)
+	p.l.sent(1)
+	p.answer(1, 150, "own")
+	if p.hash != "elsewhere" {
+		t.Errorf("a late own answer numbered before the outside edit moved the photo to %q", p.hash)
+	}
+}
