@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -181,7 +183,9 @@ func (d *Deps) seedDefaultPreset(ctx context.Context, photoID int64, up UserPres
 		return err
 	}
 	before, err := d.DB.GetPhoto(ctx, photoID)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // gone meanwhile (a rescan removed it): nothing to seed
+	} else if err != nil {
 		return err
 	}
 	landed := false
