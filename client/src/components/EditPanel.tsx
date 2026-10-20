@@ -108,9 +108,10 @@ export function EditPanel({ photos, variant }: { photos: Photo[]; variant: 'libr
       void esLoad(client, focusId, ids, photos.find((p) => p.id === focusId)?.baseExpEV ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, focusId]);
-  // The Develop editor holds the photo it shows open on the backend, so the
-  // 1:1 view after an edit skips the RAW demosaic (see editorHold).
-  useEditorHold(client, variant === 'develop' && ids.length <= 1 ? focusId : null);
+  // The Develop editor holds the photo its loupe shows open on the backend
+  // (the focused one, however many are selected), so the 1:1 view after an
+  // edit skips the RAW demosaic (see editorHold).
+  useEditorHold(client, variant === 'develop' ? focusId : null);
   const idsKey = ids.join(',');
   useEffect(() => {
     esSetApplyIds(ids);

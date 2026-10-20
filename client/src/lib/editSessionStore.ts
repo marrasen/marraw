@@ -82,6 +82,10 @@ export interface EditSessionState {
   // between base (the pre-apply draft) and result re-derives any strength
   // 0..200%. Invalidated by a photo switch, any other edit, undo, or reset.
   lastPresetApply: { photoId: number; base: Params; result: Params; name: string; amount: number } | null;
+  // The edit hash the user's last own save of a photo produced, as the
+  // backend answered it. The loupe starts that state's 1:1 render without
+  // the skimming dwell: the user is on the photo and just changed it.
+  savedHash: { photoId: number; hash: string } | null;
   cropping: boolean; // crop overlay active: loupe shows the uncropped frame
   // Heal/retouch tool active: pointer-down on the loupe places or grabs a spot
   // (draft.spots) instead of panning.
@@ -182,6 +186,7 @@ export const useEditSession = create<EditSessionState>(() => ({
   rangePicking: false,
   hoverParams: null,
   lastPresetApply: null,
+  savedHash: null,
   cropping: false,
   healing: false,
   activeSpot: null,

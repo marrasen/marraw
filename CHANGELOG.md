@@ -10,7 +10,7 @@ sections into the stable one so nobody reads the same news twice.
 
 ## Unreleased
 
-- Develop: **sharper previews while you drag a slider**. They are drawn at the size the photo covers on your screen, up to 2560 pixels, instead of a fixed 1024
+- Develop: **sharper previews while you drag a slider**. They are drawn at the size the photo covers on your screen, up to 2048 pixels, instead of a fixed 1024
 - Develop: **the full-resolution view comes back much sooner after an edit**. The photo open in Develop keeps its full-size decode in memory, so after a crop, a mask or any tone or colour slider the 1:1 view returns in about a third of the time on a 42-megapixel photo. It no longer waits a moment before it starts, either. Exposure and white balance still decode again
 
 ## 0.10.1 - 2026-10-20

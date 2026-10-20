@@ -12,7 +12,7 @@
 
 import type { ApiClient } from '@/api/client';
 import type { Params } from '@/api/edit';
-import { previewDraft, previewEdit } from '@/api/edits';
+import { previewDraft, previewEdit, previewExact } from '@/api/edits';
 import { useEditSession, type EditSessionState } from '@/lib/editSessionStore';
 
 function setState(patch: Partial<EditSessionState> | ((s: EditSessionState) => Partial<EditSessionState>)) {
@@ -30,14 +30,19 @@ function setState(patch: Partial<EditSessionState> | ((s: EditSessionState) => P
 // persists to the pyramid cache for /img. A preset hover never takes that
 // path: the server reads every PreviewEdit settle as "the editor is now on
 // this state" and moves its kept full-resolution decode there, so a hovered
-// look's sharp frame is a PreviewDraft at FULL_PX too. There is no settle
+// look's sharp frame is a PreviewExact at FULL_PX — the same exact render as
+// the settle, so applying the look shows what the hover showed, without
+// telling the server the editor is on it. There is no settle
 // timer anywhere: the sharp 2048 is queued immediately behind the instant
 // low-res frame, and a further edit ABORTS a stale in-flight 2048 (the abort
 // rides the WebSocket as a cancel frame and cancels the server handler's ctx)
 // instead of waiting behind it.
 const DRAFT_MIN_PX = 1024;
-const DRAFT_MAX_PX = 2560;
 const FULL_PX = 2048;
+// Drafts stop at the settle's size: a draft sharper than the 2048 that
+// replaces it would make the photo visibly soften the moment a slider is let
+// go.
+const DRAFT_MAX_PX = FULL_PX;
 // The drag-frame long edge: what the photo covers in the loupe at fit, in
 // device pixels (setDraftEdge), within [DRAFT_MIN_PX, DRAFT_MAX_PX].
 let draftEdge = DRAFT_MIN_PX;
@@ -53,7 +58,9 @@ export function setDraftEdge(px: number) {
 // A render is keyed by the exact params it draws — crop-flattened while
 // cropping — plus the flat tag itself: entering crop mode re-renders the same
 // params as a different frame (the flat one), so the tag must participate.
-type RenderKey = { params: string; flat: boolean };
+// The hover tag too: a hovered look's sharp frame is no settle, so a settle
+// of the same params after the hover (an apply) must still render.
+type RenderKey = { params: string; flat: boolean; hover: boolean };
 // The single in-flight render. A full (2048) render is aborted when a newer
 // edit supersedes it; in-flight drafts are never aborted — fold frames are
 // fast, land fresher feedback than a restart would, and the server can't
@@ -64,9 +71,10 @@ let inFlight: { full: boolean; abort: AbortController; key: RenderKey } | null =
 // tick paints the instant draft first with the 2048 queued right behind it —
 // a single sticky slot would render every held-key step at 2048.
 let pending: { low: boolean; full: boolean } | null = null;
-// The last FULL render that landed on screen: a settle request for the
-// identical frame is skipped (the drag-release commit right after an
-// identical settle, most commonly).
+// The last FULL render that landed on screen — a settle, or a hovered look's
+// sharp frame: a request for the identical frame is skipped (the
+// drag-release commit right after an identical settle, most commonly, or a
+// second settle request during one hover).
 let lastShown: { photoId: number; key: RenderKey } | null = null;
 
 // In crop mode the loupe draws the rectangle and applies the straighten angle
@@ -77,12 +85,12 @@ function flattenedParams(draft: Params, cropping: boolean): Params {
   return cropping ? { ...draft, cropX: 0, cropY: 0, cropW: 0, cropH: 0, cropAngle: 0 } : draft;
 }
 
-function keyFor(draft: Params, cropping: boolean): RenderKey {
-  return { params: JSON.stringify(flattenedParams(draft, cropping)), flat: cropping };
+function keyFor(draft: Params, cropping: boolean, hover: boolean): RenderKey {
+  return { params: JSON.stringify(flattenedParams(draft, cropping)), flat: cropping, hover };
 }
 
 function sameKey(a: RenderKey, b: RenderKey): boolean {
-  return a.flat === b.flat && a.params === b.params;
+  return a.flat === b.flat && a.hover === b.hover && a.params === b.params;
 }
 
 // schedulePreview requests a render of the current draft. 'draft' is a drag
@@ -108,7 +116,7 @@ export function schedulePreview(client: ApiClient, kind: 'draft' | 'settle') {
       esFlushDraft();
       const s = useEditSession.getState();
       const shown = s.hoverParams ?? s.draft;
-      if (shown && !sameKey(inFlight.key, keyFor(shown, s.cropping))) inFlight.abort.abort();
+      if (shown && !sameKey(inFlight.key, keyFor(shown, s.cropping, s.hoverParams != null))) inFlight.abort.abort();
     }
   }
 }
@@ -147,10 +155,10 @@ async function renderPreview(client: ApiClient, full: boolean) {
   // everything keyed off it — persistence, history) is untouched.
   const shown = hoverParams ?? draft;
   const renderParams = flattenedParams(shown, cropping);
-  const key = keyFor(shown, cropping);
-  // The identical sharp frame already landed (and ensurePreview wrote it to
-  // the pyramid cache) — nothing to render. Most commonly the drag-release
-  // commit right after an identical settle.
+  const key = keyFor(shown, cropping, hoverParams != null);
+  // The identical sharp frame already landed — nothing to render. Most
+  // commonly the drag-release commit right after an identical settle (which
+  // ensurePreview wrote to the pyramid cache).
   if (full && lastShown && lastShown.photoId === photoId && sameKey(lastShown.key, key)) return;
   const ac = new AbortController();
   inFlight = { full, abort: ac, key };
@@ -158,11 +166,11 @@ async function renderPreview(client: ApiClient, full: boolean) {
   const settles = full && hoverParams == null;
   setState((s) => ({ rendering: s.rendering + 1 }));
   try {
-    const blob = settles
-      ? await previewEdit(client, photoId, renderParams, FULL_PX, { signal: ac.signal })
-      : await previewDraft(client, photoId, renderParams, full ? Math.max(FULL_PX, draftEdge) : draftEdge, {
-          signal: ac.signal,
-        });
+    const blob = !full
+      ? await previewDraft(client, photoId, renderParams, draftEdge, { signal: ac.signal })
+      : settles
+        ? await previewEdit(client, photoId, renderParams, FULL_PX, { signal: ac.signal })
+        : await previewExact(client, photoId, renderParams, FULL_PX, { signal: ac.signal });
     if (useEditSession.getState().photoId !== photoId || ac.signal.aborted) return;
     const url = URL.createObjectURL(blob);
     const old = useEditSession.getState().preview;
@@ -171,9 +179,9 @@ async function renderPreview(client: ApiClient, full: boolean) {
     // lastShown means "the displayed blob IS this sharp frame" — a low-res
     // frame replacing it on screen must clear it, or returning to the exact
     // same params would dedupe-skip the settle and leave the soft draft up.
-    // A hovered look's sharp frame is no settle: an apply of the same
-    // params must still render one.
-    lastShown = settles ? { photoId, key } : null;
+    // A hovered look's sharp frame carries the hover tag in its key, so an
+    // apply of the same params still renders a settle.
+    lastShown = full ? { photoId, key } : null;
   } catch {
     // aborted or superseded
   } finally {

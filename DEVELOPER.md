@@ -57,13 +57,16 @@ a hovered preset.
 
 Slider drags render through `Edits.PreviewDraft`, always in memory, at the size
 the photo covers on screen (up to 4096 px; the Electron loupe asks for its fit
-size in device pixels, between 1024 and 2560). `PreviewEdit` treats 2048 and up
-as the exact, cached 2048 settle, and the backend reads every settle as "the
-editor is now on this state", so a hovered preset's sharp frame is a
-`PreviewDraft` at 2048, never a settle. The Develop panel holds
-`Edits.OpenInEditor` for its photo after a 350 ms dwell (`client/src/lib/editorHold.ts`),
-and the 1:1 render after an edit of the held photo starts without the skimming
-dwell.
+size in device pixels, between 1024 and 2048, so a draft is never sharper than
+the settle that replaces it). `PreviewEdit` treats 2048 and up as the exact,
+cached 2048 settle, and the backend reads every settle as "the editor is now on
+this state", so a hovered preset's sharp frame is a `PreviewExact` at 2048 —
+the same pixels as the settle, never a settle. The Develop panel holds
+`Edits.OpenInEditor` for the photo its loupe shows after a 1 s dwell
+(`client/src/lib/editorHold.ts`), holds it again once a lost connection is
+back, and gives up after three backend errors. The 1:1 render of the state the
+user's own save just produced (`savedHash` in the edit session) starts without
+the skimming dwell.
 
 ### Adaptive base look
 

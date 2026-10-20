@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { Photo } from '@/api/library';
 import { imgUrl, tileUrl, type Level } from '@/lib/backend';
-import { heldPhotoId } from '@/lib/editorHold';
 
 // When a full-resolution tile set is worth having, and how to get one without
 // stalling the browse. The tile layer itself is in components/TileLayer.
@@ -31,10 +30,16 @@ export function levelForPx(px: number): Level | 'tiles' {
 // link must not let a visitor start work on the owner's decode pool for
 // anything short of a deliberate deep zoom.
 // KICK_DWELL_MS is how long the user stays on a photo before its missing
-// tile set is rendered.
+// tile set is rendered. `immediate` skips it, for a caller that knows the
+// user is on the photo: the editor, right after its own save of it.
 const KICK_DWELL_MS = 350;
 
-export function useTilesWarm(photo: Photo | null | undefined, want: boolean, kick: boolean): boolean {
+export function useTilesWarm(
+  photo: Photo | null | undefined,
+  want: boolean,
+  kick: boolean,
+  immediate = false,
+): boolean {
   const [warm, setWarm] = useState(false);
   // Key the probe on the tile URL, not the photo OBJECT: it encodes id +
   // cacheKey + editHash, the only things that change which tiles exist. A
@@ -42,15 +47,11 @@ export function useTilesWarm(photo: Photo | null | undefined, want: boolean, kic
   // same rendered state — resetting `warm` on that identity change would drop
   // wantTiles false→true for a frame, flashing the tile layer off and on.
   const url0 = photo ? tileUrl(photo, 0, 0) : '';
-  // The photo held open in the editor, under a new edit: the user is on it
-  // and just changed it, so its 1:1 render starts at once, without the
-  // skimming dwell. The previous render's photo is kept in a ref.
-  const last = useRef<{ id: number; hash: string } | null>(null);
-  const editedHere =
-    photo != null && last.current?.id === photo.id && last.current.hash !== photo.editHash && heldPhotoId() === photo.id;
-  const dwellMs = editedHere ? 0 : KICK_DWELL_MS;
+  // Read when the kick is set, whenever `want` turns true: not a reason to
+  // probe again on its own.
+  const dwellMs = useRef(KICK_DWELL_MS);
   useEffect(() => {
-    last.current = photo ? { id: photo.id, hash: photo.editHash } : null;
+    dwellMs.current = immediate ? 0 : KICK_DWELL_MS;
   });
   useEffect(() => {
     // New render state starts cold before the async probe/kick below.
@@ -78,7 +79,7 @@ export function useTilesWarm(photo: Photo | null | undefined, want: boolean, kic
           } catch {
             // aborted: the user moved on mid-render
           }
-        }, dwellMs);
+        }, dwellMs.current);
       } catch {
         // aborted: the user moved on
       }
@@ -87,8 +88,6 @@ export function useTilesWarm(photo: Photo | null | undefined, want: boolean, kic
       window.clearTimeout(dwell);
       ac.abort();
     };
-    // dwellMs is read when the URL changes, not a reason to probe again.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url0, want, kick]);
   return warm;
 }
