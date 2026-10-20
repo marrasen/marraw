@@ -53,6 +53,11 @@ export interface Delta {
     vibrance: number | null;
 }
 
+export interface EditSaved {
+    hash: string;
+    save: number;
+}
+
 export interface FillResult {
     fillVer: string;
     generated: boolean;
@@ -341,6 +346,19 @@ export function subscribePreviewEdit(client: ApiClient, photoID: number, params:
 }
 
 
+export function previewExact(client: ApiClient, photoID: number, params: Params, longEdge: number, options?: RequestOptions): Promise<Blob> {
+    return client.request<Blob>('Edits.PreviewExact', [photoID, params, longEdge], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+previewExact.method = 'Edits.PreviewExact' as const;
+
+export function subscribePreviewExact(client: ApiClient, photoID: number, params: Params, longEdge: number, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Blob>('Edits.PreviewExact', [photoID, params, longEdge], callback, onError, options);
+}
+
+
 export function resetEdits(client: ApiClient, ids: number[], options?: RequestOptions): Promise<void> {
     return client.request<void>('Edits.ResetEdits', [ids], options);
 }
@@ -354,16 +372,16 @@ export function subscribeResetEdits(client: ApiClient, ids: number[], callback: 
 }
 
 
-export function setEditParams(client: ApiClient, photoID: number, params: Params, options?: RequestOptions): Promise<string> {
-    return client.request<string>('Edits.SetEditParams', [photoID, params], options);
+export function setEditParams(client: ApiClient, photoID: number, params: Params, options?: RequestOptions): Promise<EditSaved> {
+    return client.request<EditSaved>('Edits.SetEditParams', [photoID, params], options);
 }
 // Wire-method tag consumed by useQuerySuspense to key the promise cache and
 // open the matching server subscription. Stable identifier across builds
 // (unaffected by minification, unlike Function.name).
 setEditParams.method = 'Edits.SetEditParams' as const;
 
-export function subscribeSetEditParams(client: ApiClient, photoID: number, params: Params, callback: (data: string) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
-    return client.subscribe<string>('Edits.SetEditParams', [photoID, params], callback, onError, options);
+export function subscribeSetEditParams(client: ApiClient, photoID: number, params: Params, callback: (data: EditSaved) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<EditSaved>('Edits.SetEditParams', [photoID, params], callback, onError, options);
 }
 
 
@@ -722,6 +740,21 @@ export function usePreviewEdit(photoID: number, params: Params, longEdge: number
 }
 
 /**
+ * Subscribes to `Edits.PreviewExact` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function usePreviewExact(photoID: number, params: Params, longEdge: number, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, longEdge: number) => previewExact(client, photoID, params, longEdge, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, longEdge], _subscribe: { method: 'Edits.PreviewExact', params: [photoID, params, longEdge] } });
+}
+
+/**
  * Subscribes to `Edits.ResetEdits` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -743,7 +776,7 @@ export function useResetEdits(ids: number[], options?: UseQueryOptions<void>): U
  * See {@link UseQueryResult} for return value details — including the
  * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
  */
-export function useSetEditParams(photoID: number, params: Params, options?: UseQueryOptions<string>): UseQueryResult<string> {
+export function useSetEditParams(photoID: number, params: Params, options?: UseQueryOptions<EditSaved>): UseQueryResult<EditSaved> {
     const wrappedFn = useCallback(
         (client: ApiClient, signal: AbortSignal, photoID: number, params: Params) => setEditParams(client, photoID, params, { signal }),
         [],

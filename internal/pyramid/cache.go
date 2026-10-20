@@ -121,7 +121,8 @@ type Cache struct {
 	fullEditors map[string]*fullEditor // by CacheKey (HoldEditor)
 	fullWarms   map[string][]*fullWarm // by CacheKey
 	fullClosed  bool
-	fullDecodes atomic.Int64 // full-resolution decodes run, for tests
+	settles     map[string]chan struct{} // CacheKey|hash → settle under way (settle.go)
+	fullDecodes atomic.Int64             // full-resolution decodes run, for tests
 }
 
 func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
@@ -304,6 +305,17 @@ func (c *Cache) Ensure(ctx context.Context, photo store.Photo, level, editHash s
 	path := c.PathFor(photo.CacheKey, level, editHash)
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
+	}
+	if level != "full" && level != "2048" {
+		// A state the editor is settling on: its small renditions come from
+		// the settle's 2048 once it lands, derived on the fast pool so they
+		// don't queue behind RAW decodes.
+		c.WaitForSettle(ctx, photo, editHash, false)
+		if _, err := os.Stat(c.PathFor(photo.CacheKey, "2048", editHash)); err == nil {
+			if p, provisional, err := c.EnsureFast(ctx, photo, level, editHash); err == nil && !provisional {
+				return p, nil
+			}
+		}
 	}
 	key := photo.CacheKey + "|" + level + "|" + editHash
 	err := c.pool.Do(ctx, key, prio, func(jctx context.Context, proc *libraw.Processor) error {

@@ -43,7 +43,7 @@ func TestPhotoGeometry(t *testing.T) {
 
 func TestEditPatch(t *testing.T) {
 	p := &edit.Params{Rotate: 1, CropX: 0.1, CropY: 0.1, CropW: 0.5, CropH: 0.8}
-	got := editPatch(7, "abc", p)
+	got := editPatch(7, EditSaved{Hash: "abc"}, p)
 	if got.ID != 7 || got.EditHash == nil || *got.EditHash != "abc" {
 		t.Fatalf("editPatch id/hash = %+v", got)
 	}
@@ -53,7 +53,7 @@ func TestEditPatch(t *testing.T) {
 
 	// A reset (nil params) must deliver explicit zeros, not nil fields —
 	// nil means "unchanged" to the client patch reducer.
-	got = editPatch(7, "base", nil)
+	got = editPatch(7, EditSaved{Hash: "base"}, nil)
 	if got.Rotate == nil || *got.Rotate != 0 || got.CropW == nil || *got.CropW != 0 || got.CropH == nil || *got.CropH != 0 {
 		t.Errorf("editPatch(nil params) geometry = (%v, %v, %v), want explicit zeros", got.Rotate, got.CropW, got.CropH)
 	}

@@ -132,16 +132,16 @@ type Photo struct {
 	// them with Width/Height (renderedDims) to size cells to the rendered
 	// aspect without loading edit params. CropAngle/FlipH are deliberately
 	// absent — they don't change the output size.
-	Rotate int     `json:"rotate,omitempty"`
-	CropW  float64 `json:"cropW,omitempty"`
-	CropH  float64 `json:"cropH,omitempty"`
-	ISO         float64 `json:"iso"`
-	Shutter     float64 `json:"shutter"`
-	Aperture    float64 `json:"aperture"`
-	FocalLen    float64 `json:"focalLen"`
-	TakenAt     int64   `json:"takenAt"` // unix seconds, 0 = unknown
-	Make        string  `json:"make"`
-	Model       string  `json:"model"`
+	Rotate   int     `json:"rotate,omitempty"`
+	CropW    float64 `json:"cropW,omitempty"`
+	CropH    float64 `json:"cropH,omitempty"`
+	ISO      float64 `json:"iso"`
+	Shutter  float64 `json:"shutter"`
+	Aperture float64 `json:"aperture"`
+	FocalLen float64 `json:"focalLen"`
+	TakenAt  int64   `json:"takenAt"` // unix seconds, 0 = unknown
+	Make     string  `json:"make"`
+	Model    string  `json:"model"`
 	// Sharpness is the focus score (Laplacian variance of the embedded thumb
 	// at a 512 px basis); the grid badges values below the soft threshold.
 	// Nil = not yet measured.
@@ -336,6 +336,10 @@ type PhotoPatch struct {
 	Rotate *int     `json:"rotate"`
 	CropW  *float64 `json:"cropW"`
 	CropH  *float64 `json:"cropH"`
+	// EditSave numbers the save that set EditHash, as SetEditParams returns
+	// it to the caller, so an editor tells its own saves' patches from edits
+	// made elsewhere exactly, not by guessing from the hash.
+	EditSave *int64 `json:"editSave"`
 	// SubjectSharpness delivers a just-measured subject focus score to the grid
 	// without a full folder-list refresh. Only ever a real score — the "-1
 	// unscoreable" sentinel is client-invisible (see SubjectAnalyzed).

@@ -11,7 +11,7 @@ import { useUIStore } from '@/stores/uiStore';
 // A patch as the server sends one: every field it has no opinion about is null.
 function patch(over: Partial<PhotoPatch> & { id: number }): PhotoPatch {
   return {
-    rating: null, flag: null, editHash: null, rotate: null,
+    rating: null, flag: null, editHash: null, editSave: null, rotate: null,
     cropW: null, cropH: null, subjectSharpness: null, subjectAnalyzed: null,
     eyesClosed: null, eyesAnalyzed: null,
     ...over,

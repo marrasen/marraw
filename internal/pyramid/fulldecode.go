@@ -50,7 +50,6 @@ type fullEditor struct {
 	want  string // fullDecodeKey of the decode it asked for last; "" none yet
 }
 
-
 // fullFlight is a decode under way that others wait for.
 type fullFlight struct {
 	done    chan struct{}
