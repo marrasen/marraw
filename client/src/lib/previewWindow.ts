@@ -23,18 +23,23 @@ export interface LoupeWindow {
   // The full render's size the window was asked in: it shows only while
   // the loupe lays the photo out at that size.
   dims: [number, number];
-  // The params it shows, as JSON: a window of other params than the photo
-  // shows now is an earlier edit's (see LoupeView).
+  // The params it shows, as JSON, and the photo's bust and the drag run it
+  // was asked in: a window of other params than the photo shows now is an
+  // earlier edit's, shown only within its run (see LoupeView).
   paramsKey: string;
+  bust: number;
+  run: number;
 }
 
-// lastWasDrag: the edit shown before the one shown now was a drag frame,
-// on screen under DRAG_FRAME_MS (noteShownEdit). Its window shows on over
-// the new edit until that one's comes; a window of an edit the photo had
-// settled on does not — a one-shot change shows its preview at once.
-export const useLoupeWindow = create<{ win: LoupeWindow | null; lastWasDrag: boolean }>(() => ({
+// run counts the runs of edits: a change that is not a drag frame — one
+// after an edit that stayed on screen DRAG_FRAME_MS or longer, or into or
+// out of a hovered preset — starts a new run (noteShownEdit). A window of an
+// earlier edit of the same run shows on over the new edit until that one's
+// comes, so a drag keeps a sharp, slightly late view; one of an earlier run
+// does not, so a one-shot change shows its preview at once.
+export const useLoupeWindow = create<{ win: LoupeWindow | null; run: number }>(() => ({
   win: null,
-  lastWasDrag: false,
+  run: 0,
 }));
 
 // How long an edit may stay on screen and still count as a drag frame.
@@ -42,16 +47,16 @@ const DRAG_FRAME_MS = 400;
 let shownEdit = { key: '', since: 0, hovering: false };
 
 /**
- * Note the edit the loupe shows now, as JSON, for lastWasDrag. Going into
- * or out of a hovered preset is never a drag: the look it leaves is not
- * the one coming, however briefly it showed.
+ * Note the edit the loupe shows now, as JSON, for run. Going into or out of
+ * a hovered preset is never a drag: the look it leaves is not the one
+ * coming, however briefly it showed.
  */
 export function noteShownEdit(key: string, hovering: boolean) {
   if (key === shownEdit.key) return;
   const now = performance.now();
   const drag = now - shownEdit.since < DRAG_FRAME_MS && !hovering && !shownEdit.hovering;
   shownEdit = { key, since: now, hovering };
-  useLoupeWindow.setState({ lastWasDrag: drag });
+  if (!drag) useLoupeWindow.setState((s) => ({ run: s.run + 1 }));
 }
 
 /** What the loupe wants a window of. */
@@ -140,6 +145,7 @@ async function render(client: ApiClient) {
   const key = keyOf(a);
   const abort = new AbortController();
   const mine = gen;
+  const run = useLoupeWindow.getState().run;
   inFlight = { key, ask: a, abort, again: false };
   let blob: Blob | null = null;
   let failed = false;
@@ -153,12 +159,29 @@ async function render(client: ApiClient) {
   if (mine !== gen) return; // let go meanwhile
   const again = inFlight?.again ?? false;
   inFlight = null;
-  const old = useLoupeWindow.getState().win;
+  let url: string | null = null;
   if (blob && !failed) {
+    // Decoded before it shows: the loupe paints it at its own place at
+    // once, never the last window's pixels stretched into this one's.
+    url = URL.createObjectURL(blob);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+    } catch {
+      // Shown all the same; the browser decodes it as it paints.
+    }
+    if (mine !== gen) {
+      URL.revokeObjectURL(url);
+      return; // let go while it decoded
+    }
+  }
+  const old = useLoupeWindow.getState().win;
+  if (url) {
     if (old) URL.revokeObjectURL(old.url);
     shownKey = key;
     useLoupeWindow.setState({
-      win: { photoId: a.photoId, url: URL.createObjectURL(blob), rect: a.rect, dims: a.dims, paramsKey: JSON.stringify(a.params) },
+      win: { photoId: a.photoId, url, rect: a.rect, dims: a.dims, paramsKey: JSON.stringify(a.params), bust: a.bust, run },
     });
   } else {
     // No window of this edit. It may come later (the backend decodes the
@@ -177,5 +200,5 @@ export function resetWindowForTest() {
   dropWindow();
   gen = 0;
   shownEdit = { key: '', since: 0, hovering: false };
-  useLoupeWindow.setState({ lastWasDrag: false });
+  useLoupeWindow.setState({ run: 0 });
 }

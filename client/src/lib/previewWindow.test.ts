@@ -101,24 +101,34 @@ describe('previewWindow', () => {
     expect(calls[1].signal.aborted).toBe(false);
   });
 
-  it('counts an edit on screen only a moment as a drag frame', () => {
+  it('starts a new run of edits at a change that is no drag frame', () => {
     const now = vi.spyOn(performance, 'now');
+    const run = () => pw.useLoupeWindow.getState().run;
     now.mockReturnValue(1000);
     pw.noteShownEdit('a', false);
+    const r0 = run();
     now.mockReturnValue(1100);
-    pw.noteShownEdit('b', false); // 'a' lasted 100 ms
-    expect(pw.useLoupeWindow.getState().lastWasDrag).toBe(true);
+    pw.noteShownEdit('b', false); // 'a' lasted 100 ms: a drag frame
+    expect(run()).toBe(r0);
     now.mockReturnValue(5000);
     pw.noteShownEdit('c', false); // 'b' had settled
-    expect(pw.useLoupeWindow.getState().lastWasDrag).toBe(false);
+    expect(run()).toBe(r0 + 1);
     // Into and out of a hovered preset, however quick, is no drag.
     now.mockReturnValue(5100);
     pw.noteShownEdit('hover', true);
-    expect(pw.useLoupeWindow.getState().lastWasDrag).toBe(false);
+    expect(run()).toBe(r0 + 2);
     now.mockReturnValue(5200);
     pw.noteShownEdit('c', false);
-    expect(pw.useLoupeWindow.getState().lastWasDrag).toBe(false);
+    expect(run()).toBe(r0 + 3);
     now.mockRestore();
+  });
+
+  it('a window carries the run it was asked in', async () => {
+    pw.wantWindow(client, ask(0.1));
+    calls[0].answer(new Blob(['a']));
+    await tick();
+    await tick();
+    expect(pw.useLoupeWindow.getState().win?.run).toBe(pw.useLoupeWindow.getState().run);
   });
 
   it('asks again when the fills or maps of the photo change under the same params', async () => {

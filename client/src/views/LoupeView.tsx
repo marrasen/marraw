@@ -655,6 +655,15 @@ export function CinemaImage({
   const holdTick = useHoldTick((s) => s.tick);
   // A fill patch or AI map made since: the same params, other pixels.
   const bust = useImgBust(photo.id);
+  // A window of an earlier edit still shows within its run of drag frames
+  // (lib/previewWindow, noteShownEdit): a drag keeps a sharp, slightly late
+  // view until the next window comes, while after a one-shot change (a
+  // preset, paste, the eyedropper, leaving a hovered preset) the new
+  // preview shows rather than the old look over it. Noted before the window
+  // effect below, so a window asked for now carries the new run.
+  const shownParamsKey = useMemo(() => (shownParams ? JSON.stringify(shownParams) : ''), [shownParams]);
+  const hovering = useEditSession((s) => s.hoverParams != null);
+  useEffect(() => noteShownEdit(shownParamsKey, hovering), [shownParamsKey, hovering]);
   useEffect(() => {
     if (!windowZone) {
       dropWindow(); // another photo, out of the editor, cropping, or zoomed out
@@ -670,18 +679,11 @@ export function CinemaImage({
   }, [windowZone, wantsWindow, shownParams, viewport, dw, dh, photo.id, photo.editHash, holdTick, bust, client]);
   useEffect(() => dropWindow, [photo.id]);
   const loupeWindow = useLoupeWindow((s) => s.win);
-  // A window of an earlier edit still shows when that edit was a drag frame,
-  // on screen only a moment: a drag keeps a sharp, slightly late view until
-  // the next window comes. One the photo had settled on before a one-shot
-  // change (a preset, paste, the eyedropper, leaving a hovered preset) goes
-  // at once, and the new preview shows rather than the old look over it.
-  const shownParamsKey = useMemo(() => (shownParams ? JSON.stringify(shownParams) : ''), [shownParams]);
-  const hovering = useEditSession((s) => s.hoverParams != null);
-  useEffect(() => noteShownEdit(shownParamsKey, hovering), [shownParamsKey, hovering]);
-  const staleWindowOK = useLoupeWindow((s) => s.lastWasDrag);
+  const windowRun = useLoupeWindow((s) => s.run);
   const showWindow =
     loupeWindow != null &&
-    (loupeWindow.paramsKey === shownParamsKey || staleWindowOK) &&
+    loupeWindow.bust === bust &&
+    (loupeWindow.paramsKey === shownParamsKey || loupeWindow.run === windowRun) &&
     windowZone &&
     loupeWindow.photoId === photo.id &&
     loupeWindow.dims[0] === dw &&
@@ -1196,6 +1198,9 @@ export function CinemaImage({
             />
             {showWindow && (
               <img
+                // A fresh element for each window: the last one's pixels never
+                // show at this one's place while it loads.
+                key={loupeWindow.url}
                 data-testid="loupe-window"
                 src={loupeWindow.url}
                 draggable={false}
