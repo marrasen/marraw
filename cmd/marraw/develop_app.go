@@ -463,6 +463,7 @@ func (cu *culler) edited(commit bool) {
 // has moved on.
 func (cu *culler) preview(full bool) {
 	d := &cu.dev
+	cu.wantWindow()
 	d.want, d.wantFull = true, full
 	if d.busy {
 		if !full && d.busyFull && d.stop != nil {

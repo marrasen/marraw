@@ -77,6 +77,7 @@ func (cu *culler) wantTiles(w WantTiles, now bool) {
 		return
 	}
 	cu.tileWant = w
+	cu.wantWindow()
 	if w.Range.Empty() {
 		if cu.tileStop != nil {
 			cu.tileStop()
