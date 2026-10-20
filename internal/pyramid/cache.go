@@ -109,6 +109,7 @@ type Cache struct {
 	fullEntry   *fullDecode
 	fullFlights map[string]*fullFlight
 	fullEditors map[string]int // CacheKey → holds (HoldEditor)
+	fullWarms   map[string]*fullWarm
 	fullSeq     uint64
 	fullClosed  bool
 	fullDecodes atomic.Int64 // full-resolution decodes run, for tests
@@ -434,6 +435,11 @@ func editsForHash(photo store.Photo, editHash string) (*edit.Params, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pyramid: photo %d edit params: %w", photo.ID, err)
 	}
+	// Rendered as the hash names it: the hash is of the normalized state,
+	// and the preview and the next save render and store that state. An
+	// edit stored un-normalized (an old sidecar's) would otherwise render
+	// otherwise here than there.
+	e.Normalize()
 	return e, nil
 }
 
@@ -547,8 +553,12 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 			rgba, shared = copyRGBA(rgba, rgba.Bounds()), false
 		}
 	}
+	// stoppable: the decode outlives a render called off after it (it is
+	// kept), so the stages after it may stop early. A render that decoded
+	// for itself completes instead: its tiles keep the decode's worth.
+	stoppable := false
 	if level == "full" {
-		rgba, wbCompEV, shared, how, err = c.fullDecodeFor(ctx, proc, photo, edits, openFull)
+		rgba, wbCompEV, shared, stoppable, how, err = c.fullDecodeFor(ctx, proc, photo, edits, openFull)
 		if err != nil {
 			return err
 		}
@@ -617,18 +627,18 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		ApplyHeal(rgba, edits, ai, fills)
 		ApplyLook(rgba, gamma, edits)
 		report(0.78)
-		if err := ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil && stoppable {
 			return err
 		}
 		suppress := ApplyMasks(rgba, edits, ai)
 		ApplyBW(rgba, edits)
 		report(0.82)
-		if err := ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil && stoppable {
 			return err
 		}
 		ApplyDetail(rgba, edits, suppress)
 		report(0.90)
-		if err := ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil && stoppable {
 			return err
 		}
 		if err := c.writeTiles(rgba, photo.CacheKey, editHash, func(done, total int) {

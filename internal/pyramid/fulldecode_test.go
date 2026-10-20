@@ -343,7 +343,7 @@ func TestFlightFailureShared(t *testing.T) {
 	inOpen, fail := make(chan struct{}), make(chan struct{})
 	owner := make(chan error, 1)
 	go func() {
-		_, _, err := c.keptFullDecode(t.Context(), nil, photo, edits, func() error {
+		_, _, _, err := c.keptFullDecode(t.Context(), nil, photo, edits, func() error {
 			close(inOpen)
 			<-fail
 			return broken
@@ -352,15 +352,14 @@ func TestFlightFailureShared(t *testing.T) {
 	}()
 	<-inOpen
 	waiter := make(chan error, 1)
-	opened := false
+	reopened := errors.New("the waiter opened the file again")
 	go func() {
-		_, _, err := c.keptFullDecode(t.Context(), nil, photo, edits, func() error {
-			opened = true
-			return nil
+		_, _, _, err := c.keptFullDecode(t.Context(), nil, photo, edits, func() error {
+			return reopened
 		})
 		waiter <- err
 	}()
-	time.Sleep(50 * time.Millisecond) // the waiter waits on the flight
+	time.Sleep(200 * time.Millisecond) // the waiter waits on the flight
 	close(fail)
 	if err := <-owner; !errors.Is(err, broken) {
 		t.Fatalf("owner: %v", err)
@@ -368,7 +367,60 @@ func TestFlightFailureShared(t *testing.T) {
 	if err := <-waiter; !errors.Is(err, broken) {
 		t.Errorf("waiter: %v, want the owner's error", err)
 	}
-	if opened {
-		t.Error("the waiter opened the file again")
+}
+
+// TestAskedAgainStaysKept: the editor coming back to a kept decode (an undo)
+// while a decode of another state still runs keeps the one it came back
+// to when the other finishes.
+func TestAskedAgainStaysKept(t *testing.T) {
+	c := &Cache{}
+	photo := store.Photo{CacheKey: "k"}
+	defer c.HoldEditor(photo)()
+	px := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	x := &fullDecode{cacheKey: "k", key: "x", seq: 1, rgba: px}
+	c.keepFull(x)
+	c.fullSeq = 2 // y's decode was asked for after x's
+	y := &fullDecode{cacheKey: "k", key: "y", seq: 2, rgba: px}
+	if c.askFull("k", "x") != x {
+		t.Fatal("the kept decode was not served")
 	}
+	if c.keepFull(y) || c.fullEntry != x {
+		t.Error("a decode asked for before the undo replaced the one the editor came back to")
+	}
+	c.closeFull()
+}
+
+// TestCallOffWarm: an edit's decode of another state calls off a warm-up of
+// the photo; one of the same state does not.
+func TestCallOffWarm(t *testing.T) {
+	c := &Cache{}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	c.fullWarms = map[string]*fullWarm{"k": {key: "start", cancel: cancel}}
+	c.callOffWarm("k", "start")
+	if ctx.Err() != nil {
+		t.Fatal("a decode of the warm-up's own state called it off")
+	}
+	c.callOffWarm("k", "edit")
+	if ctx.Err() == nil {
+		t.Error("a decode of another state left the warm-up running")
+	}
+}
+
+// TestReleaseRestartsIdle: the kept decode goes fullDecodeIdle after the
+// editor leaves its photo, not after its last render, which may be long
+// before.
+func TestReleaseRestartsIdle(t *testing.T) {
+	c := &Cache{}
+	photo := store.Photo{CacheKey: "k"}
+	release := c.HoldEditor(photo)
+	f := &fullDecode{cacheKey: "k", key: "x", rgba: image.NewRGBA(image.Rect(0, 0, 1, 1))}
+	c.keepFull(f)
+	f.used = time.Now().Add(-10 * time.Minute)
+	release()
+	c.expireFull(f)
+	if c.fullEntry != f {
+		t.Error("the decode went the moment the editor left")
+	}
+	c.closeFull()
 }
