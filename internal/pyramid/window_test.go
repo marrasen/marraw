@@ -6,6 +6,8 @@ import (
 	"image"
 	"math"
 	"math/rand/v2"
+	"os"
+	"strconv"
 	"testing"
 
 	"github.com/marrasen/marraw/internal/edit"
@@ -336,4 +338,113 @@ func windowDiff(got, want *image.RGBA) (n, worst int, desc string) {
 		return 0, 0, ""
 	}
 	return n, worst, fmt.Sprintf("%d of %d values differ, worst by %d at %v", n, len(want.Pix), worst, at)
+}
+
+// TestRenderWindowFuzz renders random edits — turns, mirror, crop and
+// straighten, lens, B&W, detail, spots of every kind with sources clamped
+// at the edges, a soft AI matte, a radial mask — and random windows of
+// them, which must match the whole render exactly. MARRAW_WINDOW_FUZZ sets
+// the number of edits (default 30).
+func TestRenderWindowFuzz(t *testing.T) {
+	n := 30
+	if v, err := strconv.Atoi(os.Getenv("MARRAW_WINDOW_FUZZ")); err == nil {
+		n = v
+	}
+	src := windowTestSource(1800, 1200)
+	lensc := lens.Resolve("Panasonic", "DC-LX100M2", "", 10.9, 1.7)
+	// A soft matte, as a real model's: a smooth falloff, no hard edge.
+	matte := image.NewGray(image.Rect(0, 0, 1536, 1024))
+	for i := range matte.Pix {
+		x, y := float64(i%1536), float64(i/1536)
+		d := math.Hypot(x-700, y-480) / 420
+		matte.Pix[i] = uint8(255 * clampF(1.4-d, 0, 1))
+	}
+	store, key := testStoreWithMap(t, edit.AISubject, "soft", matte)
+	for seed := range n {
+		rnd := rand.New(rand.NewPCG(uint64(seed), 99))
+		f := func(lo, hi float64) float64 { return lo + rnd.Float64()*(hi-lo) }
+		f4 := func(lo, hi float64) float64 { return math.Round(f(lo, hi)*1e4) / 1e4 }
+		e := edit.Params{Contrast: f(-0.5, 0.5), Vibrance: f(-0.3, 0.5), Vignette: f(-0.5, 0.5),
+			Clarity: f(0, 0.5), Texture: f(0, 0.5), Sharpen: f(0, 0.8), Rotate: rnd.IntN(4), FlipH: rnd.IntN(2) == 0,
+			BW: rnd.IntN(5) == 0}
+		if rnd.IntN(2) == 0 {
+			e.CropX, e.CropY, e.CropW, e.CropH = f4(0, 0.2), f4(0, 0.2), f4(0.5, 0.8), f4(0.5, 0.8)
+		}
+		if rnd.IntN(2) == 0 {
+			e.CropAngle = f(-10, 10)
+		}
+		var lc *lens.Correction
+		if rnd.IntN(2) == 0 {
+			lc = lensc
+		} else {
+			e.LensMode = edit.LensOff
+		}
+		for range rnd.IntN(4) {
+			switch rnd.IntN(3) {
+			case 0, 1:
+				mode := edit.SpotHeal
+				if rnd.IntN(2) == 0 {
+					mode = edit.SpotClone
+				}
+				e.Spots = append(e.Spots, edit.Spot{Mode: mode, CX: f4(0, 1), CY: f4(0, 1), SX: f4(0, 1), SY: f4(0, 1),
+					Radius: f4(0.01, 0.08), Feather: f(0, 1)})
+			case 2:
+				cx, cy := f4(0.1, 0.9), f4(0.1, 0.9)
+				e.Spots = append(e.Spots, edit.Spot{Kind: "stroke", Mode: edit.SpotHeal, CX: cx, CY: cy, SX: f4(0, 1), SY: f4(0, 1),
+					Strokes: []edit.Stroke{{Radius: f4(0.005, 0.03), Pts: []float64{cx - 0.05, cy, cx + 0.05, cy + 0.03}}}})
+			}
+		}
+		if rnd.IntN(2) == 0 {
+			e.Masks = append(e.Masks, edit.Mask{Type: edit.MaskAI, AIKind: edit.AISubject, MapVer: "soft", Feather: f(0, 0.5),
+				Invert: rnd.IntN(3) == 0, Adjust: edit.MaskAdjust{ExpEV: f(-1.5, 1.5), Saturation: f(-0.5, 0.5)}})
+		}
+		if rnd.IntN(2) == 0 {
+			e.Masks = append(e.Masks, edit.Mask{Type: edit.MaskRadial, CX: f(0.2, 0.8), CY: f(0.2, 0.8), RX: f(0.1, 0.4), RY: f(0.1, 0.4),
+				Angle: f(0, 90), Feather: f(0.1, 1), Adjust: edit.MaskAdjust{Contrast: f(-0.5, 0.5), Temp: f(-0.5, 0.5)}})
+		}
+		e.Normalize()
+		ai := store.SetFor(key, &e)
+		whole := renderWholeForTest(src, 0.72, &e, 0.2, lc, ai, nil)
+		ow, oh := whole.Bounds().Dx(), whole.Bounds().Dy()
+		for range 6 {
+			w, h := 1+rnd.IntN(400), 1+rnd.IntN(300)
+			x, y := rnd.IntN(ow)-w/4, rnd.IntN(oh)-h/4
+			win := image.Rect(x, y, x+w, y+h)
+			got := RenderWindow(t.Context(), src, win, 0.72, &e, 0.2, lc, ai, nil)
+			want := win.Intersect(whole.Bounds())
+			if got == nil {
+				if !want.Empty() {
+					t.Errorf("seed %d, window %v: nil", seed, win)
+				}
+				continue
+			}
+			if _, _, d := windowDiff(got, copyRGBA(whole, want)); d != "" {
+				t.Errorf("seed %d, window %v: %s", seed, win, d)
+			}
+		}
+	}
+}
+
+// TestRenderWindowClampedSpot: a clone spot under a quarter turn whose
+// source the frame edge clamps, the reviewer's case.
+func TestRenderWindowClampedSpot(t *testing.T) {
+	src := windowTestSource(1800, 1200)
+	for _, rot := range []int{1, 3} {
+		e := edit.Params{Rotate: rot, LensMode: edit.LensOff, Contrast: 0.3, Spots: []edit.Spot{
+			{Mode: edit.SpotClone, CX: 0.1804, CY: 0.2323, Radius: 0.067, SX: 0.0925, SY: 0.6639, Feather: 0.5},
+			{Mode: edit.SpotHeal, CX: 0.1804, CY: 0.2323, Radius: 0.067, SX: 0.0925, SY: 0.6639, Feather: 0.5},
+		}}
+		e.Normalize()
+		whole := renderWholeForTest(src, 0.72, &e, 0, nil, nil, nil)
+		ow, oh := whole.Bounds().Dx(), whole.Bounds().Dy()
+		f := newMaskFrame(ow, oh, &e)
+		dx, dy := f.outputPoint(0.1804*f.frameW, 0.2323*f.frameH)
+		for _, d := range []int{60, 150, 251} {
+			win := image.Rect(int(dx)-d, int(dy)-d/2, int(dx)+d/3, int(dy)+d)
+			got := RenderWindow(t.Context(), src, win, 0.72, &e, 0, nil, nil, nil)
+			if _, _, diff := windowDiff(got, copyRGBA(whole, win.Intersect(whole.Bounds()))); diff != "" {
+				t.Errorf("rotate %d, window %v: %s", rot, win, diff)
+			}
+		}
+	}
 }
