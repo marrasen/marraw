@@ -532,6 +532,11 @@ func TestEditorWantsWindow(t *testing.T) {
 	if !f.cache.EditorWants(p, &warmer) {
 		t.Fatal("the settled state is not wanted")
 	}
+	drag := warmer
+	drag.Contrast = 0.37
+	if f.cache.EditorWants(p, &drag) {
+		t.Error("a look drag sharing the settled state's decode is wanted")
+	}
 	if _, _, _, ok := f.cache.KeptForWindow(p, &warmer); ok {
 		t.Fatal("kept before it was decoded")
 	}

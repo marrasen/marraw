@@ -84,12 +84,7 @@ func windowGeom(decW, decH int, e *edit.Params) (cropGeom, int) {
 // decode all of that comes from. Then it renders forward, each stage on
 // only the part the stages after it need. Every stage is the one the full
 // render runs, told where its buffer sits in the frame, so the result
-// matches the full render's pixels there. The one exception is float
-// rounding that depends on where the buffer starts: the mask evaluators
-// step along each row from its first pixel, so an AI mask's weight can
-// land a step off, and with several AI masks, each refining against the
-// last, that can grow — in tests, up to 16 values in a window off by up
-// to three levels.
+// matches the full render's pixels there, exactly.
 func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gamma float64, e *edit.Params, expEV float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *image.RGBA {
 	if !Windowable(e) {
 		return nil

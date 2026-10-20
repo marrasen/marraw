@@ -272,10 +272,22 @@ func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Pa
 		// The state the editor just settled on or saved, its decode not
 		// kept yet (a white balance change, say): wait for it, joining the
 		// 1:1 render's, so the window still comes well before the tiles.
-		// A drag frame is never a state the editor asked for, so drags
-		// never decode here.
-		if err := cache.WarmFull(ctx, photo, &params); err != nil {
-			return nil, err
+		// A drag frame is never the state the editor is on, so drags never
+		// decode here. The decode runs on its own: a window let go must not
+		// take with it the decode the tiles wait on. The editor moving on
+		// calls it off.
+		done := make(chan error, 1)
+		go func() { done <- cache.WarmFull(context.WithoutCancel(ctx), photo, &params) }()
+		select {
+		case err := <-done:
+			if errors.Is(err, context.Canceled) {
+				return nil, nil // called off: the editor is on another state
+			}
+			if err != nil {
+				return nil, err
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
 		src, expEV, _, ok = cache.KeptForWindow(photo, &params)
 	}
@@ -1575,6 +1587,7 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 			if on = seededParams(p); on == nil {
 				on = &edit.Params{}
 			}
+			on.Normalize() // as the editor will send it
 		}
 		e.deps.Cache.WantFull(p, on)
 		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)

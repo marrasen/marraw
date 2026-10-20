@@ -50,6 +50,9 @@ type fullDecode struct {
 type fullEditor struct {
 	holds int
 	want  string // fullDecodeKey of the decode it asked for last; "" none yet
+	// on is the edit hash of the state it settled on or opened in last:
+	// many states share a decode, and EditorWants is about this one.
+	on string
 }
 
 // fullFlight is a decode under way that others wait for.
@@ -119,7 +122,7 @@ func (c *Cache) HoldEditor(photo store.Photo) (release func()) {
 	ed.holds++
 	// A new session starts from what it opens the photo in: what an earlier
 	// one, still letting go, asked for last says nothing about it.
-	ed.want = ""
+	ed.want, ed.on = "", ""
 	released := false
 	return func() {
 		c.fullMu.Lock()
@@ -158,6 +161,9 @@ func (c *Cache) WantFull(photo store.Photo, edits *edit.Params) {
 	c.fullMu.Lock()
 	defer c.fullMu.Unlock()
 	c.wantLocked(photo.CacheKey, key)
+	if ed := c.fullEditors[photo.CacheKey]; ed != nil {
+		ed.on = edits.Hash()
+	}
 }
 
 // wantLocked makes key what the editor on cacheKey is on, if it is held.
@@ -218,18 +224,20 @@ func (c *Cache) KeptForWindow(photo store.Photo, edits *edit.Params) (src *image
 	return f.rgba, edits.ExpEV - f.baked + f.wbCompEV, f.key == key, true
 }
 
-// EditorWants reports whether the editor holds photo and asked for edits'
-// own decode last (WantFull): the state it settled on or saved. WarmFull
-// of edits then gets it kept, joining a 1:1 render's decode under way.
+// EditorWants reports whether the editor holds photo and is on edits: the
+// state it settled on, saved or opened in last (WantFull, WarmFull), and
+// no other — a drag frame of a look slider shares its decode, but is not
+// one to decode for. WarmFull of edits then gets the decode kept, joining
+// a 1:1 render's decode under way.
 func (c *Cache) EditorWants(photo store.Photo, edits *edit.Params) bool {
 	if edits == nil {
 		return false
 	}
-	key := fullDecodeKey(edits)
+	key, hash := fullDecodeKey(edits), edits.Hash()
 	c.fullMu.Lock()
 	defer c.fullMu.Unlock()
 	ed := c.fullEditors[photo.CacheKey]
-	return ed != nil && ed.want == key
+	return ed != nil && ed.want == key && ed.on == hash
 }
 
 // keepFull makes f the kept decode, in place of any other, when it is the
@@ -416,6 +424,9 @@ func (c *Cache) WarmFull(ctx context.Context, photo store.Photo, edits *edit.Par
 		return nil
 	}
 	ed.want = key
+	if ed.on == "" {
+		ed.on = edits.Hash() // the state it opens in
+	}
 	if c.fullWarms == nil {
 		c.fullWarms = map[string][]*fullWarm{}
 	}
