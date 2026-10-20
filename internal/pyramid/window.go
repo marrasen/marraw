@@ -112,10 +112,15 @@ func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gam
 	// What the geometry renders: that, plus what the spots read. Each part
 	// renders on its own, into one buffer around them all: a spot's source
 	// can sit far from the window, and the frame between them is not read.
+	// That buffer starts at the frame's origin, so the spots work in the
+	// whole render's own coordinates: their sums round as its do.
 	parts := healParts(whole, e, need)
 	healed := parts[0]
 	for _, p := range parts[1:] {
 		healed = healed.Union(p)
+	}
+	if len(parts) > 1 {
+		healed.Min = image.Point{}
 	}
 	warp := LensWarp(lensc, e, decW, decH)
 	part := func(out image.Rectangle) *image.RGBA {

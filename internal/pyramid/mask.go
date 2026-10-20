@@ -535,24 +535,29 @@ func (ev *radialEval) weightRow(y int, w []uint16) (int, int) {
 			s := math.Sqrt(disc)
 			lo := (-b - s) / (2 * a)
 			hi := (-b + s) / (2 * a)
-			x0 = max(0, int(math.Floor(lo)))
-			x1 = min(width, int(math.Ceil(hi))+1)
+			// A pixel of slack each side: the span is solved from this
+			// row's start, the weights below from each pixel's own point.
+			x0 = max(0, int(math.Floor(lo))-1)
+			x1 = min(width, int(math.Ceil(hi))+2)
 			if x0 >= x1 {
 				return 0, 0
 			}
 		}
 	}
-	u += du * float64(x0)
-	v += dv * float64(x0)
+	// Each pixel from its own frame point, not stepped along the row: a
+	// window's rows start elsewhere than the whole frame's, and a stepped
+	// sum would round differently there (RenderWindow).
 	for x := x0; x < x1; x++ {
+		fx, fy := ev.f.framePoint(float64(x), float64(y))
+		dx, dy := fx-ev.cx, fy-ev.cy
+		u := (dx*ev.ca + dy*ev.sa) / ev.rx
+		v := (-dx*ev.sa + dy*ev.ca) / ev.ry
 		q := u*u + v*v
 		if q >= 1 {
 			w[x] = ev.outside
 		} else {
 			w[x] = ev.wlut[int(q*(weightLUTSize-1))]
 		}
-		u += du
-		v += dv
 	}
 	return x0, x1
 }
@@ -615,17 +620,21 @@ func (ev *linearEval) weightRow(y int, w []uint16) (int, int) {
 			bound = -t / dt
 			keepBelow = dt < 0
 		}
+		// A pixel of slack: the bound is solved from this row's start, the
+		// weights below from each pixel's own point.
 		if keepBelow {
-			x1 = min(width, int(math.Ceil(bound))+1)
+			x1 = min(width, int(math.Ceil(bound))+2)
 		} else {
-			x0 = max(0, int(math.Floor(bound)))
+			x0 = max(0, int(math.Floor(bound))-1)
 		}
 		if x0 >= x1 {
 			return 0, 0
 		}
 	}
-	t += dt * float64(x0)
+	// Each pixel from its own frame point (see radialEval.weightRow).
 	for x := x0; x < x1; x++ {
+		fx, fy := ev.f.framePoint(float64(x), float64(y))
+		t := (fx-ev.ax)*ev.ux + (fy-ev.ay)*ev.uy
 		switch {
 		case t <= 0:
 			w[x] = ev.wlut[0]
@@ -634,7 +643,6 @@ func (ev *linearEval) weightRow(y int, w []uint16) (int, int) {
 		default:
 			w[x] = ev.wlut[int(t*(weightLUTSize-1))]
 		}
-		t += dt
 	}
 	return x0, x1
 }
@@ -816,23 +824,17 @@ func (ev *brushEval) weightRow(y int, w []uint16) (int, int) {
 	if ev.invert {
 		x0, x1 = 0, width
 	}
-	// Plane coordinates are affine along the row, like the frame point.
+	// Each pixel from its own frame point (see radialEval.weightRow).
 	sx := float64(ev.pw) / ev.f.frameW
 	sy := float64(ev.ph) / ev.f.frameH
-	fx, fy := ev.f.framePoint(float64(x0), float64(y))
-	px := fx*sx - 0.5
-	py := fy*sy - 0.5
-	dpx := ev.f.cos * sx
-	dpy := ev.f.sin * sy
 	for x := x0; x < x1; x++ {
-		cov := ev.samplePlane(px, py)
+		fx, fy := ev.f.framePoint(float64(x), float64(y))
+		cov := ev.samplePlane(fx*sx-0.5, fy*sy-0.5)
 		if ev.invert {
 			w[x] = 256 - ev.covToW[cov]
 		} else {
 			w[x] = ev.covToW[cov]
 		}
-		px += dpx
-		py += dpy
 	}
 	if ev.invert {
 		// Outside the plane-sampled span the coverage is zero → weight 256.
