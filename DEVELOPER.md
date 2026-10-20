@@ -48,10 +48,12 @@ settle or a save. 1:1 renders do not ask (a share-link guest renders the photo t
 one of the state the editor is on keeps its decode. A warm-up of a state the editor has left is called off. 1:1
 renders of any other photo (the pre-render pass, neighbour prefetch,
 share-link guests) and of the base look never replace the kept decode. It goes
-two idle minutes after the editor leaves the photo. While a photo is held, the
-post-save thumbnail render waits for the editor's 2048 settle of the same
-state, when one starts, and derives from it instead of running a RAW decode
-beside it.
+two idle minutes after the editor leaves the photo. While a photo is held, its small renditions
+(the post-save thumbnail warm, the filmstrip) wait for the editor's 2048 settle
+of the same state, when one starts, and derive from it instead of running a RAW
+decode beside it. `Edits.PreviewExact` renders a state exactly like the settle
+without saying the editor is on it, for looks the user only considers, such as
+a hovered preset.
 
 Slider drags render through `Edits.PreviewDraft`, always in memory, at the size
 the photo covers on screen (up to 4096 px; the Electron loupe asks for its fit
