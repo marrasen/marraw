@@ -100,17 +100,18 @@ type developer struct {
 	// liveM is the live picture's pixels, for the dust-hunting view.
 	liveM *image.RGBA
 	note  string
-	// sending counts each photo's own saves whose calls are still out, and
-	// owed those whose patches have not come back yet: those patches are
-	// the panel's own, not to be fetched again (see saveSettle).
-	sending, owed map[int64]int
-	// saveRound counts each photo's own saves sent, so a timer of an
-	// earlier round can tell it is stale; graceRound is the round a grace
-	// timer is pending for. failed holds a photo's last own save that
-	// failed, while no later one has gone through.
-	saveRound  map[int64]int
-	graceRound map[int64]int
-	failed     map[int64]error
+	// The panel's own saves (saves.go): saveSeq numbers them; last is each
+	// photo's latest, failed its error while it fails, and retry the timer
+	// sending it again; out counts the own saves of a photo not answered
+	// yet, ownHashes the hashes they came back with, and heldPatch a patch
+	// that came while some were out, judged once they are all in.
+	saveSeq   int
+	last      map[int64]ownSave
+	failed    map[int64]error
+	retry     map[int64]*time.Timer
+	out       map[int64]int
+	ownHashes map[int64][]string
+	heldPatch map[int64]string
 	// edits counts the changes made, committed what it was at the last
 	// save, and confirmed what it was at the last save the backend has
 	// confirmed: while they differ, the edit showing is not the saved
@@ -204,6 +205,9 @@ func (cu *culler) toggleDevelop() {
 	d := &cu.dev
 	d.open = !d.open
 	if d.open {
+		// A new session: an edit of the last one, saved or failed and
+		// sent once more on closing, holds no tiles back.
+		d.edits, d.committed, d.confirmed = 0, 0, 0
 		cu.loadEdit(cu.at)
 	} else {
 		cu.closeDevelop()
@@ -311,11 +315,12 @@ func (cu *culler) holdLater(id int64, hash string) {
 	ctx, cancel := context.WithCancel(cu.ctx)
 	d.holdID, d.holdHash, d.holdStop = id, hash, cancel
 	go func() {
-		// The first try after the dwell; then, should the call end while the
-		// panel is still on the photo (a reconnect, a backend restart), up
-		// to holdRetries more before the hold is given up.
-		waits := append([]time.Duration{dwell}, holdRetries...)
-		for n, wait := range waits {
+		// The first try after the dwell. Should the call end while the
+		// panel is still on the photo (a reconnect, a backend restart),
+		// it is made again: soon after a hold that failed quickly, then
+		// every holdRetryLate. A hold that lasted counts as a fresh start.
+		wait, quick := dwell, 0
+		for try := 1; ; try++ {
 			select {
 			case <-time.After(wait):
 			case <-ctx.Done():
@@ -324,19 +329,33 @@ func (cu *culler) holdLater(id int64, hash string) {
 			log.Printf("develop: holding photo %d open in the editor", id)
 			start := time.Now()
 			err := cu.api.Edits.OpenInEditor(ctx, id)
+			held := time.Since(start)
 			if err == nil || canceled(err) || ctx.Err() != nil {
-				log.Printf("develop: photo %d held open in the editor for %d ms", id, time.Since(start).Milliseconds())
+				log.Printf("develop: photo %d held open in the editor for %d ms", id, held.Milliseconds())
 				return
 			}
-			log.Printf("develop: holding photo %d open in the editor (try %d of %d): %v", id, n+1, len(waits), err)
+			if held > holdLasted {
+				quick = 0
+			}
+			wait = holdRetryLate
+			if quick < len(holdRetries) {
+				wait = holdRetries[quick]
+			}
+			quick++
+			log.Printf("develop: holding photo %d open in the editor (try %d, next in %s): %v", id, try, wait, err)
 		}
-		log.Printf("develop: gave up holding photo %d open in the editor", id)
 	}()
 }
 
-// holdRetries are the waits before each new try at holding a photo open in
-// the editor after the call ended with an error.
+// holdRetries are the waits before the next tries at holding a photo open
+// in the editor after the call failed quickly; holdRetryLate the wait after
+// those. A hold that lasted holdLasted before failing starts them over.
 var holdRetries = []time.Duration{time.Second, 5 * time.Second, 5 * time.Second}
+
+const (
+	holdRetryLate = 30 * time.Second
+	holdLasted    = 30 * time.Second
+)
 
 // letGo lets the photo held open in the editor go.
 func (cu *culler) letGo() {

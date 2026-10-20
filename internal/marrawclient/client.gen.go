@@ -420,9 +420,19 @@ func (h EditsClient) ResetEdits(ctx context.Context, ids []int64) error {
 }
 
 // SetEditParams persists the edit state (neutral params clear it).
-func (h EditsClient) SetEditParams(ctx context.Context, photoID int64, params_ Params) error {
-	_, err := client.Call[struct{}](ctx, h.c, "Edits.SetEditParams", []any{photoID, params_})
-	return err
+//
+// It returns the saved state's edit hash — the one the photo's patch
+// carries — so the editor knows its own save landed, and which tiles are
+// now the photo's, without waiting for the patch or telling it apart from
+// an edit made elsewhere.
+func (h EditsClient) SetEditParams(ctx context.Context, photoID int64, params_ Params) (string, error) {
+	return client.Call[string](ctx, h.c, "Edits.SetEditParams", []any{photoID, params_})
+}
+
+// SubscribeSetEditParams runs SetEditParams as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribeSetEditParams(ctx context.Context, photoID int64, params_ Params, opts ...client.SubscribeOption) *client.Subscription[string] {
+	return client.Subscribe[string](ctx, h.c, "Edits.SetEditParams", []any{photoID, params_}, opts...)
 }
 
 // SubjectBounds locates the photo's subject as a bounding box for the crop

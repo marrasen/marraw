@@ -1656,34 +1656,12 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 				_ = cu.c.Patch("grid", PhotoMarked{Folder: cu.folder, Index: i, Rating: p.Rating, Flag: string(p.Flag)})
 				_ = cu.c.Patch("grid", LibMarks{ID: p.ID, Rating: p.Rating, Flag: string(p.Flag)})
 			}
-			if pp.EditHash != nil && cu.ownPatch(p.ID) {
-				// The panel's own save, whose pixels show already: the
-				// tiles of it can come once its last save is in.
-				changed := *pp.EditHash != p.EditHash
-				cu.setEditHash(i, *pp.EditHash)
-				if changed {
-					cu.refreshThumb(*p)
-				}
-				if cu.dev.holdID == p.ID {
-					// The held edit is this one now: loading the photo again
-					// keeps the hold.
-					cu.dev.holdHash = p.EditHash
-				}
-				cu.saveSettle(p.ID)
-			}
-			if pp.EditHash != nil && *pp.EditHash != p.EditHash {
-				p.EditHash = *pp.EditHash
-				cu.tiles.drop(p.ID)
-				if cu.dev.open && cu.dev.id == p.ID {
-					// Edited elsewhere: the panel takes the new edit.
-					cu.loadEdit(i)
-				}
-				cu.cache.drop(p.ID)
-				cu.refreshThumb(*p)
-				if cu.culling && i == cu.at {
-					// Again, with the new edit's pixels.
-					cu.load = nil
-					cu.goTo(i)
+			if pp.EditHash != nil {
+				// An own save's patch is taken from its answer (saveBack);
+				// one that may be is judged once the saves out answer.
+				own, held := cu.judgePatch(p.ID, *pp.EditHash)
+				if !own && !held && *pp.EditHash != p.EditHash {
+					cu.editedElsewhere(i, *pp.EditHash)
 				}
 			}
 			if i >= cu.at-stripReach && i <= cu.at+stripReach {
