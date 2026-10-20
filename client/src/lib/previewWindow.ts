@@ -28,7 +28,27 @@ export interface LoupeWindow {
   paramsKey: string;
 }
 
-export const useLoupeWindow = create<{ win: LoupeWindow | null }>(() => ({ win: null }));
+// lastWasDrag: the edit shown before the one shown now was a drag frame,
+// on screen under DRAG_FRAME_MS (noteShownEdit). Its window shows on over
+// the new edit until that one's comes; a window of an edit the photo had
+// settled on does not — a one-shot change shows its preview at once.
+export const useLoupeWindow = create<{ win: LoupeWindow | null; lastWasDrag: boolean }>(() => ({
+  win: null,
+  lastWasDrag: false,
+}));
+
+// How long an edit may stay on screen and still count as a drag frame.
+const DRAG_FRAME_MS = 400;
+let shownEdit = { key: '', since: 0 };
+
+/** Note the edit the loupe shows now, as JSON, for lastWasDrag. */
+export function noteShownEdit(key: string) {
+  if (key === shownEdit.key) return;
+  const now = performance.now();
+  const lasted = now - shownEdit.since;
+  shownEdit = { key, since: now };
+  useLoupeWindow.setState({ lastWasDrag: lasted < DRAG_FRAME_MS });
+}
 
 /** What the loupe wants a window of. */
 export interface WindowAsk {
@@ -43,7 +63,7 @@ export const WINDOW_MAX_PIXELS = 8 << 20;
 
 // again: the same window was wanted again while it rendered, so a null
 // answer is asked once more (a save's decode may be ready by then).
-let inFlight: { key: string; abort: AbortController; again: boolean } | null = null;
+let inFlight: { key: string; ask: WindowAsk; abort: AbortController; again: boolean } | null = null;
 let wanted: WindowAsk | null = null;
 // The key of the window showing: the same one is not asked for again.
 let shownKey: string | null = null;
@@ -78,7 +98,19 @@ export function wantWindow(client: ApiClient, a: WindowAsk) {
     return;
   }
   wanted = a;
+  if (inFlight && sameEdit(inFlight.ask, a)) {
+    // Only the view moved (a pan, a zoom's last frame): the window under
+    // way is of a view no longer shown. The backend's decode, if it waits
+    // on one, goes on without it.
+    gen++;
+    inFlight.abort.abort();
+    inFlight = null;
+  }
   if (!inFlight) void render(client);
+}
+
+function sameEdit(a: WindowAsk, b: WindowAsk): boolean {
+  return a.photoId === b.photoId && JSON.stringify(a.params) === JSON.stringify(b.params);
 }
 
 /** Let the window go, and the one rendering. */
@@ -100,7 +132,7 @@ async function render(client: ApiClient) {
   const key = keyOf(a);
   const abort = new AbortController();
   const mine = gen;
-  inFlight = { key, abort, again: false };
+  inFlight = { key, ask: a, abort, again: false };
   let blob: Blob | null = null;
   let failed = false;
   try {
@@ -136,4 +168,6 @@ async function render(client: ApiClient) {
 export function resetWindowForTest() {
   dropWindow();
   gen = 0;
+  shownEdit = { key: '', since: 0 };
+  useLoupeWindow.setState({ lastWasDrag: false });
 }

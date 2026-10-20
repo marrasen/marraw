@@ -92,6 +92,28 @@ describe('previewWindow', () => {
     expect(pw.useLoupeWindow.getState().win?.paramsKey).toBe(JSON.stringify({ contrast: 0.1 }));
   });
 
+  it('lets a window of a view no longer shown go, but not a drag frame', async () => {
+    pw.wantWindow(client, ask(0.1, [0, 0, 100, 100]));
+    pw.wantWindow(client, ask(0.1, [50, 0, 100, 100])); // panned
+    expect(calls[0].signal.aborted).toBe(true);
+    expect(calls).toHaveLength(2);
+    pw.wantWindow(client, ask(0.2, [50, 0, 100, 100])); // a drag frame
+    expect(calls[1].signal.aborted).toBe(false);
+  });
+
+  it('counts an edit on screen only a moment as a drag frame', () => {
+    const now = vi.spyOn(performance, 'now');
+    now.mockReturnValue(1000);
+    pw.noteShownEdit('a');
+    now.mockReturnValue(1100);
+    pw.noteShownEdit('b'); // 'a' lasted 100 ms
+    expect(pw.useLoupeWindow.getState().lastWasDrag).toBe(true);
+    now.mockReturnValue(5000);
+    pw.noteShownEdit('c'); // 'b' had settled
+    expect(pw.useLoupeWindow.getState().lastWasDrag).toBe(false);
+    now.mockRestore();
+  });
+
   it('drops a late answer for a window let go', async () => {
     pw.wantWindow(client, ask(0.1));
     pw.dropWindow();

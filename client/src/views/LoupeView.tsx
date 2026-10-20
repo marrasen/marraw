@@ -33,7 +33,7 @@ import {
 } from '@/lib/editSession';
 import { useHoldTick } from '@/lib/editorHold';
 import { setDraftEdge } from '@/lib/previewScheduler';
-import { dropWindow, useLoupeWindow, wantWindow } from '@/lib/previewWindow';
+import { dropWindow, noteShownEdit, useLoupeWindow, wantWindow } from '@/lib/previewWindow';
 import { useDevicePixelRatio } from '@/lib/useDevicePixelRatio';
 import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
@@ -50,9 +50,6 @@ import { AIKind, type Params } from '@/api/edit';
 
 import { renditionPlan, tilesEngaged } from '@/lib/rendition';
 import { ZOOM_DURATION_MS, snapReason, zoomAt } from '@/lib/zoomTween';
-
-// How long after the edit moves on a window of the edit before still shows.
-const STALE_WINDOW_MS = 400;
 
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
 // fraction space (crop-width-fraction / crop-height-fraction), accounting for
@@ -670,18 +667,14 @@ export function CinemaImage({
   }, [windowZone, wantsWindow, shownParams, viewport, dw, dh, photo.id, photo.editHash, holdTick, client]);
   useEffect(() => dropWindow, [photo.id]);
   const loupeWindow = useLoupeWindow((s) => s.win);
-  // A window of an earlier edit shows only just after the edit moved on: a
-  // drag keeps a sharp, slightly late view, while after a one-shot change
-  // (a preset, paste, the eyedropper) whose window takes a decode the new
-  // preview shows rather than the old window over it.
+  // A window of an earlier edit still shows when that edit was a drag frame,
+  // on screen only a moment: a drag keeps a sharp, slightly late view until
+  // the next window comes. One the photo had settled on before a one-shot
+  // change (a preset, paste, the eyedropper, leaving a hovered preset) goes
+  // at once, and the new preview shows rather than the old look over it.
   const shownParamsKey = useMemo(() => (shownParams ? JSON.stringify(shownParams) : ''), [shownParams]);
-  // The edit whose moment is over: once the edit has stayed STALE_WINDOW_MS.
-  const [staleOver, setStaleOver] = useState('');
-  useEffect(() => {
-    const t = window.setTimeout(() => setStaleOver(shownParamsKey), STALE_WINDOW_MS);
-    return () => window.clearTimeout(t);
-  }, [shownParamsKey]);
-  const staleWindowOK = staleOver !== shownParamsKey;
+  useEffect(() => noteShownEdit(shownParamsKey), [shownParamsKey]);
+  const staleWindowOK = useLoupeWindow((s) => s.lastWasDrag);
   const showWindow =
     loupeWindow != null &&
     (loupeWindow.paramsKey === shownParamsKey || staleWindowOK) &&
