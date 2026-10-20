@@ -50,9 +50,6 @@ type fullEditor struct {
 	want  string // fullDecodeKey of the decode it asked for last; "" none yet
 }
 
-// wantNoDecode is what an editor on the base look wants: no decode it could
-// keep, since no edit starts from the base look's.
-const wantNoDecode = "-"
 
 // fullFlight is a decode under way that others wait for.
 type fullFlight struct {
@@ -138,13 +135,14 @@ func (c *Cache) HeldInEditor(photo store.Photo) bool {
 }
 
 // WantFull records that the editor, on a held photo, is now on edits (its
-// settle renders them; nil is the base look), so a warm-up of another state
-// is called off and a decode of another state finishing later is not kept.
+// settle or save of them), so a warm-up of another state is called off and
+// a decode of another state finishing later is not kept. edits is an edit,
+// the neutral one included: the base look's decode is never one to keep.
 func (c *Cache) WantFull(photo store.Photo, edits *edit.Params) {
-	key := wantNoDecode
-	if edits != nil {
-		key = fullDecodeKey(edits)
+	if edits == nil {
+		edits = &edit.Params{}
 	}
+	key := fullDecodeKey(edits)
 	c.fullMu.Lock()
 	defer c.fullMu.Unlock()
 	c.wantLocked(photo.CacheKey, key)

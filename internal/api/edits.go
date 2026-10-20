@@ -1213,18 +1213,24 @@ func (e *Edits) OpenInEditor(ctx context.Context, photoID int64) error {
 }
 
 // SetEditParams persists the edit state (neutral params clear it).
-func (e *Edits) SetEditParams(ctx context.Context, photoID int64, params edit.Params) error {
-	if err := e.saveEdit(ctx, photoID, &params); err != nil {
-		return err
+//
+// It returns the saved state's edit hash — the one the photo's patch
+// carries — so the editor knows its own save landed, and which tiles are
+// now the photo's, without waiting for the patch or telling it apart from
+// an edit made elsewhere.
+func (e *Edits) SetEditParams(ctx context.Context, photoID int64, params edit.Params) (string, error) {
+	hash, err := e.saveEdit(ctx, photoID, &params)
+	if err != nil {
+		return "", err
 	}
 	aprot.TriggerRefresh(ctx, editKey(photoID))
-	return nil
+	return hash, nil
 }
 
 // ResetEdits clears the edit state of the given photos.
 func (e *Edits) ResetEdits(ctx context.Context, ids []int64) error {
 	for _, id := range ids {
-		if err := e.saveEdit(ctx, id, nil); err != nil {
+		if _, err := e.saveEdit(ctx, id, nil); err != nil {
 			return err
 		}
 		aprot.TriggerRefresh(ctx, editKey(id))
@@ -1236,7 +1242,7 @@ func (e *Edits) ResetEdits(ctx context.Context, ids []int64) error {
 // client-local: GetEditParams into a clipboard).
 func (e *Edits) PasteEditParams(ctx context.Context, ids []int64, params edit.Params) error {
 	for i, id := range ids {
-		if err := e.saveEdit(ctx, id, &params); err != nil {
+		if _, err := e.saveEdit(ctx, id, &params); err != nil {
 			return err
 		}
 		aprot.TriggerRefresh(ctx, editKey(id))
@@ -1272,7 +1278,7 @@ func (e *Edits) ApplyBatchEdit(ctx context.Context, ids []int64, delta edit.Delt
 			params = *seeded
 		}
 		delta.Apply(&params)
-		if err := e.saveEdit(ctx, id, &params); err != nil {
+		if _, err := e.saveEdit(ctx, id, &params); err != nil {
 			return err
 		}
 		aprot.TriggerRefresh(ctx, editKey(id))
@@ -1328,25 +1334,22 @@ func (e *Edits) processKeepingHandleUsable(
 
 // saveEdit persists params (nil or neutral clears), pushes the patch to
 // folder subscribers, and warms the new grid thumbnail in the background.
-func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params) error {
+// It returns the saved edit hash.
+func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params) (string, error) {
 	params.Normalize()
 	var jsonPtr *string
 	hash := edit.BaseHash
 	if !params.IsNeutral() {
 		b, err := json.Marshal(params)
 		if err != nil {
-			return err
+			return "", err
 		}
 		s := string(b)
 		jsonPtr = &s
 		hash = params.Hash()
 	}
 	if err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli()); err != nil {
-		return err
-	}
-	saved := params
-	if saved == nil {
-		saved = &edit.Params{}
+		return "", err
 	}
 
 	// Warm the grid thumb for the new state so the grid updates without a
@@ -1354,13 +1357,20 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 	// the photo's portable sidecar.
 	if p, err := e.deps.DB.GetPhoto(context.WithoutCancel(ctx), photoID); err == nil {
 		// A photo open in the editor is now on the saved state, a reset
-		// that renders no settle included.
+		// that renders no settle included. A cleared edit leaves the editor
+		// on the photo's starting state, as GetEditParams gives it.
+		saved := params
+		if params.IsNeutral() {
+			if saved = seededParams(p); saved == nil {
+				saved = &edit.Params{}
+			}
+		}
 		e.deps.Cache.WantFull(p, saved)
 		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{editPatch(photoID, hash, params)})
 		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)
 		e.deps.warmEdit(p, hash)
 	}
-	return nil
+	return hash, nil
 }
 
 // editPatch is the folder broadcast for one photo's new edit state: the
@@ -1426,8 +1436,11 @@ func (d *Deps) waitForSettle(ctx context.Context, p store.Photo, hash string) {
 		ch := d.settles[key]
 		d.warmMu.Unlock()
 		if ch != nil {
+			// It may end called off, and another settle of the state take
+			// its place: look again.
 			select {
 			case <-ch:
+				continue
 			case <-ctx.Done():
 			case <-deadline.C:
 			}

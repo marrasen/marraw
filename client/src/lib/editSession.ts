@@ -844,9 +844,12 @@ function persist(client: ApiClient, params: Params, ids: number[]): Promise<void
     ids.length > 1
       ? pasteEditParams(client, ids, params)
       : setEditParams(client, ids[0], params);
-  return p.catch((err) => {
-    toast.error(`Save failed: ${(err as Error).message}`);
-  });
+  return p.then(
+    () => undefined,
+    (err) => {
+      toast.error(`Save failed: ${(err as Error).message}`);
+    },
+  );
 }
 
 // esCommit persists the draft (merged with an optional final patch) to every
