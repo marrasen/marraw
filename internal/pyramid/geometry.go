@@ -19,7 +19,9 @@ import (
 // of the quarter-rotated, mirrored frame) is taken from the result. Output
 // size is edit.OutputDims — neither the mirror nor the angle changes it.
 // Samples that fall outside the source read as opaque black, which is what
-// the crop overlay's angle guides keep the user's rectangle clear of.
+// the crop overlay's angle guides keep the user's rectangle clear of. src
+// must start at (0, 0): geometryInto reads a source that starts elsewhere
+// as that part of the frame.
 func ApplyGeometry(src *image.RGBA, e *edit.Params) *image.RGBA {
 	if e == nil {
 		return src

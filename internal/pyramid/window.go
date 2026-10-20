@@ -1,6 +1,7 @@
 package pyramid
 
 import (
+	"context"
 	"image"
 	"math"
 	"slices"
@@ -73,7 +74,8 @@ func windowGeom(decW, decH int, e *edit.Params) (cropGeom, int) {
 // the pixels the 1:1 tiles hold there — from src, the full decode that
 // render starts from. src is only read. expEV is the exposure the render
 // folds in after the decode (its ResidualExpEV and WBCompEV). It returns
-// nil when win misses the output or e is not Windowable.
+// nil when win misses the output, e is not Windowable, or ctx is done
+// (checked between the stages).
 //
 // It works backwards from win: the margin the detail stage and the AI
 // masks' edge refinement reach over, then the spots that land in that
@@ -83,12 +85,12 @@ func windowGeom(decW, decH int, e *edit.Params) (cropGeom, int) {
 // only the part the stages after it need. Every stage is the one the full
 // render runs, told where its buffer sits in the frame, so the result
 // matches the full render's pixels there. The one exception is float
-// rounding that depends on where the buffer starts: the AI masks' edge
-// refinement keeps running sums over its own blocks, and the mask
-// evaluators step along each row from its first pixel, so a weight can
-// land a step off. At an AI mask's edge, sharpened, that leaves a few
-// dozen values in a window off by up to three levels.
-func RenderWindow(src *image.RGBA, win image.Rectangle, gamma float64, e *edit.Params, expEV float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *image.RGBA {
+// rounding that depends on where the buffer starts: the mask evaluators
+// step along each row from its first pixel, so an AI mask's weight can
+// land a step off, and with several AI masks, each refining against the
+// last, that can grow — in tests, up to 16 values in a window off by up
+// to three levels.
+func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gamma float64, e *edit.Params, expEV float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *image.RGBA {
 	if !Windowable(e) {
 		return nil
 	}
@@ -125,6 +127,9 @@ func RenderWindow(src *image.RGBA, win image.Rectangle, gamma float64, e *edit.P
 		return renderGeometry(src, out, g, code, warp, e, expEV)
 	}
 	img := part(need)
+	if ctx.Err() != nil {
+		return nil
+	}
 	if len(parts) > 1 {
 		all := image.NewRGBA(image.Rect(0, 0, healed.Dx(), healed.Dy()))
 		pasteRGBA(all, img, need.Min.Sub(healed.Min))
@@ -135,6 +140,9 @@ func RenderWindow(src *image.RGBA, win image.Rectangle, gamma float64, e *edit.P
 		}
 		img = all
 	}
+	if ctx.Err() != nil {
+		return nil
+	}
 
 	applyHealIn(img, region{off: healed.Min, outW: g.outW, outH: g.outH}, e, ai, fills)
 	if len(parts) > 1 {
@@ -144,6 +152,9 @@ func RenderWindow(src *image.RGBA, win image.Rectangle, gamma float64, e *edit.P
 	applyLookIn(img, rg, gamma, e)
 	suppress := applyMasksIn(img, rg, e, ai)
 	ApplyBW(img, e)
+	if ctx.Err() != nil {
+		return nil
+	}
 	applyDetailIn(img, rg, e, suppress)
 	return copyRGBA(img, win.Sub(need.Min))
 }
@@ -154,6 +165,10 @@ func RenderWindow(src *image.RGBA, win image.Rectangle, gamma float64, e *edit.P
 func renderGeometry(src *image.RGBA, out image.Rectangle, g cropGeom, code int, warp *lens.Warp, e *edit.Params, expEV float64) *image.RGBA {
 	sb := src.Bounds()
 	turned := g.source(out)
+	if turned.Empty() {
+		// All of out is outside the straightened frame: black.
+		return image.NewRGBA(image.Rect(0, 0, out.Dx(), out.Dy()))
+	}
 	lensed := unturnRect(turned, code, e != nil && e.FlipH, sb.Dx(), sb.Dy())
 	read := lensed
 	if warp.Geometric() {
@@ -217,7 +232,9 @@ func maskReach(rg region, e *edit.Params, ai AIMapSet) (pad, align int) {
 		if g == nil {
 			continue
 		}
-		pad = max(pad, (guidedRadius+guidedRadius/4+2)*g.s)
+		// Summed, not the largest: a later AI mask refines against the
+		// image the earlier ones changed, each right only so far in.
+		pad += (guidedRadius + guidedRadius/4 + 2) * g.s
 		align = lcm(align, g.s)
 	}
 	return pad, align
@@ -352,6 +369,9 @@ func unturnRect(r image.Rectangle, code int, flip bool, decW, decH int) image.Re
 // those along out's edges and on a coarse grid inside, with room to spare
 // for the bilinear taps.
 func lensSource(w *lens.Warp, out, frame image.Rectangle) image.Rectangle {
+	if out.Empty() {
+		return image.Rectangle{}
+	}
 	minX, minY := math.Inf(1), math.Inf(1)
 	maxX, maxY := math.Inf(-1), math.Inf(-1)
 	add := func(x, y float64) {
