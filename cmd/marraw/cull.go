@@ -800,7 +800,7 @@ func (cu *culler) state() Cull {
 		}
 	}
 	st.WBFrame, st.WBPix = cu.wb.frame, cu.wb.pix
-	if w := &cu.win; w.img != nil && w.id == p.ID && cu.windowWanted() {
+	if w := &cu.win; w.img != nil && w.id == p.ID && w.frame == photoFrame(p) && cu.windowWanted() {
 		st.Window, st.WindowAt = w.img, w.at
 	}
 	if img := cu.originalShowing(p.ID); img != nil {
@@ -847,6 +847,7 @@ func (cu *culler) goTo(i int) {
 	}
 	cu.tileNote = ""
 	cu.original = false
+	cu.dropWindow()
 	cu.showCull()
 	cu.developFollows(i)
 	// The grid follows, so the photo flies back to its own tile.

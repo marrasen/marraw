@@ -226,6 +226,7 @@ func (cu *culler) closeDevelop() {
 		d.stop()
 	}
 	d.live, d.want, d.active = nil, false, ""
+	cu.dropWindow()
 	cu.letGo()
 	cu.saveForget(cu.dev.id)
 	if d.mounted {
@@ -255,6 +256,7 @@ func (cu *culler) loadEdit(i int) {
 		d.stop()
 	}
 	d.live, d.want = nil, false
+	cu.dropWindow()
 	// Held from scratch for another photo, or for this one with its edit
 	// changed elsewhere, which the backend then gets ready. Loaded again
 	// as it was (new pixels for it, say), the hold and its decode stay.
@@ -294,6 +296,7 @@ func (cu *culler) loadEdit(i int) {
 			}
 			cu.histogramShowing()
 			cu.loadPresetThumbs()
+			cu.wantWindow()
 		}:
 		case <-cu.ctx.Done():
 		}
