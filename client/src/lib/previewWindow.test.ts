@@ -23,7 +23,7 @@ const client = {} as ApiClient;
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 function ask(contrast: number, rect: [number, number, number, number] = [0, 0, 100, 100]) {
-  return { photoId: 1, params: { contrast } as unknown as Params, rect, dims: [4000, 3000] as [number, number] };
+  return { photoId: 1, params: { contrast } as unknown as Params, bust: 0, rect, dims: [4000, 3000] as [number, number] };
 }
 
 beforeEach(async () => {
@@ -104,14 +104,29 @@ describe('previewWindow', () => {
   it('counts an edit on screen only a moment as a drag frame', () => {
     const now = vi.spyOn(performance, 'now');
     now.mockReturnValue(1000);
-    pw.noteShownEdit('a');
+    pw.noteShownEdit('a', false);
     now.mockReturnValue(1100);
-    pw.noteShownEdit('b'); // 'a' lasted 100 ms
+    pw.noteShownEdit('b', false); // 'a' lasted 100 ms
     expect(pw.useLoupeWindow.getState().lastWasDrag).toBe(true);
     now.mockReturnValue(5000);
-    pw.noteShownEdit('c'); // 'b' had settled
+    pw.noteShownEdit('c', false); // 'b' had settled
+    expect(pw.useLoupeWindow.getState().lastWasDrag).toBe(false);
+    // Into and out of a hovered preset, however quick, is no drag.
+    now.mockReturnValue(5100);
+    pw.noteShownEdit('hover', true);
+    expect(pw.useLoupeWindow.getState().lastWasDrag).toBe(false);
+    now.mockReturnValue(5200);
+    pw.noteShownEdit('c', false);
     expect(pw.useLoupeWindow.getState().lastWasDrag).toBe(false);
     now.mockRestore();
+  });
+
+  it('asks again when the fills or maps of the photo change under the same params', async () => {
+    pw.wantWindow(client, ask(0.1));
+    calls[0].answer(new Blob(['a']));
+    await tick();
+    pw.wantWindow(client, { ...ask(0.1), bust: 1 });
+    expect(calls).toHaveLength(2);
   });
 
   it('drops a late answer for a window let go', async () => {

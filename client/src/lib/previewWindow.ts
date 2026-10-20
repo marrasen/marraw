@@ -39,21 +39,29 @@ export const useLoupeWindow = create<{ win: LoupeWindow | null; lastWasDrag: boo
 
 // How long an edit may stay on screen and still count as a drag frame.
 const DRAG_FRAME_MS = 400;
-let shownEdit = { key: '', since: 0 };
+let shownEdit = { key: '', since: 0, hovering: false };
 
-/** Note the edit the loupe shows now, as JSON, for lastWasDrag. */
-export function noteShownEdit(key: string) {
+/**
+ * Note the edit the loupe shows now, as JSON, for lastWasDrag. Going into
+ * or out of a hovered preset is never a drag: the look it leaves is not
+ * the one coming, however briefly it showed.
+ */
+export function noteShownEdit(key: string, hovering: boolean) {
   if (key === shownEdit.key) return;
   const now = performance.now();
-  const lasted = now - shownEdit.since;
-  shownEdit = { key, since: now };
-  useLoupeWindow.setState({ lastWasDrag: lasted < DRAG_FRAME_MS });
+  const drag = now - shownEdit.since < DRAG_FRAME_MS && !hovering && !shownEdit.hovering;
+  shownEdit = { key, since: now, hovering };
+  useLoupeWindow.setState({ lastWasDrag: drag });
 }
 
 /** What the loupe wants a window of. */
 export interface WindowAsk {
   photoId: number;
   params: Params;
+  // The photo's pixels other than its edit — its fill patches and AI maps —
+  // change under the same params; this counts them (useImgBust), so a fill
+  // made after its window asks for a new one.
+  bust: number;
   rect: [number, number, number, number];
   dims: [number, number];
 }
@@ -71,7 +79,7 @@ let shownKey: string | null = null;
 let gen = 0;
 
 function keyOf(a: WindowAsk): string {
-  return JSON.stringify([a.photoId, a.rect, a.dims, a.params]);
+  return JSON.stringify([a.photoId, a.bust, a.rect, a.dims, a.params]);
 }
 
 /**
@@ -110,7 +118,7 @@ export function wantWindow(client: ApiClient, a: WindowAsk) {
 }
 
 function sameEdit(a: WindowAsk, b: WindowAsk): boolean {
-  return a.photoId === b.photoId && JSON.stringify(a.params) === JSON.stringify(b.params);
+  return a.photoId === b.photoId && a.bust === b.bust && JSON.stringify(a.params) === JSON.stringify(b.params);
 }
 
 /** Let the window go, and the one rendering. */
@@ -168,6 +176,6 @@ async function render(client: ApiClient) {
 export function resetWindowForTest() {
   dropWindow();
   gen = 0;
-  shownEdit = { key: '', since: 0 };
+  shownEdit = { key: '', since: 0, hovering: false };
   useLoupeWindow.setState({ lastWasDrag: false });
 }

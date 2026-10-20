@@ -32,6 +32,7 @@ import {
   useEditSession,
 } from '@/lib/editSession';
 import { useHoldTick } from '@/lib/editorHold';
+import { useImgBust } from '@/lib/imgCacheBust';
 import { setDraftEdge } from '@/lib/previewScheduler';
 import { dropWindow, noteShownEdit, useLoupeWindow, wantWindow } from '@/lib/previewWindow';
 import { useDevicePixelRatio } from '@/lib/useDevicePixelRatio';
@@ -652,6 +653,8 @@ export function CinemaImage({
   const wantsWindow = windowZone && (previewUrl != null || !tilesWarm) && shownScale === scale;
   // A hold just made: the backend may make a window it could not before.
   const holdTick = useHoldTick((s) => s.tick);
+  // A fill patch or AI map made since: the same params, other pixels.
+  const bust = useImgBust(photo.id);
   useEffect(() => {
     if (!windowZone) {
       dropWindow(); // another photo, out of the editor, cropping, or zoomed out
@@ -663,8 +666,8 @@ export function CinemaImage({
     const y0 = Math.max(0, Math.floor(vy * dh));
     const x1 = Math.min(dw, Math.ceil((vx + vw) * dw));
     const y1 = Math.min(dh, Math.ceil((vy + vh) * dh));
-    wantWindow(client, { photoId: photo.id, params: shownParams, rect: [x0, y0, x1 - x0, y1 - y0], dims: [dw, dh] });
-  }, [windowZone, wantsWindow, shownParams, viewport, dw, dh, photo.id, photo.editHash, holdTick, client]);
+    wantWindow(client, { photoId: photo.id, params: shownParams, bust, rect: [x0, y0, x1 - x0, y1 - y0], dims: [dw, dh] });
+  }, [windowZone, wantsWindow, shownParams, viewport, dw, dh, photo.id, photo.editHash, holdTick, bust, client]);
   useEffect(() => dropWindow, [photo.id]);
   const loupeWindow = useLoupeWindow((s) => s.win);
   // A window of an earlier edit still shows when that edit was a drag frame,
@@ -673,7 +676,8 @@ export function CinemaImage({
   // change (a preset, paste, the eyedropper, leaving a hovered preset) goes
   // at once, and the new preview shows rather than the old look over it.
   const shownParamsKey = useMemo(() => (shownParams ? JSON.stringify(shownParams) : ''), [shownParams]);
-  useEffect(() => noteShownEdit(shownParamsKey), [shownParamsKey]);
+  const hovering = useEditSession((s) => s.hoverParams != null);
+  useEffect(() => noteShownEdit(shownParamsKey, hovering), [shownParamsKey, hovering]);
   const staleWindowOK = useLoupeWindow((s) => s.lastWasDrag);
   const showWindow =
     loupeWindow != null &&
