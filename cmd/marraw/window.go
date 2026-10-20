@@ -115,7 +115,8 @@ func (cu *culler) wantWindow() {
 	p := cu.photos[cu.at]
 	if !cu.editing(p.ID) && (cu.tileWarm[tileSet(p)] || cu.tilesCover(p, cu.tileWant.Range)) {
 		// The saved edit's tiles are in, or rendered and a fetch away:
-		// cheaper than a window, and they paint over it.
+		// cheaper than a window, and they paint over it. Nor one queued.
+		w.want, w.again = false, false
 		return
 	}
 	if cu.windowKey() == w.key {

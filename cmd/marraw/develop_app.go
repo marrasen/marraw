@@ -334,7 +334,6 @@ func (cu *culler) holdLater(id int64, hash string) {
 				select {
 				case cu.do <- func() {
 					if cu.dev.holdID == id {
-						cu.win.key = ""
 						cu.wantWindow()
 					}
 				}:

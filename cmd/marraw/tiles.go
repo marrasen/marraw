@@ -213,6 +213,23 @@ func (cu *culler) fetchTiles(p marrawclient.Photo) {
 		go func() {
 			for t := range work {
 				img, err := cu.im.tile(ctx, p, t, true)
+				if err == errMissing {
+					// Rendered once, since cleaned out of the cache (the
+					// janitor goes tile by tile): the set is cold again, for
+					// a window to bridge while it renders — once, for every
+					// tile missing (the backend renders the set as one).
+					select {
+					case cu.do <- func() {
+						if set := tileSet(p); cu.tileWarm[set] && cu.at == at {
+							delete(cu.tileWarm, set)
+							cu.wantWindow()
+						}
+					}:
+					case <-ctx.Done():
+						return
+					}
+					img, err = cu.im.tile(ctx, p, t, false)
+				}
 				if err != nil {
 					continue
 				}
