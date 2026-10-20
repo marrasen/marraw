@@ -103,3 +103,95 @@ func TestLedgerBoundsOwnNumbers(t *testing.T) {
 		t.Error("the bound kept the oldest numbers instead of the newest")
 	}
 }
+
+// ledgerPhoto plays a photo through the ledger the way sendOwn, patchHash
+// and judgeHash do: answers set the hash by the ledger's rule, patches are
+// held while own saves are out and judged in order once none is, and an
+// outside one sets the hash and counts as a reload.
+type ledgerPhoto struct {
+	l       saveLedger
+	hash    string
+	reloads []string
+}
+
+func (p *ledgerPhoto) answer(seq int, save int64, hash string) {
+	if p.l.answered(1, seq, save, true) {
+		p.hash = hash
+	}
+	for _, h := range p.l.release(1) {
+		p.judge(h.hash, h.save)
+	}
+}
+
+func (p *ledgerPhoto) patch(hash string, save int64) {
+	if !p.l.patch(1, hash, save) {
+		p.judge(hash, save)
+	}
+}
+
+func (p *ledgerPhoto) judge(hash string, save int64) {
+	if p.l.outside(1, hash, save, p.hash) {
+		p.hash = hash
+		p.reloads = append(p.reloads, hash)
+	}
+}
+
+// TestHeldOutsideThenOwn: a seed patch (outside, 5) and the panel's own
+// save (6) held while the save is out end on the own save's hash, with no
+// reload: the seed came before the save that overwrote it.
+func TestHeldOutsideThenOwn(t *testing.T) {
+	p := ledgerPhoto{hash: "h0"}
+	p.l.sent(1)
+	p.patch("seed", 5)
+	p.patch("h6", 6)
+	p.answer(1, 6, "h6")
+	if p.hash != "h6" || len(p.reloads) != 0 {
+		t.Errorf("ended on %q with reloads %v; want h6 and none", p.hash, p.reloads)
+	}
+}
+
+// TestLateOwnPatches: two own saves answer before either patch comes; the
+// patches then change nothing.
+func TestLateOwnPatches(t *testing.T) {
+	p := ledgerPhoto{hash: "h0"}
+	p.l.sent(1)
+	p.l.sent(1)
+	p.answer(1, 101, "h1")
+	p.answer(2, 102, "h2")
+	p.patch("h1", 101)
+	p.patch("h2", 102)
+	if p.hash != "h2" || len(p.reloads) != 0 {
+		t.Errorf("ended on %q with reloads %v; want h2 and none", p.hash, p.reloads)
+	}
+}
+
+// TestStaleOutsidePatch: an outside patch numbered below the newest own
+// save that answered (a seed arriving late) is ignored; one numbered above
+// is an edit made elsewhere.
+func TestStaleOutsidePatch(t *testing.T) {
+	p := ledgerPhoto{hash: "h0"}
+	p.l.sent(1)
+	p.answer(1, 100, "h1")
+	p.patch("seed", 90)
+	if p.hash != "h1" || len(p.reloads) != 0 {
+		t.Errorf("a stale outside patch moved the photo to %q (reloads %v)", p.hash, p.reloads)
+	}
+	p.patch("pasted", 120)
+	if p.hash != "pasted" || len(p.reloads) != 1 {
+		t.Errorf("a fresh outside patch: hash %q, reloads %v; want pasted, one reload", p.hash, p.reloads)
+	}
+}
+
+// TestOwnNumberOutOfWindow: a late own patch whose number fell out of the
+// bounded list is still ignored, being older than the newest own save.
+func TestOwnNumberOutOfWindow(t *testing.T) {
+	p := ledgerPhoto{hash: "h0"}
+	for i := 1; i <= ownCap+5; i++ {
+		p.l.sent(1)
+		p.answer(i, int64(1000+i), "h")
+	}
+	p.patch("old", 1001)
+	if len(p.reloads) != 0 {
+		t.Errorf("a late own patch out of the window reloaded: %v", p.reloads)
+	}
+}

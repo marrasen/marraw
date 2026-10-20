@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"slices"
 	"time"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
@@ -22,8 +23,11 @@ import (
 // an own save answered with. While own saves of the photo are out their
 // numbers are not known yet, so its patches are held, in order, and judged
 // once none is out. An own patch is nothing to do — its answer set the
-// hash already, and a late one must not undo a later save; any other patch
-// with another hash than the photo's is an edit made elsewhere.
+// hash already, and a late one must not undo a later save. Nor is any patch
+// numbered below the newest own save that answered well: that save came
+// after it and overwrote it (a seed patch arriving late, or an own number
+// gone from the bounded list). Any other patch with another hash than the
+// photo's is an edit made elsewhere.
 
 // saveJob is an edit to save. done, if set, gets the answer on the culler
 // loop.
@@ -46,8 +50,8 @@ type ownSave struct {
 const heldCap = 16
 
 // ownCap bounds the own save numbers kept per photo. Numbers are unique, so
-// keeping them does no harm; a patch late by more saves than this is the
-// panel's own all the same, and judged by its hash.
+// keeping them does no harm; a patch late by more saves than this is
+// numbered below the newest own one, and ignored all the same.
 const ownCap = 32
 
 // heldPatch is a patch of a photo's edit hash, held while own saves of the
@@ -66,6 +70,7 @@ type saveLedger struct {
 	applied map[int64]int // highest own save seq answered well
 	held    map[int64][]heldPatch
 	own     map[int64][]int64 // backend save numbers of own saves
+	newest  map[int64]int64   // highest backend save number an own save answered well with
 }
 
 // sent counts an own save of id out.
@@ -95,6 +100,10 @@ func (l *saveLedger) answered(id int64, seq int, save int64, ok bool) (apply boo
 		own = own[len(own)-ownCap:]
 	}
 	l.own[id] = own
+	if l.newest == nil {
+		l.newest = map[int64]int64{}
+	}
+	l.newest[id] = max(l.newest[id], save)
 	if seq <= l.applied[id] {
 		return false
 	}
@@ -137,15 +146,21 @@ func (l *saveLedger) release(id int64) []heldPatch {
 // isOwn reports whether save, the number a patch of id carries, is one an
 // own save of id answered with.
 func (l *saveLedger) isOwn(id, save int64) bool {
-	if save == 0 {
+	return save != 0 && slices.Contains(l.own[id], save)
+}
+
+// outside reports whether a patch of id's edit hash, set by save number
+// save (0 when it carries none), is an edit made elsewhere, the photo's
+// hash being current now: not an own save's, not older than the newest own
+// save that answered well, and another hash than the photo's.
+func (l *saveLedger) outside(id int64, hash string, save int64, current string) bool {
+	if l.isOwn(id, save) {
 		return false
 	}
-	for _, o := range l.own[id] {
-		if o == save {
-			return true
-		}
+	if save != 0 && save < l.newest[id] {
+		return false
 	}
-	return false
+	return hash != current
 }
 
 // saveRetryWaits are the waits before each new send of a failed own save,
@@ -385,22 +400,21 @@ func (cu *culler) patchHash(id int64, hash string, save *int64) {
 // judgeHash judges a patch of photo id's edit hash, set by save number save
 // (0 for none), with no own save of it out. A patch of an own save is
 // nothing to do: its answer set the hash already, and a late patch of an
-// earlier save must not undo the later one. Any other with another hash
-// than the photo's is an edit made elsewhere. It reports whether the photo
+// earlier save must not undo the later one. So is one numbered below the
+// newest own save that answered well. Any other with another hash than the
+// photo's is an edit made elsewhere (saveLedger.outside). It reports whether the photo
 // showing changed (shown), or the folder's list of the photos not showing
 // (listed).
 func (cu *culler) judgeHash(id int64, hash string, save int64) (shown, listed bool) {
-	if cu.dev.ledger.isOwn(id, save) {
-		return false, false
-	}
+	l := &cu.dev.ledger
 	if i, ok := cu.index[id]; ok {
-		if hash == cu.photos[i].EditHash {
+		if !l.outside(id, hash, save, cu.photos[i].EditHash) {
 			return false, false
 		}
 		cu.editedElsewhere(i, hash)
 		return true, false
 	}
-	if ai, ok := cu.allIndex[id]; ok && cu.all[ai].EditHash != hash {
+	if ai, ok := cu.allIndex[id]; ok && l.outside(id, hash, save, cu.all[ai].EditHash) {
 		cu.all[ai].EditHash = hash
 		return false, true
 	}
