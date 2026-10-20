@@ -8,10 +8,11 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
-## 0.10.1-beta.1 - 2026-08-29
+## 0.10.1 - 2026-10-20
 
-- Platform: **the whole toolchain moved up a generation** — Electron 44 (a newer Chromium under the app), Go 1.27 under the daemon, ONNX Runtime 1.29 under the AI models, and the latest aprot for the app's own wiring. No feature rides along; this beta exists to prove the new stack on real Windows and macOS installs, and on the auto-updater, before feature work lands on top of it
-- Fixed: **Copy image** reports success only once the image is actually on the clipboard — the newer Electron writes it asynchronously, and the old code answered before the write had happened
+- Fixed: **an edit looks the same wherever it is opened**. marraw brightens each photo to match the camera's own rendering, by an amount it measures per photo. It only measured that while showing the photo unedited, so a photo that reached a library with its edit already on it, read from the `.marraw.json` file beside it, was drawn with a fixed guess instead, which is far too bright for a dark scene. An edit made to look right there came out dark everywhere else. Now the amount is measured before any edit is drawn. Previews are redrawn once after the update, and photos edited under the wrong brightness will look darker than before
+- Fixed: **Copy image** reports success only once the image is actually on the clipboard. It used to answer before the copy had happened
+- Platform: **the whole toolchain moved up a generation**: Electron 44 (a newer Chromium under the app), Go 1.27 under the daemon, ONNX Runtime 1.29 under the AI models, and the latest aprot for the app's own wiring
 
 ## 0.10.0 - 2026-08-09
 
