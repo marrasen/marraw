@@ -254,7 +254,6 @@ func TestApplyBatchEditLeavesAnUnreadableEditAlone(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestAClippedReferenceFoldsOnlyWhileTheEditKeepsItsWhiteBalance(t *testing.T) {
 	keep := pyramid.FoldParams{D: [3]float64{1, 1, 1}, Exp: 1, Bright: 1.5}
 	warm := pyramid.FoldParams{D: [3]float64{1.4, 1, 0.7}, Exp: 1, Bright: 1}
@@ -283,7 +282,10 @@ func TestUnpickableSaysWhy(t *testing.T) {
 	for _, c := range cases {
 		if got := unpickable(c.r, c.g, c.b); got != c.want {
 			t.Errorf("unpickable(%g, %g, %g) = %q, want %q", c.r, c.g, c.b, got, c.want)
-=======
+		}
+	}
+}
+
 // TestPreviewWindowArgs: sizes past the cap are refused before any work,
 // including two sides whose product wraps around, and neutral params or
 // an edit a window cannot render answer null.
@@ -298,7 +300,6 @@ func TestPreviewWindowArgs(t *testing.T) {
 		blob, err := e.PreviewWindow(t.Context(), 1, p, 0, 0, 100, 100)
 		if err != nil || blob != nil {
 			t.Errorf("%s: %v, %v; want null", name, blob, err)
->>>>>>> origin/window-render
 		}
 	}
 }
