@@ -33,7 +33,7 @@ func ApplyHeal(img *image.RGBA, e *edit.Params, ai AIMapSet, fills FillSet) {
 
 // applyHealIn is ApplyHeal for a buffer that is the part rg of the output.
 // The buffer must hold every pixel a spot that lands in it reads (see
-// healReach): w and h below bound what the spots write and read, while
+// healParts): w and h below bound what the spots write and read, while
 // where a source may sit is bounded by the whole output.
 func applyHealIn(img *image.RGBA, rg region, e *edit.Params, ai AIMapSet, fills FillSet) {
 	if !e.HasSpots() && !e.HasMaskFills() {
@@ -449,7 +449,7 @@ func applyHealStroke(img *image.RGBA, w, h int, f *maskFrame, long float64, s *e
 	// the covered box translated by the offset must fit inside the image. The
 	// box is clipped to the image, so the clamp range is never empty. The
 	// image is the whole output; in a window the box lies inside the buffer
-	// (healReach), so x0..x1 is the box clipped to the output too.
+	// (healParts), so x0..x1 is the box clipped to the output too.
 	offX = clampF(offX, -f.bx-float64(x0), float64(f.outW)-f.bx-float64(x1))
 	offY = clampF(offY, -f.by-float64(y0), float64(f.outH)-f.by-float64(y1))
 

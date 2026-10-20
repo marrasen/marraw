@@ -37,18 +37,41 @@ func windowTestSource(w, h int) *image.RGBA {
 	return img
 }
 
-// renderWholeForTest is the 1:1 render's stage order (Cache.generate).
+// renderWholeForTest is the 1:1 render (Cache.generate): exposure, lens,
+// geometry, then ApplyFinish, whose stages generate mirrors — so a stage
+// added there and not to RenderWindow fails the test.
 func renderWholeForTest(src *image.RGBA, gamma float64, e *edit.Params, expEV float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *image.RGBA {
 	img := copyRGBA(src, src.Bounds())
 	ApplyExposureEV(img, expEV, e)
 	img = ApplyLens(img, LensWarp(lensc, e, img.Bounds().Dx(), img.Bounds().Dy()), e)
 	img = ApplyGeometry(img, e)
-	ApplyHeal(img, e, ai, fills)
-	ApplyLook(img, gamma, e)
-	suppress := ApplyMasks(img, e, ai)
-	ApplyBW(img, e)
-	ApplyDetail(img, e, suppress)
+	ApplyFinish(img, gamma, e, ai, fills)
 	return img
+}
+
+// fillsForTest makes a patch for every fill the edit composites: fill
+// spots and Remove masks.
+func fillsForTest(e *edit.Params) FillSet {
+	patch := func(seed int) *FillPatch {
+		img := image.NewRGBA(image.Rect(0, 0, 96, 80))
+		for i := 0; i < len(img.Pix); i += 4 {
+			x, y := i/4%96, i/4/96
+			img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = uint8(x*2+seed), uint8(y*3), uint8((x+y)*seed%256), 255
+		}
+		return &FillPatch{Img: img}
+	}
+	fills := FillSet{}
+	for i := range e.Spots {
+		if e.Spots[i].Mode == edit.SpotFill {
+			fills[e.SpotFillKey(&e.Spots[i])] = patch(i + 1)
+		}
+	}
+	for i := range e.Masks {
+		if e.Masks[i].Remove {
+			fills[e.MaskFillKey(&e.Masks[i])] = patch(i + 40)
+		}
+	}
+	return fills
 }
 
 // TestRenderWindowMatchesWhole: a window renders the pixels the whole
@@ -135,6 +158,17 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 				spot(edit.SpotHeal, 0.99, 0.02, 0.5, 0.5, 0.04),   // at the corner
 				stroke)
 		}),
+		"fills": with(detail, func(e *edit.Params) {
+			e.CropX, e.CropY, e.CropW, e.CropH, e.CropAngle = 0.05, 0.05, 0.9, 0.9, 3
+			e.Spots = append(e.Spots,
+				edit.Spot{Mode: edit.SpotFill, CX: 0.4, CY: 0.4, Radius: 0.05, Feather: 0.3},
+				edit.Spot{Kind: "stroke", Mode: edit.SpotFill, CX: 0.7, CY: 0.6,
+					Strokes: []edit.Stroke{{Radius: 0.02, Pts: []float64{0.65, 0.55, 0.75, 0.65}}}},
+				spot(edit.SpotHeal, 0.2, 0.7, 0.4, 0.4, 0.03)) // copies from inside the fill
+			remove := brush
+			remove.Remove, remove.Adjust = true, edit.MaskAdjust{}
+			e.Masks = append(e.Masks, remove)
+		}),
 		"bw": with(detail, func(e *edit.Params) {
 			e.BW = true
 			e.SplitHighlightAmt, e.SplitHighlightHue = 0.3, 40
@@ -168,8 +202,9 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 				e.LensMode = edit.LensOff
 			}
 			ai := store.SetFor(key, &e)
+			fills := fillsForTest(&e)
 			const expEV = 0.35
-			whole := renderWholeForTest(src, 0.72, &e, expEV, lc, ai, nil)
+			whole := renderWholeForTest(src, 0.72, &e, expEV, lc, ai, fills)
 			ow, oh := whole.Bounds().Dx(), whole.Bounds().Dy()
 			if w, h := OutputSize(2400, 1600, &e); w != ow || h != oh {
 				t.Fatalf("OutputSize = %dx%d, render is %dx%d", w, h, ow, oh)
@@ -189,7 +224,7 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 				wins = append(wins, image.Rect(x, y, x+w, y+h))
 			}
 			for _, win := range wins {
-				got := RenderWindow(t.Context(), src, win, 0.72, &e, expEV, lc, ai, nil)
+				got := RenderWindow(t.Context(), src, win, 0.72, &e, expEV, lc, ai, fills)
 				want := copyRGBA(whole, win)
 				if got == nil {
 					t.Fatalf("window %v: nil", win)
