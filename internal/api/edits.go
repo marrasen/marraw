@@ -160,7 +160,27 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 		}
 		return &aprot.Blob{ContentType: "image/jpeg", Data: data}, nil
 	}
+	return e.previewInMemory(ctx, photoID, params, longEdge)
+}
 
+// draftEdgeMax bounds PreviewDraft's size. The drafts come from the
+// half-size decode, so nothing larger than its long edge adds detail.
+const draftEdgeMax = 4096
+
+// PreviewDraft renders a draft of the (unsaved) edit state at any long
+// edge up to draftEdgeMax, entirely in memory and never cached: the frames
+// of a slider drag, sized to what the photo covers on screen. Unlike
+// PreviewEdit, a draft of 2048 or more is still a fast draft, not the
+// exact, cached 2048. The JPEG rides the WebSocket as a binary Blob.
+func (e *Edits) PreviewDraft(ctx context.Context, photoID int64, params edit.Params, longEdge int) (*aprot.Blob, error) {
+	params.Normalize()
+	return e.previewInMemory(ctx, photoID, params, min(max(longEdge, 64), draftEdgeMax))
+}
+
+// previewInMemory renders a transient frame of params, already normalized,
+// at longEdge: the fold path where it applies, else the warm or a fresh
+// half-size decode.
+func (e *Edits) previewInMemory(ctx context.Context, photoID int64, params edit.Params, longEdge int) (*aprot.Blob, error) {
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
 	if err != nil {
 		return nil, err
@@ -1143,19 +1163,22 @@ func (e *Edits) AutoAdjust(ctx context.Context, photoID int64, params edit.Param
 	return &out, nil
 }
 
-// WarmFull gets a photo's 1:1 render ready for the edits to come: it names
-// the photo the one open in the editor, whose 1:1 renders keep their
-// decode, and decodes it at full resolution as the editor starts from it — its
-// saved edit, or the seeded or neutral starting state of an unedited photo
-// — and keeps the decode. The 1:1 render of any edit that leaves those
-// LibRaw inputs as they are starts from it. For the editor to call as it
-// opens a photo; the first edit's tiles then come seconds sooner. It
-// returns once the decode is kept; cancelling the call stops the decode.
-func (e *Edits) WarmFull(ctx context.Context, photoID int64) error {
+// OpenInEditor tells the backend the editor shows a photo, for as long as
+// the call lasts: call it as the editor opens a photo and cancel it when
+// the editor leaves. While it lasts, the photo's 1:1 renders keep their
+// full-resolution decode, so an edit that leaves the LibRaw inputs as they
+// are — crop, lens, masks, healing, every look-stage slider — gets its
+// tiles without a second demosaic. It also decodes the photo at once as the
+// editor starts from it — its saved edit, or the seeded or neutral starting
+// state of an unedited photo — so even the first edit's tiles come seconds
+// sooner. It returns when cancelled.
+func (e *Edits) OpenInEditor(ctx context.Context, photoID int64) error {
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
 	if err != nil {
 		return err
 	}
+	release := e.deps.Cache.HoldEditor(photo)
+	defer release()
 	// An unedited photo's base look (auto-brightened) is a decode no edit
 	// uses: the first edit starts from GetEditParams' state. Normalized, as
 	// the next edit is saved.
@@ -1168,7 +1191,12 @@ func (e *Edits) WarmFull(ctx context.Context, photoID int64) error {
 		start = seeded
 	}
 	start.Normalize()
-	return e.deps.Cache.WarmFull(ctx, photo, start)
+	if err := e.deps.Cache.WarmFull(ctx, photo, start); err != nil && ctx.Err() == nil {
+		// The hold still serves: the first 1:1 render decodes and keeps.
+		log.Printf("edits: warming photo %d at full resolution: %v", photoID, err)
+	}
+	<-ctx.Done()
+	return nil
 }
 
 // SetEditParams persists the edit state (neutral params clear it).

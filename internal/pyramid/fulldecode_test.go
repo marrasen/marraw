@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"image"
 	"io"
 	"os"
 	"path/filepath"
@@ -119,13 +121,13 @@ func (f *fullTestCatalog) photo(i int) store.Photo {
 	return p
 }
 
-// open names photo i the one in the editor, as Edits.WarmFull does, without
-// decoding.
-func (f *fullTestCatalog) open(i int) {
+// open holds photo i open in the editor, as Edits.OpenInEditor does, until
+// the test ends or release is called.
+func (f *fullTestCatalog) open(i int) (release func()) {
 	f.t.Helper()
-	if err := f.cache.WarmFull(f.t.Context(), f.photo(i), nil); err != nil {
-		f.t.Fatal(err)
-	}
+	release = f.cache.HoldEditor(f.photo(i))
+	f.t.Cleanup(release)
+	return release
 }
 
 // tile renders photo i's 1:1 tiles under its saved edit at prio and returns
@@ -183,6 +185,7 @@ func TestFullRenderReusesKeptDecode(t *testing.T) {
 // is free, and the 1:1 render of the next look-stage edit starts from it.
 func TestWarmFullServesTheNextRender(t *testing.T) {
 	f := newFullTestCatalog(t)
+	f.open(0)
 	p := f.edit(0, edit.Params{Contrast: 0.1})
 	start := &edit.Params{Contrast: 0.1}
 	start.Normalize()
@@ -200,6 +203,7 @@ func TestWarmFullServesTheNextRender(t *testing.T) {
 // after it decodes for itself.
 func TestWarmFullCancelled(t *testing.T) {
 	f := newFullTestCatalog(t)
+	f.open(0)
 	p := f.edit(0, edit.Params{Contrast: 0.1})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -216,6 +220,7 @@ func TestWarmFullCancelled(t *testing.T) {
 // decodes auto-brightened.
 func TestWarmFullUneditedServesFirstEdit(t *testing.T) {
 	f := newFullTestCatalog(t)
+	f.open(0)
 	if err := f.cache.WarmFull(t.Context(), f.photo(0), &edit.Params{}); err != nil {
 		t.Fatal(err)
 	}
@@ -236,10 +241,29 @@ func TestOtherRendersKeepEditorsDecode(t *testing.T) {
 	f.edit(1, edit.Params{Contrast: 0.2})
 	f.tile(1, decode.PriorityVisible)
 	f.decodes(2, "another photo's render")
+	f.edit(1, edit.Params{Contrast: 0.25})
+	f.tile(1, decode.PriorityBackground)
+	f.decodes(3, "another photo's background render: nothing of it was kept")
 
 	f.edit(0, edit.Params{Contrast: 0.5})
 	f.tile(0, decode.PriorityVisible)
-	f.decodes(2, "the editor's photo after another photo's render")
+	f.decodes(3, "the editor's photo after other photos' renders")
+}
+
+// TestLeftPhotoNotKept: a decode of a photo the editor has left by the time
+// it finishes is not kept, and the hold's end lets the kept decode go idle.
+func TestLeftPhotoNotKept(t *testing.T) {
+	f := newFullTestCatalog(t)
+	release := f.open(0)
+	release()
+	start := &edit.Params{Contrast: 0.1}
+	start.Normalize()
+	if err := f.cache.WarmFull(t.Context(), f.photo(0), start); err != nil {
+		t.Fatal(err)
+	}
+	f.edit(0, *start)
+	f.tile(0, decode.PriorityVisible)
+	f.decodes(2, "a render after a warm-up of a photo no longer open")
 }
 
 // TestBaseRenderNotKept: the editor's photo's base look is not kept: it is
@@ -247,6 +271,7 @@ func TestOtherRendersKeepEditorsDecode(t *testing.T) {
 // edit can.
 func TestBaseRenderNotKept(t *testing.T) {
 	f := newFullTestCatalog(t)
+	f.open(0)
 	if err := f.cache.WarmFull(t.Context(), f.photo(0), &edit.Params{}); err != nil {
 		t.Fatal(err)
 	}
@@ -263,6 +288,7 @@ func TestBaseRenderNotKept(t *testing.T) {
 func TestRenderAndWarmFullDecodeOnce(t *testing.T) {
 	for _, cancelWarm := range []bool{false, true} {
 		f := newFullTestCatalog(t)
+		f.open(0)
 		start := &edit.Params{Contrast: 0.1}
 		start.Normalize()
 		p := f.edit(0, *start)
@@ -284,5 +310,65 @@ func TestRenderAndWarmFullDecodeOnce(t *testing.T) {
 			what = "render and a called-off warm-up"
 		}
 		f.decodes(1, what)
+	}
+}
+
+// TestKeepFullPrefersLaterAsk: of two decodes of the editor's photo, the one
+// asked for later stays kept whichever finishes last — a warm-up of the
+// starting state finishing after the decode of an edit made since does not
+// push that one out.
+func TestKeepFullPrefersLaterAsk(t *testing.T) {
+	c := &Cache{}
+	photo := store.Photo{CacheKey: "k"}
+	defer c.HoldEditor(photo)()
+	px := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	older := &fullDecode{cacheKey: "k", key: "start", seq: 1, rgba: px}
+	newer := &fullDecode{cacheKey: "k", key: "edit", seq: 2, rgba: px}
+	c.keepFull(newer)
+	c.keepFull(older)
+	if c.fullEntry != newer {
+		t.Errorf("kept %q, want the later-asked %q", c.fullEntry.key, newer.key)
+	}
+	c.closeFull()
+}
+
+// TestFlightFailureShared: when the decode others wait on fails, they fail
+// the same instead of each reading and decoding the file again in turn.
+func TestFlightFailureShared(t *testing.T) {
+	c := &Cache{}
+	photo := store.Photo{CacheKey: "k"}
+	defer c.HoldEditor(photo)()
+	edits := &edit.Params{}
+	broken := errors.New("unreadable file")
+	inOpen, fail := make(chan struct{}), make(chan struct{})
+	owner := make(chan error, 1)
+	go func() {
+		_, _, err := c.keptFullDecode(t.Context(), nil, photo, edits, func() error {
+			close(inOpen)
+			<-fail
+			return broken
+		})
+		owner <- err
+	}()
+	<-inOpen
+	waiter := make(chan error, 1)
+	opened := false
+	go func() {
+		_, _, err := c.keptFullDecode(t.Context(), nil, photo, edits, func() error {
+			opened = true
+			return nil
+		})
+		waiter <- err
+	}()
+	time.Sleep(50 * time.Millisecond) // the waiter waits on the flight
+	close(fail)
+	if err := <-owner; !errors.Is(err, broken) {
+		t.Fatalf("owner: %v", err)
+	}
+	if err := <-waiter; !errors.Is(err, broken) {
+		t.Errorf("waiter: %v, want the owner's error", err)
+	}
+	if opened {
+		t.Error("the waiter opened the file again")
 	}
 }

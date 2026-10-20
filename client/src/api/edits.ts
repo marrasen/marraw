@@ -263,6 +263,19 @@ export function subscribeMaskTintPreview(client: ApiClient, photoID: number, par
 }
 
 
+export function openInEditor(client: ApiClient, photoID: number, options?: RequestOptions): Promise<void> {
+    return client.request<void>('Edits.OpenInEditor', [photoID], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+openInEditor.method = 'Edits.OpenInEditor' as const;
+
+export function subscribeOpenInEditor(client: ApiClient, photoID: number, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Edits.OpenInEditor', [photoID], callback, onError, options);
+}
+
+
 export function pasteEditParams(client: ApiClient, ids: number[], params: Params, options?: RequestOptions): Promise<void> {
     return client.request<void>('Edits.PasteEditParams', [ids, params], options);
 }
@@ -299,6 +312,19 @@ pickWhiteBalance.method = 'Edits.PickWhiteBalance' as const;
 
 export function subscribePickWhiteBalance(client: ApiClient, photoID: number, params: Params, base: Params, x: number, y: number, callback: (data: Params) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<Params>('Edits.PickWhiteBalance', [photoID, params, base, x, y], callback, onError, options);
+}
+
+
+export function previewDraft(client: ApiClient, photoID: number, params: Params, longEdge: number, options?: RequestOptions): Promise<Blob> {
+    return client.request<Blob>('Edits.PreviewDraft', [photoID, params, longEdge], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+previewDraft.method = 'Edits.PreviewDraft' as const;
+
+export function subscribePreviewDraft(client: ApiClient, photoID: number, params: Params, longEdge: number, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Blob>('Edits.PreviewDraft', [photoID, params, longEdge], callback, onError, options);
 }
 
 
@@ -403,19 +429,6 @@ wBPickFrame.method = 'Edits.WBPickFrame' as const;
 
 export function subscribeWBPickFrame(client: ApiClient, photoID: number, base: Params, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<Blob>('Edits.WBPickFrame', [photoID, base], callback, onError, options);
-}
-
-
-export function warmFull(client: ApiClient, photoID: number, options?: RequestOptions): Promise<void> {
-    return client.request<void>('Edits.WarmFull', [photoID], options);
-}
-// Wire-method tag consumed by useQuerySuspense to key the promise cache and
-// open the matching server subscription. Stable identifier across builds
-// (unaffected by minification, unlike Function.name).
-warmFull.method = 'Edits.WarmFull' as const;
-
-export function subscribeWarmFull(client: ApiClient, photoID: number, callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
-    return client.subscribe<void>('Edits.WarmFull', [photoID], callback, onError, options);
 }
 
 export function onAIMapsGeneratedEvent(client: ApiClient, handler: PushHandler<AIMapsGeneratedEvent>): () => void {
@@ -619,6 +632,21 @@ export function useMaskTintPreview(photoID: number, params: Params, maskIndex: n
 }
 
 /**
+ * Subscribes to `Edits.OpenInEditor` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useOpenInEditor(photoID: number, options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number) => openInEditor(client, photoID, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID], _subscribe: { method: 'Edits.OpenInEditor', params: [photoID] } });
+}
+
+/**
  * Subscribes to `Edits.PasteEditParams` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -661,6 +689,21 @@ export function usePickWhiteBalance(photoID: number, params: Params, base: Param
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, params, base, x, y], _subscribe: { method: 'Edits.PickWhiteBalance', params: [photoID, params, base, x, y] } });
+}
+
+/**
+ * Subscribes to `Edits.PreviewDraft` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function usePreviewDraft(photoID: number, params: Params, longEdge: number, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, longEdge: number) => previewDraft(client, photoID, params, longEdge, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, longEdge], _subscribe: { method: 'Edits.PreviewDraft', params: [photoID, params, longEdge] } });
 }
 
 /**
@@ -781,21 +824,6 @@ export function useWBPickFrame(photoID: number, base: Params, options?: UseQuery
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, base], _subscribe: { method: 'Edits.WBPickFrame', params: [photoID, base] } });
-}
-
-/**
- * Subscribes to `Edits.WarmFull` with the given parameters and re-renders
- * automatically when the server triggers a refresh. When the parameters
- * change, the previous subscription is canceled and a new one starts.
- * See {@link UseQueryResult} for return value details — including the
- * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
- */
-export function useWarmFull(photoID: number, options?: UseQueryOptions<void>): UseQueryResult<void> {
-    const wrappedFn = useCallback(
-        (client: ApiClient, signal: AbortSignal, photoID: number) => warmFull(client, photoID, { signal }),
-        [],
-    );
-    return useQuery(wrappedFn, { ...options, params: [photoID], _subscribe: { method: 'Edits.WarmFull', params: [photoID] } });
 }
 
 export function useAIMapsGeneratedEvent(options?: { maxEvents?: number }): UsePushResult<AIMapsGeneratedEvent> {

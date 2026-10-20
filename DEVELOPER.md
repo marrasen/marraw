@@ -36,15 +36,20 @@ and decodes only the visible crop over an upscaled-2048 underlay, and the
 neighboring photos' tile sets pre-render while browsing at 1:1.
 
 The last full-resolution decode of the photo open in the editor stays in
-memory (`internal/pyramid/fulldecode.go`), keyed by every LibRaw input, and goes
-after two idle minutes. An edit that leaves the LibRaw inputs alone — crop,
-lens, masks, healing, every look-stage slider — renders its tiles from it
-without a second demosaic: 1.4 s instead of 3.8 s on a 42 MP ARW. The pixels
-are the ones a fresh decode gives. The editor names its photo by calling
-`Edits.WarmFull` as it opens it, which also decodes it as the editor will start
-from it, so even the first edit starts after the decode. 1:1 renders of any
-other photo (the pre-render pass, neighbour prefetch, share-link guests) and of
-the base look never replace the kept decode.
+memory (`internal/pyramid/fulldecode.go`), keyed by every LibRaw input. An edit
+that leaves the LibRaw inputs alone — crop, lens, masks, healing, every
+look-stage slider — renders its tiles from it without a second demosaic: 1.4 s
+instead of 3.8 s on a 42 MP ARW. The pixels are the ones a fresh decode gives.
+The editor holds `Edits.OpenInEditor` open while it shows a photo. That marks
+the one photo whose 1:1 renders keep their decode, and decodes it at once as
+the editor will start from it, so even the first edit starts after the decode.
+1:1 renders of any other photo (the pre-render pass, neighbour prefetch,
+share-link guests) and of the base look never replace the kept decode. It goes
+two idle minutes after the editor leaves the photo.
+
+Slider drags render through `Edits.PreviewDraft`, always in memory, at the size
+the photo covers on screen (up to 4096 px). `PreviewEdit` treats 2048 and up as
+the exact, cached 2048 settle.
 
 ### Adaptive base look
 
