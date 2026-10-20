@@ -1428,11 +1428,14 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 		jsonPtr = &s
 		hash = params.Hash()
 	}
-	before, err := e.deps.DB.GetPhoto(ctx, photoID)
-	if err != nil {
-		return EditSaved{}, err
+	// The folder, for the patch. A photo gone meanwhile (a rescan removed
+	// it) is saved as a no-op, as it always was: a batch paste or reset
+	// carries on with the rest of the selection.
+	folderID := int64(-1)
+	if before, err := e.deps.DB.GetPhoto(ctx, photoID); err == nil {
+		folderID = before.FolderID
 	}
-	saved, err := e.deps.numberedSave(before.FolderID, func() (bool, error) {
+	saved, err := e.deps.numberedSave(folderID, func() (bool, error) {
 		return true, e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli())
 	}, func(saved EditSaved) PhotoPatch {
 		saved.Hash = hash
@@ -1481,8 +1484,9 @@ func editPatch(photoID int64, saved EditSaved, params *edit.Params) PhotoPatch {
 // saveMu makes an edit save's write, its number and its patch one step.
 var saveMu sync.Mutex
 
-// numberedSave runs write, an edit save of a photo in folderID, and when it
-// lands (true) numbers it and sends its patch, all under saveMu, so numbers
+// numberedSave runs write, an edit save of a photo in folderID (-1:
+// unknown, no patch), and when it lands (true) numbers it and sends its
+// patch, all under saveMu, so numbers
 // follow the order edits were written in. Delivery to each subscriber runs
 // on its own goroutine and may still reorder patches, so a client keeps the
 // highest number it has seen per photo and takes any patch numbered below
@@ -1498,7 +1502,9 @@ func (d *Deps) numberedSave(folderID int64, write func() (bool, error), patch fu
 	}
 	p := patch(saved)
 	saved.Hash = *p.EditHash
-	d.patchFolderPhotos(folderID, []PhotoPatch{p})
+	if folderID >= 0 {
+		d.patchFolderPhotos(folderID, []PhotoPatch{p})
+	}
 	return saved, nil
 }
 
