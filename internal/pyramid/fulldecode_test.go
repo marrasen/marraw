@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
@@ -199,5 +200,33 @@ func TestBackgroundRenderKeepsEditorsDecode(t *testing.T) {
 	f.tile()
 	if n := f.cache.fullDecodes.Load(); n != 2 {
 		t.Errorf("the background render pushed out the kept decode: %d decodes in all, want 2", n)
+	}
+}
+
+// TestRenderAndWarmFullDecodeOnce: a 1:1 render and a warm-up of the same
+// decode at the same time decode once, whichever starts first, and a
+// warm-up called off midway leaves the render to decode for itself.
+func TestRenderAndWarmFullDecodeOnce(t *testing.T) {
+	for _, cancelWarm := range []bool{false, true} {
+		f := newFullTestCatalog(t)
+		start := &edit.Params{Contrast: 0.1}
+		start.Normalize()
+		p := f.edit(*start)
+		ctx, cancel := context.WithCancel(t.Context())
+		warmed := make(chan error, 1)
+		go func() { warmed <- f.cache.WarmFull(ctx, p, start) }()
+		if cancelWarm {
+			time.Sleep(100 * time.Millisecond) // the warm-up's decode is under way
+			cancel()
+		}
+		f.tile()
+		err := <-warmed
+		cancel()
+		if !cancelWarm && err != nil {
+			t.Fatalf("WarmFull: %v", err)
+		}
+		if n := f.cache.fullDecodes.Load(); n != 1 {
+			t.Errorf("cancelWarm=%v: %d finished decodes, want 1", cancelWarm, n)
+		}
 	}
 }

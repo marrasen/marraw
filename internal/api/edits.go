@@ -354,9 +354,9 @@ func (e *Edits) decodePreview(ctx context.Context, photoID int64, photo store.Ph
 // nil/base decode keys as "base" with zero exposure.
 func decodeKeys(ep *edit.Params) (key, noExpKey string, expEV float64) {
 	if ep == nil {
-		return pyramid.DecodeKey(nil), pyramid.DecodeKey(nil), 0
+		return "base", "base", 0
 	}
-	return pyramid.DecodeKey(ep), ep.LibrawInputsHashNoExp(), ep.BakedExpEV()
+	return ep.LibrawInputsHash(), ep.LibrawInputsHashNoExp(), ep.BakedExpEV()
 }
 
 // cachedDecodeComp returns the cached half-size decode for (photoID, key)
@@ -1156,7 +1156,9 @@ func (e *Edits) WarmFull(ctx context.Context, photoID int64) error {
 		return err
 	}
 	// An unedited photo's base look (auto-brightened) is a decode no edit
-	// uses: the first edit starts from GetEditParams' state.
+	// uses: the first edit starts from GetEditParams' state. A saved edit
+	// is parsed as the 1:1 render parses it, un-normalized, so the two ask
+	// LibRaw for the same decode.
 	start := &edit.Params{}
 	if photo.EditParams.Valid {
 		if start, err = edit.Parse(photo.EditParams.String); err != nil {
@@ -1164,8 +1166,8 @@ func (e *Edits) WarmFull(ctx context.Context, photoID int64) error {
 		}
 	} else if seeded := seededParams(photo); seeded != nil {
 		start = seeded
+		start.Normalize()
 	}
-	start.Normalize()
 	return e.deps.Cache.WarmFull(ctx, photo, start)
 }
 

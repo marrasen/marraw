@@ -483,19 +483,16 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// for background/prefetch work. A thumb miss at visible priority keeps
 	// the already-open handle (direct path, unchanged behavior). A full
 	// render opens only when it decodes: the kept decode may serve it.
-	readied := false
-	ready := func() error {
+	readied := level != "full"
+	openFull := func() error {
 		if readied {
 			return nil
 		}
 		readied = true
-		if opened && !decode.ShouldBuffer(c.IOGate, prio) {
-			return nil
-		}
 		return decode.OpenForDecode(ctx, c.IOGate, proc, photo.Path(), prio)
 	}
-	if level != "full" {
-		if err := ready(); err != nil {
+	if level != "full" && (!opened || decode.ShouldBuffer(c.IOGate, prio)) {
+		if err := decode.OpenForDecode(ctx, c.IOGate, proc, photo.Path(), prio); err != nil {
 			return err
 		}
 	}
@@ -538,8 +535,17 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	}
 	var rgba *image.RGBA
 	var wbCompEV float64
+	// shared: rgba is the kept decode's own pixels, copied (by own) before
+	// the first stage that changes pixels in place. Stages that make a new
+	// image end the sharing for free.
+	shared := false
+	own := func() {
+		if shared {
+			rgba, shared = copyRGBA(rgba, rgba.Bounds()), false
+		}
+	}
 	if level == "full" {
-		rgba, wbCompEV, err = c.fullDecodeFor(ctx, proc, photo, edits, ready, prio)
+		rgba, wbCompEV, shared, err = c.fullDecodeFor(ctx, proc, photo, edits, openFull, prio)
 		if err != nil {
 			return err
 		}
@@ -559,7 +565,10 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// before any look stage — same slot as RenderPreview's expDeltaEV — and
 	// with them the white-balance normalization LibRaw applied, so a tile
 	// matches the preview whose place it takes (see edit.Params.WBCompEV).
-	ApplyExposureEV(rgba, edits.ResidualExpEV()+wbCompEV, edits)
+	if delta := edits.ResidualExpEV() + wbCompEV; delta != 0 {
+		own()
+		ApplyExposureEV(rgba, delta, edits)
+	}
 	// Heal the stored dimensions against the FULL uncropped decode — the crop
 	// stage below shrinks the render, so this must read the pre-geometry size.
 	if level == "full" {
@@ -569,13 +578,19 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// camera's embedded JPEG that lookGammaFor measures against has the
 	// lens's vignetting already taken out, so comparing an uncorrected
 	// render to it would read the dark corners as a tone difference.
-	rgba = ApplyLens(rgba, LensWarp(c.Lenses.For(photo), edits, rgba.Bounds().Dx(), rgba.Bounds().Dy()), edits)
+	warp := LensWarp(c.Lenses.For(photo), edits, rgba.Bounds().Dx(), rgba.Bounds().Dy())
+	if warp != nil && !warp.Geometric() {
+		own() // vignetting alone is corrected in place
+	}
+	if lensed := ApplyLens(rgba, warp, edits); lensed != rgba {
+		rgba, shared = lensed, false
+	}
 	// Measuring an edited render's lift decodes again; that decode's
 	// progress is not this render's.
 	proc.OnProgress(nil)
 	if photo.LookGamma == 0 {
 		// Measuring reads the file, which a kept decode never opened.
-		if err := ready(); err != nil {
+		if err := openFull(); err != nil {
 			return err
 		}
 	}
@@ -585,8 +600,11 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	}
 	ai := c.AIMaps.SetFor(photo.CacheKey, edits)
 	fills := c.Fills.SetFor(photo.CacheKey, edits)
-	rgba = ApplyGeometry(rgba, edits)
+	if geo := ApplyGeometry(rgba, edits); geo != rgba {
+		rgba, shared = geo, false
+	}
 	if level == "full" {
+		own()
 		// Mirrors ApplyFinish stage for stage — kept inline only for the
 		// progress ticks between the stages.
 		// With the decode kept, these stages are most of the render, so a
