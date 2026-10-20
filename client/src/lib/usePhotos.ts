@@ -11,13 +11,20 @@ import { useUIStore, type LibrarySort } from '@/stores/uiStore';
 // arrive in reverse order. An edit patch numbered below the newest one seen
 // for its photo is one that a later save overwrote: its edit fields are
 // skipped. Numbers are unique across folders and daemon runs, so one map
-// for the whole session will do.
+// for the whole session will do. A full reload of the list carries no
+// numbers and is taken as is.
 const editSaves = new Map<number, number>();
+
+/** Forgets the edit-save numbers seen (tests: each starts from none). */
+export function resetEditSaves() {
+  editSaves.clear();
+}
 
 // photoPatchReducer folds server-pushed subscription patches (aprot
 // PatchSubscription — O(patch) on the wire) into the shared query snapshot.
 // Nil patch fields mean "unchanged", so mergeByKey's blind shallow merge
-// does not fit; merge non-null fields by hand.
+// does not fit; merge non-null fields by hand. Not pure: it reads and raises
+// the edit-save numbers seen (editSaves).
 export function photoPatchReducer(data: Photo[], patch: unknown): Photo[] {
   const ev = patch as PhotoPatchEvent;
   if (!ev || !Array.isArray(ev.patches)) return data;
@@ -106,8 +113,8 @@ function sortPhotos(photos: Photo[], sort: LibrarySort): Photo[] {
 // cull filters, entirely client-side.
 // foldPatch is the single place a server patch lands: into the query snapshot,
 // and against the optimistic overrides it supersedes. Module-level so its
-// identity is stable across renders, and separate from photoPatchReducer so
-// that stays a pure function of (data, patch).
+// identity is stable across renders, and separate from photoPatchReducer,
+// which touches only the snapshot and the edit-save numbers seen.
 //
 // Both of the client's entry points for this — a live patch, and the replay of
 // patches that raced a (re)load — run outside render, so touching the store

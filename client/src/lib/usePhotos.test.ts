@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Photo, PhotoPatch, PhotoPatchEvent } from '@/api/library';
-import { foldPatch, photoPatchReducer } from '@/lib/usePhotos';
+import { foldPatch, photoPatchReducer, resetEditSaves } from '@/lib/usePhotos';
 import { useUIStore } from '@/stores/uiStore';
 
 function patch(over: Partial<PhotoPatch> & { id: number }): PhotoPatch {
@@ -26,6 +26,7 @@ function photo(over: Partial<Photo> & { id: number }): Photo {
 }
 
 beforeEach(() => {
+  resetEditSaves();
   useUIStore.setState({ overrides: new Map() });
 });
 

@@ -60,6 +60,11 @@ export function useTilesWarm(
   // can land after the tiles came to be wanted.
   const immediateRef = useRef(immediate);
   const shorten = useRef<(() => void) | null>(null);
+  // What this render asks for, read by the effect's cleanup, which runs
+  // after the next render: it forgets warmth only when that render leaves
+  // the state or stops wanting tiles, never when only `kick` changed.
+  const asked = useRef({ url0: '', want: false });
+  asked.current = { url0, want };
   useEffect(() => {
     immediateRef.current = immediate;
     if (immediate) shorten.current?.();
@@ -114,7 +119,10 @@ export function useTilesWarm(
       ac.abort();
       // Leaving the state (or the zoom) forgets its warmth: coming back
       // probes again rather than trust tiles the janitor may have evicted.
-      setWarmUrl((w) => (w === url0 ? '' : w));
+      // A change of `kick` alone keeps it: tiles on screen stay up.
+      if (asked.current.url0 !== url0 || !asked.current.want) {
+        setWarmUrl((w) => (w === url0 ? '' : w));
+      }
     };
   }, [url0, want, kick]);
   return want && url0 !== '' && warmUrl === url0;

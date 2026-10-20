@@ -134,3 +134,24 @@ describe('warmth', () => {
     expect(seen.warm).toBe(false);
   });
 });
+
+// Crossing the kick threshold (a guest pinching past 2x, cull fit to 1:1 on
+// a HiDPI screen) changes only `kick`: tiles on screen stay up.
+describe('warmth across a kick change', () => {
+  const seen: boolean[] = [];
+  function K(props: { kick: boolean }) {
+    seen.push(useTilesWarm(photo, true, props.kick));
+    return null;
+  }
+  it('is kept when only kick changes', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(null, { status: 200 })) as typeof fetch;
+    await act(async () => root.render(createElement(K, { kick: false })));
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(seen.at(-1)).toBe(true);
+    globalThis.fetch = vi.fn(() => new Promise<Response>(() => {})) as typeof fetch;
+    const from = seen.length;
+    await act(async () => root.render(createElement(K, { kick: true })));
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(seen.slice(from)).not.toContain(false);
+  });
+});

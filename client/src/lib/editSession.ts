@@ -861,17 +861,20 @@ function saveSent(ids: number[]): (hash: string | null) => void {
       photoId,
       seq,
       firstSeq: prev?.firstSeq ?? seq,
-      fromHash: prev?.fromHash ?? s.shown.hash,
       out: (prev?.out ?? 0) + 1,
-      resultHash: null,
+      sentFrom: s.shown.hash,
+      real: prev?.real ?? null,
     },
   });
-  // The save is back: one fewer out, and the newest save's own result.
+  // The save is back: one fewer out, and, for the newest save, its outcome
+  // — unless it saved what it was sent from (it changed nothing).
   return (hash) =>
     setState((st) => {
       const c = st.committed;
       if (c?.photoId !== photoId || seq < c.firstSeq) return {};
-      return { committed: { ...c, out: Math.max(0, c.out - 1), resultHash: c.seq === seq ? hash : c.resultHash } };
+      const out = Math.max(0, c.out - 1);
+      if (c.seq !== seq || (hash != null && hash === c.sentFrom)) return { committed: { ...c, out } };
+      return { committed: { ...c, out, real: { sentFrom: c.sentFrom, resultHash: hash } } };
     });
 }
 
@@ -904,9 +907,10 @@ function persist(client: ApiClient, params: Params, ids: number[]): Promise<void
  * dwell.
  */
 export function savedHere(c: Committed | null, photoId: number, hash: string): boolean {
-  return (
-    c?.photoId === photoId && c.out === 0 && c.fromHash !== hash && (c.resultHash == null || c.resultHash === hash)
-  );
+  if (c?.photoId !== photoId || c.out !== 0 || !c.real) return false;
+  // Known result: the photo shows it. Unknown (paste, reset): the photo has
+  // moved past what it showed when that save was sent.
+  return c.real.resultHash != null ? c.real.resultHash === hash : c.real.sentFrom !== hash;
 }
 
 /** The loupe reports the hash it shows for a photo (see EditSessionState.shown). */

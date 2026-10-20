@@ -44,19 +44,23 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 describe('the committed state', () => {
   it('records a save of the photo with the hash it was made over', async () => {
     es.esCommit(client);
-    expect(es.useEditSession.getState().committed).toMatchObject({ photoId: 1, fromHash: 'h1', seq: 1, out: 1 });
+    expect(es.useEditSession.getState().committed).toMatchObject({ photoId: 1, sentFrom: 'h1', seq: 1, out: 1 });
     await settle();
-    expect(es.useEditSession.getState().committed).toMatchObject({ out: 0, resultHash: 'h2' });
+    expect(es.useEditSession.getState().committed).toMatchObject({
+      out: 0,
+      real: { sentFrom: 'h1', resultHash: 'h2' },
+    });
   });
 
   it('records a save made with several photos selected', async () => {
     es.useEditSession.setState({ applyIds: [1, 2, 3] });
     es.esCommit(client);
     expect(pasteEditParams).toHaveBeenCalled();
-    expect(es.useEditSession.getState().committed).toMatchObject({ photoId: 1, fromHash: 'h1', out: 1 });
+    expect(es.useEditSession.getState().committed).toMatchObject({ photoId: 1, sentFrom: 'h1', out: 1 });
     await settle();
     const c = es.useEditSession.getState().committed;
     expect(es.savedHere(c, 1, 'h2')).toBe(true);
+    expect(es.savedHere(c, 1, 'h1')).toBe(false);
   });
 
   it('is forgotten when the session moves to another photo', async () => {
@@ -134,10 +138,34 @@ describe('saves around a photo switch, no-op saves and resets', () => {
 
   it('counts the user\'s own reset', async () => {
     es.esReset(client);
-    expect(es.useEditSession.getState().committed).toMatchObject({ photoId: 1, fromHash: 'h1', out: 1 });
+    expect(es.useEditSession.getState().committed).toMatchObject({ photoId: 1, sentFrom: 'h1', out: 1 });
     await settle();
     const c = es.useEditSession.getState().committed;
-    expect(c).toMatchObject({ out: 0, resultHash: null });
+    expect(c).toMatchObject({ out: 0, real: { sentFrom: 'h1', resultHash: null } });
     expect(es.savedHere(c, 1, 'base')).toBe(true);
+  });
+
+  // A reset back to the photo's original state: the hash it returns to is
+  // the one before the first save, and still the user's own result.
+  it('counts a reset back to the original hash', async () => {
+    es.esCommit(client); // h1 → h2
+    await settle();
+    es.esShownHash(1, 'h2');
+    es.esReset(client); // h2 → back to h1
+    await settle();
+    expect(es.savedHere(es.useEditSession.getState().committed, 1, 'h1')).toBe(true);
+  });
+
+  // A paste whose result is unknown, answered before its patch: the earlier
+  // save's hash the loupe still shows is overwritten, not the user's own.
+  it('does not take an overwritten hash for a paste\'s result', async () => {
+    es.esCommit(client); // h1 → h2
+    await settle();
+    es.esShownHash(1, 'h2');
+    es.useEditSession.setState({ applyIds: [1, 2] });
+    es.esCommit(client); // paste over h2, result unknown
+    await settle();
+    expect(es.savedHere(es.useEditSession.getState().committed, 1, 'h2')).toBe(false);
+    expect(es.savedHere(es.useEditSession.getState().committed, 1, 'h4')).toBe(true);
   });
 });

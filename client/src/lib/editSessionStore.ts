@@ -52,12 +52,14 @@ export interface Committed {
   // record began (before a photo switch) cannot answer into it.
   seq: number;
   firstSeq: number;
-  // The hash the photo showed before the first save of the record. Kept
-  // across the record's later saves, so a save that changes nothing (crop
-  // entered and left) does not hide the result of the real one before it.
-  fromHash: string;
   out: number;
-  resultHash: string | null;
+  // The hash the loupe showed when the newest save was sent.
+  sentFrom: string;
+  // The outcome of the newest save that changed something, once back: the
+  // hash it was sent from and the one it saved (null: unknown, as for a
+  // paste or a reset). A save that changes nothing (crop entered and left)
+  // leaves the one before it in place, so it does not hide that result.
+  real: { sentFrom: string; resultHash: string | null } | null;
 }
 
 export interface EditSessionState {
