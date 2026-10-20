@@ -258,12 +258,15 @@ func (c *Cache) Ensure(ctx context.Context, photo store.Photo, level, editHash s
 		return path, nil
 	}
 	if level != "full" && level != "2048" {
-		// A state the editor is settling on: its small renditions come from
-		// the settle's 2048 once it lands, derived on the fast pool so they
-		// don't queue behind RAW decodes.
-		c.WaitForSettle(ctx, photo, editHash, false)
-		if _, err := os.Stat(c.PathFor(photo.CacheKey, "2048", editHash)); err == nil {
-			if p, provisional, err := c.EnsureFast(ctx, photo, level, editHash); err == nil && !provisional {
+		// A state the editor is settling on, or about to (the editor sends
+		// the settle as the save, but may hold it behind a draft frame): its
+		// small renditions come from the settle's 2048 once it lands, not
+		// from a RAW decode beside it. Someone waiting gets them derived on
+		// the fast pool, so they don't queue behind RAW decodes; prefetch
+		// and background work leave the fast pool to the cull.
+		c.WaitForSettle(ctx, photo, editHash, true)
+		if prio >= decode.PriorityVisible {
+			if p, err := c.deriveFrom2048(ctx, photo, level, editHash); err == nil {
 				return p, nil
 			}
 		}
@@ -298,25 +301,10 @@ func (c *Cache) EnsureFast(ctx context.Context, photo store.Photo, level, editHa
 	// Same-edit 2048 on disk: a one-JPEG downscale produces the real
 	// rendition (mirrors generate's fast path, but off the decode pool).
 	if level != "2048" {
-		if _, err := os.Stat(c.PathFor(photo.CacheKey, "2048", editHash)); err == nil {
-			err := c.fastPool.Do(ctx, photo.CacheKey+"|derive|"+editHash, decode.PriorityVisible,
-				func(context.Context, *libraw.Processor) error {
-					if _, err := os.Stat(path); err == nil {
-						return nil
-					}
-					src := c.readLevel(photo.CacheKey, "2048", editHash)
-					if src == nil {
-						return fs.ErrNotExist
-					}
-					return c.WriteLevels(src, photo.CacheKey, editHash, 1024, 512, 256)
-				})
-			if err == nil {
-				if _, err := os.Stat(path); err == nil {
-					return path, false, nil
-				}
-			} else if ctx.Err() != nil {
-				return "", false, err
-			}
+		if p, err := c.deriveFrom2048(ctx, photo, level, editHash); err == nil {
+			return p, false, nil
+		} else if ctx.Err() != nil {
+			return "", false, err
 		}
 	}
 	// Embedded-JPEG derivation. One job per photo (no level, no hash in the
@@ -351,6 +339,34 @@ func (c *Cache) EnsureFast(ctx context.Context, photo store.Photo, level, editHa
 		return provPath, true, nil
 	}
 	return "", false, fs.ErrNotExist
+}
+
+// deriveFrom2048 writes the small renditions of photo under editHash from
+// its 2048 on disk, on the fast pool, and returns level's path. It fails
+// when there is no readable 2048.
+func (c *Cache) deriveFrom2048(ctx context.Context, photo store.Photo, level, editHash string) (string, error) {
+	path := c.PathFor(photo.CacheKey, level, editHash)
+	if _, err := os.Stat(c.PathFor(photo.CacheKey, "2048", editHash)); err != nil {
+		return "", err
+	}
+	err := c.fastPool.Do(ctx, photo.CacheKey+"|derive|"+editHash, decode.PriorityVisible,
+		func(context.Context, *libraw.Processor) error {
+			if _, err := os.Stat(path); err == nil {
+				return nil
+			}
+			src := c.readLevel(photo.CacheKey, "2048", editHash)
+			if src == nil {
+				return fs.ErrNotExist
+			}
+			return c.WriteLevels(src, photo.CacheKey, editHash, 1024, 512, 256)
+		})
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // EnsureTile guarantees one full-resolution tile exists on disk and returns

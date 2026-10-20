@@ -37,6 +37,11 @@ type Edits struct {
 	// LibRaw state; it is replaced when either changes.
 	decodeMu    sync.Mutex
 	decodeEntry *decodeCache
+	// lookEntry is the decode of the last look only considered (a hovered
+	// preset, PreviewExact), kept apart so it never replaces decodeEntry:
+	// hovering costs the next drag frame nothing, and applying the look
+	// that was hovered finds its decode here. Guarded by decodeMu.
+	lookEntry *decodeCache
 
 	// linEntry holds the most recent scene-linear reference decode for the
 	// fold path, keyed by photo + the pre-demosaic inputs only. WB, exposure,
@@ -207,10 +212,18 @@ func (e *Edits) PreviewExact(ctx context.Context, photoID int64, params edit.Par
 		return nil, err
 	}
 	// Read the editor's cached decode, never replace it: hovering looks
-	// must not cost the next drag frame or settle a demosaic.
+	// must not cost the next drag frame or settle a demosaic. The look's own
+	// decode goes in its own slot, for the settle should it be applied.
 	rgba, wbComp, err := e.decodePreview(ctx, photoID, photo, ep, false)
 	if err != nil {
 		return nil, err
+	}
+	if key, noExpKey, expEV := decodeKeys(ep); e.cachedLook(photoID, key) == nil {
+		if r, _, ok := e.cachedDecodeComp(photoID, key); !ok || r != rgba {
+			e.decodeMu.Lock()
+			e.lookEntry = &decodeCache{photoID: photoID, key: key, noExpKey: noExpKey, expEV: expEV, wbCompEV: wbComp, rgba: rgba}
+			e.decodeMu.Unlock()
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -393,6 +406,13 @@ func (e *Edits) decodePreview(ctx context.Context, photoID int64, photo store.Ph
 	if rgba, wbComp, ok := e.cachedDecodeComp(photoID, libKey); ok {
 		return rgba, wbComp, nil
 	}
+	if l := e.cachedLook(photoID, libKey); l != nil {
+		// The look the user considered is now the one they took.
+		if cache {
+			e.storeDecode(photoID, l.key, l.noExpKey, l.expEV, l.wbCompEV, l.rgba)
+		}
+		return l.rgba, l.wbCompEV, nil
+	}
 	proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
 	if err != nil {
 		return nil, 0, err
@@ -461,6 +481,16 @@ func (e *Edits) approxDecode(photoID int64, ep *edit.Params) (rgba *image.RGBA, 
 		return e.decodeEntry.rgba, e.decodeEntry.expEV, e.decodeEntry.wbCompEV, true
 	}
 	return nil, 0, 0, false
+}
+
+// cachedLook returns the considered look's decode for (photoID, key), or nil.
+func (e *Edits) cachedLook(photoID int64, key string) *decodeCache {
+	e.decodeMu.Lock()
+	defer e.decodeMu.Unlock()
+	if l := e.lookEntry; l != nil && l.photoID == photoID && l.key == key {
+		return l
+	}
+	return nil
 }
 
 // storeDecode replaces the single-entry decode cache.
@@ -1429,8 +1459,15 @@ func editPatch(photoID int64, saved EditSaved, params *edit.Params) PhotoPatch {
 	return PhotoPatch{ID: photoID, EditHash: &saved.Hash, EditSave: &saved.Save, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
 }
 
-// editSaves numbers every edit save, for EditSaved.Save.
-var editSaves atomic.Int64
+// editSaves numbers every edit save, for EditSaved.Save. It starts from the
+// clock (microseconds since the epoch, well inside a JavaScript number), so
+// numbers stay unique across daemon restarts: a client that lives through
+// one must not take another client's save for its own.
+var editSaves = func() *atomic.Int64 {
+	var n atomic.Int64
+	n.Store(time.Now().UnixMicro())
+	return &n
+}()
 
 // EditSaved is what SetEditParams saved: the edit hash, the one the photo's
 // patch carries, and the save's number, which that patch carries too
@@ -1466,13 +1503,11 @@ func (d *Deps) warmEdit(p store.Photo, hash string) {
 	d.warmCancels[p.ID] = slot
 	d.warmMu.Unlock()
 	go func() {
-		// For a photo open in the editor, the settle of this state may be
-		// on its way: wait for it, then derive the thumbs from its 2048. A
-		// state a newer save has replaced meanwhile is nobody's thumbnail.
-		d.Cache.WaitForSettle(ctx, p, hash, true)
-		if now, err := d.DB.GetPhoto(ctx, p.ID); err == nil && now.EditHash == hash {
-			d.Cache.Ensure(ctx, p, "512", hash, decode.PriorityPrefetch)
-		}
+		// For a photo open in the editor, Ensure waits for the settle of
+		// this state and derives the thumbs from its 2048. A newer save of
+		// the photo cancels this warm (above), so a replaced state is
+		// nobody's thumbnail.
+		d.Cache.Ensure(ctx, p, "512", hash, decode.PriorityPrefetch)
 		cancel()
 		d.warmMu.Lock()
 		if d.warmCancels[p.ID] == slot { // still ours: clear the slot
