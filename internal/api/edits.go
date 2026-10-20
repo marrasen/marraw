@@ -279,11 +279,8 @@ func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Pa
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 85}); err != nil {
-		return nil, err
-	}
-	return &aprot.Blob{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
+	// Seen at 1:1, so finer than a whole-frame draft.
+	return jpegBlobAt(img, 85)
 }
 
 // previewInMemory renders a transient frame of params, already normalized,
@@ -348,8 +345,13 @@ func (e *Edits) previewInMemory(ctx context.Context, photoID int64, params edit.
 // the cached rendition's: the frame is fleeting and a smaller blob keeps the
 // WebSocket drag stream snappy.
 func jpegBlob(img *image.RGBA) (*aprot.Blob, error) {
+	return jpegBlobAt(img, 75)
+}
+
+// jpegBlobAt is jpegBlob at the given quality.
+func jpegBlobAt(img *image.RGBA, quality int) (*aprot.Blob, error) {
 	var buf bytes.Buffer
-	if err := jpegturbo.EncodeRGBA(&buf, img, 75); err != nil {
+	if err := jpegturbo.EncodeRGBA(&buf, img, quality); err != nil {
 		return nil, err
 	}
 	return &aprot.Blob{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
