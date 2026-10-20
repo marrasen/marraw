@@ -94,6 +94,8 @@ func (cu *culler) devReset() {
 	if cu.culling && d.open && d.mounted && d.id == cu.photos[cu.at].ID {
 		id := d.id
 		cu.saveOut(id)
+		// Sent again, should it fail, as the neutral edit, which clears it.
+		d.lastSaved[id] = marrawclient.Params{}
 		go func() {
 			err := cu.api.Edits.ResetEdits(cu.ctx, []int64{id})
 			var p *marrawclient.Params

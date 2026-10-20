@@ -382,7 +382,7 @@ func (h EditsClient) SubscribePickWhiteBalance(ctx context.Context, photoID int6
 }
 
 // PreviewDraft renders a draft of the (unsaved) edit state at any long
-// edge up to draftEdgeMax, entirely in memory and never cached: the frames
+// edge up to draftEdgeMax (0 is 2048), entirely in memory and never cached: the frames
 // of a slider drag, sized to what the photo covers on screen. Unlike
 // PreviewEdit, a draft of 2048 or more is still a fast draft, not the
 // exact, cached 2048. The JPEG rides the WebSocket as a binary Blob.

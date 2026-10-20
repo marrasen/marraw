@@ -1664,6 +1664,11 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 				if changed {
 					cu.refreshThumb(*p)
 				}
+				if cu.dev.holdID == p.ID {
+					// The held edit is this one now: loading the photo again
+					// keeps the hold.
+					cu.dev.holdHash = p.EditHash
+				}
 				cu.saveSettle(p.ID)
 			}
 			if pp.EditHash != nil && *pp.EditHash != p.EditHash {

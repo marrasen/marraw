@@ -104,6 +104,14 @@ type developer struct {
 	// owed those whose patches have not come back yet: those patches are
 	// the panel's own, not to be fetched again (see saveSettle).
 	sending, owed map[int64]int
+	// saveRound counts each photo's own saves sent, so a timer of an
+	// earlier round can tell it is stale. failed holds a photo's last own
+	// save that failed, while no later one has gone through, and retries
+	// how often it has been sent again; lastSaved is the edit it carried.
+	saveRound map[int64]int
+	failed    map[int64]error
+	retries   map[int64]int
+	lastSaved map[int64]marrawclient.Params
 	// edits counts the changes made, committed what it was at the last
 	// save, and confirmed what it was at the last save the backend has
 	// confirmed: while they differ, the edit showing is not the saved
@@ -126,8 +134,9 @@ type developer struct {
 	thumbStop context.CancelFunc
 	// holdID is the photo held open in the editor on the backend
 	// (Edits.OpenInEditor), or about to be once the user has stayed on it
-	// for dwell; holdStop lets it go.
+	// for dwell, under the edit holdHash; holdStop lets it go.
 	holdID   int64
+	holdHash string
 	holdStop context.CancelFunc
 }
 
@@ -160,6 +169,9 @@ const (
 
 // draftEdge is the long edge drafts render at.
 func (cu *culler) draftEdge() int {
+	// Past 2048 the settle (the exact, cached 2048) is softer than the
+	// drafts before it, but the photo then covers more than 2048 px at fit
+	// and the 1:1 tiles take its place.
 	return min(max(cu.fitEdge, minDraftEdge), maxDraftEdge)
 }
 
@@ -240,10 +252,13 @@ func (cu *culler) loadEdit(i int) {
 		d.stop()
 	}
 	d.live, d.want = nil, false
-	// Held from scratch, also for the same photo: loaded again, its edit
-	// was changed elsewhere, and the backend gets the new one ready.
-	cu.letGo()
-	cu.holdLater(id)
+	// Held from scratch for another photo, or for this one with its edit
+	// changed elsewhere, which the backend then gets ready. Loaded again
+	// as it was (new pixels for it, say), the hold and its decode stay.
+	if hash := cu.photos[i].EditHash; d.holdStop == nil || d.holdID != id || d.holdHash != hash {
+		cu.letGo()
+		cu.holdLater(id, hash)
+	}
 	go func() {
 		p, err := cu.api.Edits.GetEditParams(cu.ctx, id)
 		select {
@@ -289,24 +304,40 @@ func (cu *culler) loadEdit(i int) {
 // the photo's 1:1 renders keep that decode, so the one after an edit
 // starts after the demosaic. letGo, as the panel moves on or closes, lets
 // it go, waiting or held.
-func (cu *culler) holdLater(id int64) {
+func (cu *culler) holdLater(id int64, hash string) {
 	d := &cu.dev
 	ctx, cancel := context.WithCancel(cu.ctx)
-	d.holdID, d.holdStop = id, cancel
+	d.holdID, d.holdHash, d.holdStop = id, hash, cancel
 	go func() {
-		select {
-		case <-time.After(dwell):
-		case <-ctx.Done():
-			return
-		}
-		log.Printf("develop: holding photo %d open in the editor", id)
-		start := time.Now()
-		err := cu.api.Edits.OpenInEditor(ctx, id)
-		if err != nil && !canceled(err) && cu.ctx.Err() == nil {
+		wait := dwell
+		for _, next := range []time.Duration{time.Second, 5 * time.Second} {
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return
+			}
+			log.Printf("develop: holding photo %d open in the editor", id)
+			start := time.Now()
+			err := cu.api.Edits.OpenInEditor(ctx, id)
+			if err == nil || canceled(err) || ctx.Err() != nil {
+				log.Printf("develop: photo %d held open in the editor for %d ms", id, time.Since(start).Milliseconds())
+				return
+			}
+			// The call ended while the panel is still on the photo (a
+			// reconnect, a backend restart): held again shortly after.
 			log.Printf("develop: holding photo %d open in the editor: %v", id, err)
-			return
+			wait = next
 		}
-		log.Printf("develop: photo %d held open in the editor for %d ms", id, time.Since(start).Milliseconds())
+		for {
+			select {
+			case <-time.After(5 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+			if err := cu.api.Edits.OpenInEditor(ctx, id); err == nil || canceled(err) || ctx.Err() != nil {
+				return
+			}
+		}
 	}()
 }
 
@@ -316,7 +347,7 @@ func (cu *culler) letGo() {
 	if d.holdStop != nil {
 		d.holdStop()
 	}
-	d.holdID, d.holdStop = 0, nil
+	d.holdID, d.holdHash, d.holdStop = 0, "", nil
 }
 
 // histogramShowing shows the histogram of the best pixels showing.

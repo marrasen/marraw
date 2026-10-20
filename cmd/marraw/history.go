@@ -118,6 +118,7 @@ func (cu *culler) save(id int64, params marrawclient.Params) {
 // photo has come back (see saveSettle).
 func (cu *culler) saveOwn(id int64, params marrawclient.Params) {
 	cu.saveOut(id)
+	cu.dev.lastSaved[id] = params
 	cu.queueSave(saveJob{id: id, params: params, own: true})
 }
 
@@ -160,19 +161,51 @@ func (cu *culler) queueSave(job saveJob) {
 func (cu *culler) saveOut(id int64) {
 	d := &cu.dev
 	if d.sending == nil {
-		d.sending, d.owed = map[int64]int{}, map[int64]int{}
+		d.sending, d.owed, d.saveRound = map[int64]int{}, map[int64]int{}, map[int64]int{}
+		d.failed, d.retries = map[int64]error{}, map[int64]int{}
+		d.lastSaved = map[int64]marrawclient.Params{}
 	}
 	d.sending[id]++
 	d.owed[id]++
+	d.saveRound[id]++
 }
 
-// saveBack notes an own save's call answered. A failed save sends no
-// patch.
+// saveRetries is how often a failed own save is sent again, saveRetryAfter
+// apart, before the edit is left unsaved until the next one.
+const (
+	saveRetries    = 3
+	saveRetryAfter = 2 * time.Second
+)
+
+// saveBack notes an own save's call answered. Answers come in the order
+// the saves went, so the last answer says whether the edit is saved. A
+// failed save may still have been applied (the connection dropped after
+// it), so its patch is still owed; the edit stays unsaved — its tiles held
+// back — and is sent again.
 func (cu *culler) saveBack(id int64, err error) {
 	d := &cu.dev
 	d.sending[id] = max(d.sending[id]-1, 0)
-	if err != nil {
-		d.owed[id] = max(d.owed[id]-1, 0)
+	switch {
+	case err == nil:
+		delete(d.failed, id)
+		delete(d.retries, id)
+	case canceled(err):
+	default:
+		d.failed[id] = err
+		cu.fail("Could not save the edit", err)
+		if d.retries[id] < saveRetries {
+			d.retries[id]++
+			time.AfterFunc(saveRetryAfter, func() {
+				select {
+				case cu.do <- func() {
+					if d.failed[id] != nil && d.sending[id] == 0 {
+						cu.saveOwn(id, d.lastSaved[id])
+					}
+				}:
+				case <-cu.ctx.Done():
+				}
+			})
+		}
 	}
 	cu.saveSettle(id)
 }
@@ -194,24 +227,24 @@ func (cu *culler) ownPatch(id int64) bool {
 const ownPatchGrace = 2 * time.Second
 
 // saveSettle counts the panel's edit of photo id as saved once every own
-// save of it has been answered and its patch is in: only then is the
-// photo's edit hash the one of the edit last committed, and its 1:1 tiles
-// can come at once — the user is looking at it, not skimming past. Saves
-// still out, a patch of an earlier one must not do it: the tiles would be
-// of an edit already replaced.
+// save of it has been answered, the last one well, and its patch is in:
+// only then is the photo's edit hash the one of the edit last committed,
+// and its 1:1 tiles can come at once — the user is looking at it, not
+// skimming past. Saves still out, a patch of an earlier one must not do
+// it: the tiles would be of an edit already replaced. A patch that does not
+// come within ownPatchGrace is asked of the backend instead (savedHash).
 func (cu *culler) saveSettle(id int64) {
 	d := &cu.dev
-	if d.sending[id] > 0 {
+	if d.sending[id] > 0 || d.failed[id] != nil {
 		return
 	}
 	if d.owed[id] > 0 {
-		owed := d.owed[id]
+		round := d.saveRound[id]
 		time.AfterFunc(ownPatchGrace, func() {
 			select {
 			case cu.do <- func() {
-				if d.sending[id] == 0 && d.owed[id] == owed {
-					d.owed[id] = 0
-					cu.saveSettle(id)
+				if d.saveRound[id] == round && d.sending[id] == 0 && d.owed[id] > 0 {
+					cu.savedHash(id, round)
 				}
 			}:
 			case <-cu.ctx.Done():
@@ -219,8 +252,6 @@ func (cu *culler) saveSettle(id int64) {
 		})
 		return
 	}
-	delete(d.sending, id)
-	delete(d.owed, id)
 	if !d.open || d.id != id {
 		return
 	}
@@ -231,6 +262,52 @@ func (cu *culler) saveSettle(id int64) {
 	if cu.culling && cu.photos[cu.at].ID == id && !cu.tileWant.Range.Empty() {
 		cu.wantTiles(cu.tileWant, true)
 	}
+}
+
+// savedHash asks the backend for photo id's edit hash as saved, for a
+// round of own saves whose patch never came, and settles on it: the tiles
+// must be of the edit the backend has, never of a hash left from before.
+// A newer round meanwhile makes it moot.
+func (cu *culler) savedHash(id int64, round int) {
+	i, ok := cu.index[id]
+	if !ok {
+		return
+	}
+	folder := cu.photos[i].FolderID
+	go func() {
+		photos, err := cu.api.Library.ListPhotos(cu.ctx, folder)
+		select {
+		case cu.do <- func() {
+			d := &cu.dev
+			if d.saveRound[id] != round || d.sending[id] > 0 {
+				return
+			}
+			if err != nil {
+				// Left unsaved-looking, tiles held back, until the next save.
+				log.Printf("develop: asking for photo %d's saved edit: %v", id, err)
+				return
+			}
+			for _, sp := range photos {
+				if sp.ID != id {
+					continue
+				}
+				d.owed[id] = 0
+				if j, ok := cu.index[id]; ok && cu.photos[j].EditHash != sp.EditHash {
+					p := &cu.photos[j]
+					p.EditHash = sp.EditHash
+					cu.tiles.drop(id)
+					cu.refreshThumb(*p)
+					if d.holdID == id {
+						d.holdHash = sp.EditHash
+					}
+				}
+				cu.saveSettle(id)
+				return
+			}
+		}:
+		case <-cu.ctx.Done():
+		}
+	}()
 }
 
 // stepLabel is how an adjustment's change reads in the history: its name
