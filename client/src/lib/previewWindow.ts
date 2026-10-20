@@ -77,7 +77,7 @@ export const WINDOW_MAX_PIXELS = 8 << 20;
 // again: the same window was wanted again while it rendered, so a null
 // answer is asked once more (a save's decode may be ready by then).
 let inFlight: { key: string; ask: WindowAsk; abort: AbortController; again: boolean } | null = null;
-let wanted: WindowAsk | null = null;
+let wanted: (WindowAsk & { run: number }) | null = null;
 // The key of the window showing: the same one is not asked for again.
 let shownKey: string | null = null;
 // Counts the windows let go: an answer from before one is dropped.
@@ -110,7 +110,9 @@ export function wantWindow(client: ApiClient, a: WindowAsk) {
     }
     return;
   }
-  wanted = a;
+  // The run it is asked in, not the one its render starts in (noteShownEdit
+  // runs just before this, in the same commit).
+  wanted = { ...a, run: useLoupeWindow.getState().run };
   if (inFlight && sameEdit(inFlight.ask, a)) {
     // Only the view moved (a pan, a zoom's last frame): the window under
     // way is of a view no longer shown. The backend's decode, if it waits
@@ -145,7 +147,7 @@ async function render(client: ApiClient) {
   const key = keyOf(a);
   const abort = new AbortController();
   const mine = gen;
-  const run = useLoupeWindow.getState().run;
+  const run = a.run;
   inFlight = { key, ask: a, abort, again: false };
   let blob: Blob | null = null;
   let failed = false;
@@ -157,8 +159,6 @@ async function render(client: ApiClient) {
     failed = true; // let go, or a nicety that failed: the drafts show
   }
   if (mine !== gen) return; // let go meanwhile
-  const again = inFlight?.again ?? false;
-  inFlight = null;
   let url: string | null = null;
   if (blob && !failed) {
     // Decoded before it shows: the loupe paints it at its own place at
@@ -176,6 +176,10 @@ async function render(client: ApiClient) {
       return; // let go while it decoded
     }
   }
+  // Rendering until here, the decode included: an ask meanwhile waits, or
+  // lets this one go (back to the window showing).
+  const again = inFlight?.again ?? false;
+  inFlight = null;
   const old = useLoupeWindow.getState().win;
   if (url) {
     if (old) URL.revokeObjectURL(old.url);

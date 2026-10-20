@@ -139,6 +139,32 @@ describe('previewWindow', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('counts a window decoding as rendering: back to the one showing lets it go', async () => {
+    let decoded: () => void = () => {};
+    const decode = vi.fn(() => new Promise<void>((r) => (decoded = r)));
+    Object.defineProperty(HTMLImageElement.prototype, 'decode', { value: decode, configurable: true });
+    try {
+      pw.wantWindow(client, ask(0.1));
+      calls[0].answer(new Blob(['a']));
+      await tick();
+      await tick();
+      decoded();
+      await tick();
+      pw.wantWindow(client, ask(0.2));
+      calls[1].answer(new Blob(['b']));
+      await tick();
+      expect(decode).toHaveBeenCalledTimes(2); // 0.2 decoding now
+      pw.wantWindow(client, ask(0.1)); // back to the window showing
+      decoded(); // 0.2's decode ends, let go meanwhile
+      await tick();
+      await tick();
+      expect(pw.useLoupeWindow.getState().win?.paramsKey).toBe(JSON.stringify({ contrast: 0.1 }));
+      expect(calls).toHaveLength(2);
+    } finally {
+      delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+    }
+  });
+
   it('drops a late answer for a window let go', async () => {
     pw.wantWindow(client, ask(0.1));
     pw.dropWindow();
