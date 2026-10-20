@@ -118,6 +118,9 @@ type (
 		Flag string
 		ID   int64
 	}
+	// FitEdge is the long edge, in device pixels, the photo covers at fit:
+	// the size the panel's drafts render at.
+	FitEdge struct{ Px int }
 	// WantTiles asks for the tiles of the photo at Index in Range of the
 	// grid, as the view zooms past what the 2048 shows sharp; an empty
 	// Range wants none.
@@ -198,6 +201,12 @@ type culler struct {
 	tiles    *tileCache
 	tileWant WantTiles
 	tileWarm map[string]bool
+	// tilesNow, while set, is a photo whose 1:1 render starts without the
+	// dwell: the one in the panel, its own edit just saved, which the user
+	// is looking at and not skimming past.
+	tilesNow int64
+	// fitEdge is what FitEdge last said.
+	fitEdge int
 	// tileStop cancels the tile fetches under way; probing is the photo
 	// whose tiles are being looked for, or rendered, and probeStop stops
 	// that.
@@ -433,6 +442,8 @@ func (cu *culler) serve() error {
 				cu.goTo(to)
 			case WantTiles:
 				cu.wantTiles(in)
+			case FitEdge:
+				cu.fitEdge = in.Px
 			case Rate:
 				cu.rate(in)
 			case Mark:
@@ -1155,6 +1166,8 @@ func (cu *culler) script(o options) {
 		if !ok {
 			continue
 		}
+		// ~key=value moves the slider there without letting go: a draft.
+		key, drag := strings.CutPrefix(key, "~")
 		if key == "auto" {
 			// An Auto button: wait for its result to show.
 			cu.do <- func() { cu.devAuto(DevAuto{Sections: strings.Split(val, "+")}) }
@@ -1172,13 +1185,13 @@ func (cu *culler) script(o options) {
 				cu.devChoose(DevChoice{Key: key, Index: int(x)})
 				return
 			}
-			cu.devSet(DevSet{Key: key, Value: x, Commit: true})
+			cu.devSet(DevSet{Key: key, Value: x, Commit: !drag})
 			// As the slider would show it, had it been dragged there.
 			if cu.dev.mounted {
 				_ = cu.c.Update("develop", cu.developState())
 			}
 		}
-		// Until the full-size preview of it shows, or a while.
+		// Until its preview shows, or a while.
 		for time.Since(start) < 20*time.Second {
 			time.Sleep(100 * time.Millisecond)
 			done := make(chan bool, 1)
@@ -1642,7 +1655,9 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 					cu.tileNote = ""
 				}
 				if cu.culling && i == cu.at && !cu.tileWant.Range.Empty() {
+					cu.tilesNow = p.ID
 					cu.wantTiles(cu.tileWant)
+					cu.tilesNow = 0
 				}
 				if changed {
 					cu.refreshThumb(*p)

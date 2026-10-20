@@ -124,6 +124,10 @@ func (cu *culler) probeTiles(p marrawclient.Photo) {
 	cu.probing, cu.probeStop = p.ID, cancel
 	cu.setTileNote("tiles: looking")
 	at, gen := cu.at, cu.gen
+	wait := dwell
+	if cu.tilesNow == p.ID {
+		wait = 0
+	}
 	go func() {
 		start := time.Now()
 		_, err := cu.im.tile(ctx, p, image.Point{}, true)
@@ -131,7 +135,7 @@ func (cu *culler) probeTiles(p marrawclient.Photo) {
 		if err == errMissing {
 			cu.say(gen, "tiles: rendering the full resolution")
 			select {
-			case <-time.After(dwell):
+			case <-time.After(wait):
 				_, err = cu.im.tile(ctx, p, image.Point{}, false)
 				rendered = err == nil
 			case <-ctx.Done():

@@ -123,6 +123,10 @@ type developer struct {
 	hover *marrawclient.Params
 	// thumbStop stops the presets' small pictures being rendered.
 	thumbStop context.CancelFunc
+	// warmID is the photo whose full-resolution decode is being got ready
+	// for its 1:1 renders (Edits.WarmFull), and warmStop calls that off.
+	warmID   int64
+	warmStop context.CancelFunc
 }
 
 // editing reports whether photo id has an edit under way the backend has
@@ -143,9 +147,19 @@ func (cu *culler) tilesShowing(p marrawclient.Photo) map[image.Point]*paint.Imag
 	return cu.tiles.of(p.ID, p.EditHash)
 }
 
-// draftEdge is the long edge of the previews while a slider moves; a
+// A draft, the preview while a slider moves, is as large as the photo
+// shows at fit, in device pixels, within these bounds: below them it would
+// be no quicker to notice, above them each frame takes too long. A
 // gesture's end renders the full size.
-const draftEdge = 1024
+const (
+	minDraftEdge = 1024
+	maxDraftEdge = 2560
+)
+
+// draftEdge is the long edge drafts render at.
+func (cu *culler) draftEdge() int {
+	return min(max(cu.fitEdge, minDraftEdge), maxDraftEdge)
+}
 
 // developState is the panel's state.
 func (cu *culler) developState() DevelopState {
@@ -198,6 +212,7 @@ func (cu *culler) closeDevelop() {
 		d.stop()
 	}
 	d.live, d.want, d.active = nil, false, ""
+	cu.stopWarm()
 	if d.mounted {
 		d.mounted = false
 		_ = cu.c.Unmount("develop")
@@ -245,6 +260,7 @@ func (cu *culler) loadEdit(i int) {
 			if p != nil {
 				d.params = *p
 			}
+			cu.warmFull(id)
 			// The edit as first loaded is the history's original.
 			cu.historyOf(id, d.params)
 			if !d.mounted {
@@ -259,6 +275,38 @@ func (cu *culler) loadEdit(i int) {
 		case <-cu.ctx.Done():
 		}
 	}()
+}
+
+// warmFull gets photo id's full-resolution decode ready while the panel is
+// on it, so the 1:1 render after an edit starts after the demosaic, and
+// calls off the one for the photo before.
+func (cu *culler) warmFull(id int64) {
+	d := &cu.dev
+	if d.warmID == id && d.warmStop != nil {
+		return
+	}
+	cu.stopWarm()
+	ctx, cancel := context.WithCancel(cu.ctx)
+	d.warmID, d.warmStop = id, cancel
+	go func() {
+		start := time.Now()
+		err := cu.api.Edits.WarmFull(ctx, id)
+		switch {
+		case err == nil:
+			log.Printf("develop: photo %d's full-resolution decode ready in %d ms", id, time.Since(start).Milliseconds())
+		case !canceled(err):
+			log.Printf("develop: getting the full-resolution decode ready: %v", err)
+		}
+	}()
+}
+
+// stopWarm calls off getting a full-resolution decode ready.
+func (cu *culler) stopWarm() {
+	d := &cu.dev
+	if d.warmStop != nil {
+		d.warmStop()
+	}
+	d.warmID, d.warmStop = 0, nil
 }
 
 // histogramShowing shows the histogram of the best pixels showing.
@@ -390,7 +438,7 @@ func (cu *culler) startPreview() {
 	if flat {
 		params.CropX, params.CropY, params.CropW, params.CropH, params.CropAngle = 0, 0, 0, 0, 0
 	}
-	edge := draftEdge
+	edge := cu.draftEdge()
 	if full {
 		edge = 0
 	}
