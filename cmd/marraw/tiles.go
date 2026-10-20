@@ -237,8 +237,12 @@ func (cu *culler) fetchTiles(p marrawclient.Photo) {
 					// set, as a tile still missing after it never comes.
 					select {
 					case cu.do <- func() {
-						set := tileSet(p)
-						if cu.tileWarm[set] && !cu.tileRedone[set] && cu.at == at && ctx.Err() == nil {
+						// Only a tile in the grid the backend renders (the
+						// saved size's, as pyramid.TileGrid): one past it is
+						// never there, rendered or not.
+						set, sz := tileSet(p), size(p)
+						inGrid := t.X < (sz.X+tileSize-1)/tileSize && t.Y < (sz.Y+tileSize-1)/tileSize
+						if inGrid && cu.tileWarm[set] && !cu.tileRedone[set] && cu.at == at && ctx.Err() == nil {
 							delete(cu.tileWarm, set)
 							cu.tileRedone[set] = true
 							cu.wantWindow()
