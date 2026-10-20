@@ -175,8 +175,10 @@ func (cu *culler) startWindow() {
 			case img == nil:
 				// No window of this edit (a white balance the kept decode
 				// lacks, or effects over the whole frame): the drafts show,
-				// not a window of an edit before.
-				w.img = nil
+				// not a window of an edit before. It may come later — the
+				// backend decodes the photo once the editor holds it — and
+				// a null answer is cheap, so the same one may be asked again.
+				w.img, w.key = nil, ""
 			default:
 				w.img, w.at, w.id, w.frame = img, view, id, frameOf(params)
 				cu.dev.note = fmt.Sprintf("window · %dx%d · %d ms", view.Dx(), view.Dy(), took.Milliseconds())
