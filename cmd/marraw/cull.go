@@ -201,10 +201,6 @@ type culler struct {
 	tiles    *tileCache
 	tileWant WantTiles
 	tileWarm map[string]bool
-	// tilesNow, while set, is a photo whose 1:1 render starts without the
-	// dwell: the one in the panel, its own edit just saved, which the user
-	// is looking at and not skimming past.
-	tilesNow int64
 	// fitEdge is what FitEdge last said.
 	fitEdge int
 	// tileStop cancels the tile fetches under way; probing is the photo
@@ -213,7 +209,11 @@ type culler struct {
 	tileStop  context.CancelFunc
 	probing   int64
 	probeStop context.CancelFunc
-	tileNote  string
+	// probeNow is whether the probe under way skips the dwell, and
+	// probeSeq tells it from a probe of the same photo started after.
+	probeNow bool
+	probeSeq int
+	tileNote string
 	// errs are the errors the user has not cleared, and errSeq the last
 	// one's number.
 	errs   []ErrorNote
@@ -441,7 +441,7 @@ func (cu *culler) serve() error {
 				}
 				cu.goTo(to)
 			case WantTiles:
-				cu.wantTiles(in)
+				cu.wantTiles(in, false)
 			case FitEdge:
 				cu.fitEdge = in.Px
 			case Rate:
@@ -1166,8 +1166,20 @@ func (cu *culler) script(o options) {
 		if !ok {
 			continue
 		}
-		// ~key=value moves the slider there without letting go: a draft.
+		// ~key=value moves the slider there without letting go: a draft,
+		// which leaves the edit unsaved — a -zoom after it waits out its
+		// time, the tiles held back for the save. Choices and Auto have no
+		// drag: their ~ is ignored.
 		key, drag := strings.CutPrefix(key, "~")
+		_, isChoice := devChoices[key]
+		if drag && (key == "auto" || isChoice) {
+			fmt.Fprintf(os.Stderr, "edit: ~%s: no drag for a choice or Auto; setting it\n", key)
+			drag = false
+		}
+		mark := ""
+		if drag {
+			mark = "~"
+		}
 		if key == "auto" {
 			// An Auto button: wait for its result to show.
 			cu.do <- func() { cu.devAuto(DevAuto{Sections: strings.Split(val, "+")}) }
@@ -1181,7 +1193,7 @@ func (cu *culler) script(o options) {
 		}
 		start := time.Now()
 		cu.do <- func() {
-			if _, isChoice := devChoices[key]; isChoice {
+			if isChoice {
 				cu.devChoose(DevChoice{Key: key, Index: int(x)})
 				return
 			}
@@ -1202,7 +1214,7 @@ func (cu *culler) script(o options) {
 		}
 		note := make(chan string, 1)
 		cu.do <- func() { note <- cu.dev.note }
-		fmt.Fprintf(os.Stderr, "edit: %s=%v shown after %d ms (%s)\n", key, x, time.Since(start).Milliseconds(), <-note)
+		fmt.Fprintf(os.Stderr, "edit: %s%s=%v shown after %d ms (%s)\n", mark, key, x, time.Since(start).Milliseconds(), <-note)
 	}
 	if zoom {
 		start := time.Now()
@@ -1644,24 +1656,15 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 				_ = cu.c.Patch("grid", PhotoMarked{Folder: cu.folder, Index: i, Rating: p.Rating, Flag: string(p.Flag)})
 				_ = cu.c.Patch("grid", LibMarks{ID: p.ID, Rating: p.Rating, Flag: string(p.Flag)})
 			}
-			if pp.EditHash != nil && cu.dev.saved[p.ID] {
+			if pp.EditHash != nil && cu.ownPatch(p.ID) {
 				// The panel's own save, whose pixels show already: the
-				// tiles of it can come now.
-				delete(cu.dev.saved, p.ID)
+				// tiles of it can come once its last save is in.
 				changed := *pp.EditHash != p.EditHash
 				p.EditHash = *pp.EditHash
-				cu.dev.confirmed = cu.dev.committed
-				if cu.tileNote == "tiles: once the edit is saved" {
-					cu.tileNote = ""
-				}
-				if cu.culling && i == cu.at && !cu.tileWant.Range.Empty() {
-					cu.tilesNow = p.ID
-					cu.wantTiles(cu.tileWant)
-					cu.tilesNow = 0
-				}
 				if changed {
 					cu.refreshThumb(*p)
 				}
+				cu.saveSettle(p.ID)
 			}
 			if pp.EditHash != nil && *pp.EditHash != p.EditHash {
 				p.EditHash = *pp.EditHash

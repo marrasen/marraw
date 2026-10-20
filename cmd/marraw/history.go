@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"time"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
 )
@@ -98,15 +99,29 @@ func (cu *culler) tell(note string) {
 	cu.showCull()
 }
 
-// saveJob is an edit to save.
+// saveJob is an edit to save; own is the panel's own save (saveOwn).
 type saveJob struct {
 	id     int64
 	params marrawclient.Params
+	own    bool
 }
 
 // save saves photo id's edit, after any saves before it: one at a time and
-// in order, so a quick undo and redo never land in the other order.
+// in order, so a quick undo and redo never land in the other order. Its
+// patch comes back as an edit made elsewhere.
 func (cu *culler) save(id int64, params marrawclient.Params) {
+	cu.queueSave(saveJob{id: id, params: params})
+}
+
+// saveOwn saves the panel's own edit of photo id: its patch is known for
+// the panel's own, and the edit counts as saved once every own save of the
+// photo has come back (see saveSettle).
+func (cu *culler) saveOwn(id int64, params marrawclient.Params) {
+	cu.saveOut(id)
+	cu.queueSave(saveJob{id: id, params: params, own: true})
+}
+
+func (cu *culler) queueSave(job saveJob) {
 	d := &cu.dev
 	if d.saves == nil {
 		d.saves = make(chan saveJob, 64)
@@ -114,8 +129,19 @@ func (cu *culler) save(id int64, params marrawclient.Params) {
 			for {
 				select {
 				case j := <-d.saves:
-					if err := cu.api.Edits.SetEditParams(cu.ctx, j.id, j.params); err != nil {
+					err := cu.api.Edits.SetEditParams(cu.ctx, j.id, j.params)
+					if err != nil {
 						log.Printf("develop: save: %v", err)
+					}
+					if j.own {
+						// Off this loop: the culler may be waiting to queue
+						// the next save.
+						go func() {
+							select {
+							case cu.do <- func() { cu.saveBack(j.id, err) }:
+							case <-cu.ctx.Done():
+							}
+						}()
 					}
 				case <-cu.ctx.Done():
 					return
@@ -124,8 +150,86 @@ func (cu *culler) save(id int64, params marrawclient.Params) {
 		}()
 	}
 	select {
-	case d.saves <- saveJob{id, params}:
+	case d.saves <- job:
 	case <-cu.ctx.Done():
+	}
+}
+
+// saveOut notes an own save of photo id going out: a call to answer and a
+// patch to come back.
+func (cu *culler) saveOut(id int64) {
+	d := &cu.dev
+	if d.sending == nil {
+		d.sending, d.owed = map[int64]int{}, map[int64]int{}
+	}
+	d.sending[id]++
+	d.owed[id]++
+}
+
+// saveBack notes an own save's call answered. A failed save sends no
+// patch.
+func (cu *culler) saveBack(id int64, err error) {
+	d := &cu.dev
+	d.sending[id] = max(d.sending[id]-1, 0)
+	if err != nil {
+		d.owed[id] = max(d.owed[id]-1, 0)
+	}
+	cu.saveSettle(id)
+}
+
+// ownPatch reports whether a patch of photo id's edit is the answer to an
+// own save, and counts it in.
+func (cu *culler) ownPatch(id int64) bool {
+	d := &cu.dev
+	if d.owed[id] <= 0 {
+		return false
+	}
+	d.owed[id]--
+	return true
+}
+
+// ownPatchGrace is how long saveSettle waits for the patch of an own save
+// whose call has answered: a patch lost to a reconnect must not hold the
+// tiles back for good.
+const ownPatchGrace = 2 * time.Second
+
+// saveSettle counts the panel's edit of photo id as saved once every own
+// save of it has been answered and its patch is in: only then is the
+// photo's edit hash the one of the edit last committed, and its 1:1 tiles
+// can come at once — the user is looking at it, not skimming past. Saves
+// still out, a patch of an earlier one must not do it: the tiles would be
+// of an edit already replaced.
+func (cu *culler) saveSettle(id int64) {
+	d := &cu.dev
+	if d.sending[id] > 0 {
+		return
+	}
+	if d.owed[id] > 0 {
+		owed := d.owed[id]
+		time.AfterFunc(ownPatchGrace, func() {
+			select {
+			case cu.do <- func() {
+				if d.sending[id] == 0 && d.owed[id] == owed {
+					d.owed[id] = 0
+					cu.saveSettle(id)
+				}
+			}:
+			case <-cu.ctx.Done():
+			}
+		})
+		return
+	}
+	delete(d.sending, id)
+	delete(d.owed, id)
+	if !d.open || d.id != id {
+		return
+	}
+	d.confirmed = d.committed
+	if cu.tileNote == "tiles: once the edit is saved" {
+		cu.tileNote = ""
+	}
+	if cu.culling && cu.photos[cu.at].ID == id && !cu.tileWant.Range.Empty() {
+		cu.wantTiles(cu.tileWant, true)
 	}
 }
 

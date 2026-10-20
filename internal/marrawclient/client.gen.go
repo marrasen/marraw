@@ -322,6 +322,20 @@ func (h EditsClient) SubscribeMaskTintPreview(ctx context.Context, photoID int64
 	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.MaskTintPreview", []any{photoID, params_, maskIndex, longEdge}, opts...)
 }
 
+// OpenInEditor tells the backend the editor shows a photo, for as long as
+// the call lasts: call it as the editor opens a photo and cancel it when
+// the editor leaves. While it lasts, the photo's 1:1 renders keep their
+// full-resolution decode, so an edit that leaves the LibRaw inputs as they
+// are — crop, lens, masks, healing, every look-stage slider — gets its
+// tiles without a second demosaic. It also decodes the photo at once as the
+// editor starts from it — its saved edit, or the seeded or neutral starting
+// state of an unedited photo — so even the first edit's tiles come seconds
+// sooner. It returns when cancelled.
+func (h EditsClient) OpenInEditor(ctx context.Context, photoID int64) error {
+	_, err := client.Call[struct{}](ctx, h.c, "Edits.OpenInEditor", []any{photoID})
+	return err
+}
+
 // PasteEditParams applies one edit state to many photos (the copy side is
 // client-local: GetEditParams into a clipboard).
 func (h EditsClient) PasteEditParams(ctx context.Context, ids []int64, params_ Params) error {
@@ -365,6 +379,21 @@ func (h EditsClient) PickWhiteBalance(ctx context.Context, photoID int64, params
 // Each result arrives on the subscription's C; close it with Close.
 func (h EditsClient) SubscribePickWhiteBalance(ctx context.Context, photoID int64, params_ Params, base Params, x_ float64, y float64, opts ...client.SubscribeOption) *client.Subscription[*Params] {
 	return client.Subscribe[*Params](ctx, h.c, "Edits.PickWhiteBalance", []any{photoID, params_, base, x_, y}, opts...)
+}
+
+// PreviewDraft renders a draft of the (unsaved) edit state at any long
+// edge up to draftEdgeMax, entirely in memory and never cached: the frames
+// of a slider drag, sized to what the photo covers on screen. Unlike
+// PreviewEdit, a draft of 2048 or more is still a fast draft, not the
+// exact, cached 2048. The JPEG rides the WebSocket as a binary Blob.
+func (h EditsClient) PreviewDraft(ctx context.Context, photoID int64, params_ Params, longEdge int) (*client.Blob, error) {
+	return client.Call[*client.Blob](ctx, h.c, "Edits.PreviewDraft", []any{photoID, params_, longEdge})
+}
+
+// SubscribePreviewDraft runs PreviewDraft as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribePreviewDraft(ctx context.Context, photoID int64, params_ Params, longEdge int, opts ...client.SubscribeOption) *client.Subscription[*client.Blob] {
+	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.PreviewDraft", []any{photoID, params_, longEdge}, opts...)
 }
 
 // PreviewEdit renders a preview of the (unsaved) edit state and returns the
@@ -479,18 +508,6 @@ func (h EditsClient) WBPickFrame(ctx context.Context, photoID int64, base Params
 // Each result arrives on the subscription's C; close it with Close.
 func (h EditsClient) SubscribeWBPickFrame(ctx context.Context, photoID int64, base Params, opts ...client.SubscribeOption) *client.Subscription[*client.Blob] {
 	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.WBPickFrame", []any{photoID, base}, opts...)
-}
-
-// WarmFull gets a photo's 1:1 render ready for the edits to come: it
-// decodes the photo at full resolution as the editor starts from it — its
-// saved edit, or the seeded or neutral starting state of an unedited photo
-// — and keeps the decode. The 1:1 render of any edit that leaves those
-// LibRaw inputs as they are starts from it. For the editor to call as it
-// opens a photo; the first edit's tiles then come seconds sooner. It
-// returns once the decode is kept; cancelling the call stops the decode.
-func (h EditsClient) WarmFull(ctx context.Context, photoID int64) error {
-	_, err := client.Call[struct{}](ctx, h.c, "Edits.WarmFull", []any{photoID})
-	return err
 }
 
 // ExportClient calls the methods of the Export handler group.

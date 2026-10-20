@@ -1110,10 +1110,12 @@ func (v *cullView) Step(dt time.Duration) bool {
 func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children) geom.Size {
 	box := c.Max
 	v.box, v.scale, v.top = box, max(f.Scale, 0.1), f.Safe.Top
-	// The size the panel's drafts render at.
-	if fs := v.fitRect().Size(); int(max(fs.W, fs.H)*v.scale) != v.fitEdge {
-		v.fitEdge = int(max(fs.W, fs.H) * v.scale)
-		f.Send(v, FitEdge{Px: v.fitEdge})
+	// The size the panel's drafts render at, in steps of 64 px, so a shape
+	// gliding between photos does not send one every frame.
+	fit := v.fitRect().Size()
+	if edge := (int(max(fit.W, fit.H)*v.scale) + 32) / 64 * 64; edge != v.fitEdge {
+		v.fitEdge = edge
+		f.Send(v, FitEdge{Px: edge})
 	}
 	if v.glided {
 		v.glided = false

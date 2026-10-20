@@ -69,8 +69,10 @@ func (im *images) tile(ctx context.Context, p marrawclient.Photo, t image.Point,
 // wantTiles takes the view's ask for the tiles in a range of the photo
 // showing. The tiles engage only once the set is rendered: a cold photo
 // gets one full render, and only after the user has stayed on it zoomed in
-// for dwell, so zooming while skimming never starts one.
-func (cu *culler) wantTiles(w WantTiles) {
+// for dwell, so zooming while skimming never starts one. now skips that
+// wait: the panel's own edit has just been saved, and the user is looking
+// at the photo, not skimming past.
+func (cu *culler) wantTiles(w WantTiles, now bool) {
 	if w.Index != cu.at {
 		return
 	}
@@ -90,7 +92,7 @@ func (cu *culler) wantTiles(w WantTiles) {
 		return
 	}
 	if !cu.tileWarm[tileSet(p)] {
-		cu.probeTiles(p)
+		cu.probeTiles(p, now)
 		return
 	}
 	cu.fetchTiles(p)
@@ -112,20 +114,23 @@ func (cu *culler) stopTiles() {
 }
 
 // probeTiles finds whether p's tile set is rendered, and renders it once
-// the user has stayed for dwell. Moving on cancels it, render and all.
-func (cu *culler) probeTiles(p marrawclient.Photo) {
-	if cu.probing == p.ID {
+// the user has stayed for dwell, or at once with now. Moving on cancels it,
+// render and all. A probe of p under way stays, unless it would wait where
+// now asks not to.
+func (cu *culler) probeTiles(p marrawclient.Photo, now bool) {
+	if cu.probing == p.ID && (!now || cu.probeNow) {
 		return
 	}
 	if cu.probeStop != nil {
 		cu.probeStop()
 	}
 	ctx, cancel := context.WithCancel(cu.ctx)
-	cu.probing, cu.probeStop = p.ID, cancel
+	cu.probeSeq++
+	cu.probing, cu.probeStop, cu.probeNow = p.ID, cancel, now
 	cu.setTileNote("tiles: looking")
-	at, gen := cu.at, cu.gen
+	at, gen, seq := cu.at, cu.gen, cu.probeSeq
 	wait := dwell
-	if cu.tilesNow == p.ID {
+	if now {
 		wait = 0
 	}
 	go func() {
@@ -145,7 +150,8 @@ func (cu *culler) probeTiles(p marrawclient.Photo) {
 		took := time.Since(start)
 		select {
 		case cu.do <- func() {
-			if cu.probing == p.ID {
+			latest := cu.probeSeq == seq
+			if latest {
 				cu.probing, cu.probeStop = 0, nil
 			}
 			if err != nil {
@@ -153,7 +159,7 @@ func (cu *culler) probeTiles(p marrawclient.Photo) {
 				if !canceled(err) {
 					cu.fail("Could not show the photo at full resolution", err)
 				}
-				if cu.gen == gen {
+				if cu.gen == gen && latest {
 					cu.setTileNote("")
 				}
 				return

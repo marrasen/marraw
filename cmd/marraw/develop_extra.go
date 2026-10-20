@@ -93,10 +93,7 @@ func (cu *culler) devReset() {
 	d := &cu.dev
 	if cu.culling && d.open && d.mounted && d.id == cu.photos[cu.at].ID {
 		id := d.id
-		if d.saved == nil {
-			d.saved = map[int64]bool{}
-		}
-		d.saved[id] = true
+		cu.saveOut(id)
 		go func() {
 			err := cu.api.Edits.ResetEdits(cu.ctx, []int64{id})
 			var p *marrawclient.Params
@@ -107,9 +104,11 @@ func (cu *culler) devReset() {
 			case cu.do <- func() {
 				if err != nil {
 					log.Printf("reset: %v", err)
+					cu.saveBack(id, err)
 					return
 				}
 				if d.id != id {
+					cu.saveBack(id, nil)
 					return
 				}
 				d.params = marrawclient.Params{}
@@ -120,6 +119,8 @@ func (cu *culler) devReset() {
 				// Saved by the reset itself: the preview only.
 				d.edits++
 				d.committed = d.edits
+				// Answered: the reset is the edit last committed.
+				cu.saveBack(id, nil)
 				cu.preview(true)
 				cu.remember("Reset")
 				cu.tell("Reset")
