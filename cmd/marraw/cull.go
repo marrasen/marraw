@@ -1660,7 +1660,7 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 				// The panel's own save, whose pixels show already: the
 				// tiles of it can come once its last save is in.
 				changed := *pp.EditHash != p.EditHash
-				p.EditHash = *pp.EditHash
+				cu.setEditHash(i, *pp.EditHash)
 				if changed {
 					cu.refreshThumb(*p)
 				}

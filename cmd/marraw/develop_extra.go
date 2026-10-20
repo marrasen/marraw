@@ -94,8 +94,6 @@ func (cu *culler) devReset() {
 	if cu.culling && d.open && d.mounted && d.id == cu.photos[cu.at].ID {
 		id := d.id
 		cu.saveOut(id)
-		// Sent again, should it fail, as the neutral edit, which clears it.
-		d.lastSaved[id] = marrawclient.Params{}
 		go func() {
 			err := cu.api.Edits.ResetEdits(cu.ctx, []int64{id})
 			var p *marrawclient.Params
@@ -105,8 +103,13 @@ func (cu *culler) devReset() {
 			select {
 			case cu.do <- func() {
 				if err != nil {
-					log.Printf("reset: %v", err)
-					cu.saveBack(id, err)
+					// Left as it is: the panel keeps the edit it shows. Had
+					// the backend reset it all the same, its patch comes
+					// back as an edit made elsewhere and the panel takes it.
+					cu.saveGiveBack(id)
+					if !canceled(err) {
+						cu.fail("Could not reset the edit", err)
+					}
 					return
 				}
 				if d.id != id {

@@ -105,13 +105,12 @@ type developer struct {
 	// the panel's own, not to be fetched again (see saveSettle).
 	sending, owed map[int64]int
 	// saveRound counts each photo's own saves sent, so a timer of an
-	// earlier round can tell it is stale. failed holds a photo's last own
-	// save that failed, while no later one has gone through, and retries
-	// how often it has been sent again; lastSaved is the edit it carried.
-	saveRound map[int64]int
-	failed    map[int64]error
-	retries   map[int64]int
-	lastSaved map[int64]marrawclient.Params
+	// earlier round can tell it is stale; graceRound is the round a grace
+	// timer is pending for. failed holds a photo's last own save that
+	// failed, while no later one has gone through.
+	saveRound  map[int64]int
+	graceRound map[int64]int
+	failed     map[int64]error
 	// edits counts the changes made, committed what it was at the last
 	// save, and confirmed what it was at the last save the backend has
 	// confirmed: while they differ, the edit showing is not the saved
@@ -227,6 +226,7 @@ func (cu *culler) closeDevelop() {
 	}
 	d.live, d.want, d.active = nil, false, ""
 	cu.letGo()
+	cu.saveForget(cu.dev.id)
 	if d.mounted {
 		d.mounted = false
 		_ = cu.c.Unmount("develop")
@@ -239,7 +239,9 @@ func (cu *culler) loadEdit(i int) {
 	cu.dev.hover = nil
 	if cu.dev.id != cu.photos[i].ID {
 		// Another photo: its masks start with none chosen, and the last
-		// preset's Amount is the last photo's.
+		// preset's Amount is the last photo's. A failed save of the last
+		// one no longer holds anything back.
+		cu.saveForget(cu.dev.id)
 		cu.masks = maskState{sel: -1, brush: cu.masks.brush, hover: -1, tintOf: -1}
 		cu.presetAmt = nil
 		cu.heal.sel, cu.heal.busy = -1, nil
@@ -309,8 +311,11 @@ func (cu *culler) holdLater(id int64, hash string) {
 	ctx, cancel := context.WithCancel(cu.ctx)
 	d.holdID, d.holdHash, d.holdStop = id, hash, cancel
 	go func() {
-		wait := dwell
-		for _, next := range []time.Duration{time.Second, 5 * time.Second} {
+		// The first try after the dwell; then, should the call end while the
+		// panel is still on the photo (a reconnect, a backend restart), up
+		// to holdRetries more before the hold is given up.
+		waits := append([]time.Duration{dwell}, holdRetries...)
+		for n, wait := range waits {
 			select {
 			case <-time.After(wait):
 			case <-ctx.Done():
@@ -323,23 +328,15 @@ func (cu *culler) holdLater(id int64, hash string) {
 				log.Printf("develop: photo %d held open in the editor for %d ms", id, time.Since(start).Milliseconds())
 				return
 			}
-			// The call ended while the panel is still on the photo (a
-			// reconnect, a backend restart): held again shortly after.
-			log.Printf("develop: holding photo %d open in the editor: %v", id, err)
-			wait = next
+			log.Printf("develop: holding photo %d open in the editor (try %d of %d): %v", id, n+1, len(waits), err)
 		}
-		for {
-			select {
-			case <-time.After(5 * time.Second):
-			case <-ctx.Done():
-				return
-			}
-			if err := cu.api.Edits.OpenInEditor(ctx, id); err == nil || canceled(err) || ctx.Err() != nil {
-				return
-			}
-		}
+		log.Printf("develop: gave up holding photo %d open in the editor", id)
 	}()
 }
+
+// holdRetries are the waits before each new try at holding a photo open in
+// the editor after the call ended with an error.
+var holdRetries = []time.Duration{time.Second, 5 * time.Second, 5 * time.Second}
 
 // letGo lets the photo held open in the editor go.
 func (cu *culler) letGo() {
