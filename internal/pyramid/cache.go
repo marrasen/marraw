@@ -108,9 +108,8 @@ type Cache struct {
 	fullMu      sync.Mutex
 	fullEntry   *fullDecode
 	fullFlights map[string]*fullFlight
-	fullEditors map[string]int // CacheKey → holds (HoldEditor)
-	fullWarms   map[string]*fullWarm
-	fullSeq     uint64
+	fullEditors map[string]*fullEditor // by CacheKey (HoldEditor)
+	fullWarms   map[string][]*fullWarm // by CacheKey
 	fullClosed  bool
 	fullDecodes atomic.Int64 // full-resolution decodes run, for tests
 }
@@ -491,16 +490,16 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// for background/prefetch work. A thumb miss at visible priority keeps
 	// the already-open handle (direct path, unchanged behavior). A full
 	// render opens only when it decodes: the kept decode may serve it.
-	readied := level != "full"
-	openFull := func() error {
+	readied := opened && !decode.ShouldBuffer(c.IOGate, prio)
+	ready := func() error {
 		if readied {
 			return nil
 		}
 		readied = true
 		return decode.OpenForDecode(ctx, c.IOGate, proc, photo.Path(), prio)
 	}
-	if level != "full" && (!opened || decode.ShouldBuffer(c.IOGate, prio)) {
-		if err := decode.OpenForDecode(ctx, c.IOGate, proc, photo.Path(), prio); err != nil {
+	if level != "full" {
+		if err := ready(); err != nil {
 			return err
 		}
 	}
@@ -558,7 +557,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// for itself completes instead: its tiles keep the decode's worth.
 	stoppable := false
 	if level == "full" {
-		rgba, wbCompEV, shared, stoppable, how, err = c.fullDecodeFor(ctx, proc, photo, edits, openFull)
+		rgba, wbCompEV, shared, stoppable, how, err = c.fullDecodeFor(ctx, proc, photo, edits, ready)
 		if err != nil {
 			return err
 		}
@@ -603,7 +602,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	proc.OnProgress(nil)
 	if photo.LookGamma == 0 {
 		// Measuring reads the file, which a kept decode never opened.
-		if err := openFull(); err != nil {
+		if err := ready(); err != nil {
 			return err
 		}
 	}
