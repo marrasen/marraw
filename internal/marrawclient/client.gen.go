@@ -481,6 +481,18 @@ func (h EditsClient) SubscribeWBPickFrame(ctx context.Context, photoID int64, ba
 	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.WBPickFrame", []any{photoID, base}, opts...)
 }
 
+// WarmFull gets a photo's 1:1 render ready for the edits to come: it
+// decodes the photo at full resolution as the editor starts from it — its
+// saved edit, or the seeded or neutral starting state of an unedited photo
+// — and keeps the decode. The 1:1 render of any edit that leaves those
+// LibRaw inputs as they are starts from it. For the editor to call as it
+// opens a photo; the first edit's tiles then come seconds sooner. It
+// returns once the decode is kept; cancelling the call stops the decode.
+func (h EditsClient) WarmFull(ctx context.Context, photoID int64) error {
+	_, err := client.Call[struct{}](ctx, h.c, "Edits.WarmFull", []any{photoID})
+	return err
+}
+
 // ExportClient calls the methods of the Export handler group.
 type ExportClient struct {
 	c *client.Client
