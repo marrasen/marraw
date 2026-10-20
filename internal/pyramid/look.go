@@ -184,17 +184,18 @@ func ApplyLook(img *image.RGBA, gamma float64, e *edit.Params) {
 }
 
 func applyLookSimple(img *image.RGBA, lutR, lutG, lutB *[256]uint8, satQ int32) {
-	pix := img.Pix
-	for i := 0; i+3 < len(pix); i += 4 {
-		r := int32(lutR[pix[i]])
-		g := int32(lutG[pix[i+1]])
-		b := int32(lutB[pix[i+2]])
-		// Saturation around Rec.601 luma, in integer math.
-		luma := (299*r + 587*g + 114*b) / 1000
-		pix[i] = clamp8(luma + (r-luma)*satQ/100)
-		pix[i+1] = clamp8(luma + (g-luma)*satQ/100)
-		pix[i+2] = clamp8(luma + (b-luma)*satQ/100)
-	}
+	pixBands(img, func(pix []uint8) {
+		for i := 0; i+3 < len(pix); i += 4 {
+			r := int32(lutR[pix[i]])
+			g := int32(lutG[pix[i+1]])
+			b := int32(lutB[pix[i+2]])
+			// Saturation around Rec.601 luma, in integer math.
+			luma := (299*r + 587*g + 114*b) / 1000
+			pix[i] = clamp8(luma + (r-luma)*satQ/100)
+			pix[i+1] = clamp8(luma + (g-luma)*satQ/100)
+			pix[i+2] = clamp8(luma + (b-luma)*satQ/100)
+		}
+	})
 }
 
 // applyLookFull is the position/chroma-aware variant: vibrance scales the
@@ -232,49 +233,51 @@ func applyLookFull(img *image.RGBA, lutR, lutG, lutB *[256]uint8, satQ int32, e 
 	}
 
 	pix := img.Pix
-	for y := range h {
-		row := pix[y*img.Stride : y*img.Stride+w*4]
-		var rowSq int64
-		if vgain != nil {
-			d := float64(y) - float64(h-1)/2
-			rowSq = int64(d * d)
-		}
-		for x := range w {
-			i := x * 4
-			r := int32(lutR[row[i]])
-			g := int32(lutG[row[i+1]])
-			b := int32(lutB[row[i+2]])
-			luma := (299*r + 587*g + 114*b) / 1000
-
-			sat := satQ
-			if vibQ != 0 {
-				chroma := max(r, g, b) - min(r, g, b)
-				sat += vibQ * (255 - chroma) / 255
-			}
-			r = luma + (r-luma)*sat/100
-			g = luma + (g-luma)*sat/100
-			b = luma + (b-luma)*sat/100
-
-			if split {
-				ws := (255 - luma) * (255 - luma) >> 8 // 0..254, peaks in shadows
-				wh := luma * luma >> 8                 // peaks in highlights
-				r += (sR*ws + hR*wh) >> 8
-				g += (sG*ws + hG*wh) >> 8
-				b += (sB*ws + hB*wh) >> 8
-			}
-
+	bands(h, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			row := pix[y*img.Stride : y*img.Stride+w*4]
+			var rowSq int64
 			if vgain != nil {
-				gv := vgain[(rowSq+colSq[x])*1023/maxR2]
-				r = r * gv >> 8
-				g = g * gv >> 8
-				b = b * gv >> 8
+				d := float64(y) - float64(h-1)/2
+				rowSq = int64(d * d)
 			}
+			for x := range w {
+				i := x * 4
+				r := int32(lutR[row[i]])
+				g := int32(lutG[row[i+1]])
+				b := int32(lutB[row[i+2]])
+				luma := (299*r + 587*g + 114*b) / 1000
 
-			row[i] = clamp8(r)
-			row[i+1] = clamp8(g)
-			row[i+2] = clamp8(b)
+				sat := satQ
+				if vibQ != 0 {
+					chroma := max(r, g, b) - min(r, g, b)
+					sat += vibQ * (255 - chroma) / 255
+				}
+				r = luma + (r-luma)*sat/100
+				g = luma + (g-luma)*sat/100
+				b = luma + (b-luma)*sat/100
+
+				if split {
+					ws := (255 - luma) * (255 - luma) >> 8 // 0..254, peaks in shadows
+					wh := luma * luma >> 8                 // peaks in highlights
+					r += (sR*ws + hR*wh) >> 8
+					g += (sG*ws + hG*wh) >> 8
+					b += (sB*ws + hB*wh) >> 8
+				}
+
+				if vgain != nil {
+					gv := vgain[(rowSq+colSq[x])*1023/maxR2]
+					r = r * gv >> 8
+					g = g * gv >> 8
+					b = b * gv >> 8
+				}
+
+				row[i] = clamp8(r)
+				row[i+1] = clamp8(g)
+				row[i+2] = clamp8(b)
+			}
 		}
-	}
+	})
 }
 
 // tintDir converts a split-tone hue/amount into a luma-neutral RGB push,

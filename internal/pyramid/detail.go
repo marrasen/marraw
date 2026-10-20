@@ -61,39 +61,41 @@ func ApplyDetail(img *image.RGBA, e *edit.Params, suppress []uint8) {
 	}
 
 	pix := img.Pix
-	for y := range h {
-		row := pix[y*img.Stride : y*img.Stride+w*4]
-		for x := range w {
-			j := y*w + x
-			l := int32(luma[j])
-			var d int32
-			if sharpQ != 0 {
-				d += sharpQ * (l - int32(sharpB[j]))
-			}
-			if texQ != 0 {
-				d += texQ * (l - int32(texB[j]))
-			}
-			if clarQ != 0 {
-				// Midtone weight 4·l·(255−l)/255 peaks at middle gray and
-				// fades at the ends, protecting shadows and highlights.
-				m := 4 * l * (255 - l) / 255
-				d += clarQ * (l - int32(clarB[j])) * m / 255
-			}
-			if d != 0 && suppress != nil {
-				if s := int32(suppress[j]); s != 0 {
-					d = d * (255 - s) / 255
+	bands(h, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			row := pix[y*img.Stride : y*img.Stride+w*4]
+			for x := range w {
+				j := y*w + x
+				l := int32(luma[j])
+				var d int32
+				if sharpQ != 0 {
+					d += sharpQ * (l - int32(sharpB[j]))
 				}
+				if texQ != 0 {
+					d += texQ * (l - int32(texB[j]))
+				}
+				if clarQ != 0 {
+					// Midtone weight 4·l·(255−l)/255 peaks at middle gray and
+					// fades at the ends, protecting shadows and highlights.
+					m := 4 * l * (255 - l) / 255
+					d += clarQ * (l - int32(clarB[j])) * m / 255
+				}
+				if d != 0 && suppress != nil {
+					if s := int32(suppress[j]); s != 0 {
+						d = d * (255 - s) / 255
+					}
+				}
+				if d == 0 {
+					continue
+				}
+				d >>= 8
+				i := x * 4
+				row[i] = clamp8(int32(row[i]) + d)
+				row[i+1] = clamp8(int32(row[i+1]) + d)
+				row[i+2] = clamp8(int32(row[i+2]) + d)
 			}
-			if d == 0 {
-				continue
-			}
-			d >>= 8
-			i := x * 4
-			row[i] = clamp8(int32(row[i]) + d)
-			row[i+1] = clamp8(int32(row[i+1]) + d)
-			row[i+2] = clamp8(int32(row[i+2]) + d)
 		}
-	}
+	})
 }
 
 // lumaPlane extracts the Rec.601 luma of a zero-origin RGBA image as a
@@ -103,13 +105,15 @@ func lumaPlane(img *image.RGBA) []uint8 {
 	w, h := b.Dx(), b.Dy()
 	out := make([]uint8, w*h)
 	pix := img.Pix
-	for y := range h {
-		row := pix[y*img.Stride : y*img.Stride+w*4]
-		for x := range w {
-			i := x * 4
-			out[y*w+x] = uint8((299*int32(row[i]) + 587*int32(row[i+1]) + 114*int32(row[i+2])) / 1000)
+	bands(h, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			row := pix[y*img.Stride : y*img.Stride+w*4]
+			for x := range w {
+				i := x * 4
+				out[y*w+x] = uint8((299*int32(row[i]) + 587*int32(row[i+1]) + 114*int32(row[i+2])) / 1000)
+			}
 		}
-	}
+	})
 	return out
 }
 
@@ -134,18 +138,20 @@ func boxBlurH(src, dst []uint8, w, h, r int) {
 		r = w - 1
 	}
 	norm := int32(2*r + 1)
-	for y := range h {
-		row := src[y*w : y*w+w]
-		out := dst[y*w : y*w+w]
-		var sum int32
-		for x := -r; x <= r; x++ {
-			sum += int32(row[clampInt(x, 0, w-1)])
+	bands(h, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			row := src[y*w : y*w+w]
+			out := dst[y*w : y*w+w]
+			var sum int32
+			for x := -r; x <= r; x++ {
+				sum += int32(row[clampInt(x, 0, w-1)])
+			}
+			for x := range w {
+				out[x] = uint8((sum + norm/2) / norm)
+				sum += int32(row[min(x+r+1, w-1)]) - int32(row[max(x-r, 0)])
+			}
 		}
-		for x := range w {
-			out[x] = uint8((sum + norm/2) / norm)
-			sum += int32(row[min(x+r+1, w-1)]) - int32(row[max(x-r, 0)])
-		}
-	}
+	})
 }
 
 func boxBlurV(src, dst []uint8, w, h, r int) {
@@ -153,24 +159,28 @@ func boxBlurV(src, dst []uint8, w, h, r int) {
 		r = h - 1
 	}
 	norm := int32(2*r + 1)
-	sums := make([]int32, w)
-	for y := -r; y <= r; y++ {
-		row := src[clampInt(y, 0, h-1)*w:]
-		for x := range w {
-			sums[x] += int32(row[x])
+	// Banded by column strips, as boxBlurVU16 is.
+	bands(w, func(x0, x1 int) {
+		n := x1 - x0
+		sums := make([]int32, n)
+		for y := -r; y <= r; y++ {
+			row := src[clampInt(y, 0, h-1)*w+x0:]
+			for x := range n {
+				sums[x] += int32(row[x])
+			}
 		}
-	}
-	for y := range h {
-		out := dst[y*w : y*w+w]
-		for x := range w {
-			out[x] = uint8((sums[x] + norm/2) / norm)
+		for y := range h {
+			out := dst[y*w+x0 : y*w+x1]
+			for x := range n {
+				out[x] = uint8((sums[x] + norm/2) / norm)
+			}
+			add := src[min(y+r+1, h-1)*w+x0:]
+			sub := src[max(y-r, 0)*w+x0:]
+			for x := range n {
+				sums[x] += int32(add[x]) - int32(sub[x])
+			}
 		}
-		add := src[min(y+r+1, h-1)*w:]
-		sub := src[max(y-r, 0)*w:]
-		for x := range w {
-			sums[x] += int32(add[x]) - int32(sub[x])
-		}
-	}
+	})
 }
 
 // boxBlurPlaneU16 is boxBlurPlane for 16-bit planes — the premultiplied
@@ -211,7 +221,7 @@ func boxBlurHU16(src, dst []uint16, w, h, r int) {
 		r = w - 1
 	}
 	inv, bias := boxNormU16(int64(2*r + 1))
-	fxBands(h, func(y0, y1 int) {
+	bands(h, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			row := src[y*w : y*w+w]
 			out := dst[y*w : y*w+w]
@@ -234,7 +244,7 @@ func boxBlurVU16(src, dst []uint16, w, h, r int) {
 	inv, bias := boxNormU16(int64(2*r + 1))
 	// Banded by COLUMN strips: the running sum walks down the image, so the
 	// rows cannot be split, but the columns are independent.
-	fxBands(w, func(x0, x1 int) {
+	bands(w, func(x0, x1 int) {
 		n := x1 - x0
 		sums := make([]int64, n)
 		for y := -r; y <= r; y++ {
@@ -280,14 +290,16 @@ func applyDehaze(img *image.RGBA, amount float64) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	pix := img.Pix
-	for y := range h {
-		row := pix[y*img.Stride : y*img.Stride+w*4]
-		for i := 0; i+3 < len(row); i += 4 {
-			row[i] = lut[row[i]]
-			row[i+1] = lut[row[i+1]]
-			row[i+2] = lut[row[i+2]]
+	bands(h, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			row := pix[y*img.Stride : y*img.Stride+w*4]
+			for i := 0; i+3 < len(row); i += 4 {
+				row[i] = lut[row[i]]
+				row[i+1] = lut[row[i+1]]
+				row[i+2] = lut[row[i+2]]
+			}
 		}
-	}
+	})
 }
 
 // estimateVeil returns the ~1st percentile of the subsampled min-channel —

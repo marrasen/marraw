@@ -64,20 +64,22 @@ func ApplyGeometry(src *image.RGBA, e *edit.Params) *image.RGBA {
 	fcx, fcy := float64(fullW)/2, float64(fullH)/2
 
 	dst := image.NewRGBA(image.Rect(0, 0, cropW, cropH))
-	for oy := range cropH {
-		fy := cy0 + float64(oy) + 0.5 - fcy
-		for ox := range cropW {
-			fx := cx0 + float64(ox) + 0.5 - fcx
-			sx := fcx + fx*cos - fy*sin - 0.5
-			sy := fcy + fx*sin + fy*cos - 0.5
-			r, g, bl, a := sampleBilinear(src, sx, sy)
-			o := dst.PixOffset(ox, oy)
-			dst.Pix[o+0] = r
-			dst.Pix[o+1] = g
-			dst.Pix[o+2] = bl
-			dst.Pix[o+3] = a
+	bands(cropH, func(y0, y1 int) {
+		for oy := y0; oy < y1; oy++ {
+			fy := cy0 + float64(oy) + 0.5 - fcy
+			for ox := range cropW {
+				fx := cx0 + float64(ox) + 0.5 - fcx
+				sx := fcx + fx*cos - fy*sin - 0.5
+				sy := fcy + fx*sin + fy*cos - 0.5
+				r, g, bl, a := sampleBilinear(src, sx, sy)
+				o := dst.PixOffset(ox, oy)
+				dst.Pix[o+0] = r
+				dst.Pix[o+1] = g
+				dst.Pix[o+2] = bl
+				dst.Pix[o+3] = a
+			}
 		}
-	}
+	})
 	return dst
 }
 
@@ -136,11 +138,13 @@ func flipHorizontal(src *image.RGBA) *image.RGBA {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := range h {
-		for x := range w {
-			dst.SetRGBA(w-1-x, y, src.RGBAAt(b.Min.X+x, b.Min.Y+y))
+	bands(h, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			for x := range w {
+				dst.SetRGBA(w-1-x, y, src.RGBAAt(b.Min.X+x, b.Min.Y+y))
+			}
 		}
-	}
+	})
 	return dst
 }
 
