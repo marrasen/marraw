@@ -80,6 +80,18 @@ describe('previewWindow', () => {
     expect(calls).toHaveLength(3); // and only once
   });
 
+  it('going back to the window showing lets the other one rendering go', async () => {
+    pw.wantWindow(client, ask(0.1));
+    calls[0].answer(new Blob(['a']));
+    await tick();
+    pw.wantWindow(client, ask(0.2)); // a preset hovered
+    pw.wantWindow(client, ask(0.1)); // and left
+    expect(calls[1].signal.aborted).toBe(true);
+    calls[1].answer(new Blob(['b']));
+    await tick();
+    expect(pw.useLoupeWindow.getState().win?.paramsKey).toBe(JSON.stringify({ contrast: 0.1 }));
+  });
+
   it('drops a late answer for a window let go', async () => {
     pw.wantWindow(client, ask(0.1));
     pw.dropWindow();

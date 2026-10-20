@@ -23,6 +23,9 @@ export interface LoupeWindow {
   // The full render's size the window was asked in: it shows only while
   // the loupe lays the photo out at that size.
   dims: [number, number];
+  // The params it shows, as JSON: a window of other params than the photo
+  // shows now is an earlier edit's (see LoupeView).
+  paramsKey: string;
 }
 
 export const useLoupeWindow = create<{ win: LoupeWindow | null }>(() => ({ win: null }));
@@ -65,6 +68,13 @@ export function wantWindow(client: ApiClient, a: WindowAsk) {
   if (key === shownKey || key === inFlight?.key) {
     wanted = null; // back to it: nothing else is wanted
     if (inFlight && key === inFlight.key) inFlight.again = true;
+    else if (inFlight) {
+      // Back to the window showing while another renders: that one would
+      // land over it, an edit no longer shown.
+      gen++;
+      inFlight.abort.abort();
+      inFlight = null;
+    }
     return;
   }
   wanted = a;
@@ -107,7 +117,9 @@ async function render(client: ApiClient) {
   if (blob && !failed) {
     if (old) URL.revokeObjectURL(old.url);
     shownKey = key;
-    useLoupeWindow.setState({ win: { photoId: a.photoId, url: URL.createObjectURL(blob), rect: a.rect, dims: a.dims } });
+    useLoupeWindow.setState({
+      win: { photoId: a.photoId, url: URL.createObjectURL(blob), rect: a.rect, dims: a.dims, paramsKey: JSON.stringify(a.params) },
+    });
   } else {
     // No window of this edit. It may come later (the backend decodes the
     // photo once the editor holds it, or waits for a save's decode), so

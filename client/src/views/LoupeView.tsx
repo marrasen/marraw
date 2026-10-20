@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Crop as CropIcon, Eye, FlipHorizontal2, FlipVertical2, Pipette, RotateCcwSquare, RotateCwSquare, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { onRenderProgressEvent, type Photo } from '@/api/library';
@@ -31,6 +31,7 @@ import {
   savedHere,
   useEditSession,
 } from '@/lib/editSession';
+import { useHoldTick } from '@/lib/editorHold';
 import { setDraftEdge } from '@/lib/previewScheduler';
 import { dropWindow, useLoupeWindow, wantWindow } from '@/lib/previewWindow';
 import { useDevicePixelRatio } from '@/lib/useDevicePixelRatio';
@@ -49,6 +50,10 @@ import { AIKind, type Params } from '@/api/edit';
 
 import { renditionPlan, tilesEngaged } from '@/lib/rendition';
 import { ZOOM_DURATION_MS, snapReason, zoomAt } from '@/lib/zoomTween';
+
+// How long after the edit moves on a window of the edit before still shows.
+const STALE_WINDOW_MS = 400;
+
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
 // fraction space (crop-width-fraction / crop-height-fraction), accounting for
 // the frame's own aspect: a 1:1 pixel crop of a 3:2 frame is not 1:1 in
@@ -645,8 +650,11 @@ export function CinemaImage({
   // tiles are rendered. Asked again as the edit, the view or the save moves.
   const shownParams = useEditSession((s) => s.hoverParams ?? s.draft);
   const editingHere = esPhotoId === photo.id && shownParams != null;
-  const windowZone = editingHere && level === 'tiles' && !cropping && haveDims;
-  const wantsWindow = windowZone && (previewUrl != null || !tilesWarm);
+  const windowZone = editingHere && uiMode === 'develop' && level === 'tiles' && !cropping && haveDims;
+  // Not mid zoom tween: the view's rect is still the one zoomed from.
+  const wantsWindow = windowZone && (previewUrl != null || !tilesWarm) && shownScale === scale;
+  // A hold just made: the backend may make a window it could not before.
+  const holdTick = useHoldTick((s) => s.tick);
   useEffect(() => {
     if (!windowZone) {
       dropWindow(); // another photo, out of the editor, cropping, or zoomed out
@@ -659,11 +667,24 @@ export function CinemaImage({
     const x1 = Math.min(dw, Math.ceil((vx + vw) * dw));
     const y1 = Math.min(dh, Math.ceil((vy + vh) * dh));
     wantWindow(client, { photoId: photo.id, params: shownParams, rect: [x0, y0, x1 - x0, y1 - y0], dims: [dw, dh] });
-  }, [windowZone, wantsWindow, shownParams, viewport, dw, dh, photo.id, photo.editHash, client]);
+  }, [windowZone, wantsWindow, shownParams, viewport, dw, dh, photo.id, photo.editHash, holdTick, client]);
   useEffect(() => dropWindow, [photo.id]);
   const loupeWindow = useLoupeWindow((s) => s.win);
+  // A window of an earlier edit shows only just after the edit moved on: a
+  // drag keeps a sharp, slightly late view, while after a one-shot change
+  // (a preset, paste, the eyedropper) whose window takes a decode the new
+  // preview shows rather than the old window over it.
+  const shownParamsKey = useMemo(() => (shownParams ? JSON.stringify(shownParams) : ''), [shownParams]);
+  // The edit whose moment is over: once the edit has stayed STALE_WINDOW_MS.
+  const [staleOver, setStaleOver] = useState('');
+  useEffect(() => {
+    const t = window.setTimeout(() => setStaleOver(shownParamsKey), STALE_WINDOW_MS);
+    return () => window.clearTimeout(t);
+  }, [shownParamsKey]);
+  const staleWindowOK = staleOver !== shownParamsKey;
   const showWindow =
     loupeWindow != null &&
+    (loupeWindow.paramsKey === shownParamsKey || staleWindowOK) &&
     windowZone &&
     loupeWindow.photoId === photo.id &&
     loupeWindow.dims[0] === dw &&
