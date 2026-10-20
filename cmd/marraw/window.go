@@ -36,8 +36,11 @@ type winState struct {
 	// after it: the newest edit and view win. gen counts the windows let
 	// go: an answer from before one is dropped.
 	busy, want bool
-	gen        int
-	stop       context.CancelFunc
+	// again asks once more after a null answer: the same window was
+	// wanted again while it rendered.
+	again bool
+	gen   int
+	stop  context.CancelFunc
 }
 
 // frameKey is the shape of an edit's output: its quarter turns and crop
@@ -110,12 +113,16 @@ func (cu *culler) wantWindow() {
 		return
 	}
 	p := cu.photos[cu.at]
-	if !cu.editing(p.ID) && cu.tilesCover(p, cu.tileWant.Range) {
+	if !cu.editing(p.ID) && (cu.tileWarm[tileSet(p)] || cu.tilesCover(p, cu.tileWant.Range)) {
+		// The saved edit's tiles are in, or rendered and a fetch away:
+		// cheaper than a window, and they paint over it.
 		return
 	}
 	if cu.windowKey() == w.key {
 		// Showing or rendering already: back to it, nothing else is.
-		w.want = false
+		// Should the one rendering answer null, it is asked again, as
+		// this asks after it (a save's decode may be ready by then).
+		w.want, w.again = false, w.busy
 		return
 	}
 	w.want = true
@@ -152,7 +159,7 @@ func (cu *culler) startWindow() {
 	id, view, params, key, gen := cu.dev.id, cu.tileWant.View, cu.shownParams(), cu.windowKey(), w.gen
 	full := cu.fullOf(cu.photos[cu.at])
 	ctx, cancel := context.WithCancel(cu.ctx)
-	w.busy, w.key, w.stop = true, key, cancel
+	w.busy, w.key, w.stop, w.again = true, key, cancel, false
 	go func() {
 		defer cancel()
 		start := time.Now()
@@ -180,6 +187,7 @@ func (cu *culler) startWindow() {
 					log.Printf("window of photo %d: %v", id, err)
 				}
 				w.img, w.key = nil, ""
+				w.want = w.want || w.again
 			case img == nil:
 				// No window of this edit (a white balance the kept decode
 				// lacks, or effects over the whole frame): the drafts show,
@@ -187,6 +195,7 @@ func (cu *culler) startWindow() {
 				// backend decodes the photo once the editor holds it — and
 				// a null answer is cheap, so the same one may be asked again.
 				w.img, w.key = nil, ""
+				w.want = w.want || w.again
 			default:
 				w.img, w.at, w.id, w.frame, w.full = img, view, id, frameOf(params), full
 				cu.dev.note = fmt.Sprintf("window · %dx%d · %d ms", view.Dx(), view.Dy(), took.Milliseconds())
