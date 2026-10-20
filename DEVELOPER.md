@@ -69,11 +69,11 @@ user's own save just produced skips the 350 ms skimming dwell and waits only
 120 ms, so a burst of saves (holding undo) still makes one render. Each save of
 the session's photo, at any selection size and a Reset included, takes a
 number from a counter that never restarts (`committed` in the edit session).
-The record keeps, for the newest save that changed something, the hash the
-loupe showed when it was sent and the hash it saved. Once no save is out, the
-shorter dwell applies when the photo shows that saved hash, or, when it is
-unknown (a paste, a Reset), when the photo has moved past the hash the save was
-sent from; also to a dwell already under way. A photo switch, or warm tiles of
+Every save returns the hash it saved (`SetEditParams`, and `PasteEditParams`
+and `ResetEdits` per photo). The record keeps the hash the newest save that
+changed something saved; a save that changes nothing, or fails, leaves the one
+before it. Once no save is out, the shorter dwell applies when the photo shows
+that hash, also to a dwell already under way. A photo switch, or warm tiles of
 that state, forget it. The tile warmth `useTilesWarm` reports is for the tile
 set it was found for, so the render the next hash arrives in never reads the
 last one's. Leaving a state or the zoom, or a probe that finds its tiles gone,

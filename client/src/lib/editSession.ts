@@ -23,7 +23,7 @@ import {
   wBPickFrame,
 } from '@/api/edits';
 import { bumpImgBust } from '@/lib/imgCacheBust';
-import type { Suggestion } from '@/api/edits';
+import type { EditSaved, Suggestion } from '@/api/edits';
 import type { AIKindType, Mask, Params, Spot } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
@@ -848,12 +848,13 @@ function pushHistory(photoId: number, params: Params, label: string) {
 let saveCounter = 0;
 
 // saveSent records a save of the session's photo, when ids includes it, in
-// `committed`, and returns the function to call when it is back with the
-// hash it saved (null: unknown, as for a paste or a reset).
-function saveSent(ids: number[]): (hash: string | null) => void {
+// `committed`, and returns the function to call when it is back with what
+// each of ids saved, in order (null: the save failed).
+function saveSent(ids: number[]): (results: EditSaved[] | null) => void {
   const s = useEditSession.getState();
   const photoId = s.photoId;
   if (photoId == null || !ids.includes(photoId) || s.shown?.photoId !== photoId) return () => {};
+  const at = ids.indexOf(photoId);
   const seq = ++saveCounter;
   const prev = s.committed?.photoId === photoId ? s.committed : null;
   setState({
@@ -866,15 +867,17 @@ function saveSent(ids: number[]): (hash: string | null) => void {
       real: prev?.real ?? null,
     },
   });
-  // The save is back: one fewer out, and, for the newest save, its outcome
-  // — unless it saved what it was sent from (it changed nothing).
-  return (hash) =>
+  // The save is back: one fewer out, and, for the newest save, the hash it
+  // saved — unless it failed, or saved what it was sent from (it changed
+  // nothing): then the result before it stands.
+  return (results) =>
     setState((st) => {
       const c = st.committed;
       if (c?.photoId !== photoId || seq < c.firstSeq) return {};
       const out = Math.max(0, c.out - 1);
-      if (c.seq !== seq || (hash != null && hash === c.sentFrom)) return { committed: { ...c, out } };
-      return { committed: { ...c, out, real: { sentFrom: c.sentFrom, resultHash: hash } } };
+      const hash = results?.[at]?.hash;
+      if (c.seq !== seq || hash == null || hash === c.sentFrom) return { committed: { ...c, out } };
+      return { committed: { ...c, out, real: hash } };
     });
 }
 
@@ -885,7 +888,7 @@ function persist(client: ApiClient, params: Params, ids: number[]): Promise<void
   const back = saveSent(ids);
   if (ids.length > 1) {
     return pasteEditParams(client, ids, params).then(
-      () => back(null),
+      (saved) => back(saved),
       (err) => {
         back(null);
         toast.error(`Save failed: ${(err as Error).message}`);
@@ -893,7 +896,7 @@ function persist(client: ApiClient, params: Params, ids: number[]): Promise<void
     );
   }
   return setEditParams(client, ids[0], params).then(
-    (saved) => back(saved.hash),
+    (saved) => back([saved]),
     (err) => {
       back(null);
       toast.error(`Save failed: ${(err as Error).message}`);
@@ -907,10 +910,7 @@ function persist(client: ApiClient, params: Params, ids: number[]): Promise<void
  * dwell.
  */
 export function savedHere(c: Committed | null, photoId: number, hash: string): boolean {
-  if (c?.photoId !== photoId || c.out !== 0 || !c.real) return false;
-  // Known result: the photo shows it. Unknown (paste, reset): the photo has
-  // moved past what it showed when that save was sent.
-  return c.real.resultHash != null ? c.real.resultHash === hash : c.real.sentFrom !== hash;
+  return c?.photoId === photoId && c.out === 0 && c.real === hash;
 }
 
 /** The loupe reports the hash it shows for a photo (see EditSessionState.shown). */
@@ -1345,11 +1345,16 @@ export function esReset(client: ApiClient) {
   setState({ draft: { ...NEUTRAL }, lastPresetApply: null });
   esClearPreview();
   const ids = s.applyIds.length > 1 ? s.applyIds : [photoId];
-  // The user's own save too: its result's hash is not returned, so whether
-  // the photo moved past the hash before it decides.
+  // The user's own save too, counted like any other.
   const back = saveSent(ids);
   resetEdits(client, ids)
-    .finally(() => back(null))
+    .then(
+      (saved) => back(saved),
+      (err) => {
+        back(null);
+        throw err;
+      },
+    )
     .then(async () => {
       const params = await getEditParams(client, photoId).catch(() => null);
       if (useEditSession.getState().photoId !== photoId) return;

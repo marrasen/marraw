@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { Photo } from '@/api/library';
 import { imgUrl, tileUrl, type Level } from '@/lib/backend';
@@ -63,8 +63,13 @@ export function useTilesWarm(
   // What this render asks for, read by the effect's cleanup, which runs
   // after the next render: it forgets warmth only when that render leaves
   // the state or stops wanting tiles, never when only `kick` changed.
+  // Written on commit, not during render: a render React throws away must
+  // not be what the cleanup sees. Layout effects run before the passive
+  // cleanup below.
   const asked = useRef({ url0: '', want: false });
-  asked.current = { url0, want };
+  useLayoutEffect(() => {
+    asked.current = { url0, want };
+  });
   useEffect(() => {
     immediateRef.current = immediate;
     if (immediate) shorten.current?.();

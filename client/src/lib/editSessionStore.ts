@@ -55,11 +55,11 @@ export interface Committed {
   out: number;
   // The hash the loupe showed when the newest save was sent.
   sentFrom: string;
-  // The outcome of the newest save that changed something, once back: the
-  // hash it was sent from and the one it saved (null: unknown, as for a
-  // paste or a reset). A save that changes nothing (crop entered and left)
-  // leaves the one before it in place, so it does not hide that result.
-  real: { sentFrom: string; resultHash: string | null } | null;
+  // The hash the newest save that changed something saved, once back. Every
+  // save returns it (SetEditParams, PasteEditParams and ResetEdits alike).
+  // A save that changes nothing (crop entered and left) or fails leaves the
+  // one before it in place, so it does not hide that result.
+  real: string | null;
 }
 
 export interface EditSessionState {
