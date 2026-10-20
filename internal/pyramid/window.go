@@ -312,7 +312,13 @@ func healStrokeReach(f *maskFrame, long float64, s *edit.Spot) (dest, src image.
 	for i := range s.Strokes {
 		radPx = math.Max(radPx, s.Strokes[i].Radius*long)
 	}
-	pad := int(math.Ceil(math.Max(2, 0.35*radPx))) + 4
+	// The heal fit samples a band around the painted area, measured on the
+	// brush plane (fitStrokeBandPlanes): reach plane pixels out, each
+	// long/brushPlaneLongEdge output pixels wide — on a large frame much
+	// more than the band's own width.
+	bandPx := math.Max(2, 0.35*radPx)
+	reach := max(1, int(math.Ceil(bandPx*brushPlaneLongEdge/long)))
+	pad := int(math.Ceil(math.Max(bandPx, float64(reach+1)*long/brushPlaneLongEdge))) + 4
 	dest = image.Rect(x0, y0, x1, y1).Inset(-pad)
 	src = image.Rect(x0+int(math.Floor(offX)), y0+int(math.Floor(offY)),
 		x1+int(math.Ceil(offX)), y1+int(math.Ceil(offY))).Inset(-pad)

@@ -112,7 +112,9 @@ func clarityRadius(rg region) int {
 }
 
 // detailMargin is how far the detail stage reaches for the pixels around
-// one: its blurs run two passes (texture, clarity) or one (sharpen).
+// one: its blurs run two passes (texture, clarity) or one (sharpen). It is
+// never under 3 when the stage runs, which also keeps a window of one
+// pixel at least the 4 pixels across the stage needs to run at all.
 func detailMargin(rg region, e *edit.Params) int {
 	switch {
 	case e == nil:
@@ -122,7 +124,7 @@ func detailMargin(rg region, e *edit.Params) int {
 	case e.Texture != 0:
 		return 2 * 3
 	case e.Sharpen != 0:
-		return 1
+		return 3
 	}
 	return 0
 }
