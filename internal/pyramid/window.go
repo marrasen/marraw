@@ -327,10 +327,13 @@ func healStrokeReach(f *maskFrame, long float64, s *edit.Spot) (dest, src image.
 	// The heal fit samples a band around the painted area, measured on the
 	// brush plane (fitStrokeBandPlanes): reach plane pixels out, each
 	// long/brushPlaneLongEdge output pixels wide — on a large frame much
-	// more than the band's own width.
+	// more than the band's own width. The band is square on the plane, in
+	// the frame's own axes, so a straighten widens it on the output by
+	// |cos| + |sin| (up to 1.41 at 45 degrees).
 	bandPx := math.Max(2, 0.35*radPx)
 	reach := max(1, int(math.Ceil(bandPx*brushPlaneLongEdge/long)))
-	pad := int(math.Ceil(math.Max(bandPx, float64(reach+1)*long/brushPlaneLongEdge))) + 4
+	turn := math.Abs(f.cos) + math.Abs(f.sin)
+	pad := int(math.Ceil(math.Max(bandPx, float64(reach+1)*long/brushPlaneLongEdge*turn))) + 4
 	dest = image.Rect(x0, y0, x1, y1).Inset(-pad)
 	src = image.Rect(x0+int(math.Floor(offX)), y0+int(math.Floor(offY)),
 		x1+int(math.Ceil(offX)), y1+int(math.Ceil(offY))).Inset(-pad)
