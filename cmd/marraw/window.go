@@ -78,11 +78,19 @@ func (cu *culler) noteShown() {
 	c.key, c.since, c.hover = key, now, hover
 }
 
+// newRun starts a new run at the edit the photo shows now, a one-shot
+// change whatever came before it.
+func (cu *culler) newRun() {
+	c := &cu.win.clock
+	c.run++
+	c.key, c.since, c.hover = paramsJSON(cu.shownParams()), time.Now(), cu.dev.hover != nil
+}
+
 // windowShows reports whether the window held may show over the edit the
-// photo shows now: its own edit, or an earlier one of the same run.
+// photo shows now: an earlier one of the same run, or its own edit.
 func (cu *culler) windowShows() bool {
 	w := &cu.win
-	return w.paramsKey == paramsJSON(cu.shownParams()) || w.run == w.clock.run
+	return w.run == w.clock.run || w.paramsKey == paramsJSON(cu.shownParams())
 }
 
 func paramsJSON(p marrawclient.Params) string {
