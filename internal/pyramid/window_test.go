@@ -2,6 +2,7 @@ package pyramid
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"image"
 	"math"
@@ -446,5 +447,27 @@ func TestRenderWindowClampedSpot(t *testing.T) {
 				t.Errorf("rotate %d, window %v: %s", rot, win, diff)
 			}
 		}
+	}
+}
+
+// strongStraightenStroke is the edit review round 8's fuzz found: painted
+// heal spots under a 41-degree straighten, one of them with a thin stroke
+// and an erase stroke setting its box, whose band reaches past a pad that
+// ignored the straighten.
+const strongStraightenStroke = `{"contrast":0.29673283673262985,"texture":0,"clarity":0.21494742490350516,"sharpen":0.1483895745923057,"lensMode":"off","rotate":0,"flipH":true,"cropAngle":-41.4652,"masks":[{"type":"brush","strokes":[{"radius":0.0383,"pts":[0.0221,0.0036,0.9946,0.0122]}],"adjust":{},"remove":true}],"spots":[{"kind":"stroke","mode":"fill","cx":0.8923,"cy":0.6389,"radius":0,"sx":0,"sy":0,"strokes":[{"radius":0.0305,"feather":0.53,"pts":[0.8552,0.664,0.8634,0.5805]}]},{"cx":0.4853,"cy":0.9521,"radius":0.0151,"sx":-0.4672,"sy":0.1037,"feather":0.4049},{"mode":"fill","cx":0.9501,"cy":0.3746,"radius":0.0493,"sx":0,"sy":0,"feather":0.0443},{"mode":"clone","cx":0.9617,"cy":0.0051,"radius":0.0393,"sx":-0.3852,"sy":0.8109,"feather":0.1795},{"kind":"stroke","cx":0.6939,"cy":0.7562,"radius":0,"sx":0.0252,"sy":-0.4647,"opacity":0.6814,"strokes":[{"radius":0.025,"feather":0.346,"pts":[0.7563,0.827,0.6827,0.8012,0.6371,0.6928,0.7526,0.7069,0.7531,0.8205]}]},{"kind":"stroke","cx":0.0516,"cy":0.0934,"radius":0,"sx":-0.0549,"sy":0.3016,"strokes":[{"radius":0.0253,"feather":0.7388,"pts":[0.0933,0.0861,0.0813,0.0783]},{"radius":0.0032,"feather":0.3184,"pts":[0.1269,0.1721,0.1033,0.0471,-0.0189,0.0959]},{"erase":true,"radius":0.0344,"feather":0.7278,"pts":[-0.0098,0.0367,0.0945,0.136,0.034,0.1189]}]}]}`
+
+func TestRenderWindowStraightenedStroke(t *testing.T) {
+	var e edit.Params
+	if err := json.Unmarshal([]byte(strongStraightenStroke), &e); err != nil {
+		t.Fatal(err)
+	}
+	e.Normalize()
+	src := windowTestSource(1800, 1200)
+	fills := fillsForTest(&e)
+	whole := renderWholeForTest(src, 0.75, &e, 0.1, nil, nil, fills)
+	win := image.Rect(-97, 536, 13, 711)
+	got := RenderWindow(t.Context(), src, win, 0.75, &e, 0.1, nil, nil, fills)
+	if _, _, d := windowDiff(got, copyRGBA(whole, win.Intersect(whole.Bounds()))); d != "" {
+		t.Errorf("window %v: %s", win, d)
 	}
 }
