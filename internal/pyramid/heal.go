@@ -312,12 +312,14 @@ func applyHealSpot(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edi
 	// Keep the sampled source disc on the frame; the ±radPx clamp guarantees
 	// the clone reads never fall outside (sampleBilinear would return black).
 	// A frame smaller than the disc is degenerate — the sub-pixel guard above
-	// already rejects the only sizes where that bites.
+	// already rejects the only sizes where that bites. The clamp is in the
+	// whole output's coordinates: moving between those and the buffer's is
+	// exact (whole numbers), moving the bound would round.
 	if float64(f.outW) > 2*radPx {
-		scx = clampF(scx, radPx-f.bx, float64(f.outW)-radPx-f.bx)
+		scx = clampF(scx+f.bx, radPx, float64(f.outW)-radPx) - f.bx
 	}
 	if float64(f.outH) > 2*radPx {
-		scy = clampF(scy, radPx-f.by, float64(f.outH)-radPx-f.by)
+		scy = clampF(scy+f.by, radPx, float64(f.outH)-radPx) - f.by
 	}
 	offX, offY := scx-dcx, scy-dcy
 
@@ -332,10 +334,12 @@ func applyHealSpot(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edi
 	}
 	src := copyRGBA(img, srcRect)
 	srcW, srcH := src.Bounds().Dx(), src.Bounds().Dy()
-	// srcAt samples the snapshot at an output-space coordinate.
+	// srcAt samples the snapshot at a coordinate of the whole output (the
+	// spot's offset added there, as the whole render adds it, so a window
+	// rounds the same).
 	srcAt := func(ox, oy float64) (r, g, b float64, ok bool) {
-		lx := ox - float64(ir.Min.X)
-		ly := oy - float64(ir.Min.Y)
+		lx := ox - (float64(ir.Min.X) + f.bx)
+		ly := oy - (float64(ir.Min.Y) + f.by)
 		if lx < 0 || ly < 0 || lx > float64(srcW-1) || ly > float64(srcH-1) {
 			return 0, 0, 0, false
 		}
@@ -369,7 +373,7 @@ func applyHealSpot(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edi
 			o := img.PixOffset(ix, iy)
 			return float64(img.Pix[o]), float64(img.Pix[o+1]), float64(img.Pix[o+2]), true
 		})
-		sPlane = fitAnnulusPlanes(scx, scy, radPx, srcAt)
+		sPlane = fitAnnulusPlanes(scx+f.bx, scy+f.by, radPx, srcAt)
 	}
 
 	invR2 := 1 / (radPx * radPx)
@@ -391,7 +395,7 @@ func applyHealSpot(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edi
 			if wq == 0 {
 				continue
 			}
-			sr, sg, sb, ok := srcAt(float64(x)+offX, float64(y)+offY)
+			sr, sg, sb, ok := srcAt(float64(x)+f.bx+offX, float64(y)+f.by+offY)
 			if !ok {
 				continue
 			}
@@ -478,8 +482,8 @@ func applyHealStroke(img *image.RGBA, w, h int, f *maskFrame, long float64, s *e
 	src := copyRGBA(img, srcRect)
 	srcW, srcH := src.Bounds().Dx(), src.Bounds().Dy()
 	srcAt := func(ox, oy float64) (r, g, b float64, ok bool) {
-		lx := ox - float64(ir.Min.X)
-		ly := oy - float64(ir.Min.Y)
+		lx := ox - (float64(ir.Min.X) + f.bx)
+		ly := oy - (float64(ir.Min.Y) + f.by)
 		if lx < 0 || ly < 0 || lx > float64(srcW-1) || ly > float64(srcH-1) {
 			return 0, 0, 0, false
 		}
@@ -520,7 +524,7 @@ func applyHealStroke(img *image.RGBA, w, h int, f *maskFrame, long float64, s *e
 			if wq == 0 {
 				continue
 			}
-			sr, sg, sb, ok := srcAt(float64(x)+offX, float64(y)+offY)
+			sr, sg, sb, ok := srcAt(float64(x)+f.bx+offX, float64(y)+f.by+offY)
 			if !ok {
 				continue
 			}
@@ -644,7 +648,7 @@ func fitStrokeBandPlanes(
 			v := (oy - bcy) / scale
 			r8, g8, b8, _ := sampleBilinear(img, ox, oy)
 			dAcc.add(u, v, float64(r8), float64(g8), float64(b8))
-			if sr, sg, sb, ok := srcAt(ox+offX, oy+offY); ok {
+			if sr, sg, sb, ok := srcAt(ox+f.bx+offX, oy+f.by+offY); ok {
 				sAcc.add(u, v, sr, sg, sb)
 			}
 		}
