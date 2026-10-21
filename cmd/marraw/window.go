@@ -50,11 +50,13 @@ type winState struct {
 
 // editClock tells drag frames from one-shot changes. A change that is not
 // a drag frame — one after an edit that stayed on screen dragFrame or
-// longer, or into or out of a hovered preset — starts a new run. A window
-// of an earlier edit of the same run shows on over the new edit until
-// that one's comes, so a drag keeps a sharp, slightly late view; one of an
-// earlier run does not, so a one-shot change (a preset, paste, the
-// eyedropper) shows its preview at once rather than the old look over it.
+// longer, into or out of a hovered preset, or a preset clicked (newRun) —
+// starts a new run. A window of an earlier edit of the same run shows on
+// over the new edit until that one's comes, so a drag keeps a sharp,
+// slightly late view; one of an earlier run does not, so a change after a
+// pause (paste, undo, the eyedropper) or a preset shows its preview at once
+// rather than the old look over it. One that follows a slider within
+// dragFrame counts as part of its run.
 type editClock struct {
 	run   int
 	key   string
