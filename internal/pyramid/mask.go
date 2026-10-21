@@ -250,7 +250,8 @@ func newMaskFrameIn(rg region, e *edit.Params) maskFrame {
 
 // framePoint returns the frame-pixel coordinates of an output pixel center.
 // The map is affine: stepping x by one output pixel steps the frame point by
-// (cos, sin), which the evaluators use to walk rows incrementally.
+// (cos, sin), which the evaluators use to reach each pixel of a row from the
+// row's point at the frame's column 0.
 func (f *maskFrame) framePoint(x, y float64) (fx, fy float64) {
 	px := f.ox0 + (x + f.bx) + 0.5 - f.fcx
 	py := f.oy0 + (y + f.by) + 0.5 - f.fcy
@@ -544,14 +545,19 @@ func (ev *radialEval) weightRow(y int, w []uint16) (int, int) {
 			}
 		}
 	}
-	// Each pixel from its own frame point, not stepped along the row: a
+	// Each pixel from the row's point at the frame's own column 0 and its
+	// absolute column, not stepped from this buffer's first pixel: a
 	// window's rows start elsewhere than the whole frame's, and a stepped
-	// sum would round differently there (RenderWindow).
+	// sum would round differently there (RenderWindow). The same operations
+	// on the same inputs either way, so the two agree by construction.
+	gx, gy := ev.f.framePoint(-ev.f.bx, float64(y))
+	gdx, gdy := gx-ev.cx, gy-ev.cy
+	u0 := (gdx*ev.ca + gdy*ev.sa) / ev.rx
+	v0 := (-gdx*ev.sa + gdy*ev.ca) / ev.ry
 	for x := x0; x < x1; x++ {
-		fx, fy := ev.f.framePoint(float64(x), float64(y))
-		dx, dy := fx-ev.cx, fy-ev.cy
-		u := (dx*ev.ca + dy*ev.sa) / ev.rx
-		v := (-dx*ev.sa + dy*ev.ca) / ev.ry
+		X := float64(x) + ev.f.bx
+		u := u0 + X*du
+		v := v0 + X*dv
 		q := u*u + v*v
 		if q >= 1 {
 			w[x] = ev.outside
@@ -631,10 +637,12 @@ func (ev *linearEval) weightRow(y int, w []uint16) (int, int) {
 			return 0, 0
 		}
 	}
-	// Each pixel from its own frame point (see radialEval.weightRow).
+	// Each pixel from the row's point at column 0 and its absolute column
+	// (see radialEval.weightRow).
+	gx, gy := ev.f.framePoint(-ev.f.bx, float64(y))
+	t0 := (gx-ev.ax)*ev.ux + (gy-ev.ay)*ev.uy
 	for x := x0; x < x1; x++ {
-		fx, fy := ev.f.framePoint(float64(x), float64(y))
-		t := (fx-ev.ax)*ev.ux + (fy-ev.ay)*ev.uy
+		t := t0 + (float64(x)+ev.f.bx)*dt
 		switch {
 		case t <= 0:
 			w[x] = ev.wlut[0]
@@ -824,12 +832,16 @@ func (ev *brushEval) weightRow(y int, w []uint16) (int, int) {
 	if ev.invert {
 		x0, x1 = 0, width
 	}
-	// Each pixel from its own frame point (see radialEval.weightRow).
+	// Each pixel from the row's point at column 0 and its absolute column
+	// (see radialEval.weightRow).
 	sx := float64(ev.pw) / ev.f.frameW
 	sy := float64(ev.ph) / ev.f.frameH
+	gx, gy := ev.f.framePoint(-ev.f.bx, float64(y))
+	px0, py0 := gx*sx-0.5, gy*sy-0.5
+	dpx, dpy := ev.f.cos*sx, ev.f.sin*sy
 	for x := x0; x < x1; x++ {
-		fx, fy := ev.f.framePoint(float64(x), float64(y))
-		cov := ev.samplePlane(fx*sx-0.5, fy*sy-0.5)
+		X := float64(x) + ev.f.bx
+		cov := ev.samplePlane(px0+X*dpx, py0+X*dpy)
 		if ev.invert {
 			w[x] = 256 - ev.covToW[cov]
 		} else {
