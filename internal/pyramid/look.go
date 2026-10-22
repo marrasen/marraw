@@ -137,11 +137,22 @@ func MeanLuma(img *image.RGBA) float64 {
 // its ML fill patches (FillStore.SetFor); either is nil when the edit has
 // none or they are unavailable.
 func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fills FillSet) {
+	ApplyFinishWith(img, gamma, e, ai, fills, nil)
+}
+
+// ApplyFinishWith is ApplyFinish with the whole-frame values st, from
+// FrameStatsFor. With st nil, a render larger than the working size
+// measures them on a working-size copy of img.
+func ApplyFinishWith(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fills FillSet, st *FrameStats) {
+	if b := img.Bounds(); st == nil && max(b.Dx(), b.Dy()) > fxPlaneLongEdge && needsFrameStats(e) {
+		st = measureFrame(context.Background(), scaleToLongEdge(img, fxPlaneLongEdge), gamma, e, ai, fills)
+	}
+	rg := wholeRegion(img)
 	ApplyHeal(img, e, ai, fills)
 	ApplyLook(img, gamma, e)
-	suppress := ApplyMasks(img, e, ai)
+	suppress := applyMasksIn(img, rg, e, ai, st)
 	ApplyBW(img, e)
-	ApplyDetail(img, e, suppress)
+	applyDetailIn(img, rg, e, suppress, st)
 }
 
 // ApplyLook warms up LibRaw's flat output to sit close to the camera's own

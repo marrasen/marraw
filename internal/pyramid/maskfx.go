@@ -160,12 +160,22 @@ type fxSource struct {
 // weight plane it rasterized (nil when the mask covers nothing), which the
 // caller folds into the detail-suppression plane.
 //
+// img is the part rg of the output. Where st is given and not being
+// measured, the effects come from it (mask index mi), worked out on a
+// working-size render of the frame, and only the composite runs here: that
+// is how a window gets the effects of the whole frame. Otherwise img must
+// be the whole output, and the effects are worked out on it — and kept in
+// st, when it is being measured.
+//
 // Canonical intra-FX order: mosaic → blur → motion → zoom → prism → glow →
 // streaks. Mosaic runs first so a following blur softens the block edges; the
 // two light passes run last and additively, drawn from the already-defocused
 // and already-fringed buffer, which is the anamorphic ordering — defocus the
 // background, then let its highlights bloom and streak.
-func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) []uint8 {
+func applyMaskFX(img *image.RGBA, rg region, ev maskEvaluator, f maskFrame, m *edit.Mask, st *FrameStats, mi int) []uint8 {
+	if st != nil && !st.measuring {
+		return composeMaskFX(img, rg, ev, st.fx[mi])
+	}
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w < 4 || h < 4 {
@@ -183,6 +193,7 @@ func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) [
 	workLong := float64(max(ww, wh))
 
 	a := &m.Adjust
+	var kept maskFXStats
 
 	// Blur runs on its own, BEFORE the shared buffer is snapshotted: the
 	// radius follows the mask's weight ramp (applyGradedBlur), which needs
@@ -191,24 +202,29 @@ func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) [
 	// pixels, the anamorphic ordering the old intra-buffer order bought.
 	// The one casualty is mosaic-then-blur: blur no longer softens mosaic
 	// block edges, it defocuses the photo the mosaic then re-pixelates.
-	blurRan := false
 	if a.Blur > 0 {
-		blurRan = applyGradedBlur(img, plane, a.Blur, false)
+		kept.blur = applyGradedBlur(img, rg, plane, a.Blur, false)
 	}
 	// Bokeh after blur: a soft pre-blur under the discs reads as a dreamier
 	// aperture, and the light passes below still draw from the finished
 	// defocus either way.
-	if a.Bokeh > 0 && applyGradedBlur(img, plane, a.Bokeh, true) {
-		blurRan = true
+	if a.Bokeh > 0 {
+		kept.bokeh = applyGradedBlur(img, rg, plane, a.Bokeh, true)
+	}
+	keep := func() {
+		if st != nil {
+			st.fx[mi] = &kept
+		}
 	}
 	if !a.HasFXBeyondBlur() {
 		// Blur was the whole request: skip the shared-buffer machinery, its
 		// snapshot of img and its composite entirely. A dial too low to reach
 		// a single working-buffer pixel ran nothing, and returning the plane
 		// anyway would let it suppress detail it never destroyed.
-		if !blurRan {
+		if kept.blur == nil && kept.bokeh == nil {
 			return nil
 		}
+		keep()
 		return plane
 	}
 
@@ -250,8 +266,9 @@ func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) [
 	// behind. Worth its allocation only when nothing has destroyed the detail
 	// the render still holds AND the working buffer is smaller than the
 	// render — otherwise the plain replace below is both right and cheaper.
+	// A larger render taking the effects from st composites the same way.
 	var delta *fxDelta
-	if !destroyed && (ww != w || wh != h) {
+	if !destroyed && (ww != w || wh != h || st != nil) {
 		delta = newFXDelta(s)
 	}
 	// Prism before the light passes, so the bloom and streaks inherit its
@@ -269,7 +286,36 @@ func applyMaskFX(img *image.RGBA, ev maskEvaluator, f maskFrame, m *edit.Mask) [
 		}
 	}
 	delta.complete(s)
-	fxComposite(img, plane, s, delta)
+	kept.shared, kept.delta = s, delta
+	keep()
+	if ww == w && wh == h {
+		delta = nil
+	}
+	fxComposite(img, rg, plane, s, delta)
+	return plane
+}
+
+// composeMaskFX blends one mask's effects, worked out at the working size
+// (fx, nil when the mask runs none), into img, the part rg of the output.
+// It returns the weight plane, as applyMaskFX does.
+func composeMaskFX(img *image.RGBA, rg region, ev maskEvaluator, fx *maskFXStats) []uint8 {
+	if fx == nil {
+		return nil
+	}
+	b := img.Bounds()
+	plane, box := weightPlaneFrom(ev, b.Dx(), b.Dy())
+	if box.Empty() {
+		return nil
+	}
+	if fx.blur != nil {
+		gradedBlurComposite(img, rg, plane, fx.blur)
+	}
+	if fx.bokeh != nil {
+		gradedBlurComposite(img, rg, plane, fx.bokeh)
+	}
+	if fx.shared != nil {
+		fxComposite(img, rg, plane, fx.shared, fx.delta)
+	}
 	return plane
 }
 
@@ -942,24 +988,28 @@ func fxSampleHalf(p [][]uint16, hw, hh, x, y int) (int, int, int) {
 // long you wait — the tiles ARE the sharpest thing there is). The difference
 // carries only the low-frequency light those passes contribute, which is
 // exactly the part that survives the upsample intact.
-func fxComposite(img *image.RGBA, plane []uint8, s *fxSource, delta *fxDelta) {
+func fxComposite(img *image.RGBA, rg region, plane []uint8, s *fxSource, delta *fxDelta) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
-	exact := s.w == w && s.h == h
-	sx := float64(s.w) / float64(w)
-	sy := float64(s.h) / float64(h)
+	// Positions are the output's, so a window samples the buffer where the
+	// whole render does.
+	exact := s.w == rg.outW && s.h == rg.outH
+	sx := float64(s.w) / float64(rg.outW)
+	sy := float64(s.h) / float64(rg.outH)
 
 	bands(h, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			row := img.Pix[y*img.Stride : y*img.Stride+w*4]
 			prow := plane[y*w : (y+1)*w]
-			fy := (float64(y)+0.5)*sy - 0.5
+			oy := y + rg.off.Y
+			fy := (float64(oy)+0.5)*sy - 0.5
 			for x := range w {
 				pw := prow[x]
 				if pw == 0 {
 					continue
 				}
-				fx := (float64(x)+0.5)*sx - 0.5
+				ox := x + rg.off.X
+				fx := (float64(ox)+0.5)*sx - 0.5
 				i0 := x * 4
 				var lr, lg, lb int
 				if delta != nil {
@@ -976,7 +1026,7 @@ func fxComposite(img *image.RGBA, plane []uint8, s *fxSource, delta *fxDelta) {
 				} else {
 					var la int
 					if exact {
-						j := y*w + x
+						j := oy*s.w + ox
 						lr, lg, lb, la = int(s.r[j]), int(s.g[j]), int(s.b[j]), int(s.a[j])
 					} else {
 						lr, lg, lb, la = s.sample(fx, fy)

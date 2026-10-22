@@ -270,12 +270,17 @@ func renderFinal(img *libraw.Image, lookGamma float64, params *edit.Params, phot
 	// Exposure stops beyond LibRaw's exp_shift range fold in post-decode,
 	// exactly as the pyramid renders do — and with them the white-balance
 	// normalization, so an export matches the loupe it was judged in.
-	pyramid.ApplyExposureEV(rgba, params.ResidualExpEV()+wbCompEV, params)
+	// What dehaze and the mask effects read over the whole frame is
+	// measured from the decode, as the 1:1 render measures it.
+	expEV := params.ResidualExpEV() + wbCompEV
+	lensc := req.Lenses.For(photo)
+	ai, fills := req.AIMaps.SetFor(photo.CacheKey, params), req.Fills.SetFor(photo.CacheKey, params)
+	st := pyramid.FrameStatsFor(rgba, params, expEV, lookGamma, lensc, ai, fills)
+	pyramid.ApplyExposureEV(rgba, expEV, params)
 	rgba = pyramid.ApplyLens(rgba,
-		pyramid.LensWarp(req.Lenses.For(photo), params, rgba.Bounds().Dx(), rgba.Bounds().Dy()), params)
+		pyramid.LensWarp(lensc, params, rgba.Bounds().Dx(), rgba.Bounds().Dy()), params)
 	rgba = pyramid.ApplyGeometry(rgba, params)
-	pyramid.ApplyFinish(rgba, lookGamma, params,
-		req.AIMaps.SetFor(photo.CacheKey, params), req.Fills.SetFor(photo.CacheKey, params))
+	pyramid.ApplyFinishWith(rgba, lookGamma, params, ai, fills, st)
 	var out *image.RGBA
 	if req.Watermark != nil && req.Watermark.Frame != nil {
 		// Frame: the border grows around the photo — LongEdge constrains the

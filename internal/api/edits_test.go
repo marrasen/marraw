@@ -254,6 +254,21 @@ func TestApplyBatchEditLeavesAnUnreadableEditAlone(t *testing.T) {
 	}
 }
 
+// TestPreviewWindowArgs: sizes past the cap are refused before any work,
+// including two sides whose product wraps around, and neutral params
+// answer null.
+func TestPreviewWindowArgs(t *testing.T) {
+	e := &Edits{}
+	for _, wh := range [][2]int{{0, 10}, {10, -1}, {windowMaxPixels + 1, 1}, {1 << 32, 1 << 32}, {5000, 5000}} {
+		if _, err := e.PreviewWindow(t.Context(), 1, edit.Params{Contrast: 0.2}, 0, 0, wh[0], wh[1]); err == nil {
+			t.Errorf("%dx%d: no error", wh[0], wh[1])
+		}
+	}
+	if blob, err := e.PreviewWindow(t.Context(), 1, edit.Params{}, 0, 0, 100, 100); err != nil || blob != nil {
+		t.Errorf("neutral: %v, %v; want null", blob, err)
+	}
+}
+
 func TestAClippedReferenceFoldsOnlyWhileTheEditKeepsItsWhiteBalance(t *testing.T) {
 	keep := pyramid.FoldParams{D: [3]float64{1, 1, 1}, Exp: 1, Bright: 1.5}
 	warm := pyramid.FoldParams{D: [3]float64{1.4, 1, 0.7}, Exp: 1, Bright: 1}
@@ -286,20 +301,3 @@ func TestUnpickableSaysWhy(t *testing.T) {
 	}
 }
 
-// TestPreviewWindowArgs: sizes past the cap are refused before any work,
-// including two sides whose product wraps around, and neutral params or
-// an edit a window cannot render answer null.
-func TestPreviewWindowArgs(t *testing.T) {
-	e := &Edits{}
-	for _, wh := range [][2]int{{0, 10}, {10, -1}, {windowMaxPixels + 1, 1}, {1 << 32, 1 << 32}, {5000, 5000}} {
-		if _, err := e.PreviewWindow(t.Context(), 1, edit.Params{Contrast: 0.2}, 0, 0, wh[0], wh[1]); err == nil {
-			t.Errorf("%dx%d: no error", wh[0], wh[1])
-		}
-	}
-	for name, p := range map[string]edit.Params{"neutral": {}, "dehaze": {Dehaze: 0.4}} {
-		blob, err := e.PreviewWindow(t.Context(), 1, p, 0, 0, 100, 100)
-		if err != nil || blob != nil {
-			t.Errorf("%s: %v, %v; want null", name, blob, err)
-		}
-	}
-}

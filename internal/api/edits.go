@@ -246,12 +246,11 @@ const windowMaxPixels = 16 << 20
 // slider drags or the 1:1 tiles of a new state render. The JPEG covers the
 // clipped part. It renders from the full-resolution decode the backend
 // keeps for the photo open in the editor (OpenInEditor), so it answers
-// null when it cannot: no decode is kept under the state's LibRaw inputs
-// (exposure aside, which it folds in like the drafts do), or the edit
-// uses dehaze or mask effects, which work over the whole frame. Neutral
-// params (the base look) are never kept either. The state the editor
-// last settled on or saved is the exception to the first: its decode is
-// waited for, so a window comes right after a white balance change too.
+// null when it cannot: no decode is kept under the state's LibRaw inputs,
+// exposure and white balance aside, which it folds in like the drafts do
+// (KeptForWindow says when it cannot fold a white balance). Neutral params
+// (the base look) are never kept either. The state the editor last settled
+// on or saved is the exception: its own decode is waited for.
 func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Params, x, y, w, h int) (*aprot.Blob, error) {
 	// Each side first: a product of two huge sides wraps around.
 	if w <= 0 || h <= 0 || w > windowMaxPixels || h > windowMaxPixels || w*h > windowMaxPixels ||
@@ -259,7 +258,7 @@ func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Pa
 		return nil, fmt.Errorf("preview window: %dx%d is not 1 to %d pixels", w, h, windowMaxPixels)
 	}
 	params.Normalize()
-	if params.IsNeutral() || !pyramid.Windowable(&params) {
+	if params.IsNeutral() {
 		return nil, nil
 	}
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
@@ -267,11 +266,13 @@ func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Pa
 		return nil, err
 	}
 	cache := e.deps.Cache
-	src, expEV, _, ok := cache.KeptForWindow(photo, &params)
-	if !ok && cache.EditorWants(photo, &params) {
+	src, fold, _, ok := cache.KeptForWindow(photo, &params)
+	if (!ok || fold.WB != nil) && cache.EditorWants(photo, &params) {
 		// The state the editor just settled on or saved, its decode not
 		// kept yet (a white balance change, say): wait for it, joining the
-		// 1:1 render's, so the window still comes well before the tiles.
+		// 1:1 render's, so the window still comes well before the tiles,
+		// and is theirs exactly. A fold of another balance would shift as
+		// they came; it is for the drag frames before.
 		// A drag frame is never the state the editor is on, so drags never
 		// decode here. The decode runs on its own: a window let go must not
 		// take with it the decode the tiles wait on. The editor moving on
@@ -289,7 +290,7 @@ func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Pa
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		src, expEV, _, ok = cache.KeptForWindow(photo, &params)
+		src, fold, _, ok = cache.KeptForWindow(photo, &params)
 	}
 	if !ok {
 		return nil, nil
@@ -298,7 +299,7 @@ func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Pa
 	if err != nil {
 		return nil, err
 	}
-	img := pyramid.RenderWindow(ctx, src, image.Rect(x, y, x+w, y+h), gamma, &params, expEV,
+	img := pyramid.RenderWindow(ctx, src, image.Rect(x, y, x+w, y+h), gamma, &params, fold,
 		cache.Lenses.For(photo), cache.AIMaps.SetFor(photo.CacheKey, &params), cache.Fills.SetFor(photo.CacheKey, &params))
 	if img == nil {
 		return nil, nil

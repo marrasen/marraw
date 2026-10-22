@@ -6,8 +6,8 @@
 // Like the preview scheduler it renders one at a time: while one is in flight
 // only the newest wanted window is remembered, and goes out when it returns.
 // The backend answers null when it cannot make a window — no full-resolution
-// decode kept under the edit's white balance, dehaze, mask effects — and the
-// window then goes, so the drafts show rather than a window of an edit before.
+// decode kept it can fold the edit into — and the window then goes, so the
+// drafts show rather than a window of an edit before.
 
 import { create } from 'zustand';
 

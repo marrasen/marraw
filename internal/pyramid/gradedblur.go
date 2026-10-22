@@ -73,13 +73,14 @@ const (
 	bokehBoost = 12.0
 )
 
-// applyGradedBlur defocuses img in place through the mask's full-resolution
-// weight plane, radius growing with the local weight up to
-// amount*fxBlurFrac of the working buffer's long edge. Returns whether it
-// ran — a dial too low to reach a single working-buffer pixel runs nothing,
-// so nothing may claim the render's sharpness either (the applyMaskFX
-// `destroyed` tracking, for the same reason).
-func applyGradedBlur(img *image.RGBA, plane []uint8, amount float64, disc bool) bool {
+// applyGradedBlur defocuses img, the whole output (rg), in place through the
+// mask's full-resolution weight plane, radius growing with the local weight
+// up to amount*fxBlurFrac of the working buffer's long edge. It returns the
+// levels it blended in, nil when it did not run — a dial too low to reach a
+// single working-buffer pixel runs nothing, so nothing may claim the
+// render's sharpness either (the applyMaskFX `destroyed` tracking, for the
+// same reason).
+func applyGradedBlur(img *image.RGBA, rg region, plane []uint8, amount float64, disc bool) []*fxSource {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	long := max(w, h)
@@ -88,12 +89,12 @@ func applyGradedBlur(img *image.RGBA, plane []uint8, amount float64, disc bool) 
 	wh := max(4, h*work/long)
 	rMax := amount * fxBlurFrac * float64(max(ww, wh))
 	if rMax < 1 {
-		return false
+		return nil
 	}
 
 	lin, wp := newBlurSource(img, plane, ww, wh)
 	gather := erodeMin(wp, ww, wh)
-	levels := make([]blurLevelView, gradedBlurLevels)
+	levels := make([]*fxSource, gradedBlurLevels)
 	for k := range levels {
 		// Level k blurs at (k+1)/gradedBlurLevels of the maximum radius,
 		// gathering only pixels at least that defocused — and on a buffer
@@ -110,10 +111,10 @@ func applyGradedBlur(img *image.RGBA, plane []uint8, amount float64, disc bool) 
 			src, g = blurDownscale(lin, gather, ww, wh, lw, lh)
 		}
 		r := max(1, int(math.Round(frac*rMax*float64(max(lw, lh))/float64(max(ww, wh)))))
-		levels[k] = newBlurLevelView(blurLevel(src, g, lw, lh, frac, r, disc), w, h)
+		levels[k] = blurLevel(src, g, lw, lh, frac, r, disc)
 	}
-	gradedBlurComposite(img, plane, levels)
-	return true
+	gradedBlurComposite(img, rg, plane, levels)
+	return levels
 }
 
 // newBlurSource area-averages the render down to the working buffer,
@@ -413,9 +414,15 @@ func discPlane(src []uint16, w, h, r int, spans []int) []uint16 {
 // about it (fxComposite's argument). A pixel at coc 0 is skipped outright, so
 // the in-focus band comes through byte-identical rather than through a
 // linearize/re-encode round trip.
-func gradedBlurComposite(img *image.RGBA, coc []uint8, levels []blurLevelView) {
+func gradedBlurComposite(img *image.RGBA, rg region, coc []uint8, blurs []*fxSource) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
+	// Mapped from the output's positions, so a window samples the levels
+	// where the whole render does.
+	levels := make([]blurLevelView, len(blurs))
+	for k, s := range blurs {
+		levels[k] = newBlurLevelView(s, rg.outW, rg.outH)
+	}
 
 	bands(h, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
@@ -440,9 +447,9 @@ func gradedBlurComposite(img *image.RGBA, coc []uint8, levels []blurLevelView) {
 
 				lo := own
 				if k > 0 {
-					lo = levels[k-1].sample(x, y, own)
+					lo = levels[k-1].sample(x+rg.off.X, y+rg.off.Y, own)
 				}
-				hi := levels[k].sample(x, y, own)
+				hi := levels[k].sample(x+rg.off.X, y+rg.off.Y, own)
 
 				for ch := range 3 {
 					v := lo[ch] + (hi[ch]-lo[ch])*t

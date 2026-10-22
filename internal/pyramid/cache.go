@@ -217,7 +217,7 @@ func nested(a, b string) bool {
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r15"
+const renderVersion = "r16"
 
 // RenderVersion is renderVersion for a client in Go, which puts it in its
 // image URLs as the TypeScript client's RENDER_VERSION does.
@@ -658,6 +658,13 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// before any look stage — same slot as RenderPreview's expDeltaEV — and
 	// with them the white-balance normalization LibRaw applied, so a tile
 	// matches the preview whose place it takes (see edit.Params.WBCompEV).
+	// A full render reading the whole frame (dehaze, mask effects) measures
+	// it on a small render from the decode, as a window of it does: made
+	// here, before the exposure folds into the decode in place.
+	var proxy *image.RGBA
+	if level == "full" && needsFrameStats(edits) {
+		proxy = frameProxy(rgba, edits, Fold{ExpEV: edits.ResidualExpEV() + wbCompEV}, c.Lenses.For(photo))
+	}
 	if delta := edits.ResidualExpEV() + wbCompEV; delta != 0 {
 		own()
 		ApplyExposureEV(rgba, delta, edits)
@@ -704,19 +711,24 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		// render called off (the next edit came) stops between them. The
 		// write-out below always completes: tile (0,0) is the sentinel.
 		report(0.72)
+		var st *FrameStats
+		if proxy != nil {
+			st = measureFrame(context.Background(), proxy, gamma, edits, ai, fills)
+		}
+		rg := wholeRegion(rgba)
 		ApplyHeal(rgba, edits, ai, fills)
 		ApplyLook(rgba, gamma, edits)
 		report(0.78)
 		if err := ctx.Err(); err != nil && stoppable {
 			return err
 		}
-		suppress := ApplyMasks(rgba, edits, ai)
+		suppress := applyMasksIn(rgba, rg, edits, ai, st)
 		ApplyBW(rgba, edits)
 		report(0.82)
 		if err := ctx.Err(); err != nil && stoppable {
 			return err
 		}
-		ApplyDetail(rgba, edits, suppress)
+		applyDetailIn(rgba, rg, edits, suppress, st)
 		report(0.90)
 		if err := ctx.Err(); err != nil && stoppable {
 			return err
