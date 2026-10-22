@@ -114,6 +114,13 @@ type Cache struct {
 	fullClosed  bool
 	settles     map[string]chan struct{} // CacheKey|hash → settle under way (settle.go)
 	fullDecodes atomic.Int64             // full-resolution decodes run, for tests
+
+	// epochs counts each edit state's invalidations, keyed cacheKey|editHash.
+	// A render reads it before it starts and after it lands: a map made (or
+	// any other render input outside the edit hash changing) while it ran
+	// means what it wrote predates the change, so it is dropped and redone.
+	epochMu sync.Mutex
+	epochs  map[string]uint64
 }
 
 func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
@@ -241,6 +248,41 @@ func (c *Cache) InvalidateEdit(cacheKey, editHash string) {
 	if cacheKey == "" || editHash == "" {
 		return
 	}
+	// Bumped before the files go, so a render under way that writes after
+	// this sees it and redoes its work (see generateFresh).
+	c.epochMu.Lock()
+	if c.epochs == nil {
+		c.epochs = map[string]uint64{}
+	}
+	c.epochs[cacheKey+"|"+editHash]++
+	c.epochMu.Unlock()
+	c.removeEdit(cacheKey, editHash)
+}
+
+// epoch is how many times the edit state's renditions were invalidated.
+func (c *Cache) epoch(cacheKey, editHash string) uint64 {
+	c.epochMu.Lock()
+	defer c.epochMu.Unlock()
+	return c.epochs[cacheKey+"|"+editHash]
+}
+
+// generateFresh is generate, redone once when the edit state was
+// invalidated while it ran: a pre-render that started before an AI mask's
+// map existed must not leave its maskless pixels cached after the map
+// lands, or every later request serves them.
+func (c *Cache) generateFresh(ctx context.Context, proc *libraw.Processor, photo store.Photo, level, editHash string, prio decode.Priority) error {
+	for try := 0; ; try++ {
+		e0 := c.epoch(photo.CacheKey, editHash)
+		err := c.generate(ctx, proc, photo, level, editHash, prio)
+		if err != nil || c.epoch(photo.CacheKey, editHash) == e0 || try == 1 {
+			return err
+		}
+		c.removeEdit(photo.CacheKey, editHash)
+	}
+}
+
+// removeEdit deletes the edit state's renditions on disk.
+func (c *Cache) removeEdit(cacheKey, editHash string) {
 	pattern := filepath.Join(c.Dir(), cacheKey[:2],
 		fmt.Sprintf("%s_*_%s_%s.jpg", cacheKey, editHash, renderVersion))
 	matches, _ := filepath.Glob(pattern)
@@ -277,7 +319,7 @@ func (c *Cache) Ensure(ctx context.Context, photo store.Photo, level, editHash s
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
-		return c.generate(jctx, proc, photo, level, editHash, prio)
+		return c.generateFresh(jctx, proc, photo, level, editHash, prio)
 	})
 	if err != nil {
 		return "", err
@@ -396,7 +438,7 @@ func (c *Cache) EnsureTile(ctx context.Context, photo store.Photo, tx, ty int, e
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
-		return c.generate(jctx, proc, photo, "full", editHash, prio)
+		return c.generateFresh(jctx, proc, photo, "full", editHash, prio)
 	})
 	if err != nil {
 		return "", err
@@ -1017,10 +1059,16 @@ func outputEncoding(edits *edit.Params) (pwr, ts float64) {
 // exposure so this rendition lands at the brightness the drag showed.
 func (c *Cache) WritePreview(src *image.RGBA, photo store.Photo, editHash string, lookGamma float64, edits *edit.Params, wbCompEV float64) error {
 	cacheKey := photo.CacheKey
+	e0 := c.epoch(cacheKey, editHash)
 	ai := c.AIMaps.SetFor(cacheKey, edits)
 	fills := c.Fills.SetFor(cacheKey, edits)
 	lensc := c.Lenses.For(photo)
-	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits, edits.ResidualExpEV()+wbCompEV, ai, fills, lensc), cacheKey, "2048", editHash, 80)
+	err := c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits, edits.ResidualExpEV()+wbCompEV, ai, fills, lensc), cacheKey, "2048", editHash, 80)
+	if err == nil && c.epoch(cacheKey, editHash) != e0 {
+		// Invalidated while it rendered, as by a map made: not kept.
+		c.removeEdit(cacheKey, editHash)
+	}
+	return err
 }
 
 // WriteLevels writes a chain of downscaled renditions from src, skipping
