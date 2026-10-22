@@ -5,7 +5,7 @@ import { setVisible, type Photo } from '@/api/library';
 import { useApiClient } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
-import { useImgBust } from '@/lib/imgCacheBust';
+import { useImgBust, useThumbBust } from '@/lib/imgCacheBust';
 import { dayLabel, gapLabel, groupByGap, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { burstFor, type BurstInfo } from '@/lib/bursts';
 import { BurstBadge } from '@/components/BurstBadge';
@@ -291,6 +291,7 @@ function GridCell({ photo, w, h, fitClass, softBelow, burst }: { photo: Photo; w
   const focus = useUIStore((s) => s.focus);
   const [loaded, setLoaded] = useState(false);
   useImgBust(photo.id); // refetch this thumb when a restored AI map repaints it
+  useThumbBust(photo.id); // and when marraw's render replaces the camera's
   const level = w * window.devicePixelRatio > 256 ? '512' : '256';
   const isFocus = focusId === photo.id;
 

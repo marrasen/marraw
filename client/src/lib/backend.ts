@@ -3,7 +3,7 @@
 // daemon, or apiHost (host:port) + remote=1 for a connection to another
 // machine's daemon. Browser dev falls back to the fixed dev port.
 
-import { getImgBust } from './imgCacheBust';
+import { getImgBust, getThumbBust } from './imgCacheBust';
 
 export type Level = '256' | '512' | '1024' | '2048';
 
@@ -83,6 +83,11 @@ export function imgUrl(
   // map regenerates pixels under an unchanged edit hash — see imgCacheBust.
   const b = getImgBust(p.id);
   if (b) params.set('b', String(b));
+  // s: per-photo, per-session cache-buster (server-ignored). Advances when
+  // marraw's render replaces the unedited levels the camera's JPEG gave —
+  // see getThumbBust. Edited levels never come from the camera.
+  const s = getThumbBust(p.id);
+  if (s && !params.has('e')) params.set('s', String(s));
   if (backend.token) params.set('t', backend.token);
   return `${backend.http}/img/${p.id}/${level}?${params}`;
 }

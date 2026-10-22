@@ -74,3 +74,32 @@ export function useImgBust(photoId: number): number {
     () => getImgBust(photoId),
   );
 }
+
+// Per-photo thumbnail cache-buster, for this session only.
+//
+// An unedited photo's small levels start as its camera's embedded JPEG and
+// are replaced by marraw's own render under the same URL. The server sends
+// the camera's ones as no-cache, so a later load asks again and gets the
+// render; it says when one was replaced (BaseRenderedEvent), and
+// bumpThumbBust makes a thumbnail on screen ask again at once (imgUrl's `s`
+// param, which the server ignores). Nothing stale is cached for good, so
+// unlike bumpImgBust nothing needs to outlive the session.
+
+const thumbBusts = new Map<number, number>();
+
+export function getThumbBust(photoId: number): number {
+  return thumbBusts.get(photoId) ?? 0;
+}
+
+// bumpThumbBust records that photoId's small unedited levels are marraw's
+// render now, no longer its camera's JPEG.
+export function bumpThumbBust(photoId: number): void {
+  thumbBusts.set(photoId, getThumbBust(photoId) + 1);
+  for (const l of listeners) l();
+}
+
+// useThumbBust re-renders the caller when photoId's thumbnail cache-buster
+// advances, so a mounted thumbnail shows marraw's render once it lands.
+export function useThumbBust(photoId: number): number {
+  return useSyncExternalStore(subscribe, () => getThumbBust(photoId));
+}
