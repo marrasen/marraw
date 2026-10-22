@@ -2,6 +2,7 @@ package pyramid
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"os"
 	"testing"
@@ -170,5 +171,43 @@ func TestTightCropShrinkBounded(t *testing.T) {
 	got := RenderWindow(t.Context(), src, win, 0.72, &e, 0, nil, nil, nil)
 	if _, _, d := windowDiff(got, copyRGBA(whole, win)); d != "" {
 		t.Error(d)
+	}
+}
+
+// TestWindowStatsShrinkSurvivesCancel: a window called off after its
+// shrink still keeps it, so the next frame of a drag does not shrink the
+// decode again; and nothing is kept once the kept decode goes.
+func TestWindowStatsShrinkSurvivesCancel(t *testing.T) {
+	forgetWindowStats()
+	t.Cleanup(forgetWindowStats)
+	src := windowTestSource(2400, 1600)
+	e := edit.Params{Dehaze: 0.4, LensMode: edit.LensOff}
+	e.Normalize()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if windowStats(ctx, src, &e, 0, 0.72, nil, nil, nil) != nil {
+		t.Fatal("a cancelled window measured")
+	}
+	windowKept.Lock()
+	shrunk := windowKept.shrunk
+	windowKept.Unlock()
+	if shrunk == nil {
+		t.Fatal("the shrink was thrown away")
+	}
+	if windowStats(t.Context(), src, &e, 0, 0.72, nil, nil, nil) == nil {
+		t.Fatal("no stats")
+	}
+	windowKept.Lock()
+	again := windowKept.shrunk
+	windowKept.Unlock()
+	if again != shrunk {
+		t.Error("the decode was shrunk again")
+	}
+	forgetWindowStats()
+	windowKept.Lock()
+	gone := windowKept.shrunk == nil && windowKept.st == nil
+	windowKept.Unlock()
+	if !gone {
+		t.Error("kept after forgetWindowStats")
 	}
 }
