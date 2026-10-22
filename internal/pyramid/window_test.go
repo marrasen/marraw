@@ -44,11 +44,12 @@ func windowTestSource(w, h int) *image.RGBA {
 // geometry, then ApplyFinish, whose stages generate mirrors — so a stage
 // added there and not to RenderWindow fails the test.
 func renderWholeForTest(src *image.RGBA, gamma float64, e *edit.Params, expEV float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *image.RGBA {
+	st := FrameStatsFor(src, e, expEV, gamma, lensc, ai, fills)
 	img := copyRGBA(src, src.Bounds())
 	ApplyExposureEV(img, expEV, e)
 	img = ApplyLens(img, LensWarp(lensc, e, img.Bounds().Dx(), img.Bounds().Dy()), e)
 	img = ApplyGeometry(img, e)
-	ApplyFinish(img, gamma, e, ai, fills)
+	ApplyFinishWith(img, gamma, e, ai, fills, st)
 	return img
 }
 
@@ -78,7 +79,7 @@ func fillsForTest(e *edit.Params) FillSet {
 }
 
 // TestRenderWindowMatchesWhole: a window renders the pixels the whole
-// render has there, for every windowable stage, at edges and corners too.
+// render has there, for every stage, at edges and corners too.
 func TestRenderWindowMatchesWhole(t *testing.T) {
 	src := windowTestSource(2400, 1600)
 	lensc := lens.Resolve("Panasonic", "DC-LX100M2", "", 10.9, 1.7)
@@ -183,21 +184,51 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 			e.Masks = append(e.Masks, radial, brush)
 			e.Spots = append(e.Spots, spot(edit.SpotHeal, 0.3, 0.6, 0.7, 0.2, 0.04), stroke)
 		}),
+		"dehaze": with(detail, func(e *edit.Params) { e.Dehaze = 0.6 }),
+		"haze":   with(detail, func(e *edit.Params) { e.Dehaze = -0.4 }),
+		"blur": with(detail, func(e *edit.Params) {
+			m := radial
+			m.Adjust = edit.MaskAdjust{Blur: 0.6, ExpEV: 0.3}
+			e.Masks = append(e.Masks, m)
+		}),
+		"bokeh-ai": with(detail, func(e *edit.Params) {
+			m := aiM
+			m.Invert, m.Adjust = true, edit.MaskAdjust{Blur: 0.4, Bokeh: 0.7}
+			e.Masks = append(e.Masks, m, rangeM)
+		}),
+		"glow": with(detail, func(e *edit.Params) {
+			m := linear
+			m.Adjust = edit.MaskAdjust{Glow: 0.8, Streaks: 0.6, FXAngle: 30, Prism: 0.5}
+			e.Masks = append(e.Masks, m)
+		}),
+		"smears": with(look, func(e *edit.Params) {
+			e.Rotate, e.CropX, e.CropY, e.CropW, e.CropH, e.CropAngle = 1, 0.05, 0.1, 0.85, 0.8, -3
+			mo, zo := brush, radial
+			mo.Adjust = edit.MaskAdjust{MotionBlur: 0.5, FXAngle: 70, Mosaic: 0.3}
+			zo.Adjust = edit.MaskAdjust{ZoomBlur: 0.6, Prism: -0.4, Glow: 0.3}
+			e.Masks = append(e.Masks, mo, zo)
+		}),
+		"fx-everything": with(detail, func(e *edit.Params) {
+			e.Dehaze = 0.4
+			e.CropX, e.CropY, e.CropW, e.CropH, e.CropAngle = 0.05, 0.05, 0.9, 0.9, 2
+			blur := aiM
+			blur.Adjust = edit.MaskAdjust{Blur: 0.5, Streaks: 0.4}
+			e.Masks = append(e.Masks, radial, blur, aiM)
+			e.Spots = append(e.Spots, spot(edit.SpotHeal, 0.3, 0.6, 0.7, 0.2, 0.04))
+		}),
 		"everything": with(detail, func(e *edit.Params) {
 			e.Rotate, e.CropX, e.CropY, e.CropW, e.CropH, e.CropAngle = 3, 0.05, 0.05, 0.9, 0.9, 2
 			e.Masks = append(e.Masks, radial, aiM, brush)
 			e.Spots = append(e.Spots, spot(edit.SpotHeal, 0.3, 0.6, 0.7, 0.2, 0.04), stroke)
 		}),
 	}
-	lensFor := map[string]bool{"lens": true, "turned": true, "everything": true, "everything-noai": true, "spots": true}
+	lensFor := map[string]bool{"lens": true, "turned": true, "everything": true, "everything-noai": true, "spots": true,
+		"smears": true, "fx-everything": true}
 
 	rnd := rand.New(rand.NewPCG(3, 4))
 	for name, e := range cases {
 		t.Run(name, func(t *testing.T) {
 			e.Normalize()
-			if !Windowable(&e) {
-				t.Fatal("not windowable")
-			}
 			var lc *lens.Correction
 			if lensFor[name] {
 				lc = lensc
@@ -296,25 +327,6 @@ func TestRenderWindowCancelled(t *testing.T) {
 	}
 }
 
-// TestNotWindowable: dehaze and mask effects need the whole frame.
-func TestNotWindowable(t *testing.T) {
-	for name, e := range map[string]*edit.Params{
-		"dehaze": {Dehaze: 0.3},
-		"blur":   {Masks: []edit.Mask{{Type: edit.MaskRadial, RX: 0.2, RY: 0.2, Adjust: edit.MaskAdjust{Blur: 0.5}}}},
-	} {
-		if Windowable(e) {
-			t.Errorf("%s: windowable", name)
-		}
-		if RenderWindow(t.Context(), windowTestSource(64, 64), image.Rect(0, 0, 8, 8), 0.72, e, 0, nil, nil, nil) != nil {
-			t.Errorf("%s: rendered a window", name)
-		}
-	}
-	off := &edit.Params{Masks: []edit.Mask{{Type: edit.MaskRadial, Disabled: true, Adjust: edit.MaskAdjust{Blur: 0.5}}}}
-	if !Windowable(off) {
-		t.Error("a hidden mask's effects block the window")
-	}
-}
-
 // windowDiff counts the values two renders differ in and by how much at
 // most, and describes it ("" when they are the same).
 func windowDiff(got, want *image.RGBA) (n, worst int, desc string) {
@@ -342,9 +354,9 @@ func windowDiff(got, want *image.RGBA) (n, worst int, desc string) {
 }
 
 // TestRenderWindowFuzz renders random edits — turns, mirror, crop and
-// straighten, lens, B&W, detail, spots of every kind with sources clamped
-// at the edges, a soft AI matte, a radial mask — and random windows of
-// them, which must match the whole render exactly. MARRAW_WINDOW_FUZZ sets
+// straighten, lens, B&W, detail, dehaze, spots of every kind with sources
+// clamped at the edges, a soft AI matte, a radial mask, effects on both —
+// and random windows of them, which must match the whole render exactly. MARRAW_WINDOW_FUZZ sets
 // the number of edits (default 30).
 func TestRenderWindowFuzz(t *testing.T) {
 	n := 30
@@ -395,13 +407,29 @@ func TestRenderWindowFuzz(t *testing.T) {
 					Strokes: []edit.Stroke{{Radius: f4(0.005, 0.03), Pts: []float64{cx - 0.05, cy, cx + 0.05, cy + 0.03}}}})
 			}
 		}
+		if rnd.IntN(3) == 0 {
+			e.Dehaze = f(-0.5, 1)
+		}
+		// Each effect at random, on about one mask in two.
+		fx := func(a edit.MaskAdjust) edit.MaskAdjust {
+			if rnd.IntN(2) == 0 {
+				return a
+			}
+			for _, p := range []*float64{&a.Blur, &a.Bokeh, &a.MotionBlur, &a.ZoomBlur, &a.Streaks, &a.Glow, &a.Mosaic, &a.Prism} {
+				if rnd.IntN(4) == 0 {
+					*p = f(0, 1)
+				}
+			}
+			a.FXAngle = f(0, 180)
+			return a
+		}
 		if rnd.IntN(2) == 0 {
 			e.Masks = append(e.Masks, edit.Mask{Type: edit.MaskAI, AIKind: edit.AISubject, MapVer: "soft", Feather: f(0, 0.5),
-				Invert: rnd.IntN(3) == 0, Adjust: edit.MaskAdjust{ExpEV: f(-1.5, 1.5), Saturation: f(-0.5, 0.5)}})
+				Invert: rnd.IntN(3) == 0, Adjust: fx(edit.MaskAdjust{ExpEV: f(-1.5, 1.5), Saturation: f(-0.5, 0.5)})})
 		}
 		if rnd.IntN(2) == 0 {
 			e.Masks = append(e.Masks, edit.Mask{Type: edit.MaskRadial, CX: f(0.2, 0.8), CY: f(0.2, 0.8), RX: f(0.1, 0.4), RY: f(0.1, 0.4),
-				Angle: f(0, 90), Feather: f(0.1, 1), Adjust: edit.MaskAdjust{Contrast: f(-0.5, 0.5), Temp: f(-0.5, 0.5)}})
+				Angle: f(0, 90), Feather: f(0.1, 1), Adjust: fx(edit.MaskAdjust{Contrast: f(-0.5, 0.5), Temp: f(-0.5, 0.5)})})
 		}
 		e.Normalize()
 		ai := store.SetFor(key, &e)

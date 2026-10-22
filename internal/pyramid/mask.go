@@ -45,13 +45,14 @@ import (
 // the live image, so an earlier heavy blur degrades a later AI mask's edge
 // snapping — rare enough in practice to document rather than work around.
 func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) []uint8 {
-	return applyMasksIn(img, wholeRegion(img), e, ai)
+	return applyMasksIn(img, wholeRegion(img), e, ai, nil)
 }
 
 // applyMasksIn is ApplyMasks for a buffer that is the part rg of the
-// output. RenderWindow never hands it a mask with spatial effects: those
-// gather over the whole frame.
-func applyMasksIn(img *image.RGBA, rg region, e *edit.Params, ai AIMapSet) []uint8 {
+// output. A mask's spatial effects come from st where it is given and not
+// being measured (see FrameStats); a buffer that is only part of the
+// output must have it.
+func applyMasksIn(img *image.RGBA, rg region, e *edit.Params, ai AIMapSet, st *FrameStats) []uint8 {
 	if !e.HasMasks() {
 		return nil
 	}
@@ -132,7 +133,7 @@ func applyMasksIn(img *image.RGBA, rg region, e *edit.Params, ai AIMapSet) []uin
 			}
 		}
 		if m.Adjust.HasFX() {
-			if wp := applyMaskFX(img, ev, f, m); wp != nil {
+			if wp := applyMaskFX(img, rg, ev, f, m, st, mi); wp != nil {
 				if st := fxDetailSuppression(&m.Adjust); st > 0 {
 					if suppress == nil {
 						suppress = make([]uint8, w*h)

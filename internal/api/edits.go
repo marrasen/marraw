@@ -247,9 +247,8 @@ const windowMaxPixels = 16 << 20
 // clipped part. It renders from the full-resolution decode the backend
 // keeps for the photo open in the editor (OpenInEditor), so it answers
 // null when it cannot: no decode is kept under the state's LibRaw inputs
-// (exposure aside, which it folds in like the drafts do), or the edit
-// uses dehaze or mask effects, which work over the whole frame. Neutral
-// params (the base look) are never kept either. The state the editor
+// (exposure aside, which it folds in like the drafts do). Neutral params
+// (the base look) are never kept either. The state the editor
 // last settled on or saved is the exception to the first: its decode is
 // waited for, so a window comes right after a white balance change too.
 func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Params, x, y, w, h int) (*aprot.Blob, error) {
@@ -259,7 +258,7 @@ func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Pa
 		return nil, fmt.Errorf("preview window: %dx%d is not 1 to %d pixels", w, h, windowMaxPixels)
 	}
 	params.Normalize()
-	if params.IsNeutral() || !pyramid.Windowable(&params) {
+	if params.IsNeutral() {
 		return nil, nil
 	}
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)

@@ -279,6 +279,7 @@ func (c *Cache) expireFull(f *fullDecode) {
 		return
 	}
 	c.fullEntry = nil
+	forgetWindowStats()
 }
 
 // closeFull lets the kept decode go and keeps none after.
@@ -290,6 +291,7 @@ func (c *Cache) closeFull() {
 		f.timer.Stop()
 		c.fullEntry = nil
 	}
+	forgetWindowStats()
 }
 
 // decodeFull decodes photo at full resolution under edits with proc, which
