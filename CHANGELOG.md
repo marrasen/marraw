@@ -8,9 +8,9 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
-## Unreleased
+## 0.11.0-beta.2 - 2026-10-22
 
-- Develop: **zoomed in, white balance drags show sharp too**. Dragging temperature or tint, or a Kelvin value, at 1:1 now draws the part on screen at full resolution, with the new white balance folded into the full-size decode marraw keeps. It lands within a level or two of the exact render, which replaces it when the drag ends. Auto white balance, highlight recovery or preservation, and photos that lost a colour channel under one strong colour of light still show the soft preview
+- Develop: **zoomed in, white balance drags show sharp too**. Dragging temperature or tint, or a Kelvin value, at 1:1 now draws the part on screen at full resolution, with the new white balance folded into the full-size decode marraw keeps. It lands within a few levels of the exact render, bright coloured highlights furthest off, and the exact render replaces it when the drag ends. Auto white balance, highlight recovery or preservation, and photos that lost a colour channel under one strong colour of light still show the soft preview
 - Develop: **zoomed in, dehaze and the effects on masks show sharp at once too**. While you drag a slider at 1:1 on a photo with dehaze, or with blur, bokeh, glow, streaks or another effect on a mask, marraw now draws the part on screen at full resolution, as it already did for other edits. These effects are now measured on a small render of the whole photo, so a full-resolution render, an export and the part on screen agree. The previews, 1:1 view and exports of photos with these effects can change very slightly, and previews are drawn again once after the update
 
 ## 0.11.0-beta.1 - 2026-10-22
