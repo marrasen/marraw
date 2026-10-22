@@ -8,6 +8,11 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
+## Unreleased
+
+- Develop: **sharper previews while you drag a slider**. They are drawn at the size the photo covers on your screen, up to 2048 pixels, instead of a fixed 1024
+- Develop: **the full-resolution view comes back much sooner after an edit**. The photo open in Develop keeps its full-size decode in memory, so after a crop, a mask or any tone or colour slider the 1:1 view returns in about a third of the time on a 42-megapixel photo. It no longer waits a moment before it starts, either. Exposure and white balance still decode again
+
 ## 0.10.1 - 2026-10-20
 
 - Fixed: **an edit looks the same wherever it is opened**. marraw brightens each photo to match the camera's own rendering, by an amount it measures per photo. It only measured that while showing the photo unedited, so a photo that reached a library with its edit already on it, read from the `.marraw.json` file beside it, was drawn with a fixed guess instead, which is far too bright for a dark scene. An edit made to look right there came out dark everywhere else. Now the amount is measured before any edit is drawn. Previews are redrawn once after the update, and photos edited under the wrong brightness will look darker than before

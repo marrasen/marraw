@@ -45,6 +45,23 @@ export interface HistoryEntry {
   index: number;
 }
 
+export interface Committed {
+  photoId: number;
+  // The newest save's number, and the first one this record counts: numbers
+  // come from one counter that never restarts, so a save sent before the
+  // record began (before a photo switch) cannot answer into it.
+  seq: number;
+  firstSeq: number;
+  out: number;
+  // The hash the loupe showed when the newest save was sent.
+  sentFrom: string;
+  // The hash the newest save that changed something saved, once back. Every
+  // save returns it (SetEditParams, PasteEditParams and ResetEdits alike).
+  // A save that changes nothing (crop entered and left) or fails leaves the
+  // one before it in place, so it does not hide that result.
+  real: string | null;
+}
+
 export interface EditSessionState {
   photoId: number | null;
   applyIds: number[]; // commit targets; >1 when multiple photos selected
@@ -82,6 +99,18 @@ export interface EditSessionState {
   // between base (the pre-apply draft) and result re-derives any strength
   // 0..200%. Invalidated by a photo switch, any other edit, undo, or reset.
   lastPresetApply: { photoId: number; base: Params; result: Params; name: string; amount: number } | null;
+  // The edit hash the loupe shows for the session's photo, kept current by
+  // the loupe (esShownHash): the hash a save is made over.
+  shown: { photoId: number; hash: string } | null;
+  // The user's own saves of the session's photo, at any selection size: the
+  // newest one's number (seq) and the hash it was made over, how many are
+  // still out, and the hash the newest answered with (a single-photo save;
+  // null otherwise or until it answers). Once no save is out and the photo
+  // shows the newest save's result, the loupe starts its 1:1 render without
+  // the skimming dwell: the user is on the photo and just changed it. A
+  // burst of saves (holding undo) waits for its last. Cleared by a photo
+  // switch and once that state's tiles are warm.
+  committed: Committed | null;
   cropping: boolean; // crop overlay active: loupe shows the uncropped frame
   // Heal/retouch tool active: pointer-down on the loupe places or grabs a spot
   // (draft.spots) instead of panning.
@@ -182,6 +211,8 @@ export const useEditSession = create<EditSessionState>(() => ({
   rangePicking: false,
   hoverParams: null,
   lastPresetApply: null,
+  shown: null,
+  committed: null,
   cropping: false,
   healing: false,
   activeSpot: null,

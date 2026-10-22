@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { Photo } from '@/api/library';
 import { imgUrl, tileUrl, type Level } from '@/lib/backend';
@@ -29,51 +29,108 @@ export function levelForPx(px: number): Level | 'tiles' {
 // `kick` is also the guest-side bound: an unrendered photo behind a share
 // link must not let a visitor start work on the owner's decode pool for
 // anything short of a deliberate deep zoom.
-export function useTilesWarm(photo: Photo | null | undefined, want: boolean, kick: boolean): boolean {
-  const [warm, setWarm] = useState(false);
+// KICK_DWELL_MS is how long the user stays on a photo before its missing
+// tile set is rendered. `immediate` shortens it to IMMEDIATE_DWELL_MS, for a
+// caller that knows the user is on the photo: the editor, right after its
+// own save of it. Not to zero: a burst of saves (holding undo, stepping the
+// history) still coalesces into one render instead of starting and
+// aborting one per step.
+const KICK_DWELL_MS = 350;
+const IMMEDIATE_DWELL_MS = 120;
+
+export function useTilesWarm(
+  photo: Photo | null | undefined,
+  want: boolean,
+  kick: boolean,
+  immediate = false,
+): boolean {
+  // The tile URL the warmth was found for: warm answers for that state
+  // only, so a caller never reads the last state's warmth in the render the
+  // next state's hash arrives in, before the effect below has run.
+  const [warmUrl, setWarmUrl] = useState('');
   // Key the probe on the tile URL, not the photo OBJECT: it encodes id +
   // cacheKey + editHash, the only things that change which tiles exist. A
   // background metadata/rating push hands down a fresh photo object with the
   // same rendered state — resetting `warm` on that identity change would drop
   // wantTiles false→true for a frame, flashing the tile layer off and on.
   const url0 = photo ? tileUrl(photo, 0, 0) : '';
+  // Read when the kick is set, whenever `want` turns true: not a reason to
+  // probe again on its own. A dwell already under way when `immediate`
+  // turns true is shortened (shorten, below): the save that makes it true
+  // can land after the tiles came to be wanted.
+  const immediateRef = useRef(immediate);
+  const shorten = useRef<(() => void) | null>(null);
+  // What this render asks for, read by the effect's cleanup, which runs
+  // after the next render: it forgets warmth only when that render leaves
+  // the state or stops wanting tiles, never when only `kick` changed.
+  // Written on commit, not during render: a render React throws away must
+  // not be what the cleanup sees. Layout effects run before the passive
+  // cleanup below.
+  const asked = useRef({ url0: '', want: false });
+  useLayoutEffect(() => {
+    asked.current = { url0, want };
+  });
   useEffect(() => {
-    // New render state starts cold before the async probe/kick below.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setWarm(false);
+    immediateRef.current = immediate;
+    if (immediate) shorten.current?.();
+  }, [immediate]);
+  useEffect(() => {
     if (!want || !url0) return;
     const ac = new AbortController();
     let dwell = 0;
+    const render = async () => {
+      shorten.current = null;
+      window.clearTimeout(dwell);
+      try {
+        const res = await fetch(url0, { signal: ac.signal });
+        if (res.ok) setWarmUrl(url0);
+      } catch {
+        // aborted: the user moved on mid-render
+      }
+    };
     (async () => {
       try {
         const probe = await fetch(url0 + '&cacheOnly=1', { signal: ac.signal });
         if (probe.ok) {
-          setWarm(true);
+          setWarmUrl(url0);
           return;
         }
+        // Found warm once, gone since (the janitor evicted the tiles): cold.
+        setWarmUrl((w) => (w === url0 ? '' : w));
         if (!kick) return;
         // Kick only after a real dwell: while the user is skimming, no full
         // render ever STARTS — cheaper and more robust than starting one per
         // step and racing to cancel it (a render that slips past its
         // cancellation checkpoint blocks the pipeline for seconds).
-        dwell = window.setTimeout(async () => {
-          try {
-            const render = await fetch(url0, { signal: ac.signal });
-            if (render.ok) setWarm(true);
-          } catch {
-            // aborted: the user moved on mid-render
-          }
-        }, 350);
+        if (immediateRef.current) {
+          dwell = window.setTimeout(() => void render(), IMMEDIATE_DWELL_MS);
+          return;
+        }
+        const start = Date.now();
+        shorten.current = () => {
+          shorten.current = null;
+          window.clearTimeout(dwell);
+          const left = Math.max(0, IMMEDIATE_DWELL_MS - (Date.now() - start));
+          dwell = window.setTimeout(() => void render(), left);
+        };
+        dwell = window.setTimeout(() => void render(), KICK_DWELL_MS);
       } catch {
         // aborted: the user moved on
       }
     })();
     return () => {
+      shorten.current = null;
       window.clearTimeout(dwell);
       ac.abort();
+      // Leaving the state (or the zoom) forgets its warmth: coming back
+      // probes again rather than trust tiles the janitor may have evicted.
+      // A change of `kick` alone keeps it: tiles on screen stay up.
+      if (asked.current.url0 !== url0 || !asked.current.want) {
+        setWarmUrl((w) => (w === url0 ? '' : w));
+      }
     };
   }, [url0, want, kick]);
-  return warm;
+  return want && url0 !== '' && warmUrl === url0;
 }
 
 // useTilePrefetch warms the photos adjacent to the focused one so stepping

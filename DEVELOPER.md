@@ -56,8 +56,28 @@ without saying the editor is on it, for looks the user only considers, such as
 a hovered preset.
 
 Slider drags render through `Edits.PreviewDraft`, always in memory, at the size
-the photo covers on screen (up to 4096 px). `PreviewEdit` treats 2048 and up as
-the exact, cached 2048 settle.
+the photo covers on screen (up to 4096 px; the Electron loupe asks for its fit
+size in device pixels, between 1024 and 2048, so a draft is never sharper than
+the settle that replaces it). `PreviewEdit` treats 2048 and up as the exact,
+cached 2048 settle, and the backend reads every settle as "the editor is now on
+this state", so a hovered preset's sharp frame is a `PreviewExact` at 2048 —
+the same pixels as the settle, never a settle. The Develop panel holds
+`Edits.OpenInEditor` for the photo its loupe shows after a 1 s dwell
+(`client/src/lib/editorHold.ts`), holds it again once a lost connection is
+back, and gives up after three backend errors. The 1:1 render of the state the
+user's own save just produced skips the 350 ms skimming dwell and waits only
+120 ms, so a burst of saves (holding undo) still makes one render. Each save of
+the session's photo, at any selection size and a Reset included, takes a
+number from a counter that never restarts (`committed` in the edit session).
+Every save returns the hash it saved (`SetEditParams`, and `PasteEditParams`
+and `ResetEdits` per photo). The record keeps the hash the newest save that
+changed something saved; a save that changes nothing, or fails, leaves the one
+before it. Once no save is out, the shorter dwell applies when the photo shows
+that hash, also to a dwell already under way. A photo switch, or warm tiles of
+that state, forget it. The tile warmth `useTilesWarm` reports is for the tile
+set it was found for, so the render the next hash arrives in never reads the
+last one's. Leaving a state or the zoom, or a probe that finds its tiles gone,
+forgets it; a change of `kick` alone does not.
 
 Zoomed in, a draft of the whole frame is too soft. `Edits.PreviewWindow`
 renders just the visible part at full resolution from the kept decode
@@ -120,7 +140,7 @@ by the mask's exposure. That pass
 materializes the mask's weight plane and gathers *through* it: weight-normalized
 (`Σw·c / Σw`, so a masked-out subject cannot bleed into the blurred surround)
 and in linear light. That pass runs at a fixed `fxPlaneLongEdge` working
-resolution, so the 1024 draft, the 2048 settle, the 1:1 tiles and the export all
+resolution, so the drag draft, the 2048 settle, the 1:1 tiles and the export all
 compute the identical effect. `ApplyMasks` returns a detail-suppression plane
 that damps `ApplyDetail` where a mask deliberately destroyed detail — otherwise
 clarity re-etches a rim around a sharp subject against a defocused background.
