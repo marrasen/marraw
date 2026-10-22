@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"sync/atomic"
 
 	"github.com/marrasen/aprot"
@@ -349,7 +350,7 @@ func (e *Edits) GenerateAIMap(ctx context.Context, photoID int64, kind edit.AIKi
 	}
 
 	tctx, task := tasks.StartTask[TaskMeta](ctx, "AI mask: "+photo.FileName, tasks.Shared())
-	task.SetMeta(TaskMeta{Kind: "aimask"})
+	task.SetMeta(TaskMeta{Kind: "aimask", Unit: "MB"})
 	res, _, err := e.generateAIMap(tctx, photo, kind, allowDownload, true, func(done, total int64) {
 		task.Progress(int(done>>20), int(total>>20)) // model download, MB units
 	})
@@ -512,6 +513,19 @@ func (e *Edits) GenerateAIMaps(ctx context.Context, photoIDs []int64, kinds []ed
 
 	go func() {
 		var done atomic.Int64
+		fetches := map[edit.AIKind]*modelFetch{}
+		for _, j := range work {
+			for _, k := range j.missing {
+				if fetches[k] == nil {
+					fetches[k] = newModelFetch(task, "Downloading the "+string(k)+" model")
+				}
+			}
+		}
+		defer func() {
+			for _, f := range fetches {
+				f.end()
+			}
+		}()
 		g, gctx := errgroup.WithContext(tctx)
 		// Same worker cap as AnalyzeSubjects: memory binds, not cores — every
 		// in-flight frame pins a LibRaw handle the 3-entry HandleCache cannot
@@ -532,7 +546,7 @@ func (e *Edits) GenerateAIMaps(ctx context.Context, photoIDs []int64, kinds []ed
 				}
 				generated := false
 				for _, k := range j.missing {
-					res, _, err := e.generateAIMap(gctx, p, k, allowDownload, false, nil)
+					res, _, err := e.generateAIMap(gctx, p, k, allowDownload, false, fetches[k].progress)
 					if err != nil {
 						if gctx.Err() != nil {
 							return gctx.Err() // cancelled — not a per-frame failure
@@ -693,6 +707,8 @@ func (e *Edits) AnalyzeSubjects(ctx context.Context, photoIDs []int64, allowDown
 
 	go func() {
 		var done atomic.Int64
+		fetch := newModelFetch(task, "Downloading the subject model")
+		defer fetch.end()
 		g, gctx := errgroup.WithContext(tctx)
 		// The binding resource is memory, not cores: every in-flight frame
 		// pins its own unpacked LibRaw handle (~100–200 MB for a 42 MP file)
@@ -708,7 +724,7 @@ func (e *Edits) AnalyzeSubjects(ctx context.Context, photoIDs []int64, allowDown
 				if gctx.Err() != nil {
 					return gctx.Err()
 				}
-				if _, _, err := e.generateAIMap(gctx, p, edit.AISubject, allowDownload, false, nil); err != nil {
+				if _, _, err := e.generateAIMap(gctx, p, edit.AISubject, allowDownload, false, fetch.progress); err != nil {
 					if gctx.Err() != nil {
 						return gctx.Err() // cancelled — not a per-frame failure
 					}
@@ -721,4 +737,51 @@ func (e *Edits) AnalyzeSubjects(ctx context.Context, photoIDs []int64, allowDown
 		task.Err(g.Wait())
 	}()
 	return &tasks.TaskRef{TaskID: task.ID()}, nil
+}
+
+// modelFetch shows a model downloading inside a scan as a subtask of the
+// scan's task, counting megabytes, so the user sees the one-time fetch
+// move rather than the scan sitting at nought. The subtask is made when
+// the first bytes come and closes when the last do. The download is
+// singleflighted, so every worker reports to the one subtask.
+type modelFetch struct {
+	mu    sync.Mutex
+	task  *tasks.Task[TaskMeta]
+	title string
+	sub   *tasks.TaskSub[TaskMeta]
+	ended bool
+}
+
+func newModelFetch(task *tasks.Task[TaskMeta], title string) *modelFetch {
+	return &modelFetch{task: task, title: title}
+}
+
+// progress takes how much of the model has come, as generateAIMap's
+// onProgress.
+func (f *modelFetch) progress(done, total int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ended {
+		return
+	}
+	if f.sub == nil {
+		f.sub = f.task.SubTask(f.title)
+		f.sub.SetMeta(TaskMeta{Kind: "download", Unit: "MB"})
+	}
+	f.sub.Progress(int(done>>20), int(total>>20))
+	if total > 0 && done >= total {
+		f.sub.Close()
+		f.sub, f.ended = nil, true
+	}
+}
+
+// end closes the subtask, if the download stopped short.
+func (f *modelFetch) end() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sub != nil {
+		f.sub.Close()
+		f.sub = nil
+	}
+	f.ended = true
 }

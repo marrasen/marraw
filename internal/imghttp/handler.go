@@ -289,8 +289,11 @@ func (h *Handler) ServeTile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, path string) {
-	h.serveFileHeaders(w, r, path, "private, max-age=31536000, immutable")
+	h.serveFileHeaders(w, r, path, immutable)
 }
+
+// immutable is the Cache-Control of a content-addressed file.
+const immutable = "private, max-age=31536000, immutable"
 
 func (h *Handler) serveFileHeaders(w http.ResponseWriter, r *http.Request, path, cacheControl string) {
 	f, err := os.Open(path)
@@ -304,6 +307,20 @@ func (h *Handler) serveFileHeaders(w http.ResponseWriter, r *http.Request, path,
 	// the token, which rides in the URL, not the origin.
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Content-Type", "image/jpeg")
+	if cacheControl == immutable {
+		// A level drawn from the camera's JPEG is replaced by marraw's
+		// render under the same URL (pyramid/camera.go): the browser must
+		// ask again rather than keep it. The tag answers "not modified"
+		// while the file is the same one.
+		head := make([]byte, pyramid.CameraHeadLen)
+		n, _ := f.ReadAt(head, 0)
+		if pyramid.IsCameraJPEG(head[:n]) {
+			cacheControl = "no-cache"
+			if info, err := f.Stat(); err == nil {
+				w.Header().Set("ETag", `"camera-`+strconv.FormatInt(info.Size(), 10)+`"`)
+			}
+		}
+	}
 	w.Header().Set("Cache-Control", cacheControl)
 	http.ServeContent(w, r, "", time.Time{}, f)
 	// mtime ≈ last served, so the janitor evicts cold files first.

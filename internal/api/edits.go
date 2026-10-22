@@ -8,10 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/jpeg"
 	"log"
 	"math"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +21,7 @@ import (
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/jpegturbo"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/store"
@@ -378,7 +379,7 @@ func jpegBlob(img *image.RGBA) (*aprot.Blob, error) {
 // jpegBlobAt is jpegBlob at the given quality.
 func jpegBlobAt(img *image.RGBA, quality int) (*aprot.Blob, error) {
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
+	if err := jpegturbo.EncodeRGBA(&buf, img, quality); err != nil {
 		return nil, err
 	}
 	return &aprot.Blob{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
@@ -609,10 +610,10 @@ func (e *Edits) previewLinear(ctx context.Context, photoID int64, photo store.Ph
 	if err != nil {
 		return nil, false, err
 	}
-	if entry.clipped {
-		return nil, false, nil // reference can't carry a WB change; decode exactly
-	}
 	fp := foldParamsFor(ep, entry.refMul, entry.camXYZ, entry.rgbCam)
+	if !foldsOver(entry.clipped, fp) {
+		return nil, false, nil // reference can't carry this WB change; decode exactly
+	}
 	ai := e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep)
 	fills := e.deps.Cache.Fills.SetFor(photo.CacheKey, ep)
 	return pyramid.RenderPreviewLinear(entry.lin, longEdge, fp, gamma, ep, ai, fills, e.deps.Cache.Lenses.For(photo)), true, nil
@@ -662,7 +663,10 @@ func (e *Edits) linearMaster(ctx context.Context, photoID int64, photo store.Pho
 // channel negative and clip it. A blue-lit ILCE-7RM2 frame came back with
 // green at 0 across 92% of the reference: the fold rendered it magenta while
 // the exact decode of the same edit was correct. Photos like that give up the
-// fold path and re-decode per frame — slower to drag, but right.
+// fold path for a white-balance change and re-decode per frame — slower to
+// drag, but right. An edit that keeps the as-shot balance still folds: the
+// fold then only scales and encodes, which a floored channel survives (see
+// foldsOver).
 func refClipped(lin *image.RGBA64) bool {
 	b := lin.Bounds()
 	const (
@@ -690,6 +694,17 @@ func refClipped(lin *image.RGBA64) bool {
 	// A handful of saturated specular pixels is normal; a fifth of the lit
 	// frame missing a channel is not.
 	return litN > 0 && badN*5 > litN
+}
+
+// foldsOver reports whether the fold can render an edit over a reference:
+// always when every channel is there, and over a clipped one only while
+// the edit keeps the reference's white balance. Then the fold just scales
+// and encodes, as the exact decode does, and lands within a level of it; a
+// white-balance change needs the channel that is gone. Without this, a
+// blue-lit frame re-decoded the RAW for every brightness, gamma or shadow
+// slope drag frame, ~440 ms each, where the fold takes ~25.
+func foldsOver(clipped bool, fp pyramid.FoldParams) bool {
+	return !clipped || fp.KeepsWB()
 }
 
 // cachedLinear returns the cached linear reference for (photoID, key), or nil.
@@ -828,10 +843,10 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params, bas
 	}
 	satFactor := math.Max(0.2, 1.15*(1+base.Saturation))
 	rl, gl, bl := samplePatchLinear(frame.rgba, x, y, lookGamma, satFactor)
-	if rl < 1e-4 || gl < 1e-4 || bl < 1e-4 {
+	if why := unpickable(rl, gl, bl); why != "" {
 		log.Printf("wb pick: no-signal patch at (%.3f,%.3f) linear rl=%.4g gl=%.4g bl=%.4g on %dx%d pinned frame",
 			x, y, rl, gl, bl, frame.rgba.Bounds().Dx(), frame.rgba.Bounds().Dy())
-		return nil, aprot.ErrInvalidParams("picked area is too dark — pick a brighter neutral area")
+		return nil, aprot.ErrInvalidParams(why)
 	}
 
 	// The multipliers act on the camera's own channels, before the colour
@@ -876,6 +891,30 @@ func (e *Edits) PickWhiteBalance(ctx context.Context, photoID int64, params, bas
 	out.WBMul = mul
 	out.WBTemp, out.WBTint, out.WBKelvin = 0, 0, 0
 	return &out, nil
+}
+
+// pickFloor is the least linear light a channel of a picked patch needs:
+// about 13/255 in the 8-bit frame.
+const pickFloor = 1e-4
+
+// unpickable says why a patch of linear light r, g, b cannot be made grey,
+// or "" when it can. A patch with every channel empty is too dark; one with
+// light in some channels but none in another is lit by strongly coloured
+// light, as a stage's blue or red LEDs, and no gain can make it grey.
+func unpickable(r, g, b float64) string {
+	if r >= pickFloor && g >= pickFloor && b >= pickFloor {
+		return ""
+	}
+	if max(r, g, b) < pickFloor {
+		return "picked area is too dark — pick a brighter neutral area"
+	}
+	var none []string
+	for i, v := range []float64{r, g, b} {
+		if v < pickFloor {
+			none = append(none, [3]string{"red", "green", "blue"}[i])
+		}
+	}
+	return "picked area has no " + strings.Join(none, " or ") + " light — one strong colour lights it, with no grey to find"
 }
 
 // WBPickFrame returns the frame PickWhiteBalance samples for this base, as a

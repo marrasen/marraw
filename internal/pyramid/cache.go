@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"io"
 	"io/fs"
 	"log"
 	"math"
@@ -29,6 +30,7 @@ import (
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/jpegturbo"
 	"github.com/marrasen/marraw/internal/lens"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/store"
@@ -93,6 +95,10 @@ type Cache struct {
 	// OnPhotoChanged, when set, is called after the cache corrects a photo
 	// row (dimension healing) so folder subscribers can refresh.
 	OnPhotoChanged func(folderID int64)
+	// OnBaseRendered, when set, is called after a render of a photo's
+	// unedited look wrote over the small levels its camera's JPEG gave
+	// (see camera.go): clients showing those must ask for them again.
+	OnBaseRendered func(photoID int64)
 	// Progress, when set, receives coarse 0..1 progress for full-resolution
 	// (1:1 tile) renders so the loupe's decoding indicator can show a percent.
 	// Fixed-level renders stay silent — they are fast, and mostly background
@@ -113,6 +119,13 @@ type Cache struct {
 	fullClosed  bool
 	settles     map[string]chan struct{} // CacheKey|hash → settle under way (settle.go)
 	fullDecodes atomic.Int64             // full-resolution decodes run, for tests
+
+	// epochs counts each edit state's invalidations, keyed cacheKey|editHash.
+	// A render reads it before it starts and after it lands: a map made (or
+	// any other render input outside the edit hash changing) while it ran
+	// means what it wrote predates the change, so it is dropped and redone.
+	epochMu sync.Mutex
+	epochs  map[string]uint64
 }
 
 func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
@@ -240,6 +253,41 @@ func (c *Cache) InvalidateEdit(cacheKey, editHash string) {
 	if cacheKey == "" || editHash == "" {
 		return
 	}
+	// Bumped before the files go, so a render under way that writes after
+	// this sees it and redoes its work (see generateFresh).
+	c.epochMu.Lock()
+	if c.epochs == nil {
+		c.epochs = map[string]uint64{}
+	}
+	c.epochs[cacheKey+"|"+editHash]++
+	c.epochMu.Unlock()
+	c.removeEdit(cacheKey, editHash)
+}
+
+// epoch is how many times the edit state's renditions were invalidated.
+func (c *Cache) epoch(cacheKey, editHash string) uint64 {
+	c.epochMu.Lock()
+	defer c.epochMu.Unlock()
+	return c.epochs[cacheKey+"|"+editHash]
+}
+
+// generateFresh is generate, redone once when the edit state was
+// invalidated while it ran: a pre-render that started before an AI mask's
+// map existed must not leave its maskless pixels cached after the map
+// lands, or every later request serves them.
+func (c *Cache) generateFresh(ctx context.Context, proc *libraw.Processor, photo store.Photo, level, editHash string, prio decode.Priority) error {
+	for try := 0; ; try++ {
+		e0 := c.epoch(photo.CacheKey, editHash)
+		err := c.generate(ctx, proc, photo, level, editHash, prio)
+		if err != nil || c.epoch(photo.CacheKey, editHash) == e0 || try == 1 {
+			return err
+		}
+		c.removeEdit(photo.CacheKey, editHash)
+	}
+}
+
+// removeEdit deletes the edit state's renditions on disk.
+func (c *Cache) removeEdit(cacheKey, editHash string) {
 	pattern := filepath.Join(c.Dir(), cacheKey[:2],
 		fmt.Sprintf("%s_*_%s_%s.jpg", cacheKey, editHash, renderVersion))
 	matches, _ := filepath.Glob(pattern)
@@ -276,7 +324,7 @@ func (c *Cache) Ensure(ctx context.Context, photo store.Photo, level, editHash s
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
-		return c.generate(jctx, proc, photo, level, editHash, prio)
+		return c.generateFresh(jctx, proc, photo, level, editHash, prio)
 	})
 	if err != nil {
 		return "", err
@@ -358,7 +406,9 @@ func (c *Cache) deriveFrom2048(ctx context.Context, photo store.Photo, level, ed
 			if src == nil {
 				return fs.ErrNotExist
 			}
-			return c.WriteLevels(src, photo.CacheKey, editHash, 1024, 512, 256)
+			replaced, err := c.writeLevels(src, photo.CacheKey, editHash, 1024, 512, 256)
+			c.wroteRendered(photo, replaced)
+			return err
 		})
 	if err != nil {
 		return "", err
@@ -395,7 +445,7 @@ func (c *Cache) EnsureTile(ctx context.Context, photo store.Photo, tx, ty int, e
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		}
-		return c.generate(jctx, proc, photo, "full", editHash, prio)
+		return c.generateFresh(jctx, proc, photo, "full", editHash, prio)
 	})
 	if err != nil {
 		return "", err
@@ -435,17 +485,12 @@ func (c *Cache) readLevel(cacheKey, level, editHash string) *image.RGBA {
 	if err != nil {
 		return nil
 	}
-	img, err := jpeg.Decode(f)
+	img, err := jpegturbo.Decode(f)
 	f.Close()
 	if err != nil {
 		return nil
 	}
-	if rgba, ok := img.(*image.RGBA); ok {
-		return rgba
-	}
-	rgba := image.NewRGBA(img.Bounds())
-	xdraw.Copy(rgba, image.Point{}, img, img.Bounds(), xdraw.Src, nil)
-	return rgba
+	return img
 }
 
 // editsForHash returns the parsed edit params identified by editHash, or nil
@@ -496,7 +541,9 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// downscale (~30 ms) produces identical pixels.
 	if level != "full" && level != "2048" {
 		if src := c.readLevel(photo.CacheKey, "2048", editHash); src != nil {
-			return c.WriteLevels(src, photo.CacheKey, editHash, 1024, 512, 256)
+			replaced, err := c.writeLevels(src, photo.CacheKey, editHash, 1024, 512, 256)
+			c.wroteRendered(photo, replaced)
+			return err
 		}
 	}
 
@@ -674,9 +721,11 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		}); err != nil {
 			return err
 		}
-		if err := c.WriteLevels(rgba, photo.CacheKey, editHash, 2048, 1024, 512, 256); err != nil {
+		replaced, err := c.writeRendered(rgba, photo.CacheKey, editHash, edits == nil)
+		if err != nil {
 			return err
 		}
+		c.wroteRendered(photo, replaced)
 		report(1)
 		return nil
 	}
@@ -686,11 +735,44 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	scaled := scaleToLongEdge(rgba, 2048)
 	ApplyFinish(scaled, gamma, edits, ai, fills)
 	report(0.92)
-	if err := c.WriteLevels(scaled, photo.CacheKey, editHash, 2048, 1024, 512, 256); err != nil {
+	replaced, err := c.writeRendered(scaled, photo.CacheKey, editHash, edits == nil)
+	if err != nil {
 		return err
 	}
+	c.wroteRendered(photo, replaced)
 	report(1)
 	return nil
+}
+
+// writeRendered writes a RAW render's small levels, 2048 down to 256.
+// Unedited, it writes over the ones the camera's embedded JPEG gave
+// (deriveFromThumb, tryThumbRoute): the grid's thumbnail then shows the
+// photo as marraw renders it, as the photo view does, rather than as the
+// camera did. Those files keep their names, so a client holding one must
+// ask for it again: replaced says one was written over (see camera.go).
+func (c *Cache) writeRendered(src *image.RGBA, cacheKey, editHash string, base bool) (replaced bool, err error) {
+	cur := src
+	for _, l := range []int{2048, 1024, 512, 256} {
+		cur = scaleToLongEdge(cur, l)
+		q := 80
+		if l >= 1024 {
+			q = 85
+		}
+		r, err := writeJPEGFileOver(c.PathFor(cacheKey, strconv.Itoa(l), editHash), cur, q, base)
+		if err != nil {
+			return replaced, err
+		}
+		replaced = replaced || r
+	}
+	return replaced, nil
+}
+
+// wroteRendered tells clients that photo's camera-drawn levels were
+// replaced by its render, when they were.
+func (c *Cache) wroteRendered(photo store.Photo, replaced bool) {
+	if replaced && c.OnBaseRendered != nil {
+		c.OnBaseRendered(photo.ID)
+	}
 }
 
 // healDimensions repairs stored photo dimensions against a full-resolution
@@ -810,14 +892,9 @@ func cameraRGBA(proc *libraw.Processor) *image.RGBA {
 	if err != nil {
 		return nil
 	}
-	thumbImg, err := jpeg.Decode(bytes.NewReader(thumb))
+	camera, err := jpegturbo.DecodeRGBA(thumb)
 	if err != nil {
 		return nil
-	}
-	camera, ok := thumbImg.(*image.RGBA)
-	if !ok {
-		camera = image.NewRGBA(thumbImg.Bounds())
-		xdraw.Copy(camera, image.Point{}, thumbImg, thumbImg.Bounds(), xdraw.Src, nil)
 	}
 	return camera
 }
@@ -832,14 +909,9 @@ func thumbRGBA(proc *libraw.Processor) *image.RGBA {
 	if err != nil {
 		return nil
 	}
-	img, err := jpeg.Decode(bytes.NewReader(data))
+	rgba, err := jpegturbo.DecodeRGBA(data)
 	if err != nil {
 		return nil
-	}
-	rgba, ok := img.(*image.RGBA)
-	if !ok {
-		rgba = image.NewRGBA(img.Bounds())
-		xdraw.Copy(rgba, image.Point{}, img, img.Bounds(), xdraw.Src, nil)
 	}
 	return rotateFlip(rgba, proc.Metadata().Orientation)
 }
@@ -862,7 +934,7 @@ func (c *Cache) tryThumbRoute(proc *libraw.Processor, photo store.Photo, level i
 			levels = append(levels, l)
 		}
 	}
-	return true, c.WriteLevels(rgba, photo.CacheKey, editHash, levels...)
+	return true, c.writeCameraLevels(rgba, photo.CacheKey, editHash, levels...)
 }
 
 // deriveFromThumb is EnsureFast's worker: decode the embedded JPEG once and
@@ -888,7 +960,7 @@ func (c *Cache) deriveFromThumb(proc *libraw.Processor, photo store.Photo, base 
 			}
 		}
 		if len(levels) > 0 {
-			if err := c.WriteLevels(rgba, photo.CacheKey, edit.BaseHash, levels...); err != nil {
+			if err := c.writeCameraLevels(rgba, photo.CacheKey, edit.BaseHash, levels...); err != nil {
 				return err
 			}
 		}
@@ -1031,15 +1103,39 @@ func outputEncoding(edits *edit.Params) (pwr, ts float64) {
 // exposure so this rendition lands at the brightness the drag showed.
 func (c *Cache) WritePreview(src *image.RGBA, photo store.Photo, editHash string, lookGamma float64, edits *edit.Params, wbCompEV float64) error {
 	cacheKey := photo.CacheKey
+	e0 := c.epoch(cacheKey, editHash)
 	ai := c.AIMaps.SetFor(cacheKey, edits)
 	fills := c.Fills.SetFor(cacheKey, edits)
 	lensc := c.Lenses.For(photo)
-	return c.writeJPEG(RenderPreview(src, 2048, lookGamma, edits, edits.ResidualExpEV()+wbCompEV, ai, fills, lensc), cacheKey, "2048", editHash, 80)
+	img := RenderPreview(src, 2048, lookGamma, edits, edits.ResidualExpEV()+wbCompEV, ai, fills, lensc)
+	err := c.writeJPEG(img, cacheKey, "2048", editHash, 80)
+	if err == nil && c.epoch(cacheKey, editHash) != e0 {
+		// Invalidated while it rendered, as by a map made: not kept.
+		c.removeEdit(cacheKey, editHash)
+		return nil
+	}
+	if err == nil && editHash == edit.BaseHash && c.cameraLevels(cacheKey) {
+		// The unedited look settled (neutral params): the photo is drawn
+		// now, and nothing else will draw it, as its 2048 is there. Its
+		// small levels from the camera give way to this render.
+		replaced, err := c.writeLevels(img, cacheKey, editHash, 1024, 512, 256)
+		c.wroteRendered(photo, replaced)
+		return err
+	}
+	return err
 }
 
 // WriteLevels writes a chain of downscaled renditions from src, skipping
-// files that already exist. Levels must be sorted descending.
+// files that already exist, other than camera-drawn ones (see camera.go).
+// Levels must be sorted descending.
 func (c *Cache) WriteLevels(src *image.RGBA, cacheKey, editHash string, levels ...int) error {
+	_, err := c.writeLevels(src, cacheKey, editHash, levels...)
+	return err
+}
+
+// writeLevels is WriteLevels, saying whether it replaced a camera-drawn
+// level.
+func (c *Cache) writeLevels(src *image.RGBA, cacheKey, editHash string, levels ...int) (replaced bool, err error) {
 	cur := src
 	for _, l := range levels {
 		cur = scaleToLongEdge(cur, l)
@@ -1047,11 +1143,13 @@ func (c *Cache) WriteLevels(src *image.RGBA, cacheKey, editHash string, levels .
 		if l >= 1024 {
 			q = 85
 		}
-		if err := c.writeJPEG(cur, cacheKey, strconv.Itoa(l), editHash, q); err != nil {
-			return err
+		r, err := writeJPEGFileTagged(c.PathFor(cacheKey, strconv.Itoa(l), editHash), cur, q, false, false)
+		if err != nil {
+			return replaced, err
 		}
+		replaced = replaced || r
 	}
-	return nil
+	return replaced, nil
 }
 
 // writeTiles cuts the full-resolution render into TileSize tiles and encodes
@@ -1092,15 +1190,40 @@ func (c *Cache) writeJPEG(img *image.RGBA, cacheKey, level, editHash string, qua
 	return writeJPEGFile(c.PathFor(cacheKey, level, editHash), img, quality)
 }
 
+// encodeJPEG writes img as a JPEG: with libjpeg-turbo for the RGBA the
+// pipeline renders, and with image/jpeg for anything else.
+func encodeJPEG(w io.Writer, img image.Image, quality int) error {
+	if rgba, ok := img.(*image.RGBA); ok {
+		return jpegturbo.EncodeRGBA(w, rgba, quality)
+	}
+	return jpeg.Encode(w, img, &jpeg.Options{Quality: quality})
+}
+
 // tmpSeq disambiguates concurrent writes of the same cache file.
 var tmpSeq atomic.Uint64
 
 func writeJPEGFile(path string, img image.Image, quality int) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
+	_, err := writeJPEGFileTagged(path, img, quality, false, false)
+	return err
+}
+
+// writeJPEGFileOver is writeJPEGFile, writing over a file there already
+// where over is set. The rename is atomic, so a reader gets the old file
+// or the new, never half of one.
+func writeJPEGFileOver(path string, img image.Image, quality int, over bool) (replaced bool, err error) {
+	return writeJPEGFileTagged(path, img, quality, over, false)
+}
+
+// writeJPEGFileTagged is writeJPEGFileOver, with the camera comment where
+// camera is set (see camera.go). A camera-drawn file is a stand-in: any
+// other write replaces it, over or not, and a camera write never replaces
+// a file. replaced says this write took the place of a camera-drawn one.
+func writeJPEGFileTagged(path string, img image.Image, quality int, over, camera bool) (replaced bool, err error) {
+	if !over && keepsFile(path, camera) {
+		return false, nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return false, err
 	}
 	// Unique per CALL, not per process: two workers can render the same
 	// (cacheKey, level, editHash) concurrently — the Stat above only
@@ -1111,18 +1234,60 @@ func writeJPEGFile(path string, img image.Image, quality int) error {
 	tmp := fmt.Sprintf("%s.%d.%d.tmp", path, os.Getpid(), tmpSeq.Add(1))
 	f, err := os.Create(tmp)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := jpeg.Encode(f, img, &jpeg.Options{Quality: quality}); err != nil {
+	if camera {
+		var buf bytes.Buffer
+		err = encodeJPEG(&buf, img, quality)
+		if err == nil {
+			_, err = f.Write(tagCamera(buf.Bytes()))
+		}
+	} else {
+		err = encodeJPEG(f, img, quality)
+	}
+	if err != nil {
 		f.Close()
 		os.Remove(tmp)
-		return err
+		return false, err
 	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
-		return err
+		return false, err
 	}
-	return os.Rename(tmp, path)
+	// Looked at again with the rename, under one lock: a camera write
+	// encoding while a render lands must not then put the camera's pixels
+	// back over the render.
+	swapMu.Lock()
+	defer swapMu.Unlock()
+	if !over && keepsFile(path, camera) {
+		os.Remove(tmp)
+		return false, nil
+	}
+	wasCamera := !camera && isCameraFile(path)
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		if over || wasCamera {
+			// Windows will not rename over a file a reader holds open: the
+			// old one stays, as good as before, and the render goes on. A
+			// camera-drawn one is replaced by the next render that writes
+			// this level.
+			return false, nil
+		}
+		return false, err
+	}
+	return wasCamera, nil
+}
+
+// swapMu makes a cache file's last look and its rename one step.
+var swapMu sync.Mutex
+
+// keepsFile reports whether a write that is not over keeps the file at
+// path: one is there, and the write is the camera's or the file is not.
+func keepsFile(path string, camera bool) bool {
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	return camera || !isCameraFile(path)
 }
 
 // previewFrameEdge is the long edge to downscale a FULL frame to so that,

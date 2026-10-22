@@ -55,6 +55,7 @@ export interface TaskMeta {
     folder?: string;
     folderPath?: string;
     destDir?: string;
+    unit?: string;
 }
 
 export interface TaskNode {
