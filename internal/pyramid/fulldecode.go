@@ -116,10 +116,12 @@ func fullDecodeKeyNoWB(edits *edit.Params) string {
 // edits with are known before it decodes (edit.Params.EffectiveWBMul): not
 // for auto white balance, which dcraw works out from the pixels, nor for a
 // custom balance with no multipliers, which LibRaw takes from the camera's
-// daylight balance.
+// daylight balance, nor for Kelvin without a temperature, whose tint
+// EffectiveWBMul does not follow.
 func wbKnown(edits *edit.Params) bool {
 	return edits != nil && edits.WBMode != edit.WBAuto &&
-		(edits.WBMode != edit.WBCustom || edits.WBMul != [4]float64{})
+		(edits.WBMode != edit.WBCustom || edits.WBMul != [4]float64{}) &&
+		(edits.WBMode != edit.WBKelvin || edits.WBKelvin > 0)
 }
 
 // fullDecodeParams are the LibRaw params of a full-resolution render.
@@ -259,7 +261,8 @@ func (c *Cache) KeptForWindow(photo store.Photo, edits *edit.Params) (src *image
 		if f.noWBKey != noWBKey || !f.wbFolds || !wbKnown(edits) {
 			return nil, Fold{}, false, false
 		}
-		wb, ok := newWBFold(f.wbMul, edits.EffectiveWBMul(f.camMul, f.camXYZ), f.rgbCam, edits.Highlight)
+		wb, ok := newWBFold(f.wbMul, edits.EffectiveWBMul(f.camMul, f.camXYZ), f.rgbCam, edits.Highlight,
+			f.baked, edits.BakedExpEV(), edits.Bright)
 		if !ok {
 			return nil, Fold{}, false, false
 		}

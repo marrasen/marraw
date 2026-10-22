@@ -25,11 +25,12 @@ type Fold struct {
 // balances the camera channels, clips them, and then RGBCam takes them to
 // the output: so the fold takes the output back to the camera channels
 // (Inv), scales them (D), clips them where the decode of the new balance
-// would (Ceil), and takes them out again (RGBCam).
+// would (Ceil), and takes them out again (RGBCam). White is where the
+// decode's own camera channels clipped, in the same units.
 type WBFold struct {
 	RGBCam, Inv [3][3]float64
 	D           [3]float64
-	Ceil        float64
+	Ceil, White float64
 }
 
 // ApplyFold folds fold into img, a decode of edits' LibRaw inputs but for
@@ -55,7 +56,7 @@ func ApplyFold(img *image.RGBA, fold Fold, edits *edit.Params) {
 	ceil := float32(wb.Ceil)
 	// Where a camera channel of the decode sits at its white, give or take
 	// the 8-bit rounding.
-	const clipped = 0.995
+	clipped := float32(0.995 * wb.White)
 	const blownFrom = 180
 	pwr, ts := outputEncoding(edits)
 	dec := dcrawGammaDecoder(pwr, ts)
@@ -79,9 +80,14 @@ func ApplyFold(img *image.RGBA, fold Fold, edits *edit.Params) {
 	// camera channels apart, and the exact decode of any balance shows it
 	// near white. blown says how near, by how close its darkest channel
 	// came to the clip too.
-	var blown [256]float32
+	// The output's own clip comes on over its last levels, so a smooth
+	// bright sky running up to it does not step.
+	var blown, clip [256]float32
 	for v := blownFrom; v < 256; v++ {
 		blown[v] = float32(v-blownFrom) / float32(255-blownFrom)
+	}
+	for v := 246; v < 256; v++ {
+		clip[v] = min(1, float32(v-246)/8)
 	}
 	// camera rebalances one camera channel v of the decode by d. A channel
 	// the decode clipped held anything from its white up, so it stays at
@@ -99,7 +105,7 @@ func ApplyFold(img *image.RGBA, fold Fold, edits *edit.Params) {
 			c0 := camera(inv[0][0]*r+inv[0][1]*g+inv[0][2]*b, d[0])
 			c1 := camera(inv[1][0]*r+inv[1][1]*g+inv[1][2]*b, d[1])
 			c2 := camera(inv[2][0]*r+inv[2][1]*g+inv[2][2]*b, d[2])
-			if t := blown[min(pix[i], pix[i+1], pix[i+2])]; t > 0 && max(pix[i], pix[i+1], pix[i+2]) >= 254 {
+			if t := blown[min(pix[i], pix[i+1], pix[i+2])] * clip[max(pix[i], pix[i+1], pix[i+2])]; t > 0 {
 				c0 += (ceil - c0) * t
 				c1 += (ceil - c1) * t
 				c2 += (ceil - c2) * t
@@ -112,21 +118,33 @@ func ApplyFold(img *image.RGBA, fold Fold, edits *edit.Params) {
 }
 
 // newWBFold is the change of white balance from the multipliers from to
-// to, for a decode with highlight mode highlight. The balances are taken
-// relative to green, as the exposure compensation (edit.Params.WBCompEV)
-// keeps a change of balance from changing the brightness; LibRaw clips the
+// to, for decodes with highlight mode highlight and brightness bright,
+// LibRaw having baked the exposures baked0 into the decode folded from and
+// baked1 into the one folded to. The balances are taken relative to
+// green, as the exposure compensation (edit.Params.WBCompEV) keeps a
+// change of balance from changing the brightness. LibRaw clips the
 // channels at its white after dividing the multipliers by their smallest
-// (libraw.ScaleNorm), which in those terms sits at Ceil. A camera with a
-// fourth colour, or a matrix that will not invert, scales the output
-// channels instead. ok is false when a multiplier is missing.
-func newWBFold(from, to [4]float64, rgbCam [3][4]float64, highlight int) (f WBFold, ok bool) {
+// (libraw.ScaleNorm), and again after its exposure shift; the output then
+// scales by the brightness. A camera with a fourth colour, or a matrix
+// that will not invert, scales the output channels instead. ok is false
+// when a multiplier is missing.
+func newWBFold(from, to [4]float64, rgbCam [3][4]float64, highlight int, baked0, baked1, bright float64) (f WBFold, ok bool) {
 	for c := range 3 {
 		if from[c] <= 0 || to[c] <= 0 {
 			return f, false
 		}
 		f.D[c] = (to[c] / to[1]) / (from[c] / from[1])
 	}
-	f.Ceil = (from[1] / libraw.ScaleNorm(from, highlight)) / (to[1] / libraw.ScaleNorm(to, highlight))
+	if bright <= 0 {
+		bright = 1
+	}
+	// In the units of the decode folded from: its channels reach
+	// bright·2^baked0 where the balance clips them, and bright where the
+	// exposure shift does. The decode folded to clips where the new
+	// balance does, and at 2^-baked1 of that after its own shift.
+	f.Ceil = (from[1] / libraw.ScaleNorm(from, highlight)) / (to[1] / libraw.ScaleNorm(to, highlight)) *
+		bright * math.Exp2(baked0) * min(1, math.Exp2(-baked1))
+	f.White = bright * min(1, math.Exp2(baked0))
 	four := false
 	for i := range 3 {
 		four = four || math.Abs(rgbCam[i][3]) > 1e-6

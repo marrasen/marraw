@@ -29,7 +29,7 @@ func TestFoldWithoutWBIsExposure(t *testing.T) {
 func TestWBFoldIdentity(t *testing.T) {
 	rgbCam := [3][4]float64{{1.8, -0.6, -0.2}, {-0.2, 1.5, -0.3}, {0.05, -0.5, 1.45}}
 	mul := [4]float64{2.1, 1, 1.6, 1}
-	same, ok := newWBFold(mul, mul, rgbCam, 0)
+	same, ok := newWBFold(mul, mul, rgbCam, 0, 0, 0, 1)
 	if !ok {
 		t.Fatal("no fold")
 	}
@@ -39,7 +39,7 @@ func TestWBFoldIdentity(t *testing.T) {
 	if _, worst, _ := windowDiff(img, src); worst > 1 {
 		t.Errorf("an unchanged balance moved a value by %d", worst)
 	}
-	warm, _ := newWBFold(mul, [4]float64{2.6, 1, 1.3, 1}, rgbCam, 0)
+	warm, _ := newWBFold(mul, [4]float64{2.6, 1, 1.3, 1}, rgbCam, 0, 0, 0, 1)
 	ApplyFold(img, Fold{WB: &warm}, &edit.Params{})
 	var dr, db int
 	for i := 0; i < len(img.Pix); i += 4 {
@@ -48,6 +48,18 @@ func TestWBFoldIdentity(t *testing.T) {
 	}
 	if dr <= 0 || db >= 0 {
 		t.Errorf("a warmer balance: red moved %d, blue %d", dr, db)
+	}
+	// A bright sky running up to the output's clip has no step at it.
+	cool, _ := newWBFold(mul, [4]float64{1.5, 1, 2.4, 1}, rgbCam, 0, 0, 0, 1)
+	var last uint8
+	for v := 240; v <= 255; v++ {
+		px := image.NewRGBA(image.Rect(0, 0, 1, 1))
+		copy(px.Pix, []uint8{200, 230, uint8(v), 255})
+		ApplyFold(px, Fold{WB: &cool}, &edit.Params{})
+		if v > 240 && max(int(px.Pix[0])-int(last), int(last)-int(px.Pix[0])) > 16 {
+			t.Errorf("blue %d -> %d: red jumps %d -> %d", v-1, v, last, px.Pix[0])
+		}
+		last = px.Pix[0]
 	}
 	// Clipped white stays white: the exact decode clips every channel.
 	white := image.NewRGBA(image.Rect(0, 0, 1, 1))
@@ -105,13 +117,21 @@ func TestWBFoldNearTheDecode(t *testing.T) {
 		// stops into 8-bit pixels is off by 3.1 levels on average already,
 		// with no change of balance (the exposure fold windows had before).
 		{func(e *edit.Params) { e.WBMode, e.WBKelvin, e.ExpEV = edit.WBKelvin, 2500, 1.5 }, 2.5, 4.5, 8},
+		// Highlight recovery clips only the channel with the largest
+		// multiplier at the balance: the exposure shift's clip whitens the
+		// rest. And a darker brightness never reaches the output's clip.
+		{func(e *edit.Params) { e.WBMode, e.WBKelvin, e.ExpEV, e.Highlight = edit.WBKelvin, 2500, 1.5, 1 }, 2.5, 4.5, 8},
+		{func(e *edit.Params) { e.WBMode, e.WBKelvin, e.Bright = edit.WBKelvin, 3200, 0.5 }, 1, 3, 6},
 	} {
 		e := start
 		tc.wb(&e)
 		e.Normalize()
-		// The window first, from the as-shot decode kept: then the tiles
-		// of e, decoded under its balance.
-		f.edit(0, start)
+		// The window first, from the as-shot decode kept, at exposure 0
+		// but e's other LibRaw inputs: then the tiles of e, decoded under
+		// its balance.
+		base := e
+		base.WBMode, base.WBKelvin, base.WBTemp, base.WBTint, base.ExpEV = "", 0, 0, 0, 0
+		f.edit(0, base)
 		if _, err := f.cache.EnsureTile(t.Context(), f.photo(0), 1, 1, f.photo(0).EditHash, decode.PriorityVisible); err != nil {
 			t.Fatal(err)
 		}
