@@ -59,6 +59,24 @@ Slider drags render through `Edits.PreviewDraft`, always in memory, at the size
 the photo covers on screen (up to 4096 px). `PreviewEdit` treats 2048 and up as
 the exact, cached 2048 settle.
 
+Zoomed in, a draft of the whole frame is too soft. `Edits.PreviewWindow`
+renders just the visible part at full resolution from the kept decode
+(`pyramid.RenderWindow`): a 2560×1440 window of a 42 MP photo in 250–300 ms,
+against 1.4 s for the whole frame. It works backwards from the window through
+every stage (the detail and AI-mask margins, the spots that land in it and
+their sources, crop and straighten, quarter turns, lens) to the part of the
+decode it needs, and the stages take a `region` saying where their buffer sits
+in the frame. The pixels match the 1:1 tiles exactly, which holds only while
+nothing in a stage mixes a non-integer with the buffer's offset: positions are
+worked out in the whole output's coordinates (moving between those and a
+buffer's is exact, being whole numbers), and the mask evaluators step from the
+frame's own column 0. `TestRenderWindowFuzz` checks it on random edits and
+windows; `MARRAW_WINDOW_FUZZ=400` runs more of them. It answers null when it cannot help: no decode kept under the
+state's LibRaw inputs (an exposure change is folded in, as the drafts fold it),
+or dehaze and mask effects, which work over the whole frame. For the state the
+editor last settled on or saved it waits for that decode instead, so a window
+comes right after a white balance change too, well before the tiles.
+
 ### Adaptive base look
 
 LibRaw output is flat next to camera JPEGs — manufacturer tone curves are

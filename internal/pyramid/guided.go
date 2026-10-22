@@ -42,7 +42,10 @@ func newGuidedEval(base *brushEval, img *image.RGBA) *guidedEval {
 	}
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
-	outLong := max(w, h)
+	// The block size follows the whole output, so a window (whose origin
+	// RenderWindow puts on the block grid) refines on the grid the whole
+	// render does.
+	outLong := max(base.f.outW, base.f.outH)
 	mapLong := max(base.pw, base.ph)
 	if outLong < guidedMinLongEdge || outLong < 2*mapLong {
 		return nil
@@ -131,10 +134,14 @@ func (g *guidedEval) weightRow(y int, wrow []uint16) (int, int) {
 		return 0, 0
 	}
 
-	// Bilinear taps into the coefficient grid walk linearly along the row.
-	fy := (float32(y) - float32(g.s)/2) / float32(g.s)
-	ly0 := int(fy)
-	ty := fy - float32(ly0)
+	// Bilinear taps into the coefficient grid, at (y - s/2) / s blocks: in
+	// integers, then the fraction, so a buffer whose origin sits on the
+	// block grid (a window, RenderWindow) gets the same taps as the whole
+	// frame — float32 coordinates rounded differently by where they start.
+	s2 := 2 * g.s
+	ny := 2*y - g.s
+	ly0 := ny / s2
+	ty := float32(ny-ly0*s2) / float32(s2)
 	if ly0 < 0 {
 		ly0, ty = 0, 0
 	}
@@ -145,9 +152,9 @@ func (g *guidedEval) weightRow(y int, wrow []uint16) (int, int) {
 
 	row := g.img.Pix[y*g.img.Stride:]
 	for x := x0; x < x1; x++ {
-		fx := (float32(x) - float32(g.s)/2) / float32(g.s)
-		lx0 := int(fx)
-		tx := fx - float32(lx0)
+		nx := 2*x - g.s
+		lx0 := nx / s2
+		tx := float32(nx-lx0*s2) / float32(s2)
 		if lx0 < 0 {
 			lx0, tx = 0, 0
 		}
@@ -193,27 +200,30 @@ func boxBlurF32(p []float32, w, h, radius int) []float32 {
 	}
 	tmp := make([]float32, len(p))
 	out := make([]float32, len(p))
-	n := float32(2*radius + 1)
+	// The running sums are float64: a float32 sum drifts by where it
+	// started, and a window (RenderWindow) starts its rows and columns
+	// elsewhere than the whole frame does.
+	n := float64(2*radius + 1)
 	for y := 0; y < h; y++ {
 		row := p[y*w : (y+1)*w]
 		orow := tmp[y*w : (y+1)*w]
-		var sum float32
+		var sum float64
 		for x := -radius; x <= radius; x++ {
-			sum += row[min(max(x, 0), w-1)]
+			sum += float64(row[min(max(x, 0), w-1)])
 		}
 		for x := 0; x < w; x++ {
-			orow[x] = sum / n
-			sum += row[min(x+radius+1, w-1)] - row[max(x-radius, 0)]
+			orow[x] = float32(sum / n)
+			sum += float64(row[min(x+radius+1, w-1)]) - float64(row[max(x-radius, 0)])
 		}
 	}
 	for x := 0; x < w; x++ {
-		var sum float32
+		var sum float64
 		for y := -radius; y <= radius; y++ {
-			sum += tmp[min(max(y, 0), h-1)*w+x]
+			sum += float64(tmp[min(max(y, 0), h-1)*w+x])
 		}
 		for y := 0; y < h; y++ {
-			out[y*w+x] = sum / n
-			sum += tmp[min(y+radius+1, h-1)*w+x] - tmp[max(y-radius, 0)*w+x]
+			out[y*w+x] = float32(sum / n)
+			sum += float64(tmp[min(y+radius+1, h-1)*w+x]) - float64(tmp[max(y-radius, 0)*w+x])
 		}
 	}
 	return out

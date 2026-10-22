@@ -310,6 +310,9 @@ func (cu *culler) presetApply(in PresetApply) {
 			}
 			base := d.params
 			d.params = p
+			// A preset click is one-shot whatever came before it: a window
+			// of the look before must not show over it (editClock).
+			cu.newRun()
 			cu.edited(true)
 			cu.remember(name)
 			cu.presetAmt = &presetAmount{id: id, base: base, result: p, name: name, amount: 1}

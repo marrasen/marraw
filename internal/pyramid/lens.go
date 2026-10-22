@@ -40,10 +40,16 @@ func ApplyLens(src *image.RGBA, w *lens.Warp, e *edit.Params) *image.RGBA {
 		applyVignette(src, w, e)
 		return src
 	}
-	b := src.Bounds()
-	width, height := b.Dx(), b.Dy()
-	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	return lensInto(src, w, e, src.Bounds())
+}
 
+// lensInto resamples the part out of the corrected frame from src, which
+// is the uncorrected frame or a part of it holding every pixel out samples
+// (lensSource). Both are in the frame's own pixel coordinates, and the
+// result's bounds are out: a window renders exactly the pixels the whole
+// frame has there.
+func lensInto(src *image.RGBA, w *lens.Warp, e *edit.Params, out image.Rectangle) *image.RGBA {
+	dst := image.NewRGBA(out)
 	dec, enc := linearCodec(e)
 	vig := w.HasVignetting()
 
@@ -51,50 +57,44 @@ func ApplyLens(src *image.RGBA, w *lens.Warp, e *edit.Params) *image.RGBA {
 	// this loop is the stage's entire cost — 42 megapixels of it on a 1:1
 	// render. It reads the source plane directly rather than through
 	// image.RGBA's accessors, and skips the red and blue lookups entirely
-	// when there is no CA to correct, which is the common case.
-	sp := plane{pix: src.Pix, stride: src.Stride, w: width, h: height}
-	sp.ox = src.Bounds().Min.X
-	sp.oy = src.Bounds().Min.Y
+	// when there is no CA to correct, which is the common case. Sample
+	// coordinates are shifted onto src's own pixels (an exact subtraction).
+	sb := src.Bounds()
+	sp := plane{pix: src.Pix, stride: src.Stride, w: sb.Dx(), h: sb.Dy()}
+	sx0, sy0 := float64(sb.Min.X), float64(sb.Min.Y)
 	tca := w.Geometric() && w.HasTCA()
 
-	var g errgroup.Group
-	g.SetLimit(runtime.NumCPU())
-	const band = 64
-	for y0 := 0; y0 < height; y0 += band {
-		y1 := min(y0+band, height)
-		g.Go(func() error {
-			for oy := y0; oy < y1; oy++ {
-				do := dst.PixOffset(0, oy)
-				fy := float64(oy) + 0.5
-				for ox := range width {
-					rx, ry, gx, gy, bx, by := w.Source(float64(ox)+0.5, fy)
-					r, gg, bl := sp.sample3(gx-0.5, gy-0.5)
-					if tca {
-						// Each channel samples its own coordinate — that is
-						// what makes this a CA correction rather than three
-						// copies of the same resample.
-						r = sp.sample1(rx-0.5, ry-0.5, 0)
-						bl = sp.sample1(bx-0.5, by-0.5, 2)
-					}
-					if vig {
-						// The fall-off happened where the light landed, so
-						// the gain is evaluated at the source position.
-						k := w.VigGain(gx, gy)
-						r = enc(dec(r) * k)
-						gg = enc(dec(gg) * k)
-						bl = enc(dec(bl) * k)
-					}
-					o := do + ox*4
-					dst.Pix[o+0] = r
-					dst.Pix[o+1] = gg
-					dst.Pix[o+2] = bl
-					dst.Pix[o+3] = 0xff
+	width := out.Dx()
+	bands(out.Dy(), func(y0, y1 int) {
+		for ly := y0; ly < y1; ly++ {
+			do := ly * dst.Stride
+			fy := float64(out.Min.Y+ly) + 0.5
+			for lx := range width {
+				rx, ry, gx, gy, bx, by := w.Source(float64(out.Min.X+lx)+0.5, fy)
+				r, gg, bl := sp.sample3(gx-0.5-sx0, gy-0.5-sy0)
+				if tca {
+					// Each channel samples its own coordinate — that is
+					// what makes this a CA correction rather than three
+					// copies of the same resample.
+					r = sp.sample1(rx-0.5-sx0, ry-0.5-sy0, 0)
+					bl = sp.sample1(bx-0.5-sx0, by-0.5-sy0, 2)
 				}
+				if vig {
+					// The fall-off happened where the light landed, so
+					// the gain is evaluated at the source position.
+					k := w.VigGain(gx, gy)
+					r = enc(dec(r) * k)
+					gg = enc(dec(gg) * k)
+					bl = enc(dec(bl) * k)
+				}
+				o := do + lx*4
+				dst.Pix[o+0] = r
+				dst.Pix[o+1] = gg
+				dst.Pix[o+2] = bl
+				dst.Pix[o+3] = 0xff
 			}
-			return nil
-		})
-	}
-	_ = g.Wait() // the workers never fail; the group is only for the limit
+		}
+	})
 	return dst
 }
 
@@ -114,7 +114,8 @@ func applyVignette(img *image.RGBA, w *lens.Warp, e *edit.Params) {
 			for y := y0; y < y1; y++ {
 				o := img.PixOffset(b.Min.X, b.Min.Y+y)
 				for x := range width {
-					k := w.VigGain(float64(x)+0.5, float64(y)+0.5)
+					// In the frame's own coordinates: img may be a part of it.
+					k := w.VigGain(float64(b.Min.X+x)+0.5, float64(b.Min.Y+y)+0.5)
 					if k != 1 {
 						img.Pix[o+0] = enc(dec(img.Pix[o+0]) * k)
 						img.Pix[o+1] = enc(dec(img.Pix[o+1]) * k)
@@ -158,14 +159,13 @@ func linearCodec(e *edit.Params) (dec func(uint8) float64, enc func(float64) uin
 		}
 }
 
-// plane is a flat view of an RGBA image for the resample loop: the bounds
-// offset is folded in once so the inner loop indexes the pixel slice
+// plane is a flat view of an RGBA image for the resample loop, in the
+// image's own pixels (from 0), so the inner loop indexes the pixel slice
 // directly instead of going through image.RGBA's accessors.
 type plane struct {
 	pix    []uint8
 	stride int
 	w, h   int
-	ox, oy int
 }
 
 // clampCoord splits a fractional coordinate into its two neighbouring
@@ -196,10 +196,10 @@ func clampCoord(v float64, n int) (i0, i1 int, f float64) {
 func (p *plane) sample3(x, y float64) (r, g, b uint8) {
 	x0, x1, fx := clampCoord(x, p.w)
 	y0, y1, fy := clampCoord(y, p.h)
-	o00 := (p.oy+y0)*p.stride + (p.ox+x0)*4
-	o01 := (p.oy+y0)*p.stride + (p.ox+x1)*4
-	o10 := (p.oy+y1)*p.stride + (p.ox+x0)*4
-	o11 := (p.oy+y1)*p.stride + (p.ox+x1)*4
+	o00 := y0*p.stride + x0*4
+	o01 := y0*p.stride + x1*4
+	o10 := y1*p.stride + x0*4
+	o11 := y1*p.stride + x1*4
 	w00 := (1 - fx) * (1 - fy)
 	w01 := fx * (1 - fy)
 	w10 := (1 - fx) * fy
@@ -216,10 +216,10 @@ func (p *plane) sample3(x, y float64) (r, g, b uint8) {
 func (p *plane) sample1(x, y float64, c int) uint8 {
 	x0, x1, fx := clampCoord(x, p.w)
 	y0, y1, fy := clampCoord(y, p.h)
-	r0 := (p.oy + y0) * p.stride
-	r1 := (p.oy + y1) * p.stride
-	c0 := (p.ox+x0)*4 + c
-	c1 := (p.ox+x1)*4 + c
+	r0 := y0 * p.stride
+	r1 := y1 * p.stride
+	c0 := x0*4 + c
+	c1 := x1*4 + c
 	return uint8(float64(p.pix[r0+c0])*(1-fx)*(1-fy) +
 		float64(p.pix[r0+c1])*fx*(1-fy) +
 		float64(p.pix[r1+c0])*(1-fx)*fy +

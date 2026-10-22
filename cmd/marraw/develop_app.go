@@ -226,6 +226,7 @@ func (cu *culler) closeDevelop() {
 		d.stop()
 	}
 	d.live, d.want, d.active = nil, false, ""
+	cu.dropWindow()
 	cu.letGo()
 	cu.saveForget(cu.dev.id)
 	if d.mounted {
@@ -255,6 +256,7 @@ func (cu *culler) loadEdit(i int) {
 		d.stop()
 	}
 	d.live, d.want = nil, false
+	cu.dropWindow()
 	// Held from scratch for another photo, or for this one with its edit
 	// changed elsewhere, which the backend then gets ready. Loaded again
 	// as it was (new pixels for it, say), the hold and its decode stay.
@@ -294,6 +296,7 @@ func (cu *culler) loadEdit(i int) {
 			}
 			cu.histogramShowing()
 			cu.loadPresetThumbs()
+			cu.wantWindow()
 		}:
 		case <-cu.ctx.Done():
 		}
@@ -324,9 +327,23 @@ func (cu *culler) holdLater(id int64, hash string) {
 				return
 			}
 			log.Printf("develop: holding photo %d open in the editor", id)
+			// Held, the backend decodes the photo, and a window of the edit
+			// it opened in waits for that rather than answering null: ask
+			// again, the call being under way by then.
+			retry := time.AfterFunc(holdAsk, func() {
+				select {
+				case cu.do <- func() {
+					if cu.dev.holdID == id {
+						cu.wantWindow()
+					}
+				}:
+				case <-ctx.Done():
+				}
+			})
 			start := time.Now()
 			err := cu.api.Edits.OpenInEditor(ctx, id)
 			held := time.Since(start)
+			retry.Stop()
 			if err == nil || canceled(err) || ctx.Err() != nil {
 				log.Printf("develop: photo %d held open in the editor for %d ms", id, held.Milliseconds())
 				return
@@ -343,6 +360,9 @@ func (cu *culler) holdLater(id int64, hash string) {
 		}
 	}()
 }
+
+// holdAsk is how long after the hold's call a window is asked for again.
+const holdAsk = 300 * time.Millisecond
 
 // holdRetries are the waits before the next tries at holding a photo open
 // in the editor after the call failed quickly; holdRetryLate the wait after
@@ -463,6 +483,8 @@ func (cu *culler) edited(commit bool) {
 // has moved on.
 func (cu *culler) preview(full bool) {
 	d := &cu.dev
+	cu.noteShown()
+	cu.wantWindow()
 	d.want, d.wantFull = true, full
 	if d.busy {
 		if !full && d.busyFull && d.stop != nil {

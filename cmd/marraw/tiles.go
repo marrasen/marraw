@@ -77,6 +77,7 @@ func (cu *culler) wantTiles(w WantTiles, now bool) {
 		return
 	}
 	cu.tileWant = w
+	cu.wantWindow()
 	if w.Range.Empty() {
 		if cu.tileStop != nil {
 			cu.tileStop()
@@ -118,6 +119,11 @@ func (cu *culler) stopTiles() {
 // render and all. A probe of p under way stays, unless it would wait where
 // now asks not to.
 func (cu *culler) probeTiles(p marrawclient.Photo, now bool) {
+	cu.probeTilesAt(p, now, image.Point{})
+}
+
+// probeTilesAt is probeTiles by the tile at t.
+func (cu *culler) probeTilesAt(p marrawclient.Photo, now bool, t image.Point) {
 	if cu.probing == p.ID && (!now || cu.probeNow) {
 		return
 	}
@@ -135,13 +141,19 @@ func (cu *culler) probeTiles(p marrawclient.Photo, now bool) {
 	}
 	go func() {
 		start := time.Now()
-		_, err := cu.im.tile(ctx, p, image.Point{}, true)
+		_, err := cu.im.tile(ctx, p, t, true)
 		rendered := false
 		if err == errMissing {
 			cu.say(gen, "tiles: rendering the full resolution")
 			select {
 			case <-time.After(wait):
-				_, err = cu.im.tile(ctx, p, image.Point{}, false)
+				_, err = cu.im.tile(ctx, p, t, false)
+				if err == errMissing {
+					// Rendered, and this tile is not in it (a grid a column
+					// longer than the render, say): the set is in all the
+					// same, and the fetches skip the tile.
+					err = nil
+				}
 				rendered = err == nil
 			case <-ctx.Done():
 				err = ctx.Err()
@@ -153,6 +165,11 @@ func (cu *culler) probeTiles(p marrawclient.Photo, now bool) {
 			latest := cu.probeSeq == seq
 			if latest {
 				cu.probing, cu.probeStop = 0, nil
+			}
+			if err != nil && t != (image.Point{}) {
+				// A re-render of a thinned set (fetchTiles) that did not
+				// finish: the next visit may try again.
+				delete(cu.tileRedone, tileSet(p))
 			}
 			if err != nil {
 				// Called off, as a step or an edit does, it is no error.
@@ -212,6 +229,31 @@ func (cu *culler) fetchTiles(p marrawclient.Photo) {
 		go func() {
 			for t := range work {
 				img, err := cu.im.tile(ctx, p, t, true)
+				if err == errMissing {
+					// Rendered once, since cleaned out of the cache (the
+					// janitor goes tile by tile): the set is cold again, for
+					// a window to bridge while it renders. The render is the
+					// probe's, by this tile, which a pan leaves alone; once a
+					// set, as a tile still missing after it never comes.
+					select {
+					case cu.do <- func() {
+						// Only a tile in the grid the backend renders (the
+						// saved size's, as pyramid.TileGrid): one past it is
+						// never there, rendered or not.
+						set, sz := tileSet(p), size(p)
+						inGrid := t.X < (sz.X+tileSize-1)/tileSize && t.Y < (sz.Y+tileSize-1)/tileSize
+						if inGrid && cu.tileWarm[set] && !cu.tileRedone[set] && cu.at == at && ctx.Err() == nil {
+							delete(cu.tileWarm, set)
+							cu.tileRedone[set] = true
+							cu.wantWindow()
+							cu.probeTilesAt(p, true, t)
+						}
+					}:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				}
 				if err != nil {
 					continue
 				}

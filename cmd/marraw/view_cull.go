@@ -499,6 +499,8 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 		w.Range = image.Rect(
 			max(0, int(x0/tileSize)), max(0, int(y0/tileSize)),
 			min(cols, int(math.Ceil(float64(x1/tileSize)))), min(rows, int(math.Ceil(float64(y1/tileSize)))))
+		w.View = image.Rect(int(math.Floor(float64(x0))), int(math.Floor(float64(y0))),
+			int(math.Ceil(float64(x1))), int(math.Ceil(float64(y1)))).Intersect(image.Rect(0, 0, int(f.W), int(f.H)))
 	}
 	if w != v.asked {
 		v.asked = w
@@ -1532,6 +1534,10 @@ type cullPic struct {
 	full     image.Point
 	oldTiles map[image.Point]*paint.Image
 	oldFull  image.Point
+	// win is the part in view at full resolution over an edit, at winAt
+	// in full's pixels (Cull.Window).
+	win   *paint.Image
+	winAt image.Rectangle
 	// Tiles that come in are gathered in pending for a moment, or until
 	// the view's are all in, and fade in together, as fresh does, so the
 	// photo sharpens as a whole rather than square by square.
@@ -1541,7 +1547,8 @@ type cullPic struct {
 }
 
 func newCullPic(v *cullView, s Cull) *cullPic {
-	q := &cullPic{v: v, img: best(s), mix: anim.NewFloat(1), tiles: s.Tiles, full: s.Full, freshIn: anim.NewFloat(1)}
+	q := &cullPic{v: v, img: best(s), mix: anim.NewFloat(1), tiles: s.Tiles, full: s.Full, freshIn: anim.NewFloat(1),
+		win: s.Window, winAt: s.WindowAt}
 	q.Add(q.mix, q.freshIn)
 	return q
 }
@@ -1560,6 +1567,7 @@ func (q *cullPic) step(s, prev Cull, slide float32) {
 	// The old picture leaves whole, its sharp tiles with it.
 	q.oldTiles, q.oldFull = q.showing(), q.full
 	q.img, q.full, q.slide = best(s), s.Full, slide
+	q.win, q.winAt = s.Window, s.WindowAt
 	// The new photo's tiles held already come with it, at once.
 	q.tiles, q.pending, q.fresh, q.gather = s.Tiles, nil, nil, 0
 	q.freshIn.Jump(1)
@@ -1662,6 +1670,7 @@ func (q *cullPic) Step(dt time.Duration) bool {
 // sharpen shows the photo's better pixels, fading in over the last.
 func (q *cullPic) sharpen(s Cull) {
 	q.full = s.Full
+	q.win, q.winAt = s.Window, s.WindowAt
 	if q.tiles == nil {
 		q.tiles = map[image.Point]*paint.Image{}
 	}
@@ -1742,6 +1751,7 @@ func (q *cullPic) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, _ gunim.
 	}
 	faded(p, frame, min(1, k*1.6), func() {
 		p.Image(q.img, base, paint.ImageOpts{Opacity: 1})
+		q.paintWindow(p, frame)
 		q.paintTiles(p, q.tiles, frame, q.full, 1)
 		q.paintTiles(p, q.fresh, frame, q.full, q.freshIn.Value())
 	})
@@ -1776,6 +1786,18 @@ func (q *cullPic) paintTiles(p *paint.Painter, tiles map[image.Point]*paint.Imag
 		}
 		p.Image(img, tr, paint.ImageOpts{Opacity: op})
 	}
+}
+
+// paintWindow draws the window, if any, over the picture in the frame
+// base, where it sits in the photo.
+func (q *cullPic) paintWindow(p *paint.Painter, base geom.Rect) {
+	if q.win == nil || q.full.X <= 0 {
+		return
+	}
+	s := base.Size().W / float32(q.full.X)
+	r := q.winAt
+	p.Image(q.win, geom.Rc(base.Min.X+float32(r.Min.X)*s, base.Min.Y+float32(r.Min.Y)*s,
+		float32(r.Dx())*s, float32(r.Dy())*s), paint.ImageOpts{Opacity: 1})
 }
 
 // drawerRect is where the develop panel floats, as marraw's drawer: 352

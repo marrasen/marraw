@@ -133,7 +133,7 @@ func newBlurSource(img *image.RGBA, coc []uint8, ww, wh int) (*fxSource, []uint8
 	// buffer IS the render — skip the block machinery for a straight row walk
 	// (newFXSource's fast path, for the same reason).
 	if ww == w && wh == h {
-		fxBands(wh, func(y0, y1 int) {
+		bands(wh, func(y0, y1 int) {
 			for y := y0; y < y1; y++ {
 				row := img.Pix[y*img.Stride : y*img.Stride+w*4]
 				for x := range ww {
@@ -148,7 +148,7 @@ func newBlurSource(img *image.RGBA, coc []uint8, ww, wh int) (*fxSource, []uint8
 		})
 		return s, out
 	}
-	fxBands(wh, func(y0, y1 int) {
+	bands(wh, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			sy0 := y * h / wh
 			sy1 := max(sy0+1, (y+1)*h/wh)
@@ -210,7 +210,7 @@ func blurDownscale(lin *fxSource, coc []uint8, ww, wh, nw, nh int) (*fxSource, [
 		r: make([]uint16, n), g: make([]uint16, n), b: make([]uint16, n),
 	}
 	oc := make([]uint8, n)
-	fxBands(nh, func(y0, y1 int) {
+	bands(nh, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			sy0 := y * wh / nh
 			sy1 := max(sy0+1, (y+1)*wh/nh)
@@ -262,7 +262,7 @@ func erodeMin(coc []uint8, ww, wh int) []uint8 {
 	const r = 2
 	tmp := make([]uint8, len(coc))
 	out := make([]uint8, len(coc))
-	fxBands(wh, func(y0, y1 int) {
+	bands(wh, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			row := coc[y*ww : (y+1)*ww]
 			trow := tmp[y*ww : (y+1)*ww]
@@ -277,7 +277,7 @@ func erodeMin(coc []uint8, ww, wh int) []uint8 {
 			}
 		}
 	})
-	fxBands(wh, func(y0, y1 int) {
+	bands(wh, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			for x := range ww {
 				m := tmp[y*ww+x]
@@ -317,7 +317,7 @@ func blurLevel(lin *fxSource, coc []uint8, ww, wh int, frac float64, r int, disc
 	for v := range wq {
 		wq[v] = uint16(math.Round(65535 * math.Min(float64(v)/full, 1)))
 	}
-	fxBands(wh, func(y0, y1 int) {
+	bands(wh, func(y0, y1 int) {
 		for j := y0 * ww; j < y1*ww; j++ {
 			pw := float64(wq[coc[j]])
 			if pw == 0 {
@@ -370,7 +370,7 @@ func discPlane(src []uint16, w, h, r int, spans []int) []uint16 {
 	// Row prefix sums: pre[y*(w+1)+x+1] = Σ row y cols 0..x. uint32 is safe:
 	// 65535 × fxPlaneLongEdge < 2³².
 	pre := make([]uint32, (w+1)*h)
-	fxBands(h, func(y0, y1 int) {
+	bands(h, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			row := src[y*w : (y+1)*w]
 			p := pre[y*(w+1):]
@@ -382,7 +382,7 @@ func discPlane(src []uint16, w, h, r int, spans []int) []uint16 {
 		}
 	})
 	out := make([]uint16, len(src))
-	fxBands(h, func(y0, y1 int) {
+	bands(h, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			dy0 := max(-r, -y)
 			dy1 := min(r, h-1-y)
@@ -417,7 +417,7 @@ func gradedBlurComposite(img *image.RGBA, coc []uint8, levels []blurLevelView) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 
-	fxBands(h, func(y0, y1 int) {
+	bands(h, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			row := img.Pix[y*img.Stride : y*img.Stride+w*4]
 			crow := coc[y*w : (y+1)*w]

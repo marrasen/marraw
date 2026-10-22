@@ -435,6 +435,26 @@ func (h EditsClient) SubscribePreviewExact(ctx context.Context, photoID int64, p
 	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.PreviewExact", []any{photoID, params_, longEdge}, opts...)
 }
 
+// PreviewWindow renders the part (x, y, w, h) of the 1:1 render of the
+// (unsaved) edit state — in that render's pixels, clipped to it — in
+// memory and never cached: what a loupe zoomed in shows, sharp, while a
+// slider drags or the 1:1 tiles of a new state render. The JPEG covers the
+// clipped part. It renders from the full-resolution decode the backend
+// keeps for the photo open in the editor (OpenInEditor), so it answers
+// null when it cannot: no decode is kept under the state's LibRaw inputs
+// (exposure aside, which it folds in like the drafts do), or the edit
+// uses dehaze or mask effects, which work over the whole frame. Neutral
+// params (the base look) are never kept either.
+func (h EditsClient) PreviewWindow(ctx context.Context, photoID int64, params_ Params, x_ int, y int, w int, h_ int) (*client.Blob, error) {
+	return client.Call[*client.Blob](ctx, h.c, "Edits.PreviewWindow", []any{photoID, params_, x_, y, w, h_})
+}
+
+// SubscribePreviewWindow runs PreviewWindow as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribePreviewWindow(ctx context.Context, photoID int64, params_ Params, x_ int, y int, w int, h_ int, opts ...client.SubscribeOption) *client.Subscription[*client.Blob] {
+	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.PreviewWindow", []any{photoID, params_, x_, y, w, h_}, opts...)
+}
+
 // ResetEdits clears the edit state of the given photos. It returns what
 // each save saved, in the order of ids, as SetEditParams does for one.
 func (h EditsClient) ResetEdits(ctx context.Context, ids []int64) ([]EditSaved, error) {

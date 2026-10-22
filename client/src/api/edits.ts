@@ -359,6 +359,19 @@ export function subscribePreviewExact(client: ApiClient, photoID: number, params
 }
 
 
+export function previewWindow(client: ApiClient, photoID: number, params: Params, x: number, y: number, w: number, h: number, options?: RequestOptions): Promise<Blob> {
+    return client.request<Blob>('Edits.PreviewWindow', [photoID, params, x, y, w, h], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+previewWindow.method = 'Edits.PreviewWindow' as const;
+
+export function subscribePreviewWindow(client: ApiClient, photoID: number, params: Params, x: number, y: number, w: number, h: number, callback: (data: Blob) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<Blob>('Edits.PreviewWindow', [photoID, params, x, y, w, h], callback, onError, options);
+}
+
+
 export function resetEdits(client: ApiClient, ids: number[], options?: RequestOptions): Promise<EditSaved[]> {
     return client.request<EditSaved[]>('Edits.ResetEdits', [ids], options);
 }
@@ -752,6 +765,21 @@ export function usePreviewExact(photoID: number, params: Params, longEdge: numbe
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [photoID, params, longEdge], _subscribe: { method: 'Edits.PreviewExact', params: [photoID, params, longEdge] } });
+}
+
+/**
+ * Subscribes to `Edits.PreviewWindow` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function usePreviewWindow(photoID: number, params: Params, x: number, y: number, w: number, h: number, options?: UseQueryOptions<Blob>): UseQueryResult<Blob> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, photoID: number, params: Params, x: number, y: number, w: number, h: number) => previewWindow(client, photoID, params, x, y, w, h, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [photoID, params, x, y, w, h], _subscribe: { method: 'Edits.PreviewWindow', params: [photoID, params, x, y, w, h] } });
 }
 
 /**

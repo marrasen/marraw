@@ -142,6 +142,7 @@ func (cu *culler) toggleCrop() {
 	// they come.
 	d.edits++
 	cu.stopTiles()
+	cu.dropWindow()
 	cu.preview(true)
 	cu.showCull()
 }

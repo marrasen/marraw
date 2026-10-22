@@ -50,6 +50,11 @@ type (
 		// Tiles those of them fetched, by their place in the grid.
 		Full  image.Point
 		Tiles map[image.Point]*paint.Image
+		// Window is the part of the photo in view at full resolution, at
+		// WindowAt in Full's pixels, while an edit's tiles are not in: it
+		// shows over Img and under Tiles.
+		Window   *paint.Image
+		WindowAt image.Rectangle
 		// TileNote says how the tiles stand.
 		TileNote string
 		// Panel says the develop panel is open beside the photo, and Live
@@ -123,10 +128,12 @@ type (
 	FitEdge struct{ Px int }
 	// WantTiles asks for the tiles of the photo at Index in Range of the
 	// grid, as the view zooms past what the 2048 shows sharp; an empty
-	// Range wants none.
+	// Range wants none. View is the part of the photo in view, in its
+	// full resolution's pixels, when Range is not empty.
 	WantTiles struct {
 		Index int
 		Range image.Rectangle
+		View  image.Rectangle
 	}
 	// Step moves through the folder by By photos.
 	Step struct{ By int }
@@ -201,6 +208,11 @@ type culler struct {
 	tiles    *tileCache
 	tileWant WantTiles
 	tileWarm map[string]bool
+	// tileRedone are the tile sets rendered again this session, having
+	// lost tiles to the cache's janitor (fetchTiles).
+	tileRedone map[string]bool
+	// win is the sharp window over a zoomed-in edit.
+	win winState
 	// fitEdge is what FitEdge last said.
 	fitEdge int
 	// tileStop cancels the tile fetches under way; probing is the photo
@@ -353,7 +365,7 @@ type timing struct {
 func newCuller(ctx context.Context, c gunim.Client, api *marrawclient.Client, im *images, folder int64, folderPath string, photos []marrawclient.Photo) *culler {
 	cu := &culler{aspects: map[int64]float32{}, ctx: ctx, c: c, api: api, im: im, folder: folder, folderPath: folderPath,
 		cache: newPixelCache(16), arrived: make(chan arrival, 16), do: make(chan func(), 16),
-		tiles: newTileCache(48), tileWarm: map[string]bool{},
+		tiles: newTileCache(48), tileWarm: map[string]bool{}, tileRedone: map[string]bool{},
 		thumbs: map[int64]*paint.Image{}, thumbsWanted: map[int64]bool{}, thumbSlots: make(chan struct{}, 6), editThumbSlots: make(chan struct{}, 2), cursor: -1,
 		libView: defaultView("", defaultGap), masks: maskState{sel: -1, brush: defaultBrush, hover: -1, tintOf: -1}, heal: newHealState()}
 	cu.setAll(photos)
@@ -791,9 +803,12 @@ func (cu *culler) state() Cull {
 		}
 	}
 	st.WBFrame, st.WBPix = cu.wb.frame, cu.wb.pix
+	if w := &cu.win; w.img != nil && w.id == p.ID && w.frame == photoFrame(p) && w.full == st.Full && cu.windowShows() && cu.windowWanted() {
+		st.Window, st.WindowAt = w.img, w.at
+	}
 	if img := cu.originalShowing(p.ID); img != nil {
-		// The edit's tiles are not the original's.
-		st.Img, st.Note, st.Tiles = img, "original, before any edit", nil
+		// The edit's tiles are not the original's, nor its window.
+		st.Img, st.Note, st.Tiles, st.Window = img, "original, before any edit", nil, nil
 	}
 	if cu.swapNow {
 		st.Live, cu.swapNow = true, false
@@ -835,6 +850,7 @@ func (cu *culler) goTo(i int) {
 	}
 	cu.tileNote = ""
 	cu.original = false
+	cu.dropWindow()
 	cu.showCull()
 	cu.developFollows(i)
 	// The grid follows, so the photo flies back to its own tile.
@@ -1207,7 +1223,7 @@ func (cu *culler) script(o options) {
 		for time.Since(start) < 20*time.Second {
 			time.Sleep(100 * time.Millisecond)
 			done := make(chan bool, 1)
-			cu.do <- func() { done <- !cu.dev.busy && !cu.dev.want && cu.dev.live != nil }
+			cu.do <- func() { done <- !cu.dev.busy && !cu.dev.want && cu.dev.live != nil && !cu.win.busy && !cu.win.want }
 			if <-done {
 				break
 			}

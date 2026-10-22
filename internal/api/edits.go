@@ -236,6 +236,81 @@ func (e *Edits) PreviewExact(ctx context.Context, photoID int64, params edit.Par
 		e.deps.Cache.Lenses.For(photo)))
 }
 
+// windowMaxPixels bounds PreviewWindow: a 4K screen's worth of 1:1 pixels
+// and then some.
+const windowMaxPixels = 16 << 20
+
+// PreviewWindow renders the part (x, y, w, h) of the 1:1 render of the
+// (unsaved) edit state — in that render's pixels, clipped to it — in
+// memory and never cached: what a loupe zoomed in shows, sharp, while a
+// slider drags or the 1:1 tiles of a new state render. The JPEG covers the
+// clipped part. It renders from the full-resolution decode the backend
+// keeps for the photo open in the editor (OpenInEditor), so it answers
+// null when it cannot: no decode is kept under the state's LibRaw inputs
+// (exposure aside, which it folds in like the drafts do), or the edit
+// uses dehaze or mask effects, which work over the whole frame. Neutral
+// params (the base look) are never kept either. The state the editor
+// last settled on or saved is the exception to the first: its decode is
+// waited for, so a window comes right after a white balance change too.
+func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Params, x, y, w, h int) (*aprot.Blob, error) {
+	// Each side first: a product of two huge sides wraps around.
+	if w <= 0 || h <= 0 || w > windowMaxPixels || h > windowMaxPixels || w*h > windowMaxPixels ||
+		x < -windowMaxPixels || y < -windowMaxPixels || x > math.MaxInt32 || y > math.MaxInt32 {
+		return nil, fmt.Errorf("preview window: %dx%d is not 1 to %d pixels", w, h, windowMaxPixels)
+	}
+	params.Normalize()
+	if params.IsNeutral() || !pyramid.Windowable(&params) {
+		return nil, nil
+	}
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	cache := e.deps.Cache
+	src, expEV, _, ok := cache.KeptForWindow(photo, &params)
+	if !ok && cache.EditorWants(photo, &params) {
+		// The state the editor just settled on or saved, its decode not
+		// kept yet (a white balance change, say): wait for it, joining the
+		// 1:1 render's, so the window still comes well before the tiles.
+		// A drag frame is never the state the editor is on, so drags never
+		// decode here. The decode runs on its own: a window let go must not
+		// take with it the decode the tiles wait on. The editor moving on
+		// calls it off.
+		done := make(chan error, 1)
+		go func() { done <- cache.WarmFull(context.WithoutCancel(ctx), photo, &params) }()
+		select {
+		case err := <-done:
+			if errors.Is(err, context.Canceled) {
+				return nil, nil // called off: the editor is on another state
+			}
+			if err != nil {
+				return nil, err
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		src, expEV, _, ok = cache.KeptForWindow(photo, &params)
+	}
+	if !ok {
+		return nil, nil
+	}
+	gamma, err := e.lookGamma(ctx, photo)
+	if err != nil {
+		return nil, err
+	}
+	img := pyramid.RenderWindow(ctx, src, image.Rect(x, y, x+w, y+h), gamma, &params, expEV,
+		cache.Lenses.For(photo), cache.AIMaps.SetFor(photo.CacheKey, &params), cache.Fills.SetFor(photo.CacheKey, &params))
+	if img == nil {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Seen at 1:1, as the tiles that take its place are: at their quality,
+	// so nothing shifts as they come.
+	return jpegBlobAt(img, 90)
+}
+
 // previewInMemory renders a transient frame of params, already normalized,
 // at longEdge: the fold path where it applies, else the warm or a fresh
 // half-size decode.
@@ -298,8 +373,13 @@ func (e *Edits) previewInMemory(ctx context.Context, photoID int64, params edit.
 // the cached rendition's: the frame is fleeting and a smaller blob keeps the
 // WebSocket drag stream snappy.
 func jpegBlob(img *image.RGBA) (*aprot.Blob, error) {
+	return jpegBlobAt(img, 75)
+}
+
+// jpegBlobAt is jpegBlob at the given quality.
+func jpegBlobAt(img *image.RGBA, quality int) (*aprot.Blob, error) {
 	var buf bytes.Buffer
-	if err := jpegturbo.EncodeRGBA(&buf, img, 75); err != nil {
+	if err := jpegturbo.EncodeRGBA(&buf, img, quality); err != nil {
 		return nil, err
 	}
 	return &aprot.Blob{ContentType: "image/jpeg", Data: buf.Bytes()}, nil
@@ -1507,6 +1587,7 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 			if on = seededParams(p); on == nil {
 				on = &edit.Params{}
 			}
+			on.Normalize() // as the editor will send it
 		}
 		e.deps.Cache.WantFull(p, on)
 		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)
