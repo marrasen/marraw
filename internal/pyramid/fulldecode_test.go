@@ -518,6 +518,20 @@ func TestKeptForWindow(t *testing.T) {
 	if _, _, _, ok := f.cache.KeptForWindow(p, &custom); ok {
 		t.Error("a custom balance without multipliers folds in")
 	}
+	// Where the fold would guess at the highlights: recovery, highlight
+	// preservation, and a decode brighter than the edit.
+	for name, e := range map[string]func(*edit.Params){
+		"recovery":     func(e *edit.Params) { e.Highlight = 2 },
+		"preservation": func(e *edit.Params) { e.ExpPreserve = 0.5 },
+		"darker":       func(e *edit.Params) { e.ExpEV = -0.5 },
+	} {
+		q := warmer
+		e(&q)
+		q.Normalize()
+		if _, fold, _, ok := f.cache.KeptForWindow(p, &q); ok && fold.WB != nil {
+			t.Errorf("%s: a white balance folds in", name)
+		}
+	}
 	denoised := warmer
 	denoised.NRThreshold = 200
 	if _, _, _, ok := f.cache.KeptForWindow(p, &denoised); ok {

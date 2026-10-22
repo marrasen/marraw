@@ -47,13 +47,14 @@ type fullDecode struct {
 	// multipliers this decode was balanced with (none for auto WB, which
 	// dcraw works out from the pixels), the camera's as-shot balance and
 	// matrices, and whether the decode lost a channel (decodeClipped).
-	wbMul   [4]float64
-	camMul  [4]float64
-	camXYZ  [4][3]float64
-	rgbCam  [3][4]float64
-	wbFolds bool
-	used    time.Time   // last render from it; guarded by fullMu
-	timer   *time.Timer // lets the decode go fullDecodeIdle after used
+	wbMul    [4]float64
+	preserve float64 // edit.Params.ExpPreserve, which noExpKey leaves out
+	camMul   [4]float64
+	camXYZ   [4][3]float64
+	rgbCam   [3][4]float64
+	wbFolds  bool
+	used     time.Time   // last render from it; guarded by fullMu
+	timer    *time.Timer // lets the decode go fullDecodeIdle after used
 }
 
 // fullEditor is a photo held open in the editor.
@@ -122,6 +123,17 @@ func wbKnown(edits *edit.Params) bool {
 	return edits != nil && edits.WBMode != edit.WBAuto &&
 		(edits.WBMode != edit.WBCustom || edits.WBMul != [4]float64{}) &&
 		(edits.WBMode != edit.WBKelvin || edits.WBKelvin > 0)
+}
+
+// wbFoldsOver reports whether a fold of edits' white balance into f lands
+// near the exact decode in its highlights too, where the decode clipped
+// them and the fold must guess (newWBFold). Not under highlight recovery,
+// which blends or rebuilds blown areas to a level of its own; not with the
+// exposure's highlight preservation, which bends the top of the range; and
+// not from a decode brighter than the edit's, whose clipped channels may
+// sit anywhere up to the new white. Those drags show the drafts.
+func wbFoldsOver(f *fullDecode, edits *edit.Params) bool {
+	return edits.Highlight == 0 && edits.ExpPreserve == 0 && f.preserve == 0 && f.baked <= edits.BakedExpEV()
 }
 
 // fullDecodeParams are the LibRaw params of a full-resolution render.
@@ -258,7 +270,7 @@ func (c *Cache) KeptForWindow(photo store.Photo, edits *edit.Params) (src *image
 	}
 	fold.ExpEV = edits.ExpEV - f.baked + f.wbCompEV
 	if f.noExpKey != noExpKey {
-		if f.noWBKey != noWBKey || !f.wbFolds || !wbKnown(edits) {
+		if f.noWBKey != noWBKey || !f.wbFolds || !wbKnown(edits) || !wbFoldsOver(f, edits) {
 			return nil, Fold{}, false, false
 		}
 		wb, ok := newWBFold(f.wbMul, edits.EffectiveWBMul(f.camMul, f.camXYZ), f.rgbCam, edits.Highlight,
@@ -364,10 +376,14 @@ func (c *Cache) decodeFull(ctx context.Context, proc *libraw.Processor, photo st
 		return nil, err
 	}
 	c.fullDecodes.Add(1)
+	var preserve float64
+	if edits != nil {
+		preserve = edits.ExpPreserve
+	}
 	return &fullDecode{
 		cacheKey: photo.CacheKey, key: fullDecodeKey(edits), noExpKey: fullDecodeKeyNoExp(edits),
 		noWBKey: fullDecodeKeyNoWB(edits), baked: edits.BakedExpEV(), wbCompEV: wbCompEV, rgba: rgba,
-		wbMul: edits.EffectiveWBMul(camMul, camXYZ), camMul: camMul, camXYZ: camXYZ, rgbCam: proc.RgbCam(),
+		wbMul: edits.EffectiveWBMul(camMul, camXYZ), preserve: preserve, camMul: camMul, camXYZ: camXYZ, rgbCam: proc.RgbCam(),
 		wbFolds: wbKnown(edits) && !decodeClipped(rgba),
 	}, nil
 }

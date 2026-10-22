@@ -117,10 +117,7 @@ func TestWBFoldNearTheDecode(t *testing.T) {
 		// stops into 8-bit pixels is off by 3.1 levels on average already,
 		// with no change of balance (the exposure fold windows had before).
 		{func(e *edit.Params) { e.WBMode, e.WBKelvin, e.ExpEV = edit.WBKelvin, 2500, 1.5 }, 2.5, 4.5, 8},
-		// Highlight recovery clips only the channel with the largest
-		// multiplier at the balance: the exposure shift's clip whitens the
-		// rest. And a darker brightness never reaches the output's clip.
-		{func(e *edit.Params) { e.WBMode, e.WBKelvin, e.ExpEV, e.Highlight = edit.WBKelvin, 2500, 1.5, 1 }, 2.5, 4.5, 8},
+		// A darker brightness never reaches the output's clip.
 		{func(e *edit.Params) { e.WBMode, e.WBKelvin, e.Bright = edit.WBKelvin, 3200, 0.5 }, 1, 3, 6},
 	} {
 		e := start
