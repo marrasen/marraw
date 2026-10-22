@@ -18,5 +18,7 @@ describe('thumbnail cache-buster', () => {
     // Edited levels never come from the camera: their URLs stay.
     expect(imgUrl(edited, '256')).toBe(editedBefore);
     expect(imgUrl({ ...base, id: 8 }, '256')).not.toContain('s=');
+    // Nor do the larger levels: a 2048 already held is not asked for again.
+    expect(new URL(imgUrl(base, '2048')).searchParams.has('s')).toBe(false);
   });
 });

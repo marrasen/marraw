@@ -85,9 +85,10 @@ export function imgUrl(
   if (b) params.set('b', String(b));
   // s: per-photo, per-session cache-buster (server-ignored). Advances when
   // marraw's render replaces the unedited levels the camera's JPEG gave —
-  // see getThumbBust. Edited levels never come from the camera.
+  // see getThumbBust. Only unedited levels of 1024 and below ever come from
+  // the camera.
   const s = getThumbBust(p.id);
-  if (s && !params.has('e')) params.set('s', String(s));
+  if (s && !params.has('e') && (level === '1024' || level === '512' || level === '256')) params.set('s', String(s));
   if (backend.token) params.set('t', backend.token);
   return `${backend.http}/img/${p.id}/${level}?${params}`;
 }

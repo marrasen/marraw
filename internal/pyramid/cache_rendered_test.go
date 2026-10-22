@@ -8,6 +8,7 @@ import (
 
 	"github.com/marrasen/marraw/internal/edit"
 	"github.com/marrasen/marraw/internal/jpegturbo"
+	"github.com/marrasen/marraw/internal/store"
 )
 
 // An unedited RAW render writes over the levels the camera's embedded
@@ -100,5 +101,60 @@ func TestIsCameraJPEG(t *testing.T) {
 		if IsCameraJPEG(b) {
 			t.Errorf("%x reads as marked", b)
 		}
+	}
+}
+
+// A camera write never replaces a file, a render's own; any other write
+// replaces a camera-drawn one, over or not, and says so.
+func TestCameraFileGivesWay(t *testing.T) {
+	path := t.TempDir() + "/x.jpg"
+	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	if _, err := writeJPEGFileTagged(path, img, 80, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := writeJPEGFileTagged(path, img, 80, false, true); err != nil || r || isCameraFile(path) {
+		t.Fatalf("a camera write over a render: replaced=%v, %v; camera now %v", r, err, isCameraFile(path))
+	}
+	os.Remove(path)
+	if _, err := writeJPEGFileTagged(path, img, 80, false, true); err != nil || !isCameraFile(path) {
+		t.Fatalf("camera write: %v", err)
+	}
+	if r, err := writeJPEGFileTagged(path, img, 80, false, true); err != nil || r || !isCameraFile(path) {
+		t.Fatalf("a camera write over a camera file: replaced=%v, %v", r, err)
+	}
+	if r, err := writeJPEGFileTagged(path, img, 80, false, false); err != nil || !r || isCameraFile(path) {
+		t.Fatalf("a render over a camera file: replaced=%v, %v; camera now %v", r, err, isCameraFile(path))
+	}
+	if r, _ := writeJPEGFileTagged(path, img, 80, false, false); r {
+		t.Error("a render over a render reported a camera file replaced")
+	}
+}
+
+// The unedited look settling (neutral params) draws the photo's 2048, and
+// with it nothing else renders the photo: its camera-drawn small levels
+// give way to that render then, and clients hear of it.
+func TestBasePreviewReplacesCameraLevels(t *testing.T) {
+	c, err := New(t.TempDir(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var told []int64
+	c.OnBaseRendered = func(id int64) { told = append(told, id) }
+	photo := store.Photo{ID: 9, CacheKey: "key"}
+	if err := c.writeCameraLevels(image.NewRGBA(image.Rect(0, 0, 1200, 800)), "key", edit.BaseHash, 1024, 512, 256); err != nil {
+		t.Fatal(err)
+	}
+	src := image.NewRGBA(image.Rect(0, 0, 3000, 2000))
+	if err := c.WritePreview(src, photo, edit.BaseHash, 1, &edit.Params{}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if c.cameraLevels("key") {
+		t.Error("camera-drawn levels left after the unedited look settled")
+	}
+	if len(told) != 1 || told[0] != 9 {
+		t.Errorf("OnBaseRendered calls = %v, want [9]", told)
+	}
+	if err := c.WritePreview(src, photo, edit.BaseHash, 1, &edit.Params{}, 0); err != nil || len(told) != 1 {
+		t.Errorf("settling again: %v, calls %v; want no new call", err, told)
 	}
 }

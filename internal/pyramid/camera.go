@@ -5,6 +5,8 @@ import (
 	"image"
 	"os"
 	"strconv"
+
+	"github.com/marrasen/marraw/internal/edit"
 )
 
 // A small level drawn from the camera's embedded JPEG (tryThumbRoute,
@@ -81,6 +83,17 @@ func isCameraFile(path string) bool {
 	return IsCameraJPEG(head[:n])
 }
 
+// cameraLevels reports whether any of the unedited small levels of
+// cacheKey is camera-drawn.
+func (c *Cache) cameraLevels(cacheKey string) bool {
+	for _, l := range []string{"1024", "512", "256"} {
+		if isCameraFile(c.PathFor(cacheKey, l, edit.BaseHash)) {
+			return true
+		}
+	}
+	return false
+}
+
 // writeCameraLevels is WriteLevels for levels drawn from the camera's
 // embedded JPEG: each carries the camera comment.
 func (c *Cache) writeCameraLevels(src *image.RGBA, cacheKey, editHash string, levels ...int) error {
@@ -91,7 +104,7 @@ func (c *Cache) writeCameraLevels(src *image.RGBA, cacheKey, editHash string, le
 		if l >= 1024 {
 			q = 85
 		}
-		if err := writeJPEGFileTagged(c.PathFor(cacheKey, strconv.Itoa(l), editHash), cur, q, false, true); err != nil {
+		if _, err := writeJPEGFileTagged(c.PathFor(cacheKey, strconv.Itoa(l), editHash), cur, q, false, true); err != nil {
 			return err
 		}
 	}
