@@ -50,46 +50,47 @@ func ApplyBW(img *image.RGBA, e *edit.Params) {
 	hR, hG, hB := tintDir(e.SplitHighlightHue, e.SplitHighlightAmt)
 	split := e.SplitShadowAmt != 0 || e.SplitHighlightAmt != 0
 
-	pix := img.Pix
-	for i := 0; i+3 < len(pix); i += 4 {
-		r := int32(pix[i])
-		g := int32(pix[i+1])
-		b := int32(pix[i+2])
-		gray := (299*r + 587*g + 114*b) / 1000
+	pixBands(img, func(pix []uint8) {
+		for i := 0; i+3 < len(pix); i += 4 {
+			r := int32(pix[i])
+			g := int32(pix[i+1])
+			b := int32(pix[i+2])
+			gray := (299*r + 587*g + 114*b) / 1000
 
-		mx := max(r, g, b)
-		c := mx - min(r, g, b)
-		if c != 0 {
-			// Hue in degrees, integer six-sector form; the sub-degree error
-			// is worth less than the float round trip here.
-			var h int32
-			switch mx {
-			case r:
-				h = 60 * (g - b) / c
-			case g:
-				h = 60*(b-r)/c + 120
-			default:
-				h = 60*(r-g)/c + 240
+			mx := max(r, g, b)
+			c := mx - min(r, g, b)
+			if c != 0 {
+				// Hue in degrees, integer six-sector form; the sub-degree error
+				// is worth less than the float round trip here.
+				var h int32
+				switch mx {
+				case r:
+					h = 60 * (g - b) / c
+				case g:
+					h = 60*(b-r)/c + 120
+				default:
+					h = 60*(r-g)/c + 240
+				}
+				if h < 0 {
+					h += 360
+				}
+				gray = clamp8i(gray + wQ[min(h, 359)]*c>>8)
 			}
-			if h < 0 {
-				h += 360
-			}
-			gray = clamp8i(gray + wQ[min(h, 359)]*c>>8)
-		}
 
-		if split {
-			// Clamp before weighting: an out-of-range gray squared into the
-			// shadow/highlight weights would tint by the wrong mix.
-			ws := (255 - gray) * (255 - gray) >> 8
-			wh := gray * gray >> 8
-			pix[i] = clamp8(gray + (sR*ws+hR*wh)>>8)
-			pix[i+1] = clamp8(gray + (sG*ws+hG*wh)>>8)
-			pix[i+2] = clamp8(gray + (sB*ws+hB*wh)>>8)
-			continue
+			if split {
+				// Clamp before weighting: an out-of-range gray squared into the
+				// shadow/highlight weights would tint by the wrong mix.
+				ws := (255 - gray) * (255 - gray) >> 8
+				wh := gray * gray >> 8
+				pix[i] = clamp8(gray + (sR*ws+hR*wh)>>8)
+				pix[i+1] = clamp8(gray + (sG*ws+hG*wh)>>8)
+				pix[i+2] = clamp8(gray + (sB*ws+hB*wh)>>8)
+				continue
+			}
+			v := uint8(gray)
+			pix[i], pix[i+1], pix[i+2] = v, v, v
 		}
-		v := uint8(gray)
-		pix[i], pix[i+1], pix[i+2] = v, v, v
-	}
+	})
 }
 
 // clamp8i is clamp8 without the narrowing, for values that stay in the

@@ -28,6 +28,14 @@ import (
 // region from; it is nil when the edit has none or they are unavailable, in
 // which case those masks composite nothing.
 func ApplyHeal(img *image.RGBA, e *edit.Params, ai AIMapSet, fills FillSet) {
+	applyHealIn(img, wholeRegion(img), e, ai, fills)
+}
+
+// applyHealIn is ApplyHeal for a buffer that is the part rg of the output.
+// The buffer must hold every pixel a spot that lands in it reads (see
+// healParts): w and h below bound what the spots write and read, while
+// where a source may sit is bounded by the whole output.
+func applyHealIn(img *image.RGBA, rg region, e *edit.Params, ai AIMapSet, fills FillSet) {
 	if !e.HasSpots() && !e.HasMaskFills() {
 		return
 	}
@@ -36,7 +44,7 @@ func ApplyHeal(img *image.RGBA, e *edit.Params, ai AIMapSet, fills FillSet) {
 	if w == 0 || h == 0 {
 		return
 	}
-	f := newMaskFrame(w, h, e)
+	f := newMaskFrameIn(rg, e)
 	long := math.Max(f.frameW, f.frameH)
 	applyMaskFills(img, w, h, &f, e, ai, fills)
 	for i := range e.Spots {
@@ -304,12 +312,14 @@ func applyHealSpot(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edi
 	// Keep the sampled source disc on the frame; the ±radPx clamp guarantees
 	// the clone reads never fall outside (sampleBilinear would return black).
 	// A frame smaller than the disc is degenerate — the sub-pixel guard above
-	// already rejects the only sizes where that bites.
-	if float64(w) > 2*radPx {
-		scx = clampF(scx, radPx, float64(w)-radPx)
+	// already rejects the only sizes where that bites. The clamp is in the
+	// whole output's coordinates: moving between those and the buffer's is
+	// exact (whole numbers), moving the bound would round.
+	if float64(f.outW) > 2*radPx {
+		scx = clampF(scx+f.bx, radPx, float64(f.outW)-radPx) - f.bx
 	}
-	if float64(h) > 2*radPx {
-		scy = clampF(scy, radPx, float64(h)-radPx)
+	if float64(f.outH) > 2*radPx {
+		scy = clampF(scy+f.by, radPx, float64(f.outH)-radPx) - f.by
 	}
 	offX, offY := scx-dcx, scy-dcy
 
@@ -324,10 +334,12 @@ func applyHealSpot(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edi
 	}
 	src := copyRGBA(img, srcRect)
 	srcW, srcH := src.Bounds().Dx(), src.Bounds().Dy()
-	// srcAt samples the snapshot at an output-space coordinate.
+	// srcAt samples the snapshot at a coordinate of the whole output (the
+	// spot's offset added there, as the whole render adds it, so a window
+	// rounds the same).
 	srcAt := func(ox, oy float64) (r, g, b float64, ok bool) {
-		lx := ox - float64(ir.Min.X)
-		ly := oy - float64(ir.Min.Y)
+		lx := ox - (float64(ir.Min.X) + f.bx)
+		ly := oy - (float64(ir.Min.Y) + f.by)
 		if lx < 0 || ly < 0 || lx > float64(srcW-1) || ly > float64(srcH-1) {
 			return 0, 0, 0, false
 		}
@@ -361,7 +373,7 @@ func applyHealSpot(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edi
 			o := img.PixOffset(ix, iy)
 			return float64(img.Pix[o]), float64(img.Pix[o+1]), float64(img.Pix[o+2]), true
 		})
-		sPlane = fitAnnulusPlanes(scx, scy, radPx, srcAt)
+		sPlane = fitAnnulusPlanes(scx+f.bx, scy+f.by, radPx, srcAt)
 	}
 
 	invR2 := 1 / (radPx * radPx)
@@ -383,7 +395,7 @@ func applyHealSpot(img *image.RGBA, w, h int, f *maskFrame, long float64, s *edi
 			if wq == 0 {
 				continue
 			}
-			sr, sg, sb, ok := srcAt(float64(x)+offX, float64(y)+offY)
+			sr, sg, sb, ok := srcAt(float64(x)+f.bx+offX, float64(y)+f.by+offY)
 			if !ok {
 				continue
 			}
@@ -439,9 +451,11 @@ func applyHealStroke(img *image.RGBA, w, h int, f *maskFrame, long float64, s *e
 	offX, offY := scx-dcx, scy-dcy
 	// Keep the source region on the frame (the circle's source-center clamp):
 	// the covered box translated by the offset must fit inside the image. The
-	// box is clipped to the image, so the clamp range is never empty.
-	offX = clampF(offX, -float64(x0), float64(w)-float64(x1))
-	offY = clampF(offY, -float64(y0), float64(h)-float64(y1))
+	// box is clipped to the image, so the clamp range is never empty. The
+	// image is the whole output; in a window the box lies inside the buffer
+	// (healParts), so x0..x1 is the box clipped to the output too.
+	offX = clampF(offX, -f.bx-float64(x0), float64(f.outW)-f.bx-float64(x1))
+	offY = clampF(offY, -f.by-float64(y0), float64(f.outH)-f.by-float64(y1))
 
 	// The boundary band's width tracks the brush size: the circle fits over
 	// [1.0, 1.35]·radius, so use 0.35 of the largest stroke radius.
@@ -468,8 +482,8 @@ func applyHealStroke(img *image.RGBA, w, h int, f *maskFrame, long float64, s *e
 	src := copyRGBA(img, srcRect)
 	srcW, srcH := src.Bounds().Dx(), src.Bounds().Dy()
 	srcAt := func(ox, oy float64) (r, g, b float64, ok bool) {
-		lx := ox - float64(ir.Min.X)
-		ly := oy - float64(ir.Min.Y)
+		lx := ox - (float64(ir.Min.X) + f.bx)
+		ly := oy - (float64(ir.Min.Y) + f.by)
 		if lx < 0 || ly < 0 || lx > float64(srcW-1) || ly > float64(srcH-1) {
 			return 0, 0, 0, false
 		}
@@ -510,7 +524,7 @@ func applyHealStroke(img *image.RGBA, w, h int, f *maskFrame, long float64, s *e
 			if wq == 0 {
 				continue
 			}
-			sr, sg, sb, ok := srcAt(float64(x)+offX, float64(y)+offY)
+			sr, sg, sb, ok := srcAt(float64(x)+f.bx+offX, float64(y)+f.by+offY)
 			if !ok {
 				continue
 			}
@@ -634,7 +648,7 @@ func fitStrokeBandPlanes(
 			v := (oy - bcy) / scale
 			r8, g8, b8, _ := sampleBilinear(img, ox, oy)
 			dAcc.add(u, v, float64(r8), float64(g8), float64(b8))
-			if sr, sg, sb, ok := srcAt(ox+offX, oy+offY); ok {
+			if sr, sg, sb, ok := srcAt(ox+f.bx+offX, oy+f.by+offY); ok {
 				sAcc.add(u, v, sr, sg, sb)
 			}
 		}

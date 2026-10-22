@@ -45,6 +45,13 @@ import (
 // the live image, so an earlier heavy blur degrades a later AI mask's edge
 // snapping — rare enough in practice to document rather than work around.
 func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) []uint8 {
+	return applyMasksIn(img, wholeRegion(img), e, ai)
+}
+
+// applyMasksIn is ApplyMasks for a buffer that is the part rg of the
+// output. RenderWindow never hands it a mask with spatial effects: those
+// gather over the whole frame.
+func applyMasksIn(img *image.RGBA, rg region, e *edit.Params, ai AIMapSet) []uint8 {
 	if !e.HasMasks() {
 		return nil
 	}
@@ -53,7 +60,7 @@ func ApplyMasks(img *image.RGBA, e *edit.Params, ai AIMapSet) []uint8 {
 	if w == 0 || h == 0 {
 		return nil
 	}
-	f := newMaskFrame(w, h, e)
+	f := newMaskFrameIn(rg, e)
 	// Range masks select by the developed pixel's own value. Masks apply in
 	// order and each mutates img, so a naive range mask would "see" earlier
 	// masks' adjustments. Snapshot the post-Look image once (only when a live
@@ -211,11 +218,23 @@ type maskFrame struct {
 	ox0, oy0       float64 // crop origin in frame pixels
 	fcx, fcy       float64 // frame center (straighten pivot)
 	cos, sin       float64 // rotation by -CropAngle (output → frame)
+	// The buffer's place in the full output (see region): its pixel (0, 0)
+	// is the output's pixel (bx, by), and the output is outW×outH. Zero
+	// offset for a buffer that is the whole output.
+	bx, by     float64
+	outW, outH int
 }
 
 func newMaskFrame(outW, outH int, e *edit.Params) maskFrame {
+	return newMaskFrameIn(region{outW: outW, outH: outH}, e)
+}
+
+// newMaskFrameIn is newMaskFrame for a buffer that is the part rg of the
+// output.
+func newMaskFrameIn(rg region, e *edit.Params) maskFrame {
+	outW, outH := rg.outW, rg.outH
 	fw, fh := float64(outW), float64(outH)
-	var f maskFrame
+	f := maskFrame{bx: float64(rg.off.X), by: float64(rg.off.Y), outW: outW, outH: outH}
 	if e.HasCrop() {
 		fw = float64(outW) / e.CropW
 		fh = float64(outH) / e.CropH
@@ -231,10 +250,11 @@ func newMaskFrame(outW, outH int, e *edit.Params) maskFrame {
 
 // framePoint returns the frame-pixel coordinates of an output pixel center.
 // The map is affine: stepping x by one output pixel steps the frame point by
-// (cos, sin), which the evaluators use to walk rows incrementally.
+// (cos, sin), which the evaluators use to reach each pixel of a row from the
+// row's point at the frame's column 0.
 func (f *maskFrame) framePoint(x, y float64) (fx, fy float64) {
-	px := f.ox0 + x + 0.5 - f.fcx
-	py := f.oy0 + y + 0.5 - f.fcy
+	px := f.ox0 + (x + f.bx) + 0.5 - f.fcx
+	py := f.oy0 + (y + f.by) + 0.5 - f.fcy
 	return f.fcx + px*f.cos - py*f.sin, f.fcy + px*f.sin + py*f.cos
 }
 
@@ -245,7 +265,7 @@ func (f *maskFrame) outputPoint(fx, fy float64) (x, y float64) {
 	// Transpose of the framePoint rotation.
 	px := dx*f.cos + dy*f.sin
 	py := -dx*f.sin + dy*f.cos
-	return px + f.fcx - f.ox0 - 0.5, py + f.fcy - f.oy0 - 0.5
+	return px + f.fcx - f.ox0 - 0.5 - f.bx, py + f.fcy - f.oy0 - 0.5 - f.by
 }
 
 // maskEvaluator fills one output row with Q8 weights (0..256) and returns the
@@ -516,24 +536,34 @@ func (ev *radialEval) weightRow(y int, w []uint16) (int, int) {
 			s := math.Sqrt(disc)
 			lo := (-b - s) / (2 * a)
 			hi := (-b + s) / (2 * a)
-			x0 = max(0, int(math.Floor(lo)))
-			x1 = min(width, int(math.Ceil(hi))+1)
+			// A pixel of slack each side: the span is solved from this
+			// row's start, the weights below from each pixel's own point.
+			x0 = max(0, int(math.Floor(lo))-1)
+			x1 = min(width, int(math.Ceil(hi))+2)
 			if x0 >= x1 {
 				return 0, 0
 			}
 		}
 	}
-	u += du * float64(x0)
-	v += dv * float64(x0)
+	// Each pixel from the row's point at the frame's own column 0 and its
+	// absolute column, not stepped from this buffer's first pixel: a
+	// window's rows start elsewhere than the whole frame's, and a stepped
+	// sum would round differently there (RenderWindow). The same operations
+	// on the same inputs either way, so the two agree by construction.
+	gx, gy := ev.f.framePoint(-ev.f.bx, float64(y))
+	gdx, gdy := gx-ev.cx, gy-ev.cy
+	u0 := (gdx*ev.ca + gdy*ev.sa) / ev.rx
+	v0 := (-gdx*ev.sa + gdy*ev.ca) / ev.ry
 	for x := x0; x < x1; x++ {
+		X := float64(x) + ev.f.bx
+		u := u0 + X*du
+		v := v0 + X*dv
 		q := u*u + v*v
 		if q >= 1 {
 			w[x] = ev.outside
 		} else {
 			w[x] = ev.wlut[int(q*(weightLUTSize-1))]
 		}
-		u += du
-		v += dv
 	}
 	return x0, x1
 }
@@ -596,17 +626,23 @@ func (ev *linearEval) weightRow(y int, w []uint16) (int, int) {
 			bound = -t / dt
 			keepBelow = dt < 0
 		}
+		// A pixel of slack: the bound is solved from this row's start, the
+		// weights below from each pixel's own point.
 		if keepBelow {
-			x1 = min(width, int(math.Ceil(bound))+1)
+			x1 = min(width, int(math.Ceil(bound))+2)
 		} else {
-			x0 = max(0, int(math.Floor(bound)))
+			x0 = max(0, int(math.Floor(bound))-1)
 		}
 		if x0 >= x1 {
 			return 0, 0
 		}
 	}
-	t += dt * float64(x0)
+	// Each pixel from the row's point at column 0 and its absolute column
+	// (see radialEval.weightRow).
+	gx, gy := ev.f.framePoint(-ev.f.bx, float64(y))
+	t0 := (gx-ev.ax)*ev.ux + (gy-ev.ay)*ev.uy
 	for x := x0; x < x1; x++ {
+		t := t0 + (float64(x)+ev.f.bx)*dt
 		switch {
 		case t <= 0:
 			w[x] = ev.wlut[0]
@@ -615,7 +651,6 @@ func (ev *linearEval) weightRow(y int, w []uint16) (int, int) {
 		default:
 			w[x] = ev.wlut[int(t*(weightLUTSize-1))]
 		}
-		t += dt
 	}
 	return x0, x1
 }
@@ -797,23 +832,21 @@ func (ev *brushEval) weightRow(y int, w []uint16) (int, int) {
 	if ev.invert {
 		x0, x1 = 0, width
 	}
-	// Plane coordinates are affine along the row, like the frame point.
+	// Each pixel from the row's point at column 0 and its absolute column
+	// (see radialEval.weightRow).
 	sx := float64(ev.pw) / ev.f.frameW
 	sy := float64(ev.ph) / ev.f.frameH
-	fx, fy := ev.f.framePoint(float64(x0), float64(y))
-	px := fx*sx - 0.5
-	py := fy*sy - 0.5
-	dpx := ev.f.cos * sx
-	dpy := ev.f.sin * sy
+	gx, gy := ev.f.framePoint(-ev.f.bx, float64(y))
+	px0, py0 := gx*sx-0.5, gy*sy-0.5
+	dpx, dpy := ev.f.cos*sx, ev.f.sin*sy
 	for x := x0; x < x1; x++ {
-		cov := ev.samplePlane(px, py)
+		X := float64(x) + ev.f.bx
+		cov := ev.samplePlane(px0+X*dpx, py0+X*dpy)
 		if ev.invert {
 			w[x] = 256 - ev.covToW[cov]
 		} else {
 			w[x] = ev.covToW[cov]
 		}
-		px += dpx
-		py += dpy
 	}
 	if ev.invert {
 		// Outside the plane-sampled span the coverage is zero → weight 256.

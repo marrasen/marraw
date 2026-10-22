@@ -58,72 +58,73 @@ func applyHSL(img *image.RGBA, e *edit.Params) {
 		dhT[h] *= hslMaxHueShift
 	}
 
-	pix := img.Pix
-	for i := 0; i+3 < len(pix); i += 4 {
-		r := float64(pix[i])
-		g := float64(pix[i+1])
-		b := float64(pix[i+2])
-		mx := math.Max(r, math.Max(g, b))
-		mn := math.Min(r, math.Min(g, b))
-		c := mx - mn
-		if c < 4 {
-			continue // effectively neutral: no band membership
-		}
+	pixBands(img, func(pix []uint8) {
+		for i := 0; i+3 < len(pix); i += 4 {
+			r := float64(pix[i])
+			g := float64(pix[i+1])
+			b := float64(pix[i+2])
+			mx := math.Max(r, math.Max(g, b))
+			mn := math.Min(r, math.Min(g, b))
+			c := mx - mn
+			if c < 4 {
+				continue // effectively neutral: no band membership
+			}
 
-		var h float64
-		switch mx {
-		case r:
-			h = 60 * ((g - b) / c)
-		case g:
-			h = 60 * ((b-r)/c + 2)
-		default:
-			h = 60 * ((r-g)/c + 4)
-		}
-		if h < 0 {
-			h += 360
-		}
-		hi := min(int(h), 359)
-		dh, ds, dl := dhT[hi], dsT[hi], dlT[hi]
-		if dh == 0 && ds == 0 && dl == 0 {
-			continue
-		}
-		// Chroma gate: fades the adjustment in over c 2..24 so near-neutrals
-		// stay put instead of flipping hue on sensor noise. Short on purpose —
-		// real photos average chroma well under 20, and a longer ramp made the
-		// mixer feel weak on exactly the ordinary colors it should grab.
-		if gate := (c - 2) / 22; gate < 1 {
-			dh *= gate
-			ds *= gate
-			dl *= gate
-		}
+			var h float64
+			switch mx {
+			case r:
+				h = 60 * ((g - b) / c)
+			case g:
+				h = 60 * ((b-r)/c + 2)
+			default:
+				h = 60 * ((r-g)/c + 4)
+			}
+			if h < 0 {
+				h += 360
+			}
+			hi := min(int(h), 359)
+			dh, ds, dl := dhT[hi], dsT[hi], dlT[hi]
+			if dh == 0 && ds == 0 && dl == 0 {
+				continue
+			}
+			// Chroma gate: fades the adjustment in over c 2..24 so near-neutrals
+			// stay put instead of flipping hue on sensor noise. Short on purpose —
+			// real photos average chroma well under 20, and a longer ramp made the
+			// mixer feel weak on exactly the ordinary colors it should grab.
+			if gate := (c - 2) / 22; gate < 1 {
+				dh *= gate
+				ds *= gate
+				dl *= gate
+			}
 
-		v := mx / 255
-		s := c / mx
-		h = math.Mod(h+dh+360, 360)
-		s = math.Min(1, math.Max(0, s*(1+ds)))
-		v = math.Min(1, math.Max(0, v*(1+0.6*dl)))
+			v := mx / 255
+			s := c / mx
+			h = math.Mod(h+dh+360, 360)
+			s = math.Min(1, math.Max(0, s*(1+ds)))
+			v = math.Min(1, math.Max(0, v*(1+0.6*dl)))
 
-		// HSV → RGB.
-		cc := v * s
-		x := cc * (1 - math.Abs(math.Mod(h/60, 2)-1))
-		m := v - cc
-		var rr, gg, bb float64
-		switch {
-		case h < 60:
-			rr, gg, bb = cc, x, 0
-		case h < 120:
-			rr, gg, bb = x, cc, 0
-		case h < 180:
-			rr, gg, bb = 0, cc, x
-		case h < 240:
-			rr, gg, bb = 0, x, cc
-		case h < 300:
-			rr, gg, bb = x, 0, cc
-		default:
-			rr, gg, bb = cc, 0, x
+			// HSV → RGB.
+			cc := v * s
+			x := cc * (1 - math.Abs(math.Mod(h/60, 2)-1))
+			m := v - cc
+			var rr, gg, bb float64
+			switch {
+			case h < 60:
+				rr, gg, bb = cc, x, 0
+			case h < 120:
+				rr, gg, bb = x, cc, 0
+			case h < 180:
+				rr, gg, bb = 0, cc, x
+			case h < 240:
+				rr, gg, bb = 0, x, cc
+			case h < 300:
+				rr, gg, bb = x, 0, cc
+			default:
+				rr, gg, bb = cc, 0, x
+			}
+			pix[i] = uint8((rr+m)*255 + 0.5)
+			pix[i+1] = uint8((gg+m)*255 + 0.5)
+			pix[i+2] = uint8((bb+m)*255 + 0.5)
 		}
-		pix[i] = uint8((rr+m)*255 + 0.5)
-		pix[i+1] = uint8((gg+m)*255 + 0.5)
-		pix[i+2] = uint8((bb+m)*255 + 0.5)
-	}
+	})
 }

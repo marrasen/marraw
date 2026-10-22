@@ -7,6 +7,7 @@ import (
 	"errors"
 	"image"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -468,5 +469,84 @@ func TestRenderDoesNotAsk(t *testing.T) {
 	}
 	if f.cache.fullEntry != nil {
 		t.Error("a render of a state the editor is not on was kept")
+	}
+}
+
+// TestKeptForWindow: a window renders from the kept decode under the same
+// LibRaw inputs, or the same but for exposure, which it folds in.
+func TestKeptForWindow(t *testing.T) {
+	f := newFullTestCatalog(t)
+	f.open(0)
+	start := &edit.Params{Contrast: 0.1, ExpEV: 0.5}
+	start.Normalize()
+	p := f.photo(0)
+	if err := f.cache.WarmFull(t.Context(), p, start); err != nil {
+		t.Fatal(err)
+	}
+	src, base, exact, ok := f.cache.KeptForWindow(p, start)
+	if !ok || !exact || src == nil {
+		t.Fatalf("own state: ok %v exact %v", ok, exact)
+	}
+	look := *start
+	look.Contrast, look.Clarity = 0.5, 0.3
+	if _, ev, exact, ok := f.cache.KeptForWindow(p, &look); !ok || !exact || ev != base {
+		t.Errorf("look edit: ok %v exact %v expEV %v, want %v", ok, exact, ev, base)
+	}
+	brighter := *start
+	brighter.ExpEV = 1.2
+	if _, ev, exact, ok := f.cache.KeptForWindow(p, &brighter); !ok || exact || math.Abs(ev-base-0.7) > 1e-9 {
+		t.Errorf("exposure edit: ok %v exact %v expEV %v, want %v", ok, exact, ev, base+0.7)
+	}
+	warmer := *start
+	warmer.WBMode, warmer.WBKelvin = edit.WBKelvin, 7000
+	warmer.Normalize()
+	if _, _, _, ok := f.cache.KeptForWindow(p, &warmer); ok {
+		t.Error("a white balance edit renders from the kept decode")
+	}
+	if _, _, _, ok := f.cache.KeptForWindow(f.photo(1), start); ok {
+		t.Error("another photo renders from the kept decode")
+	}
+	if _, _, _, ok := f.cache.KeptForWindow(p, nil); ok {
+		t.Error("the base look renders from the kept decode")
+	}
+}
+
+// TestEditorWantsWindow: the state the editor settled on, its decode not
+// kept yet, is one a window waits for; WarmFull then keeps it.
+func TestEditorWantsWindow(t *testing.T) {
+	f := newFullTestCatalog(t)
+	f.open(0)
+	p := f.photo(0)
+	start := &edit.Params{Contrast: 0.1}
+	start.Normalize()
+	if err := f.cache.WarmFull(t.Context(), p, start); err != nil {
+		t.Fatal(err)
+	}
+	warmer := *start
+	warmer.WBMode, warmer.WBKelvin = edit.WBKelvin, 7000
+	warmer.Normalize()
+	if f.cache.EditorWants(p, &warmer) {
+		t.Error("a drag frame's state is wanted")
+	}
+	f.cache.WantFull(p, &warmer)
+	if !f.cache.EditorWants(p, &warmer) {
+		t.Fatal("the settled state is not wanted")
+	}
+	drag := warmer
+	drag.Contrast = 0.37
+	if f.cache.EditorWants(p, &drag) {
+		t.Error("a look drag sharing the settled state's decode is wanted")
+	}
+	if _, _, _, ok := f.cache.KeptForWindow(p, &warmer); ok {
+		t.Fatal("kept before it was decoded")
+	}
+	if err := f.cache.WarmFull(t.Context(), p, &warmer); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, exact, ok := f.cache.KeptForWindow(p, &warmer); !ok || !exact {
+		t.Errorf("after the wait: ok %v exact %v", ok, exact)
+	}
+	if f.cache.EditorWants(f.photo(1), &warmer) {
+		t.Error("a photo not held is wanted")
 	}
 }

@@ -202,7 +202,7 @@ func nested(a, b string) bool {
 // regenerate instead of being served. Orphans age out via the janitor.
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
-const renderVersion = "r14"
+const renderVersion = "r15"
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
@@ -1000,12 +1000,13 @@ func ApplyExposureEV(img *image.RGBA, deltaEV float64, edits *edit.Params) {
 		}
 		lut[i] = uint8(math.Round(255 * enc(x)))
 	}
-	pix := img.Pix
-	for i := 0; i+3 < len(pix); i += 4 {
-		pix[i] = lut[pix[i]]
-		pix[i+1] = lut[pix[i+1]]
-		pix[i+2] = lut[pix[i+2]]
-	}
+	pixBands(img, func(pix []uint8) {
+		for i := 0; i+3 < len(pix); i += 4 {
+			pix[i] = lut[pix[i]]
+			pix[i+1] = lut[pix[i+1]]
+			pix[i+2] = lut[pix[i+2]]
+		}
+	})
 }
 
 // outputEncoding is the dcraw output-gamma power and toe slope the decode of
