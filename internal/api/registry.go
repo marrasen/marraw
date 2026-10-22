@@ -171,6 +171,18 @@ func (d *Deps) BroadcastAIMapsGenerated(photoID int64) {
 	}
 }
 
+// BroadcastBaseRendered tells every window that photoID's small unedited
+// levels are marraw's render now, no longer its camera's JPEG (see
+// BaseRenderedEvent).
+func (d *Deps) BroadcastBaseRendered(photoID int64) {
+	d.mu.RLock()
+	s := d.server
+	d.mu.RUnlock()
+	if s != nil {
+		s.Broadcast(BaseRenderedEvent{PhotoID: photoID})
+	}
+}
+
 // Connection identities, set by the auth hook in cmd/marrawd. They are what
 // lets a handler tell a window on this machine from a client somewhere else —
 // the whole approve-a-remote-connection flow rests on the distinction.
@@ -420,6 +432,7 @@ func NewRegistry(deps *Deps) (*aprot.Registry, *Library, *Edits, *Export) {
 	registry.RegisterPushEventFor(library, PhotoPatchEvent{})
 	registry.RegisterPushEventFor(library, RenderProgressEvent{})
 	registry.RegisterPushEventFor(edits, AIMapsGeneratedEvent{})
+	registry.RegisterPushEventFor(library, BaseRenderedEvent{})
 
 	// marraw is single-user localhost: any window may cancel any task. This
 	// also restores cancel rights after a reconnect, which the default

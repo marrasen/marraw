@@ -23,6 +23,10 @@ export interface AppSettings {
     sidecarWrites: boolean;
 }
 
+export interface BaseRenderedEvent {
+    photoId: number;
+}
+
 export interface CameraInfo {
     make: string;
     model: string;
@@ -529,6 +533,10 @@ export function onRenderProgressEvent(client: ApiClient, handler: PushHandler<Re
     return client.onPush<RenderProgressEvent>('RenderProgressEvent', handler);
 }
 
+export function onBaseRenderedEvent(client: ApiClient, handler: PushHandler<BaseRenderedEvent>): () => void {
+    return client.onPush<BaseRenderedEvent>('BaseRenderedEvent', handler);
+}
+
 // React Hooks for Library
 
 /**
@@ -935,4 +943,8 @@ export function usePhotoPatchEvent(options?: { maxEvents?: number }): UsePushRes
 
 export function useRenderProgressEvent(options?: { maxEvents?: number }): UsePushResult<RenderProgressEvent> {
     return usePushEvent(onRenderProgressEvent, options);
+}
+
+export function useBaseRenderedEvent(options?: { maxEvents?: number }): UsePushResult<BaseRenderedEvent> {
+    return usePushEvent(onBaseRenderedEvent, options);
 }

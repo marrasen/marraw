@@ -7,8 +7,9 @@ import ViewerApp from '@/views/ViewerApp';
 import { ThemeProvider } from '@/components/theme-provider.tsx';
 import { ApiClient, ApiClientProvider } from '@/api/client';
 import { onAIMapsGeneratedEvent } from '@/api/edits';
+import { onBaseRenderedEvent } from '@/api/library';
 import { backend } from '@/lib/backend';
-import { bumpImgBust } from '@/lib/imgCacheBust';
+import { bumpImgBust, bumpThumbBust } from '@/lib/imgCacheBust';
 import { migrateLocalSettings } from '@/lib/migrateLocalSettings';
 import { useConnectionRejected } from '@/stores/connectionStore';
 
@@ -34,6 +35,9 @@ client.connect();
 // event must land whatever folder or view is mounted, and bumpImgBust is
 // global (localStorage) state.
 onAIMapsGeneratedEvent(client, (ev) => bumpImgBust(ev.photoId));
+// marraw's render replaced a photo's thumbnails from its camera's JPEG,
+// under the same URLs: thumbnails on screen ask for them again.
+onBaseRenderedEvent(client, (ev) => bumpThumbBust(ev.photoId));
 
 // ?view=viewer is the pop-out photo window (Ctrl+N): the same bundle and the
 // same daemon connection, rendering only the photo surface. Everything below

@@ -1,36 +1,68 @@
 import { useEffect, useMemo } from 'react';
-import { useListPhotos, type Photo, type PhotoPatchEvent } from '@/api/library';
+import { useListPhotos, type Photo, type PhotoPatch, type PhotoPatchEvent } from '@/api/library';
 import { burstMap, isSoft, softThreshold, type BurstInfo } from '@/lib/bursts';
 import { hasClosedEyes } from '@/lib/eyes';
 import { resolveFeature } from '@/lib/features';
 import { useUIStore, type LibrarySort } from '@/stores/uiStore';
 
+// editSaves is the highest edit-save number applied per photo id. The server
+// numbers every edit save in the order it was written, but delivers patches
+// to each subscriber on its own goroutine, so two saves of one photo can
+// arrive in reverse order. An edit patch numbered below the newest one seen
+// for its photo is one that a later save overwrote: its edit fields are
+// skipped. Numbers are unique across folders and daemon runs, so one map
+// for the whole session will do. A full reload of the list carries no
+// numbers and is taken as is.
+const editSaves = new Map<number, number>();
+
+/** Forgets the edit-save numbers seen (tests: each starts from none). */
+export function resetEditSaves() {
+  editSaves.clear();
+}
+
 // photoPatchReducer folds server-pushed subscription patches (aprot
 // PatchSubscription — O(patch) on the wire) into the shared query snapshot.
 // Nil patch fields mean "unchanged", so mergeByKey's blind shallow merge
-// does not fit; merge non-null fields by hand.
+// does not fit; merge non-null fields by hand. Not pure: it reads and raises
+// the edit-save numbers seen (editSaves).
 export function photoPatchReducer(data: Photo[], patch: unknown): Photo[] {
   const ev = patch as PhotoPatchEvent;
   if (!ev || !Array.isArray(ev.patches)) return data;
-  const byId = new Map(ev.patches.map((p) => [p.id, p]));
+  const byId = new Map<number, PhotoPatch[]>();
+  for (const p of ev.patches) {
+    const list = byId.get(p.id);
+    if (list) list.push(p);
+    else byId.set(p.id, [p]);
+  }
   return data.map((photo) => {
-    const p = byId.get(photo.id);
-    if (!p) return photo;
+    const ps = byId.get(photo.id);
+    if (!ps) return photo;
     const next = { ...photo };
-    if (p.rating != null) next.rating = p.rating;
-    if (p.flag != null) next.flag = p.flag;
+    for (const p of ps) applyPatch(next, p);
+    return next;
+  });
+}
+
+function applyPatch(next: Photo, p: PhotoPatch) {
+  if (p.rating != null) next.rating = p.rating;
+  if (p.flag != null) next.flag = p.flag;
+  // The edit fields come together; an edit patch older than one applied
+  // already for this photo leaves them as they are.
+  const seen = editSaves.get(p.id);
+  const stale = p.editSave != null && seen != null && p.editSave < seen;
+  if (!stale) {
+    if (p.editSave != null) editSaves.set(p.id, p.editSave);
     if (p.editHash != null) next.editHash = p.editHash;
     // Geometry arrives as explicit values on every edit save (0 = reset), so
     // != null both applies and clears — the grid's cell aspect follows live.
     if (p.rotate != null) next.rotate = p.rotate;
     if (p.cropW != null) next.cropW = p.cropW;
     if (p.cropH != null) next.cropH = p.cropH;
-    if (p.subjectSharpness != null) next.subjectSharpness = p.subjectSharpness;
-    if (p.subjectAnalyzed != null) next.subjectAnalyzed = p.subjectAnalyzed;
-    if (p.eyesClosed != null) next.eyesClosed = p.eyesClosed;
-    if (p.eyesAnalyzed != null) next.eyesAnalyzed = p.eyesAnalyzed;
-    return next;
-  });
+  }
+  if (p.subjectSharpness != null) next.subjectSharpness = p.subjectSharpness;
+  if (p.subjectAnalyzed != null) next.subjectAnalyzed = p.subjectAnalyzed;
+  if (p.eyesClosed != null) next.eyesClosed = p.eyesClosed;
+  if (p.eyesAnalyzed != null) next.eyesAnalyzed = p.eyesAnalyzed;
 }
 
 export interface PhotoLists {
@@ -81,8 +113,8 @@ function sortPhotos(photos: Photo[], sort: LibrarySort): Photo[] {
 // cull filters, entirely client-side.
 // foldPatch is the single place a server patch lands: into the query snapshot,
 // and against the optimistic overrides it supersedes. Module-level so its
-// identity is stable across renders, and separate from photoPatchReducer so
-// that stays a pure function of (data, patch).
+// identity is stable across renders, and separate from photoPatchReducer,
+// which touches only the snapshot and the edit-save numbers seen.
 //
 // Both of the client's entry points for this — a live patch, and the replay of
 // patches that raced a (re)load — run outside render, so touching the store

@@ -366,6 +366,15 @@ type AIMapsGeneratedEvent struct {
 	PhotoID int64 `json:"photoId"`
 }
 
+// BaseRenderedEvent is broadcast when marraw's render of a photo's
+// unedited look wrote over the small levels its camera's embedded JPEG
+// gave. Their URLs stay the same, so a client showing one asks for it
+// again (bumpThumbBust). Broadcast like AIMapsGeneratedEvent, for the same
+// reason: the grid that shows the photo need not be its folder's.
+type BaseRenderedEvent struct {
+	PhotoID int64 `json:"photoId"`
+}
+
 // PhotoPatchEvent is broadcast when rating/flag/edits change so clients can
 // patch their in-memory photo list without a full re-query.
 type PhotoPatchEvent struct {

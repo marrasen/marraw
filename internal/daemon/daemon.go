@@ -286,6 +286,8 @@ func Start(ctx context.Context, o Options) (*Daemon, error) {
 	cache.OnPhotoChanged = scanner.OnPhotosChanged
 	// 1:1 render progress → the loupe's decoding indicator.
 	cache.Progress = deps.BroadcastRenderProgress
+	// A render over the camera's small levels → thumbnails asked for again.
+	cache.OnBaseRendered = deps.BroadcastBaseRendered
 
 	// After SetServer, so the watcher's refresh pushes reach subscribers. A
 	// watcher that will not start is not fatal — folders keep their manual

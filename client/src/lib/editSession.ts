@@ -23,7 +23,7 @@ import {
   wBPickFrame,
 } from '@/api/edits';
 import { bumpImgBust } from '@/lib/imgCacheBust';
-import type { Suggestion } from '@/api/edits';
+import type { EditSaved, Suggestion } from '@/api/edits';
 import type { AIKindType, Mask, Params, Spot } from '@/api/edit';
 import type { UserPreset } from '@/api/settings';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
@@ -56,9 +56,16 @@ import {
   schedulerIdle,
 } from '@/lib/previewScheduler';
 export { esFlushDraft } from '@/lib/previewScheduler';
-import { useEditSession, type AIPickKind, type EditSessionState, type HistorySnapshot, type SpotMode } from '@/lib/editSessionStore';
+import {
+  useEditSession,
+  type AIPickKind,
+  type Committed,
+  type EditSessionState,
+  type HistorySnapshot,
+  type SpotMode,
+} from '@/lib/editSessionStore';
 export { useEditSession } from '@/lib/editSessionStore';
-export type { AIPickKind, EditSessionState, HistorySnapshot, SpotMode } from '@/lib/editSessionStore';
+export type { AIPickKind, Committed, EditSessionState, HistorySnapshot, SpotMode } from '@/lib/editSessionStore';
 // The control catalog (NEUTRAL params, the ControlId union, CONTROL_SPECS,
 // CONTROL_ORDER) lives in lib/controlSpecs — a leaf module shared with the
 // toolbar dial catalog (lib/dials) — and is re-exported here so edit-state
@@ -179,6 +186,7 @@ export async function esLoad(client: ApiClient, photoId: number, applyIds: numbe
     photoId,
     applyIds,
     baseExpEV,
+    committed: s.committed?.photoId === photoId ? s.committed : null,
     hoverParams: null,
     lastPresetApply: null,
     draft: null,
@@ -836,20 +844,87 @@ function pushHistory(photoId: number, params: Params, label: string) {
   });
 }
 
+// Numbers the saves of the session's photo; never restarts (see Committed).
+let saveCounter = 0;
+
+// saveSent records a save of the session's photo, when ids includes it, in
+// `committed`, and returns the function to call when it is back with what
+// each of ids saved, in order (null: the save failed).
+function saveSent(ids: number[]): (results: EditSaved[] | null) => void {
+  const s = useEditSession.getState();
+  const photoId = s.photoId;
+  if (photoId == null || !ids.includes(photoId) || s.shown?.photoId !== photoId) return () => {};
+  const at = ids.indexOf(photoId);
+  const seq = ++saveCounter;
+  const prev = s.committed?.photoId === photoId ? s.committed : null;
+  setState({
+    committed: {
+      photoId,
+      seq,
+      firstSeq: prev?.firstSeq ?? seq,
+      out: (prev?.out ?? 0) + 1,
+      sentFrom: s.shown.hash,
+      real: prev?.real ?? null,
+    },
+  });
+  // The save is back: one fewer out, and, for the newest save, the hash it
+  // saved — unless it failed, or saved what it was sent from (it changed
+  // nothing): then the result before it stands.
+  return (results) =>
+    setState((st) => {
+      const c = st.committed;
+      if (c?.photoId !== photoId || seq < c.firstSeq) return {};
+      const out = Math.max(0, c.out - 1);
+      const hash = results?.[at]?.hash;
+      if (c.seq !== seq || hash == null || hash === c.sentFrom) return { committed: { ...c, out } };
+      return { committed: { ...c, out, real: hash } };
+    });
+}
+
 // persist saves the params to every target. The returned promise settles when
 // the save is done (or has failed and been reported) — never rejects — so
 // callers can sequence work that must not race the write.
 function persist(client: ApiClient, params: Params, ids: number[]): Promise<void> {
-  const p =
-    ids.length > 1
-      ? pasteEditParams(client, ids, params)
-      : setEditParams(client, ids[0], params);
-  return p.then(
-    () => undefined,
+  const back = saveSent(ids);
+  if (ids.length > 1) {
+    return pasteEditParams(client, ids, params).then(
+      (saved) => back(saved),
+      (err) => {
+        back(null);
+        toast.error(`Save failed: ${(err as Error).message}`);
+      },
+    );
+  }
+  return setEditParams(client, ids[0], params).then(
+    (saved) => back([saved]),
     (err) => {
+      back(null);
       toast.error(`Save failed: ${(err as Error).message}`);
     },
   );
+}
+
+/**
+ * Whether the photo, showing hash, shows the result of the user's newest own
+ * save of it with no save still out: its 1:1 render may skip the skimming
+ * dwell.
+ */
+export function savedHere(c: Committed | null, photoId: number, hash: string): boolean {
+  return c?.photoId === photoId && c.out === 0 && c.real === hash;
+}
+
+/** The loupe reports the hash it shows for a photo (see EditSessionState.shown). */
+export function esShownHash(photoId: number, hash: string) {
+  const s = useEditSession.getState().shown;
+  if (s?.photoId !== photoId || s.hash !== hash) setState({ shown: { photoId, hash } });
+}
+
+/**
+ * The tiles of photoId under hash are warm. When that is the newest own
+ * save's result, there is no more reason to skip the dwell.
+ */
+export function esCommittedWarm(photoId: number, hash: string) {
+  if (savedHere(useEditSession.getState().committed, photoId, hash)) setState({ committed: null });
 }
 
 // esCommit persists the draft (merged with an optional final patch) to every
@@ -1270,7 +1345,16 @@ export function esReset(client: ApiClient) {
   setState({ draft: { ...NEUTRAL }, lastPresetApply: null });
   esClearPreview();
   const ids = s.applyIds.length > 1 ? s.applyIds : [photoId];
+  // The user's own save too, counted like any other.
+  const back = saveSent(ids);
   resetEdits(client, ids)
+    .then(
+      (saved) => back(saved),
+      (err) => {
+        back(null);
+        throw err;
+      },
+    )
     .then(async () => {
       const params = await getEditParams(client, photoId).catch(() => null);
       if (useEditSession.getState().photoId !== photoId) return;

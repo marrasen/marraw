@@ -3,7 +3,7 @@ import type { Photo } from '@/api/library';
 import { burstFor, type BurstInfo } from '@/lib/bursts';
 import { cn } from '@/lib/utils';
 import { imgUrl } from '@/lib/backend';
-import { useImgBust } from '@/lib/imgCacheBust';
+import { useImgBust, useThumbBust } from '@/lib/imgCacheBust';
 import { gapLabel, rangeLabel, type TimeGroup } from '@/lib/timeGaps';
 import { useHoverKeep } from '@/lib/useIdle';
 import { aspectOf } from '@/lib/justify';
@@ -214,6 +214,7 @@ const StripThumb = memo(function StripThumb({
   burst?: BurstInfo;
 }) {
   useImgBust(photo.id); // refetch when a restored AI map repaints this thumb
+  useThumbBust(photo.id); // and when marraw's render replaces the camera's
   return (
     <button
       data-strip-id={photo.id}

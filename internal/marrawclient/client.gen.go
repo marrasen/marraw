@@ -43,6 +43,12 @@ func (c *Client) OnAIMapsGeneratedEvent(fn func(AIMapsGeneratedEvent)) (remove f
 	return client.OnPush(c.Client, "AIMapsGeneratedEvent", fn)
 }
 
+// OnBaseRenderedEvent calls fn for every BaseRenderedEvent push event.
+// The returned function removes the handler.
+func (c *Client) OnBaseRenderedEvent(fn func(BaseRenderedEvent)) (remove func()) {
+	return client.OnPush(c.Client, "BaseRenderedEvent", fn)
+}
+
 // OnPhotoPatchEvent calls fn for every PhotoPatchEvent push event.
 // The returned function removes the handler.
 func (c *Client) OnPhotoPatchEvent(fn func(PhotoPatchEvent)) (remove func()) {
@@ -444,7 +450,9 @@ func (h EditsClient) SubscribePreviewExact(ctx context.Context, photoID int64, p
 // null when it cannot: no decode is kept under the state's LibRaw inputs
 // (exposure aside, which it folds in like the drafts do), or the edit
 // uses dehaze or mask effects, which work over the whole frame. Neutral
-// params (the base look) are never kept either.
+// params (the base look) are never kept either. The state the editor
+// last settled on or saved is the exception to the first: its decode is
+// waited for, so a window comes right after a white balance change too.
 func (h EditsClient) PreviewWindow(ctx context.Context, photoID int64, params_ Params, x_ int, y int, w int, h_ int) (*client.Blob, error) {
 	return client.Call[*client.Blob](ctx, h.c, "Edits.PreviewWindow", []any{photoID, params_, x_, y, w, h_})
 }
@@ -1558,6 +1566,15 @@ type AutoPreset struct {
 	Name     string             `json:"name"`
 	Sections []string           `json:"sections"`
 	Offsets  map[string]float64 `json:"offsets"`
+}
+
+// BaseRenderedEvent is broadcast when marraw's render of a photo's
+// unedited look wrote over the small levels its camera's embedded JPEG
+// gave. Their URLs stay the same, so a client showing one asks for it
+// again (bumpThumbBust). Broadcast like AIMapsGeneratedEvent, for the same
+// reason: the grid that shows the photo need not be its folder's.
+type BaseRenderedEvent struct {
+	PhotoID int64 `json:"photoId"`
 }
 
 // CacheInfo describes the preview cache's location, disk usage, and cap.
