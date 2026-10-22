@@ -75,7 +75,7 @@ func main() {
 	keys := flag.String("keys", "", "once -skim is done, press these keys, a comma-separated list such as 3,p,right,x; also click:x:y, move:x:y, type:text, shift+plus, ctrl+z, w, wait:ms and shot:name")
 	wait := flag.Duration("wait", time.Second, "how long the window shows the grid before the script starts")
 	burst := flag.Int("burst", 0, "write this many pictures, from the last of -keys on, to -shot's name with -01, -02 and on, instead of one")
-	edit := flag.String("edit", "", "once -keys are pressed, with the develop panel open, set adjustments as the panel does, such as contrast=0.6,expEV=2, choices by their option, such as wbMode=2 for Kelvin, or auto=tone or auto=wb+color, and save them")
+	edit := flag.String("edit", "", "once -keys are pressed, with the develop panel open, set adjustments as the panel does, such as contrast=0.6,expEV=2, choices by their option, such as wbMode=2 for Kelvin, or auto=tone or auto=wb+color, and save them; ~key=value drags a slider there without letting go, for a draft, and leaves the edit unsaved, so a -zoom after it waits for nothing")
 	zoom := flag.Bool("zoom", false, "once -skim is done, zoom to one to one with Z, and wait for the full resolution before the shot")
 	backend := flag.Bool("backend", false, "run as the backend process the window starts, and nothing else (internal)")
 	backendPort := flag.Int("backend-port", 0, "with -backend, the port to listen on, nought for a free one (internal)")

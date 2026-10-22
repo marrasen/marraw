@@ -10,7 +10,7 @@ import { useUIStore } from '@/stores/uiStore';
 
 function patch(over: Partial<PhotoPatch> & { id: number }): PhotoPatch {
   return {
-    rating: null, flag: null, editHash: null, rotate: null,
+    rating: null, flag: null, editHash: null, editSave: null, rotate: null,
     cropW: null, cropH: null, subjectSharpness: null, subjectAnalyzed: null,
     eyesClosed: null, eyesAnalyzed: null,
     ...over,

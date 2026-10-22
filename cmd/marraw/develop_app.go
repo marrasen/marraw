@@ -100,9 +100,15 @@ type developer struct {
 	// liveM is the live picture's pixels, for the dust-hunting view.
 	liveM *image.RGBA
 	note  string
-	// saved are the photos whose own saves are on their way back as
-	// patches, not to be fetched again.
-	saved map[int64]bool
+	// The panel's own saves (saves.go): saveSeq numbers them; last is each
+	// photo's latest, failed its error while it fails, and retry the timer
+	// sending it again; ledger counts them out and in and holds a patch
+	// that came while some were out.
+	saveSeq int
+	last    map[int64]ownSave
+	failed  map[int64]error
+	retry   map[int64]*time.Timer
+	ledger  saveLedger
 	// edits counts the changes made, committed what it was at the last
 	// save, and confirmed what it was at the last save the backend has
 	// confirmed: while they differ, the edit showing is not the saved
@@ -123,6 +129,12 @@ type developer struct {
 	hover *marrawclient.Params
 	// thumbStop stops the presets' small pictures being rendered.
 	thumbStop context.CancelFunc
+	// holdID is the photo held open in the editor on the backend
+	// (Edits.OpenInEditor), or about to be once the user has stayed on it
+	// for dwell, under the edit holdHash; holdStop lets it go.
+	holdID   int64
+	holdHash string
+	holdStop context.CancelFunc
 }
 
 // editing reports whether photo id has an edit under way the backend has
@@ -143,9 +155,22 @@ func (cu *culler) tilesShowing(p marrawclient.Photo) map[image.Point]*paint.Imag
 	return cu.tiles.of(p.ID, p.EditHash)
 }
 
-// draftEdge is the long edge of the previews while a slider moves; a
+// A draft, the preview while a slider moves, is as large as the photo
+// shows at fit, in device pixels, within these bounds: below them it would
+// be no quicker to notice, above them each frame takes too long. A
 // gesture's end renders the full size.
-const draftEdge = 1024
+const (
+	minDraftEdge = 1024
+	maxDraftEdge = 2560
+)
+
+// draftEdge is the long edge drafts render at.
+func (cu *culler) draftEdge() int {
+	// Past 2048 the settle (the exact, cached 2048) is softer than the
+	// drafts before it, but the photo then covers more than 2048 px at fit
+	// and the 1:1 tiles take its place.
+	return min(max(cu.fitEdge, minDraftEdge), maxDraftEdge)
+}
 
 // developState is the panel's state.
 func (cu *culler) developState() DevelopState {
@@ -177,6 +202,9 @@ func (cu *culler) toggleDevelop() {
 	d := &cu.dev
 	d.open = !d.open
 	if d.open {
+		// A new session: an edit of the last one, saved or failed and
+		// sent once more on closing, holds no tiles back.
+		d.edits, d.committed, d.confirmed = 0, 0, 0
 		cu.loadEdit(cu.at)
 	} else {
 		cu.closeDevelop()
@@ -198,6 +226,8 @@ func (cu *culler) closeDevelop() {
 		d.stop()
 	}
 	d.live, d.want, d.active = nil, false, ""
+	cu.letGo()
+	cu.saveForget(cu.dev.id)
 	if d.mounted {
 		d.mounted = false
 		_ = cu.c.Unmount("develop")
@@ -210,7 +240,9 @@ func (cu *culler) loadEdit(i int) {
 	cu.dev.hover = nil
 	if cu.dev.id != cu.photos[i].ID {
 		// Another photo: its masks start with none chosen, and the last
-		// preset's Amount is the last photo's.
+		// preset's Amount is the last photo's. A failed save of the last
+		// one no longer holds anything back.
+		cu.saveForget(cu.dev.id)
 		cu.masks = maskState{sel: -1, brush: cu.masks.brush, hover: -1, tintOf: -1}
 		cu.presetAmt = nil
 		cu.heal.sel, cu.heal.busy = -1, nil
@@ -223,6 +255,13 @@ func (cu *culler) loadEdit(i int) {
 		d.stop()
 	}
 	d.live, d.want = nil, false
+	// Held from scratch for another photo, or for this one with its edit
+	// changed elsewhere, which the backend then gets ready. Loaded again
+	// as it was (new pixels for it, say), the hold and its decode stay.
+	if hash := cu.photos[i].EditHash; d.holdStop == nil || d.holdID != id || d.holdHash != hash {
+		cu.letGo()
+		cu.holdLater(id, hash)
+	}
 	go func() {
 		p, err := cu.api.Edits.GetEditParams(cu.ctx, id)
 		select {
@@ -259,6 +298,69 @@ func (cu *culler) loadEdit(i int) {
 		case <-cu.ctx.Done():
 		}
 	}()
+}
+
+// holdLater holds photo id open in the editor on the backend
+// (Edits.OpenInEditor) once the user has stayed on it for dwell, as the
+// tiles wait: holding it starts its full-resolution decode, which a skim
+// with the panel open must not start for every photo it passes. While held,
+// the photo's 1:1 renders keep that decode, so the one after an edit
+// starts after the demosaic. letGo, as the panel moves on or closes, lets
+// it go, waiting or held.
+func (cu *culler) holdLater(id int64, hash string) {
+	d := &cu.dev
+	ctx, cancel := context.WithCancel(cu.ctx)
+	d.holdID, d.holdHash, d.holdStop = id, hash, cancel
+	go func() {
+		// The first try after the dwell. Should the call end while the
+		// panel is still on the photo (a reconnect, a backend restart),
+		// it is made again: soon after a hold that failed quickly, then
+		// every holdRetryLate. A hold that lasted counts as a fresh start.
+		wait, quick := dwell, 0
+		for try := 1; ; try++ {
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return
+			}
+			log.Printf("develop: holding photo %d open in the editor", id)
+			start := time.Now()
+			err := cu.api.Edits.OpenInEditor(ctx, id)
+			held := time.Since(start)
+			if err == nil || canceled(err) || ctx.Err() != nil {
+				log.Printf("develop: photo %d held open in the editor for %d ms", id, held.Milliseconds())
+				return
+			}
+			if held > holdLasted {
+				quick = 0
+			}
+			wait = holdRetryLate
+			if quick < len(holdRetries) {
+				wait = holdRetries[quick]
+			}
+			quick++
+			log.Printf("develop: holding photo %d open in the editor (try %d, next in %s): %v", id, try, wait, err)
+		}
+	}()
+}
+
+// holdRetries are the waits before the next tries at holding a photo open
+// in the editor after the call failed quickly; holdRetryLate the wait after
+// those. A hold that lasted holdLasted before failing starts them over.
+var holdRetries = []time.Duration{time.Second, 5 * time.Second, 5 * time.Second}
+
+const (
+	holdRetryLate = 30 * time.Second
+	holdLasted    = 30 * time.Second
+)
+
+// letGo lets the photo held open in the editor go.
+func (cu *culler) letGo() {
+	d := &cu.dev
+	if d.holdStop != nil {
+		d.holdStop()
+	}
+	d.holdID, d.holdHash, d.holdStop = 0, "", nil
 }
 
 // histogramShowing shows the histogram of the best pixels showing.
@@ -350,12 +452,7 @@ func (cu *culler) edited(commit bool) {
 	cu.tileNote = "tiles: once the edit is saved"
 	if commit {
 		d.committed = d.edits
-		id, params := d.id, d.params
-		if d.saved == nil {
-			d.saved = map[int64]bool{}
-		}
-		d.saved[id] = true
-		cu.save(id, params)
+		cu.saveOwn(d.id, d.params)
 	}
 	cu.preview(commit)
 }
@@ -390,9 +487,12 @@ func (cu *culler) startPreview() {
 	if flat {
 		params.CropX, params.CropY, params.CropW, params.CropH, params.CropAngle = 0, 0, 0, 0, 0
 	}
-	edge := draftEdge
+	// A draft renders in memory at any size (PreviewDraft); PreviewEdit at
+	// 2048 and up is the exact render, cached, which full asks for.
+	render := cu.api.Edits.PreviewDraft
+	edge := cu.draftEdge()
 	if full {
-		edge = 0
+		render, edge = cu.api.Edits.PreviewEdit, 0
 	}
 	ctx, cancel := context.WithCancel(cu.ctx)
 	d.busy, d.busyFull, d.stop = true, full, cancel
@@ -403,7 +503,7 @@ func (cu *culler) startPreview() {
 		var rgba *image.RGBA
 		var counts [3][256]uint32
 		var size image.Point
-		blob, err := cu.api.Edits.PreviewEdit(ctx, id, params, edge)
+		blob, err := render(ctx, id, params, edge)
 		took := time.Since(start)
 		if err == nil {
 			var m *image.RGBA

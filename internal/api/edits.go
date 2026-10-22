@@ -3,7 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"log"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/marrasen/aprot"
@@ -36,6 +39,11 @@ type Edits struct {
 	// LibRaw state; it is replaced when either changes.
 	decodeMu    sync.Mutex
 	decodeEntry *decodeCache
+	// lookEntry is the decode of the last look only considered (a hovered
+	// preset, PreviewExact), kept apart so it never replaces decodeEntry:
+	// hovering costs the next drag frame nothing, and applying the look
+	// that was hovered finds its decode here. Guarded by decodeMu.
+	lookEntry *decodeCache
 
 	// linEntry holds the most recent scene-linear reference decode for the
 	// fold path, keyed by photo + the pre-demosaic inputs only. WB, exposure,
@@ -161,7 +169,77 @@ func (e *Edits) PreviewEdit(ctx context.Context, photoID int64, params edit.Para
 		}
 		return &aprot.Blob{ContentType: "image/jpeg", Data: data}, nil
 	}
+	return e.previewInMemory(ctx, photoID, params, longEdge)
+}
 
+// draftEdgeMax bounds PreviewDraft's size. The drafts come from the
+// half-size decode, so nothing larger than its long edge adds detail.
+const draftEdgeMax = 4096
+
+// PreviewDraft renders a draft of the (unsaved) edit state at any long
+// edge up to draftEdgeMax (0 is 2048), entirely in memory and never cached: the frames
+// of a slider drag, sized to what the photo covers on screen. Unlike
+// PreviewEdit, a draft of 2048 or more is still a fast draft, not the
+// exact, cached 2048. The JPEG rides the WebSocket as a binary Blob.
+func (e *Edits) PreviewDraft(ctx context.Context, photoID int64, params edit.Params, longEdge int) (*aprot.Blob, error) {
+	params.Normalize()
+	if longEdge <= 0 {
+		longEdge = previewLongEdge // as PreviewEdit reads 0
+	}
+	return e.previewInMemory(ctx, photoID, params, min(max(longEdge, 64), draftEdgeMax))
+}
+
+// PreviewExact renders the (unsaved) edit state exactly as the 2048 settle
+// does — the same decode, no fold or reuse approximations — at longEdge
+// (0 is 2048, up to draftEdgeMax), in memory and never cached. Unlike the
+// settle it does not tell the backend the editor is on this state: it is
+// for looks the user only considers, such as a hovered preset, which must
+// match what applying them gives but must not move the kept full decode.
+func (e *Edits) PreviewExact(ctx context.Context, photoID int64, params edit.Params, longEdge int) (*aprot.Blob, error) {
+	params.Normalize()
+	if longEdge <= 0 {
+		longEdge = previewLongEdge
+	}
+	longEdge = min(max(longEdge, 64), draftEdgeMax)
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
+		return nil, err
+	}
+	var ep *edit.Params
+	if !params.IsNeutral() {
+		ep = &params
+	}
+	gamma, err := e.lookGamma(ctx, photo)
+	if err != nil {
+		return nil, err
+	}
+	// Read the editor's cached decode, never replace it: hovering looks
+	// must not cost the next drag frame or settle a demosaic. The look's own
+	// decode goes in its own slot, for the settle should it be applied.
+	rgba, wbComp, err := e.decodePreview(ctx, photoID, photo, ep, false)
+	if err != nil {
+		return nil, err
+	}
+	if key, noExpKey, expEV := decodeKeys(ep); e.cachedLook(photoID, key) == nil {
+		if r, _, ok := e.cachedDecodeComp(photoID, key); !ok || r != rgba {
+			e.decodeMu.Lock()
+			e.lookEntry = &decodeCache{photoID: photoID, key: key, noExpKey: noExpKey, expEV: expEV, wbCompEV: wbComp, rgba: rgba}
+			e.decodeMu.Unlock()
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return jpegBlob(pyramid.RenderPreview(rgba, longEdge, gamma, ep, ep.ResidualExpEV()+wbComp,
+		e.deps.Cache.AIMaps.SetFor(photo.CacheKey, ep),
+		e.deps.Cache.Fills.SetFor(photo.CacheKey, ep),
+		e.deps.Cache.Lenses.For(photo)))
+}
+
+// previewInMemory renders a transient frame of params, already normalized,
+// at longEdge: the fold path where it applies, else the warm or a fresh
+// half-size decode.
+func (e *Edits) previewInMemory(ctx context.Context, photoID int64, params edit.Params, longEdge int) (*aprot.Blob, error) {
 	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
 	if err != nil {
 		return nil, err
@@ -239,17 +317,29 @@ func (e *Edits) ensurePreview(ctx context.Context, photoID int64, params edit.Pa
 	if err != nil {
 		return "", err
 	}
-	path := e.deps.Cache.PathFor(photo.CacheKey, "2048", hash)
-	if _, err := os.Stat(path); err == nil {
-		return path, nil // already rendered
-	}
-
 	// Neutral params must render the exact base look (auto-brighten), not
 	// the deterministic edit pipeline — they share the "base" cache slot.
 	var ep *edit.Params
 	if !params.IsNeutral() {
 		ep = &params
 	}
+	// The editor settles on this state, an undo back to one rendered before
+	// included: a full-resolution warm-up of another one is called off, and
+	// it is the decode to keep. Not a settle called off meanwhile: a newer
+	// one has said already. The neutral state's own decode is an edit's (the
+	// first edit starts from it), not the base look's.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	e.deps.Cache.WantFull(photo, &params)
+	// A look considered meanwhile is applied now or left: its decode slot
+	// goes either way (decodePreview below promotes it if it is this one).
+	defer e.dropLook()
+	path := e.deps.Cache.PathFor(photo.CacheKey, "2048", hash)
+	if _, err := os.Stat(path); err == nil {
+		return path, nil // already rendered
+	}
+	defer e.deps.Cache.Settling(photo, hash)()
 
 	rgba, wbComp, err := e.previewDecode(ctx, photoID, photo, ep)
 	if err != nil {
@@ -321,6 +411,13 @@ func (e *Edits) decodePreview(ctx context.Context, photoID int64, photo store.Ph
 	if rgba, wbComp, ok := e.cachedDecodeComp(photoID, libKey); ok {
 		return rgba, wbComp, nil
 	}
+	if l := e.cachedLook(photoID, libKey); l != nil {
+		// The look the user considered is now the one they took.
+		if cache {
+			e.storeDecode(photoID, l.key, l.noExpKey, l.expEV, l.wbCompEV, l.rgba)
+		}
+		return l.rgba, l.wbCompEV, nil
+	}
 	proc, release, err := e.deps.Handles.Acquire(photoID, photo.Path())
 	if err != nil {
 		return nil, 0, err
@@ -389,6 +486,23 @@ func (e *Edits) approxDecode(photoID int64, ep *edit.Params) (rgba *image.RGBA, 
 		return e.decodeEntry.rgba, e.decodeEntry.expEV, e.decodeEntry.wbCompEV, true
 	}
 	return nil, 0, 0, false
+}
+
+// dropLook lets the considered look's decode go.
+func (e *Edits) dropLook() {
+	e.decodeMu.Lock()
+	e.lookEntry = nil
+	e.decodeMu.Unlock()
+}
+
+// cachedLook returns the considered look's decode for (photoID, key), or nil.
+func (e *Edits) cachedLook(photoID int64, key string) *decodeCache {
+	e.decodeMu.Lock()
+	defer e.decodeMu.Unlock()
+	if l := e.lookEntry; l != nil && l.photoID == photoID && l.key == key {
+		return l
+	}
+	return nil
 }
 
 // storeDecode replaces the single-entry decode cache.
@@ -1182,37 +1296,87 @@ func (e *Edits) AutoAdjust(ctx context.Context, photoID int64, params edit.Param
 	return &out, nil
 }
 
-// SetEditParams persists the edit state (neutral params clear it).
-func (e *Edits) SetEditParams(ctx context.Context, photoID int64, params edit.Params) error {
-	if err := e.saveEdit(ctx, photoID, &params); err != nil {
+// OpenInEditor tells the backend the editor shows a photo, for as long as
+// the call lasts: call it as the editor opens a photo and cancel it when
+// the editor leaves. While it lasts, the photo's 1:1 renders keep their
+// full-resolution decode, so an edit that leaves the LibRaw inputs as they
+// are — crop, lens, masks, healing, every look-stage slider — gets its
+// tiles without a second demosaic. It also decodes the photo at once as the
+// editor starts from it — its saved edit, or the seeded or neutral starting
+// state of an unedited photo — so even the first edit's tiles come seconds
+// sooner. It returns when cancelled.
+func (e *Edits) OpenInEditor(ctx context.Context, photoID int64) error {
+	photo, err := e.deps.DB.GetPhoto(ctx, photoID)
+	if err != nil {
 		return err
 	}
-	aprot.TriggerRefresh(ctx, editKey(photoID))
+	release := e.deps.Cache.HoldEditor(photo)
+	defer release()
+	// An unedited photo's base look (auto-brightened) is a decode no edit
+	// uses: the first edit starts from GetEditParams' state. Normalized, as
+	// the next edit is saved.
+	start := &edit.Params{}
+	if photo.EditParams.Valid {
+		if start, err = edit.Parse(photo.EditParams.String); err != nil {
+			return err
+		}
+	} else if seeded := seededParams(photo); seeded != nil {
+		start = seeded
+	}
+	start.Normalize()
+	if err := e.deps.Cache.WarmFull(ctx, photo, start); err != nil && !errors.Is(err, context.Canceled) {
+		// The hold still serves: the first 1:1 render decodes and keeps.
+		log.Printf("edits: warming photo %d at full resolution: %v", photoID, err)
+	}
+	<-ctx.Done()
 	return nil
 }
 
-// ResetEdits clears the edit state of the given photos.
-func (e *Edits) ResetEdits(ctx context.Context, ids []int64) error {
+// SetEditParams persists the edit state (neutral params clear it).
+//
+// It returns the saved state's edit hash and the save's number, both of
+// which the photo's patch carries, so the editor knows its own save landed
+// and which tiles are now the photo's, and tells its own saves' patches
+// from edits made elsewhere.
+func (e *Edits) SetEditParams(ctx context.Context, photoID int64, params edit.Params) (*EditSaved, error) {
+	saved, err := e.saveEdit(ctx, photoID, &params)
+	if err != nil {
+		return nil, err
+	}
+	aprot.TriggerRefresh(ctx, editKey(photoID))
+	return &saved, nil
+}
+
+// ResetEdits clears the edit state of the given photos. It returns what
+// each save saved, in the order of ids, as SetEditParams does for one.
+func (e *Edits) ResetEdits(ctx context.Context, ids []int64) ([]EditSaved, error) {
+	out := make([]EditSaved, 0, len(ids))
 	for _, id := range ids {
-		if err := e.saveEdit(ctx, id, nil); err != nil {
-			return err
+		saved, err := e.saveEdit(ctx, id, nil)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, saved)
 		aprot.TriggerRefresh(ctx, editKey(id))
 	}
-	return nil
+	return out, nil
 }
 
 // PasteEditParams applies one edit state to many photos (the copy side is
-// client-local: GetEditParams into a clipboard).
-func (e *Edits) PasteEditParams(ctx context.Context, ids []int64, params edit.Params) error {
+// client-local: GetEditParams into a clipboard). It returns what each save
+// saved, in the order of ids, as SetEditParams does for one.
+func (e *Edits) PasteEditParams(ctx context.Context, ids []int64, params edit.Params) ([]EditSaved, error) {
+	out := make([]EditSaved, 0, len(ids))
 	for i, id := range ids {
-		if err := e.saveEdit(ctx, id, &params); err != nil {
-			return err
+		saved, err := e.saveEdit(ctx, id, &params)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, saved)
 		aprot.TriggerRefresh(ctx, editKey(id))
 		aprot.Progress(ctx).Update(i+1, len(ids), "")
 	}
-	return nil
+	return out, nil
 }
 
 // ApplyBatchEdit applies a relative adjustment to many photos, e.g.
@@ -1242,7 +1406,7 @@ func (e *Edits) ApplyBatchEdit(ctx context.Context, ids []int64, delta edit.Delt
 			params = *seeded
 		}
 		delta.Apply(&params)
-		if err := e.saveEdit(ctx, id, &params); err != nil {
+		if _, err := e.saveEdit(ctx, id, &params); err != nil {
 			return err
 		}
 		aprot.TriggerRefresh(ctx, editKey(id))
@@ -1298,32 +1462,57 @@ func (e *Edits) processKeepingHandleUsable(
 
 // saveEdit persists params (nil or neutral clears), pushes the patch to
 // folder subscribers, and warms the new grid thumbnail in the background.
-func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params) error {
+// It returns the saved edit hash and the save's number.
+func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params) (EditSaved, error) {
 	params.Normalize()
 	var jsonPtr *string
 	hash := edit.BaseHash
 	if !params.IsNeutral() {
 		b, err := json.Marshal(params)
 		if err != nil {
-			return err
+			return EditSaved{}, err
 		}
 		s := string(b)
 		jsonPtr = &s
 		hash = params.Hash()
 	}
-	if err := e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli()); err != nil {
-		return err
+	// The folder, for the patch. A photo gone meanwhile (a rescan removed
+	// it) is saved as a no-op, as it always was: a batch paste or reset
+	// carries on with the rest of the selection.
+	folderID := int64(-1)
+	if before, err := e.deps.DB.GetPhoto(ctx, photoID); err == nil {
+		folderID = before.FolderID
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return EditSaved{}, err
+	}
+	saved, err := e.deps.numberedSave(folderID, func() (bool, error) {
+		return true, e.deps.DB.SetEdit(ctx, photoID, jsonPtr, hash, time.Now().UnixMilli())
+	}, func(saved EditSaved) PhotoPatch {
+		saved.Hash = hash
+		return editPatch(photoID, saved, params)
+	})
+	if err != nil {
+		return EditSaved{}, err
 	}
 
 	// Warm the grid thumb for the new state so the grid updates without a
 	// scroll-triggered fetch racing the patch, and mirror the new intent to
 	// the photo's portable sidecar.
 	if p, err := e.deps.DB.GetPhoto(context.WithoutCancel(ctx), photoID); err == nil {
-		e.deps.patchFolderPhotos(p.FolderID, []PhotoPatch{editPatch(photoID, hash, params)})
+		// A photo open in the editor is now on the saved state, a reset
+		// that renders no settle included. A cleared edit leaves the editor
+		// on the photo's starting state, as GetEditParams gives it.
+		on := params
+		if params.IsNeutral() {
+			if on = seededParams(p); on == nil {
+				on = &edit.Params{}
+			}
+		}
+		e.deps.Cache.WantFull(p, on)
 		e.deps.writeSidecarFor(context.WithoutCancel(ctx), p)
 		e.deps.warmEdit(p, hash)
 	}
-	return nil
+	return saved, nil
 }
 
 // editPatch is the folder broadcast for one photo's new edit state: the
@@ -1332,13 +1521,59 @@ func (e *Edits) saveEdit(ctx context.Context, photoID int64, params *edit.Params
 // fields are always set — a reset must deliver explicit zeros, and nil
 // params means exactly that (params are already normalized, so CropW/CropH
 // are 0 unless a real crop is present).
-func editPatch(photoID int64, hash string, params *edit.Params) PhotoPatch {
+func editPatch(photoID int64, saved EditSaved, params *edit.Params) PhotoPatch {
 	rotate := params.RotateTurns()
 	var cropW, cropH float64
 	if params != nil {
 		cropW, cropH = params.CropW, params.CropH
 	}
-	return PhotoPatch{ID: photoID, EditHash: &hash, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
+	hash, save := saved.Hash, saved.Save
+	return PhotoPatch{ID: photoID, EditHash: &hash, EditSave: &save, Rotate: &rotate, CropW: &cropW, CropH: &cropH}
+}
+
+// saveMu makes an edit save's write, its number and its patch one step.
+var saveMu sync.Mutex
+
+// numberedSave runs write, an edit save of a photo in folderID (-1:
+// unknown, no patch), and when it lands (true) numbers it and sends its
+// patch, all under saveMu, so numbers
+// follow the order edits were written in. Delivery to each subscriber runs
+// on its own goroutine and may still reorder patches, so a client keeps the
+// highest number it has seen per photo and takes any patch numbered below
+// it as one a later save overwrote. A write that does not land still takes
+// a number, which no one sees.
+func (d *Deps) numberedSave(folderID int64, write func() (bool, error), patch func(EditSaved) PhotoPatch) (EditSaved, error) {
+	saveMu.Lock()
+	defer saveMu.Unlock()
+	landed, err := write()
+	saved := EditSaved{Save: editSaves.Add(1)}
+	if err != nil || !landed {
+		return saved, err
+	}
+	p := patch(saved)
+	saved.Hash = *p.EditHash
+	if folderID >= 0 {
+		d.patchFolderPhotos(folderID, []PhotoPatch{p})
+	}
+	return saved, nil
+}
+
+// editSaves numbers every edit save, for EditSaved.Save. It starts from the
+// clock (microseconds since the epoch, well inside a JavaScript number), so
+// numbers stay unique across daemon restarts: a client that lives through
+// one must not take another client's save for its own.
+var editSaves = func() *atomic.Int64 {
+	var n atomic.Int64
+	n.Store(time.Now().UnixMicro())
+	return &n
+}()
+
+// EditSaved is what SetEditParams saved: the edit hash, the one the photo's
+// patch carries, and the save's number, which that patch carries too
+// (PhotoPatch.EditSave).
+type EditSaved struct {
+	Hash string `json:"hash"`
+	Save int64  `json:"save"`
 }
 
 // warmSlot holds the cancel func of one in-flight post-save warm so a
@@ -1367,7 +1602,14 @@ func (d *Deps) warmEdit(p store.Photo, hash string) {
 	d.warmCancels[p.ID] = slot
 	d.warmMu.Unlock()
 	go func() {
-		d.Cache.Ensure(ctx, p, "512", hash, decode.PriorityPrefetch)
+		// For a photo open in the editor, the settle of this state may be
+		// on its way: wait for it, so the thumbs derive from its 2048. A
+		// newer save of the photo cancels this warm (above); a state replaced
+		// otherwise meanwhile (a synced sidecar) is nobody's thumbnail.
+		d.Cache.WaitForSettle(ctx, p, hash, true)
+		if now, err := d.DB.GetPhoto(ctx, p.ID); err == nil && now.EditHash == hash {
+			d.Cache.Ensure(ctx, p, "512", hash, decode.PriorityPrefetch)
+		}
 		cancel()
 		d.warmMu.Lock()
 		if d.warmCancels[p.ID] == slot { // still ours: clear the slot

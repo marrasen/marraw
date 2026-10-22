@@ -75,7 +75,8 @@ func (cu *culler) batchPreset(in BatchPreset) {
 						mu.Lock()
 						name = n
 						mu.Unlock()
-						return cu.api.Edits.PasteEditParams(ctx, []int64{id}, p)
+						_, err = cu.api.Edits.PasteEditParams(ctx, []int64{id}, p)
+						return err
 					}()
 					if err != nil {
 						mu.Lock()

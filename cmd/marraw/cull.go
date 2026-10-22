@@ -118,6 +118,9 @@ type (
 		Flag string
 		ID   int64
 	}
+	// FitEdge is the long edge, in device pixels, the photo covers at fit:
+	// the size the panel's drafts render at.
+	FitEdge struct{ Px int }
 	// WantTiles asks for the tiles of the photo at Index in Range of the
 	// grid, as the view zooms past what the 2048 shows sharp; an empty
 	// Range wants none.
@@ -198,13 +201,19 @@ type culler struct {
 	tiles    *tileCache
 	tileWant WantTiles
 	tileWarm map[string]bool
+	// fitEdge is what FitEdge last said.
+	fitEdge int
 	// tileStop cancels the tile fetches under way; probing is the photo
 	// whose tiles are being looked for, or rendered, and probeStop stops
 	// that.
 	tileStop  context.CancelFunc
 	probing   int64
 	probeStop context.CancelFunc
-	tileNote  string
+	// probeNow is whether the probe under way skips the dwell, and
+	// probeSeq tells it from a probe of the same photo started after.
+	probeNow bool
+	probeSeq int
+	tileNote string
 	// errs are the errors the user has not cleared, and errSeq the last
 	// one's number.
 	errs   []ErrorNote
@@ -432,7 +441,9 @@ func (cu *culler) serve() error {
 				}
 				cu.goTo(to)
 			case WantTiles:
-				cu.wantTiles(in)
+				cu.wantTiles(in, false)
+			case FitEdge:
+				cu.fitEdge = in.Px
 			case Rate:
 				cu.rate(in)
 			case Mark:
@@ -1155,6 +1166,20 @@ func (cu *culler) script(o options) {
 		if !ok {
 			continue
 		}
+		// ~key=value moves the slider there without letting go: a draft,
+		// which leaves the edit unsaved — a -zoom after it waits out its
+		// time, the tiles held back for the save. Choices and Auto have no
+		// drag: their ~ is ignored.
+		key, drag := strings.CutPrefix(key, "~")
+		_, isChoice := devChoices[key]
+		if drag && (key == "auto" || isChoice) {
+			fmt.Fprintf(os.Stderr, "edit: ~%s: no drag for a choice or Auto; setting it\n", key)
+			drag = false
+		}
+		mark := ""
+		if drag {
+			mark = "~"
+		}
 		if key == "auto" {
 			// An Auto button: wait for its result to show.
 			cu.do <- func() { cu.devAuto(DevAuto{Sections: strings.Split(val, "+")}) }
@@ -1168,17 +1193,17 @@ func (cu *culler) script(o options) {
 		}
 		start := time.Now()
 		cu.do <- func() {
-			if _, isChoice := devChoices[key]; isChoice {
+			if isChoice {
 				cu.devChoose(DevChoice{Key: key, Index: int(x)})
 				return
 			}
-			cu.devSet(DevSet{Key: key, Value: x, Commit: true})
+			cu.devSet(DevSet{Key: key, Value: x, Commit: !drag})
 			// As the slider would show it, had it been dragged there.
 			if cu.dev.mounted {
 				_ = cu.c.Update("develop", cu.developState())
 			}
 		}
-		// Until the full-size preview of it shows, or a while.
+		// Until its preview shows, or a while.
 		for time.Since(start) < 20*time.Second {
 			time.Sleep(100 * time.Millisecond)
 			done := make(chan bool, 1)
@@ -1189,7 +1214,7 @@ func (cu *culler) script(o options) {
 		}
 		note := make(chan string, 1)
 		cu.do <- func() { note <- cu.dev.note }
-		fmt.Fprintf(os.Stderr, "edit: %s=%v shown after %d ms (%s)\n", key, x, time.Since(start).Milliseconds(), <-note)
+		fmt.Fprintf(os.Stderr, "edit: %s%s=%v shown after %d ms (%s)\n", mark, key, x, time.Since(start).Milliseconds(), <-note)
 	}
 	if zoom {
 		start := time.Now()
@@ -1608,7 +1633,7 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 			p.Flag = *pp.Flag
 		}
 		if pp.EditHash != nil {
-			p.EditHash = *pp.EditHash
+			cu.patchHash(pp.ID, *pp.EditHash, pp.EditSave)
 		}
 	}
 	if aided {
@@ -1631,37 +1656,10 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 				_ = cu.c.Patch("grid", PhotoMarked{Folder: cu.folder, Index: i, Rating: p.Rating, Flag: string(p.Flag)})
 				_ = cu.c.Patch("grid", LibMarks{ID: p.ID, Rating: p.Rating, Flag: string(p.Flag)})
 			}
-			if pp.EditHash != nil && cu.dev.saved[p.ID] {
-				// The panel's own save, whose pixels show already: the
-				// tiles of it can come now.
-				delete(cu.dev.saved, p.ID)
-				changed := *pp.EditHash != p.EditHash
-				p.EditHash = *pp.EditHash
-				cu.dev.confirmed = cu.dev.committed
-				if cu.tileNote == "tiles: once the edit is saved" {
-					cu.tileNote = ""
-				}
-				if cu.culling && i == cu.at && !cu.tileWant.Range.Empty() {
-					cu.wantTiles(cu.tileWant)
-				}
-				if changed {
-					cu.refreshThumb(*p)
-				}
-			}
-			if pp.EditHash != nil && *pp.EditHash != p.EditHash {
-				p.EditHash = *pp.EditHash
-				cu.tiles.drop(p.ID)
-				if cu.dev.open && cu.dev.id == p.ID {
-					// Edited elsewhere: the panel takes the new edit.
-					cu.loadEdit(i)
-				}
-				cu.cache.drop(p.ID)
-				cu.refreshThumb(*p)
-				if cu.culling && i == cu.at {
-					// Again, with the new edit's pixels.
-					cu.load = nil
-					cu.goTo(i)
-				}
+			if pp.EditHash != nil {
+				// An own save's hash is taken from its answer; a patch
+				// that may be one is judged once the saves out answer.
+				cu.patchHash(p.ID, *pp.EditHash, pp.EditSave)
 			}
 			if i >= cu.at-stripReach && i <= cu.at+stripReach {
 				changed = true

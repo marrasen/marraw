@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"reflect"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
@@ -96,37 +95,6 @@ func (cu *culler) undoEdit(redo bool) {
 func (cu *culler) tell(note string) {
 	cu.notice, cu.noticeSeq = note, cu.noticeSeq+1
 	cu.showCull()
-}
-
-// saveJob is an edit to save.
-type saveJob struct {
-	id     int64
-	params marrawclient.Params
-}
-
-// save saves photo id's edit, after any saves before it: one at a time and
-// in order, so a quick undo and redo never land in the other order.
-func (cu *culler) save(id int64, params marrawclient.Params) {
-	d := &cu.dev
-	if d.saves == nil {
-		d.saves = make(chan saveJob, 64)
-		go func() {
-			for {
-				select {
-				case j := <-d.saves:
-					if err := cu.api.Edits.SetEditParams(cu.ctx, j.id, j.params); err != nil {
-						log.Printf("develop: save: %v", err)
-					}
-				case <-cu.ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-	select {
-	case d.saves <- saveJob{id, params}:
-	case <-cu.ctx.Done():
-	}
 }
 
 // stepLabel is how an adjustment's change reads in the history: its name

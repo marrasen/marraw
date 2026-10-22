@@ -171,11 +171,7 @@ func (cu *culler) cropKeep(label string) {
 	d := &cu.dev
 	d.edits++
 	d.committed = d.edits
-	if d.saved == nil {
-		d.saved = map[int64]bool{}
-	}
-	d.saved[d.id] = true
-	cu.save(d.id, d.params)
+	cu.saveOwn(d.id, d.params)
 	cu.remember(label)
 	_ = cu.c.Update("develop", cu.developState())
 	cu.showCull()

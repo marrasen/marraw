@@ -87,46 +87,96 @@ func exifLine(p marrawclient.Photo) string {
 	return strings.Join(parts, " · ")
 }
 
+// resetLoad takes a reset of photo id, own save seq, into the panel once
+// it has the edit as the backend gives it now (the measured exposure, say),
+// asking again while that fails: the edit counts as saved only then, never
+// with the panel still showing the edit before. The first failure is told:
+// the panel goes on showing the old edit meanwhile, and an edit made on it
+// is the user's (a newer own save) and stands.
+func (cu *culler) resetLoad(id int64, seq int, tries int) {
+	go func() {
+		p, err := cu.api.Edits.GetEditParams(cu.ctx, id)
+		select {
+		case cu.do <- func() {
+			d := &cu.dev
+			last, ok := d.last[id]
+			if !ok || last.seq != seq || !d.open || d.id != id {
+				// Edited again since, or left: the newer save or the
+				// photo's own hash says.
+				return
+			}
+			if err != nil {
+				if canceled(err) {
+					return
+				}
+				if tries == 0 {
+					cu.fail("Reset saved, but the panel could not reload it — retrying", err)
+				} else {
+					log.Printf("develop: loading photo %d's edit after the reset (try %d): %v", id, tries+1, err)
+				}
+				wait := saveRetryWaits[min(tries+1, len(saveRetryWaits))-1]
+				time.AfterFunc(wait, func() { cu.resetLoad(id, seq, tries+1) })
+				return
+			}
+			d.params = marrawclient.Params{}
+			if p != nil {
+				d.params = *p
+			}
+			_ = cu.c.Update("develop", cu.developState())
+			// Saved by the reset itself: the preview only.
+			d.edits++
+			d.committed = d.edits
+			cu.confirmSaved(id)
+			cu.preview(true)
+			cu.remember("Reset")
+			cu.tell("Reset")
+		}:
+		case <-cu.ctx.Done():
+		}
+	}()
+}
+
 // devReset resets the edit: of the photo showing as a step of its history,
 // with the panel open; otherwise of the photos selected or showing.
 func (cu *culler) devReset() {
 	d := &cu.dev
 	if cu.culling && d.open && d.mounted && d.id == cu.photos[cu.at].ID {
 		id := d.id
-		if d.saved == nil {
-			d.saved = map[int64]bool{}
-		}
-		d.saved[id] = true
-		go func() {
-			err := cu.api.Edits.ResetEdits(cu.ctx, []int64{id})
-			var p *marrawclient.Params
-			if err == nil {
-				p, err = cu.api.Edits.GetEditParams(cu.ctx, id)
+		// Saved as the neutral edit, which clears it as a reset does: an own
+		// save like any, so its answer sets the hash the photo is on, and
+		// one before it answering late cannot undo it.
+		prev, prevErr := d.last[id], d.failed[id]
+		seq := cu.recordOwn(id, marrawclient.Params{})
+		cu.sendOwn(id, seq, marrawclient.Params{}, func(_ marrawclient.EditSaved, err error) {
+			last, onIt := d.last[id]
+			if err != nil && !canceled(err) && (!onIt || last.seq == seq) {
+				// Told while the reset is the latest save, or the panel has
+				// left the photo: the reset did not happen. A newer save
+				// of the panel's carries the reset's state, and says.
+				cu.fail("Could not reset the edit", err)
 			}
-			select {
-			case cu.do <- func() {
-				if err != nil {
-					log.Printf("reset: %v", err)
+			if !onIt || last.seq != seq {
+				return // edited again since, or left: the newer save says
+			}
+			if err != nil {
+				// Left as it was: the panel keeps the edit it shows. An
+				// earlier save answered well is the photo's already; one
+				// failing goes on being sent; one out says when it answers.
+				if prev.seq == 0 {
+					delete(d.last, id)
 					return
 				}
-				if d.id != id {
-					return
+				d.last[id] = prev
+				if prevErr != nil {
+					cu.retrySave(id, max(prev.tries, 1))
+				} else {
+					cu.confirmSaved(id)
 				}
-				d.params = marrawclient.Params{}
-				if p != nil {
-					d.params = *p
-				}
-				_ = cu.c.Update("develop", cu.developState())
-				// Saved by the reset itself: the preview only.
-				d.edits++
-				d.committed = d.edits
-				cu.preview(true)
-				cu.remember("Reset")
-				cu.tell("Reset")
-			}:
-			case <-cu.ctx.Done():
+				return
 			}
-		}()
+			delete(d.failed, id)
+			cu.resetLoad(id, seq, 0)
+		})
 		return
 	}
 	var ids []int64
@@ -137,7 +187,8 @@ func (cu *culler) devReset() {
 		return
 	}
 	go func() {
-		if err := cu.api.Edits.ResetEdits(cu.ctx, ids); err != nil {
+		// Not the panel's own save: the patches tell the view.
+		if _, err := cu.api.Edits.ResetEdits(cu.ctx, ids); err != nil {
 			log.Printf("reset: %v", err)
 		}
 	}()

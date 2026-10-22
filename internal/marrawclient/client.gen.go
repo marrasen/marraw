@@ -322,11 +322,31 @@ func (h EditsClient) SubscribeMaskTintPreview(ctx context.Context, photoID int64
 	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.MaskTintPreview", []any{photoID, params_, maskIndex, longEdge}, opts...)
 }
 
-// PasteEditParams applies one edit state to many photos (the copy side is
-// client-local: GetEditParams into a clipboard).
-func (h EditsClient) PasteEditParams(ctx context.Context, ids []int64, params_ Params) error {
-	_, err := client.Call[struct{}](ctx, h.c, "Edits.PasteEditParams", []any{ids, params_})
+// OpenInEditor tells the backend the editor shows a photo, for as long as
+// the call lasts: call it as the editor opens a photo and cancel it when
+// the editor leaves. While it lasts, the photo's 1:1 renders keep their
+// full-resolution decode, so an edit that leaves the LibRaw inputs as they
+// are — crop, lens, masks, healing, every look-stage slider — gets its
+// tiles without a second demosaic. It also decodes the photo at once as the
+// editor starts from it — its saved edit, or the seeded or neutral starting
+// state of an unedited photo — so even the first edit's tiles come seconds
+// sooner. It returns when cancelled.
+func (h EditsClient) OpenInEditor(ctx context.Context, photoID int64) error {
+	_, err := client.Call[struct{}](ctx, h.c, "Edits.OpenInEditor", []any{photoID})
 	return err
+}
+
+// PasteEditParams applies one edit state to many photos (the copy side is
+// client-local: GetEditParams into a clipboard). It returns what each save
+// saved, in the order of ids, as SetEditParams does for one.
+func (h EditsClient) PasteEditParams(ctx context.Context, ids []int64, params_ Params) ([]EditSaved, error) {
+	return client.Call[[]EditSaved](ctx, h.c, "Edits.PasteEditParams", []any{ids, params_})
+}
+
+// SubscribePasteEditParams runs PasteEditParams as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribePasteEditParams(ctx context.Context, ids []int64, params_ Params, opts ...client.SubscribeOption) *client.Subscription[[]EditSaved] {
+	return client.Subscribe[[]EditSaved](ctx, h.c, "Edits.PasteEditParams", []any{ids, params_}, opts...)
 }
 
 // PickRangeColor samples the developed colour at the clicked spot and seeds the
@@ -367,6 +387,21 @@ func (h EditsClient) SubscribePickWhiteBalance(ctx context.Context, photoID int6
 	return client.Subscribe[*Params](ctx, h.c, "Edits.PickWhiteBalance", []any{photoID, params_, base, x_, y}, opts...)
 }
 
+// PreviewDraft renders a draft of the (unsaved) edit state at any long
+// edge up to draftEdgeMax (0 is 2048), entirely in memory and never cached: the frames
+// of a slider drag, sized to what the photo covers on screen. Unlike
+// PreviewEdit, a draft of 2048 or more is still a fast draft, not the
+// exact, cached 2048. The JPEG rides the WebSocket as a binary Blob.
+func (h EditsClient) PreviewDraft(ctx context.Context, photoID int64, params_ Params, longEdge int) (*client.Blob, error) {
+	return client.Call[*client.Blob](ctx, h.c, "Edits.PreviewDraft", []any{photoID, params_, longEdge})
+}
+
+// SubscribePreviewDraft runs PreviewDraft as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribePreviewDraft(ctx context.Context, photoID int64, params_ Params, longEdge int, opts ...client.SubscribeOption) *client.Subscription[*client.Blob] {
+	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.PreviewDraft", []any{photoID, params_, longEdge}, opts...)
+}
+
 // PreviewEdit renders a preview of the (unsaved) edit state and returns the
 // JPEG itself as a binary Blob riding the WebSocket — no second HTTP round
 // trip. longEdge picks the rendition size: 0 or anything >= 2048 is the full
@@ -384,16 +419,48 @@ func (h EditsClient) SubscribePreviewEdit(ctx context.Context, photoID int64, pa
 	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.PreviewEdit", []any{photoID, params_, longEdge}, opts...)
 }
 
-// ResetEdits clears the edit state of the given photos.
-func (h EditsClient) ResetEdits(ctx context.Context, ids []int64) error {
-	_, err := client.Call[struct{}](ctx, h.c, "Edits.ResetEdits", []any{ids})
-	return err
+// PreviewExact renders the (unsaved) edit state exactly as the 2048 settle
+// does — the same decode, no fold or reuse approximations — at longEdge
+// (0 is 2048, up to draftEdgeMax), in memory and never cached. Unlike the
+// settle it does not tell the backend the editor is on this state: it is
+// for looks the user only considers, such as a hovered preset, which must
+// match what applying them gives but must not move the kept full decode.
+func (h EditsClient) PreviewExact(ctx context.Context, photoID int64, params_ Params, longEdge int) (*client.Blob, error) {
+	return client.Call[*client.Blob](ctx, h.c, "Edits.PreviewExact", []any{photoID, params_, longEdge})
+}
+
+// SubscribePreviewExact runs PreviewExact as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribePreviewExact(ctx context.Context, photoID int64, params_ Params, longEdge int, opts ...client.SubscribeOption) *client.Subscription[*client.Blob] {
+	return client.Subscribe[*client.Blob](ctx, h.c, "Edits.PreviewExact", []any{photoID, params_, longEdge}, opts...)
+}
+
+// ResetEdits clears the edit state of the given photos. It returns what
+// each save saved, in the order of ids, as SetEditParams does for one.
+func (h EditsClient) ResetEdits(ctx context.Context, ids []int64) ([]EditSaved, error) {
+	return client.Call[[]EditSaved](ctx, h.c, "Edits.ResetEdits", []any{ids})
+}
+
+// SubscribeResetEdits runs ResetEdits as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribeResetEdits(ctx context.Context, ids []int64, opts ...client.SubscribeOption) *client.Subscription[[]EditSaved] {
+	return client.Subscribe[[]EditSaved](ctx, h.c, "Edits.ResetEdits", []any{ids}, opts...)
 }
 
 // SetEditParams persists the edit state (neutral params clear it).
-func (h EditsClient) SetEditParams(ctx context.Context, photoID int64, params_ Params) error {
-	_, err := client.Call[struct{}](ctx, h.c, "Edits.SetEditParams", []any{photoID, params_})
-	return err
+//
+// It returns the saved state's edit hash and the save's number, both of
+// which the photo's patch carries, so the editor knows its own save landed
+// and which tiles are now the photo's, and tells its own saves' patches
+// from edits made elsewhere.
+func (h EditsClient) SetEditParams(ctx context.Context, photoID int64, params_ Params) (*EditSaved, error) {
+	return client.Call[*EditSaved](ctx, h.c, "Edits.SetEditParams", []any{photoID, params_})
+}
+
+// SubscribeSetEditParams runs SetEditParams as a live query.
+// Each result arrives on the subscription's C; close it with Close.
+func (h EditsClient) SubscribeSetEditParams(ctx context.Context, photoID int64, params_ Params, opts ...client.SubscribeOption) *client.Subscription[*EditSaved] {
+	return client.Subscribe[*EditSaved](ctx, h.c, "Edits.SetEditParams", []any{photoID, params_}, opts...)
 }
 
 // SubjectBounds locates the photo's subject as a bounding box for the crop
@@ -1585,6 +1652,14 @@ type DriveInfo struct {
 	Name string `json:"name"`
 }
 
+// EditSaved is what SetEditParams saved: the edit hash, the one the photo's
+// patch carries, and the save's number, which that patch carries too
+// (PhotoPatch.EditSave).
+type EditSaved struct {
+	Hash string `json:"hash"`
+	Save int64  `json:"save"`
+}
+
 // ExifMode selects what metadata an export carries: everything the catalog
 // has, only the artist/copyright credit, or a bare file with no EXIF at all.
 type ExifMode string
@@ -2051,6 +2126,10 @@ type PhotoPatch struct {
 	Rotate *int     `json:"rotate"`
 	CropW  *float64 `json:"cropW"`
 	CropH  *float64 `json:"cropH"`
+	// EditSave numbers the save that set EditHash, as SetEditParams returns
+	// it to the caller, so an editor tells its own saves' patches from edits
+	// made elsewhere exactly, not by guessing from the hash.
+	EditSave *int64 `json:"editSave"`
 	// SubjectSharpness delivers a just-measured subject focus score to the grid
 	// without a full folder-list refresh. Only ever a real score — the "-1
 	// unscoreable" sentinel is client-invisible (see SubjectAnalyzed).
