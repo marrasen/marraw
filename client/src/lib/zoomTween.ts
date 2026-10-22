@@ -84,5 +84,9 @@ export const ZOOM_DURATION_MS = 160;
  */
 export function zoomAt(from: number, to: number, elapsed: number): number {
   const p = Math.min(1, Math.max(0, elapsed / ZOOM_DURATION_MS));
+  // At the end, exactly the target: from + (to − from) need not be to in
+  // floating point, and the loupe asks whether the tween is over by
+  // comparing the two (its sharp window waits for that).
+  if (p >= 1) return to;
   return from + (to - from) * (1 - Math.pow(1 - p, 3));
 }

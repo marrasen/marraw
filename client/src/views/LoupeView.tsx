@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Crop as CropIcon, Eye, FlipHorizontal2, FlipVertical2, Pipette, RotateCcwSquare, RotateCwSquare, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { onRenderProgressEvent, type Photo } from '@/api/library';
@@ -31,7 +31,10 @@ import {
   savedHere,
   useEditSession,
 } from '@/lib/editSession';
+import { useHoldTick } from '@/lib/editorHold';
+import { useImgBust } from '@/lib/imgCacheBust';
 import { setDraftEdge } from '@/lib/previewScheduler';
+import { dropWindow, noteShownEdit, useLoupeWindow, wantWindow } from '@/lib/previewWindow';
 import { useDevicePixelRatio } from '@/lib/useDevicePixelRatio';
 import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
@@ -48,6 +51,7 @@ import { AIKind, type Params } from '@/api/edit';
 
 import { renditionPlan, tilesEngaged } from '@/lib/rendition';
 import { ZOOM_DURATION_MS, snapReason, zoomAt } from '@/lib/zoomTween';
+
 // aspectRatioFrac converts a selected aspect preset into a crop ratio in
 // fraction space (crop-width-fraction / crop-height-fraction), accounting for
 // the frame's own aspect: a 1:1 pixel crop of a 3:2 frame is not 1:1 in
@@ -638,6 +642,55 @@ export function CinemaImage({
     if (p && p.photoId === photo.id && esPreviewSettled()) esClearPreview();
   }, [level, cropping, photo.id, preview, esRendering]);
 
+  // The sharp window (lib/previewWindow): zoomed into tile depth on the photo
+  // being edited, the part in view at full resolution, over the draft and
+  // under the tiles — while a live preview shows, or until the saved edit's
+  // tiles are rendered. Asked again as the edit, the view or the save moves.
+  const shownParams = useEditSession((s) => s.hoverParams ?? s.draft);
+  const editingHere = esPhotoId === photo.id && shownParams != null;
+  const windowZone = editingHere && uiMode === 'develop' && level === 'tiles' && !cropping && haveDims;
+  // Not mid zoom tween: the view's rect is still the one zoomed from.
+  const wantsWindow = windowZone && (previewUrl != null || !tilesWarm) && shownScale === scale;
+  // A hold just made: the backend may make a window it could not before.
+  const holdTick = useHoldTick((s) => s.tick);
+  // A fill patch or AI map made since: the same params, other pixels.
+  const bust = useImgBust(photo.id);
+  // A window of an earlier edit still shows within its run of drag frames
+  // (lib/previewWindow, noteShownEdit): a drag keeps a sharp, slightly late
+  // view until the next window comes, while after a one-shot change (a
+  // preset, paste, the eyedropper, leaving a hovered preset) the new
+  // preview shows rather than the old look over it. Noted before the window
+  // effect below, so a window asked for now carries the new run.
+  const shownParamsKey = useMemo(() => (shownParams ? JSON.stringify(shownParams) : ''), [shownParams]);
+  const hovering = useEditSession((s) => s.hoverParams != null);
+  useEffect(() => noteShownEdit(shownParamsKey, hovering), [shownParamsKey, hovering]);
+  useEffect(() => {
+    if (!windowZone) {
+      dropWindow(); // another photo, out of the editor, cropping, or zoomed out
+      return;
+    }
+    if (!wantsWindow || !shownParams) return; // the tiles serve it; keep what shows under them
+    const [vx, vy, vw, vh] = viewport;
+    const x0 = Math.max(0, Math.floor(vx * dw));
+    const y0 = Math.max(0, Math.floor(vy * dh));
+    const x1 = Math.min(dw, Math.ceil((vx + vw) * dw));
+    const y1 = Math.min(dh, Math.ceil((vy + vh) * dh));
+    wantWindow(client, { photoId: photo.id, params: shownParams, bust, rect: [x0, y0, x1 - x0, y1 - y0], dims: [dw, dh] });
+  }, [windowZone, wantsWindow, shownParams, viewport, dw, dh, photo.id, photo.editHash, holdTick, bust, client]);
+  useEffect(() => dropWindow, [photo.id]);
+  const loupeWindow = useLoupeWindow((s) => s.win);
+  const windowRun = useLoupeWindow((s) => s.run);
+  const showWindow =
+    loupeWindow != null &&
+    loupeWindow.bust === bust &&
+    (loupeWindow.paramsKey === shownParamsKey || loupeWindow.run === windowRun) &&
+    windowZone &&
+    loupeWindow.photoId === photo.id &&
+    loupeWindow.dims[0] === dw &&
+    loupeWindow.dims[1] === dh &&
+    !cropUI &&
+    !originalUI;
+
   // Restore the pan ratio whenever the geometry or photo changes. `container`
   // must be a dep: at a numeric zoom boxW is container-independent, so on a
   // fresh mount (mode switch) it is already final while the container still
@@ -1143,6 +1196,24 @@ export function CinemaImage({
               // would rotate the crop twice.
               style={cropUI && draft ? { transform: `rotate(${draft.cropAngle}deg)` } : undefined}
             />
+            {showWindow && (
+              <img
+                // A fresh element for each window: the last one's pixels never
+                // show at this one's place while it loads.
+                key={loupeWindow.url}
+                data-testid="loupe-window"
+                src={loupeWindow.url}
+                draggable={false}
+                alt=""
+                className="pointer-events-none absolute"
+                style={{
+                  left: (loupeWindow.rect[0] / dw) * boxW,
+                  top: (loupeWindow.rect[1] / dh) * boxH,
+                  width: (loupeWindow.rect[2] / dw) * boxW,
+                  height: (loupeWindow.rect[3] / dh) * boxH,
+                }}
+              />
+            )}
             {wantTiles && shownSrc.includes(`/img/${photo.id}/`) && (
               <TileLayer
                 key={`${photo.id}|${photo.cacheKey}|${photo.editHash}`}
