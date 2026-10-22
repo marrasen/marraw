@@ -117,8 +117,8 @@ var windowKept struct {
 var frameMeasures atomic.Int64
 
 // windowStats is FrameStatsFor for a window: src is a decode nothing
-// writes to, and what it measured last is windowKept. It returns nil when ctx is
-// done before it is measured.
+// writes to, and what it measured last is kept (windowKept). It returns
+// nil when ctx is done before it is measured.
 func windowStats(ctx context.Context, src *image.RGBA, e *edit.Params, fold Fold, gamma float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *FrameStats {
 	if !needsFrameStats(e) {
 		return nil
@@ -171,8 +171,8 @@ func windowStats(ctx context.Context, src *image.RGBA, e *edit.Params, fold Fold
 
 // windowStatsKey says what FrameStats depend on: the edit but for the
 // stages after the measure (the detail sliders, dehaze's amount), the
-// fold (exposure and white balance), the look's lift, the lens profile and the AI maps
-// and fill patches the edit reads.
+// fold (exposure and white balance), the look's lift, the lens profile,
+// and the AI maps and fill patches the edit reads.
 func windowStatsKey(e *edit.Params, fold Fold, gamma float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) string {
 	flat := *e
 	flat.Clarity, flat.Texture, flat.Sharpen = 0, 0, 0
