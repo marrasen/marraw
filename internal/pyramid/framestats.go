@@ -110,6 +110,7 @@ var windowKept struct {
 	shrunk *image.RGBA
 	key    string // windowStatsKey of st
 	st     *FrameStats
+	gen    int // counts forgetWindowStats
 }
 
 // frameMeasures counts the measures windowStats ran, for tests.
@@ -126,6 +127,7 @@ func windowStats(ctx context.Context, src *image.RGBA, e *edit.Params, fold Fold
 	edge := min(previewFrameEdge(src, fxPlaneLongEdge, e), proxyMaxEdge)
 	key := windowStatsKey(e, fold, gamma, lensc, ai, fills)
 	windowKept.Lock()
+	gen := windowKept.gen
 	same := windowKept.shrunk != nil && windowKept.src == ref && windowKept.edge == edge
 	shrunk, st := windowKept.shrunk, windowKept.st
 	measured := same && st != nil && windowKept.key == key
@@ -133,10 +135,23 @@ func windowStats(ctx context.Context, src *image.RGBA, e *edit.Params, fold Fold
 	if measured {
 		return st
 	}
+	// keep stores what this call made, unless what windows measured was
+	// let go since it began (forgetWindowStats).
+	keep := func(set func()) {
+		windowKept.Lock()
+		if windowKept.gen == gen {
+			set()
+		}
+		windowKept.Unlock()
+	}
 	if !same {
 		// Outside the lock: a 42 MP shrink must not hold up windows of
-		// another photo.
+		// another photo. Kept at once, so a drag whose frames call each
+		// other off still shrinks only once.
 		shrunk = shrinkDecode(src, e)
+		keep(func() {
+			windowKept.src, windowKept.edge, windowKept.shrunk, windowKept.key, windowKept.st = ref, edge, shrunk, "", nil
+		})
 	}
 	if ctx.Err() != nil {
 		return nil
@@ -146,9 +161,11 @@ func windowStats(ctx context.Context, src *image.RGBA, e *edit.Params, fold Fold
 		return nil
 	}
 	frameMeasures.Add(1)
-	windowKept.Lock()
-	windowKept.src, windowKept.edge, windowKept.shrunk, windowKept.key, windowKept.st = ref, edge, shrunk, key, st
-	windowKept.Unlock()
+	keep(func() {
+		if windowKept.src == ref && windowKept.edge == edge {
+			windowKept.key, windowKept.st = key, st
+		}
+	})
 	return st
 }
 
@@ -163,24 +180,34 @@ func windowStatsKey(e *edit.Params, fold Fold, gamma float64, lensc *lens.Correc
 		flat.Dehaze = 1
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s|%v|%v|%p", flat.Hash(), fold.ExpEV, gamma, lensc)
+	fmt.Fprintf(&b, "%s|%v|%v", flat.Hash(), fold.ExpEV, gamma)
 	if fold.WB != nil {
 		fmt.Fprintf(&b, "|%v", *fold.WB)
 	}
+	if lensc != nil {
+		fmt.Fprintf(&b, "|%+v", *lensc)
+	}
+	// By content (file and time), not address: a map made again under
+	// the same name is a new one.
 	for _, k := range slices.Sorted(maps.Keys(ai)) {
-		fmt.Fprintf(&b, "|%s=%p", k, ai[k])
+		if m := ai[k]; m != nil {
+			fmt.Fprintf(&b, "|%s=%s", k, m.Key)
+		}
 	}
 	for _, k := range slices.Sorted(maps.Keys(fills)) {
-		fmt.Fprintf(&b, "|%s=%p", k, fills[k])
+		if f := fills[k]; f != nil {
+			fmt.Fprintf(&b, "|%s=%s", k, f.Key)
+		}
 	}
 	return b.String()
 }
 
 // forgetWindowStats lets what windows measured go, with the decode they
-// measured it from.
+// measured it from; a window under way then keeps nothing.
 func forgetWindowStats() {
 	windowKept.Lock()
 	windowKept.src, windowKept.edge, windowKept.shrunk, windowKept.key, windowKept.st = weak.Pointer[image.RGBA]{}, 0, nil, "", nil
+	windowKept.gen++
 	windowKept.Unlock()
 }
 
