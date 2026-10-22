@@ -78,12 +78,9 @@ func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gam
 		return nil
 	}
 	whole := region{outW: g.outW, outH: g.outH}
-	var st *FrameStats
-	if needsFrameStats(e) {
-		st = measureFrame(proxyFrom(shrinkKept(src, e), e, expEV, lensc), gamma, e, ai, fills)
-		if ctx.Err() != nil {
-			return nil
-		}
+	st := windowStats(ctx, src, e, expEV, gamma, lensc, ai, fills)
+	if ctx.Err() != nil {
+		return nil
 	}
 
 	// What the look, masks and detail run on: the window plus the reach

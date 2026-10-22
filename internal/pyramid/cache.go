@@ -707,7 +707,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 		report(0.72)
 		var st *FrameStats
 		if proxy != nil {
-			st = measureFrame(proxy, gamma, edits, ai, fills)
+			st = measureFrame(context.Background(), proxy, gamma, edits, ai, fills)
 		}
 		rg := wholeRegion(rgba)
 		ApplyHeal(rgba, edits, ai, fills)

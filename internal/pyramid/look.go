@@ -145,7 +145,7 @@ func ApplyFinish(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fi
 // measures them on a working-size copy of img.
 func ApplyFinishWith(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fills FillSet, st *FrameStats) {
 	if b := img.Bounds(); st == nil && max(b.Dx(), b.Dy()) > fxPlaneLongEdge && needsFrameStats(e) {
-		st = measureFrame(scaleToLongEdge(img, fxPlaneLongEdge), gamma, e, ai, fills)
+		st = measureFrame(context.Background(), scaleToLongEdge(img, fxPlaneLongEdge), gamma, e, ai, fills)
 	}
 	rg := wholeRegion(img)
 	ApplyHeal(img, e, ai, fills)

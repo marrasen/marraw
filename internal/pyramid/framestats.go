@@ -1,8 +1,14 @@
 package pyramid
 
 import (
+	"context"
+	"fmt"
 	"image"
+	"maps"
+	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"weak"
 
 	"github.com/marrasen/marraw/internal/edit"
@@ -64,7 +70,7 @@ func FrameStatsFor(src *image.RGBA, e *edit.Params, expEV, gamma float64, lensc 
 	if !needsFrameStats(e) {
 		return nil
 	}
-	return measureFrame(frameProxy(src, e, expEV, lensc), gamma, e, ai, fills)
+	return measureFrame(context.Background(), frameProxy(src, e, expEV, lensc), gamma, e, ai, fills)
 }
 
 // frameProxy is the working-size frame a render of e from the decode src
@@ -75,38 +81,104 @@ func frameProxy(src *image.RGBA, e *edit.Params, expEV float64, lensc *lens.Corr
 	return proxyFrom(shrinkDecode(src, e), e, expEV, lensc)
 }
 
+// proxyMaxEdge bounds the shrunk decode frameProxy works from. A crop
+// smaller than a quarter of the frame's long edge would otherwise ask for
+// the decode at full size to leave the crop at the working size; past the
+// bound, the working-size frame comes out smaller than that, which the
+// effects are drawn from just the same.
+const proxyMaxEdge = 4 * fxPlaneLongEdge
+
 // shrinkDecode is the decode src shrunk for frameProxy, in a buffer of its
 // own.
 func shrinkDecode(src *image.RGBA, e *edit.Params) *image.RGBA {
-	img := scaleToLongEdge(src, previewFrameEdge(src, fxPlaneLongEdge, e))
+	img := scaleToLongEdge(src, min(previewFrameEdge(src, fxPlaneLongEdge, e), proxyMaxEdge))
 	if img == src {
 		img = copyRGBA(src, src.Bounds())
 	}
 	return img
 }
 
-// shrunk is the last decode a window shrank (shrinkKept). A window of the
-// photo open in the editor shrinks the same decode on every frame of a
-// drag, and the shrink is most of what measuring the frame costs. The
-// decode is held weakly, so this keeps none alive.
-var shrunk struct {
+// windowKept is what windows of the photo open in the editor measured last
+// (windowStats): on every frame of a drag they shrink the same decode, and
+// a pan, or a drag of a stage after the measure, asks for the same
+// FrameStats again. The decode is held weakly, so this keeps none alive,
+// and it goes when the kept decode does (forgetWindowStats).
+var windowKept struct {
 	sync.Mutex
-	src  weak.Pointer[image.RGBA]
-	edge int
-	img  *image.RGBA
+	src    weak.Pointer[image.RGBA]
+	edge   int
+	shrunk *image.RGBA
+	key    string // windowStatsKey of st
+	st     *FrameStats
 }
 
-// shrinkKept is shrinkDecode for src, a decode nothing writes to, as a
-// window's is: the last one is kept. The result is a copy the caller owns.
-func shrinkKept(src *image.RGBA, e *edit.Params) *image.RGBA {
-	edge := previewFrameEdge(src, fxPlaneLongEdge, e)
-	key := weak.Make(src)
-	shrunk.Lock()
-	defer shrunk.Unlock()
-	if shrunk.img == nil || shrunk.src != key || shrunk.edge != edge {
-		shrunk.src, shrunk.edge, shrunk.img = key, edge, shrinkDecode(src, e)
+// frameMeasures counts the measures windowStats ran, for tests.
+var frameMeasures atomic.Int64
+
+// windowStats is FrameStatsFor for a window: src is a decode nothing
+// writes to, and what it measured last is windowKept. It returns nil when ctx is
+// done before it is measured.
+func windowStats(ctx context.Context, src *image.RGBA, e *edit.Params, expEV, gamma float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *FrameStats {
+	if !needsFrameStats(e) {
+		return nil
 	}
-	return copyRGBA(shrunk.img, shrunk.img.Bounds())
+	ref := weak.Make(src)
+	edge := min(previewFrameEdge(src, fxPlaneLongEdge, e), proxyMaxEdge)
+	key := windowStatsKey(e, expEV, gamma, lensc, ai, fills)
+	windowKept.Lock()
+	same := windowKept.shrunk != nil && windowKept.src == ref && windowKept.edge == edge
+	shrunk, st := windowKept.shrunk, windowKept.st
+	measured := same && st != nil && windowKept.key == key
+	windowKept.Unlock()
+	if measured {
+		return st
+	}
+	if !same {
+		// Outside the lock: a 42 MP shrink must not hold up windows of
+		// another photo.
+		shrunk = shrinkDecode(src, e)
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	st = measureFrame(ctx, proxyFrom(copyRGBA(shrunk, shrunk.Bounds()), e, expEV, lensc), gamma, e, ai, fills)
+	if st == nil {
+		return nil
+	}
+	frameMeasures.Add(1)
+	windowKept.Lock()
+	windowKept.src, windowKept.edge, windowKept.shrunk, windowKept.key, windowKept.st = ref, edge, shrunk, key, st
+	windowKept.Unlock()
+	return st
+}
+
+// windowStatsKey says what FrameStats depend on: the edit but for the
+// stages after the measure (the detail sliders, dehaze's amount), the
+// exposure folded in, the look's lift, the lens profile and the AI maps
+// and fill patches the edit reads.
+func windowStatsKey(e *edit.Params, expEV, gamma float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) string {
+	flat := *e
+	flat.Clarity, flat.Texture, flat.Sharpen = 0, 0, 0
+	if flat.Dehaze > 0 {
+		flat.Dehaze = 1
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s|%v|%v|%p", flat.Hash(), expEV, gamma, lensc)
+	for _, k := range slices.Sorted(maps.Keys(ai)) {
+		fmt.Fprintf(&b, "|%s=%p", k, ai[k])
+	}
+	for _, k := range slices.Sorted(maps.Keys(fills)) {
+		fmt.Fprintf(&b, "|%s=%p", k, fills[k])
+	}
+	return b.String()
+}
+
+// forgetWindowStats lets what windows measured go, with the decode they
+// measured it from.
+func forgetWindowStats() {
+	windowKept.Lock()
+	windowKept.src, windowKept.edge, windowKept.shrunk, windowKept.key, windowKept.st = weak.Pointer[image.RGBA]{}, 0, nil, "", nil
+	windowKept.Unlock()
 }
 
 // proxyFrom is frameProxy from the shrunk decode work, which it may write
@@ -119,12 +191,19 @@ func proxyFrom(work *image.RGBA, e *edit.Params, expEV float64, lensc *lens.Corr
 }
 
 // measureFrame renders img, a working-size frame after geometry, up to
-// dehaze, and keeps what the whole-frame stages measure on the way.
-func measureFrame(img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fills FillSet) *FrameStats {
+// dehaze, and keeps what the whole-frame stages measure on the way. It
+// returns nil when ctx is done (checked between the stages).
+func measureFrame(ctx context.Context, img *image.RGBA, gamma float64, e *edit.Params, ai AIMapSet, fills FillSet) *FrameStats {
 	st := &FrameStats{fx: make([]*maskFXStats, len(e.Masks)), measuring: true}
 	ApplyHeal(img, e, ai, fills)
 	ApplyLook(img, gamma, e)
+	if ctx.Err() != nil {
+		return nil
+	}
 	applyMasksIn(img, wholeRegion(img), e, ai, st)
+	if ctx.Err() != nil {
+		return nil
+	}
 	ApplyBW(img, e)
 	if e.Dehaze > 0 {
 		st.veil = estimateVeil(img)

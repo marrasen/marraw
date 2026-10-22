@@ -117,3 +117,58 @@ func TestWindowMatchesTilesWithEffects(t *testing.T) {
 		}
 	}
 }
+
+// TestWindowStatsReused: a pan, or a drag of a stage after the measure,
+// reuses what the last window measured; an edit the measure reads does
+// not. Neither changes the pixels.
+func TestWindowStatsReused(t *testing.T) {
+	forgetWindowStats()
+	t.Cleanup(forgetWindowStats)
+	src := windowTestSource(2400, 1600)
+	e := edit.Params{Dehaze: 0.4, LensMode: edit.LensOff, Masks: []edit.Mask{{Type: edit.MaskRadial,
+		CX: 0.5, CY: 0.5, RX: 0.3, RY: 0.3, Feather: 0.5, Adjust: edit.MaskAdjust{Glow: 0.6}}}}
+	e.Normalize()
+	window := func(e edit.Params, win image.Rectangle) {
+		t.Helper()
+		got := RenderWindow(t.Context(), src, win, 0.72, &e, 0, nil, nil, nil)
+		want := copyRGBA(renderWholeForTest(src, 0.72, &e, 0, nil, nil, nil), win)
+		if _, _, d := windowDiff(got, want); d != "" {
+			t.Errorf("window %v: %s", win, d)
+		}
+	}
+	n0 := frameMeasures.Load()
+	window(e, image.Rect(100, 100, 600, 500))
+	window(e, image.Rect(900, 700, 1300, 1000)) // a pan
+	sharper := e
+	sharper.Clarity, sharper.Dehaze = 0.5, 0.7
+	window(sharper, image.Rect(900, 700, 1300, 1000))
+	if n := frameMeasures.Load() - n0; n != 1 {
+		t.Errorf("%d measures, want 1", n)
+	}
+	glowier := e
+	glowier.Masks = []edit.Mask{e.Masks[0]}
+	glowier.Masks[0].Adjust.Glow = 0.9
+	window(glowier, image.Rect(900, 700, 1300, 1000))
+	if n := frameMeasures.Load() - n0; n != 2 {
+		t.Errorf("%d measures after a mask change, want 2", n)
+	}
+}
+
+// TestTightCropShrinkBounded: a crop of a tenth of the frame does not ask
+// for the decode at full size, and its window still matches.
+func TestTightCropShrinkBounded(t *testing.T) {
+	src := windowTestSource(9000, 6000)
+	e := edit.Params{Dehaze: 0.3, LensMode: edit.LensOff, CropX: 0.4, CropY: 0.4, CropW: 0.1, CropH: 0.1,
+		Masks: []edit.Mask{{Type: edit.MaskRadial, CX: 0.45, CY: 0.45, RX: 0.03, RY: 0.03, Feather: 0.5,
+			Adjust: edit.MaskAdjust{Blur: 0.5}}}}
+	e.Normalize()
+	if b := shrinkDecode(src, &e).Bounds(); max(b.Dx(), b.Dy()) > proxyMaxEdge {
+		t.Errorf("shrunk to %v", b.Size())
+	}
+	whole := renderWholeForTest(src, 0.72, &e, 0, nil, nil, nil)
+	win := image.Rect(200, 150, 700, 500).Intersect(whole.Bounds())
+	got := RenderWindow(t.Context(), src, win, 0.72, &e, 0, nil, nil, nil)
+	if _, _, d := windowDiff(got, copyRGBA(whole, win)); d != "" {
+		t.Error(d)
+	}
+}
