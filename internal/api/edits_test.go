@@ -255,8 +255,8 @@ func TestApplyBatchEditLeavesAnUnreadableEditAlone(t *testing.T) {
 }
 
 // TestPreviewWindowArgs: sizes past the cap are refused before any work,
-// including two sides whose product wraps around, and neutral params or
-// an edit a window cannot render answer null.
+// including two sides whose product wraps around, and neutral params
+// answer null.
 func TestPreviewWindowArgs(t *testing.T) {
 	e := &Edits{}
 	for _, wh := range [][2]int{{0, 10}, {10, -1}, {windowMaxPixels + 1, 1}, {1 << 32, 1 << 32}, {5000, 5000}} {
@@ -264,11 +264,8 @@ func TestPreviewWindowArgs(t *testing.T) {
 			t.Errorf("%dx%d: no error", wh[0], wh[1])
 		}
 	}
-	for name, p := range map[string]edit.Params{"neutral": {}, "dehaze": {Dehaze: 0.4}} {
-		blob, err := e.PreviewWindow(t.Context(), 1, p, 0, 0, 100, 100)
-		if err != nil || blob != nil {
-			t.Errorf("%s: %v, %v; want null", name, blob, err)
-		}
+	if blob, err := e.PreviewWindow(t.Context(), 1, edit.Params{}, 0, 0, 100, 100); err != nil || blob != nil {
+		t.Errorf("neutral: %v, %v; want null", blob, err)
 	}
 }
 

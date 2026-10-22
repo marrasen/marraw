@@ -8,6 +8,10 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
+## Unreleased
+
+- Develop: **zoomed in, dehaze and the effects on masks show sharp at once too**. While you drag a slider at 1:1 on a photo with dehaze, or with blur, bokeh, glow, streaks or another effect on a mask, marraw now draws the part on screen at full resolution, as it already did for other edits. These effects are now measured on a small render of the whole photo, so a full-resolution render, an export and the part on screen agree. The previews, 1:1 view and exports of photos with these effects can change very slightly, and previews are drawn again once after the update
+
 ## 0.11.0-beta.1 - 2026-10-22
 
 - Develop: **sharper previews while you drag a slider**. They are drawn at the size the photo covers on your screen, up to 2048 pixels, instead of a fixed 1024

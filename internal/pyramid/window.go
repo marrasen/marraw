@@ -27,25 +27,6 @@ func wholeRegion(img *image.RGBA) region {
 	return region{outW: b.Dx(), outH: b.Dy()}
 }
 
-// Windowable reports whether RenderWindow can render e. Dehaze and the
-// spatial effects on masks (blur, glow, streaks and the rest) measure or
-// gather over the whole frame, so a window of them needs the whole render.
-func Windowable(e *edit.Params) bool {
-	if e == nil {
-		return true
-	}
-	if e.Dehaze != 0 {
-		return false
-	}
-	for i := range e.Masks {
-		m := &e.Masks[i]
-		if !m.Disabled && m.Adjust.HasFX() {
-			return false
-		}
-	}
-	return true
-}
-
 // OutputSize is the size of the full render of e from a decode of
 // decW×decH: the frame after the quarter turns, crop and straighten.
 func OutputSize(decW, decH int, e *edit.Params) (w, h int) {
@@ -74,8 +55,8 @@ func windowGeom(decW, decH int, e *edit.Params) (cropGeom, int) {
 // the pixels the 1:1 tiles hold there — from src, the full decode that
 // render starts from. src is only read. expEV is the exposure the render
 // folds in after the decode (its ResidualExpEV and WBCompEV). It returns
-// nil when win misses the output, e is not Windowable, or ctx is done
-// (checked between the stages).
+// nil when win misses the output or ctx is done (checked between the
+// stages).
 //
 // It works backwards from win: the margin the detail stage and the AI
 // masks' edge refinement reach over, then the spots that land in that
@@ -84,11 +65,10 @@ func windowGeom(decW, decH int, e *edit.Params) (cropGeom, int) {
 // decode all of that comes from. Then it renders forward, each stage on
 // only the part the stages after it need. Every stage is the one the full
 // render runs, told where its buffer sits in the frame, so the result
-// matches the full render's pixels there, exactly.
+// matches the full render's pixels there, exactly. Dehaze and the mask
+// effects, which read the whole frame, take what they read from the small
+// render of it the full render measures too (FrameStatsFor).
 func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gamma float64, e *edit.Params, expEV float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *image.RGBA {
-	if !Windowable(e) {
-		return nil
-	}
 	sb := src.Bounds()
 	decW, decH := sb.Dx(), sb.Dy()
 	g, code := windowGeom(decW, decH, e)
@@ -98,6 +78,13 @@ func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gam
 		return nil
 	}
 	whole := region{outW: g.outW, outH: g.outH}
+	var st *FrameStats
+	if needsFrameStats(e) {
+		st = measureFrame(proxyFrom(shrinkKept(src, e), e, expEV, lensc), gamma, e, ai, fills)
+		if ctx.Err() != nil {
+			return nil
+		}
+	}
 
 	// What the look, masks and detail run on: the window plus the reach
 	// of the detail blurs and of the AI masks' refinement, whose block
@@ -145,12 +132,12 @@ func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gam
 	}
 	rg := region{off: need.Min, outW: g.outW, outH: g.outH}
 	applyLookIn(img, rg, gamma, e)
-	suppress := applyMasksIn(img, rg, e, ai)
+	suppress := applyMasksIn(img, rg, e, ai, st)
 	ApplyBW(img, e)
 	if ctx.Err() != nil {
 		return nil
 	}
-	applyDetailIn(img, rg, e, suppress)
+	applyDetailIn(img, rg, e, suppress, st)
 	return copyRGBA(img, win.Sub(need.Min))
 }
 

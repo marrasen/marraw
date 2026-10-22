@@ -24,19 +24,27 @@ import (
 // large-radius unsharp mask straddling a sharp subject against a deliberately
 // blurred background prints a bright rim around the subject.
 func ApplyDetail(img *image.RGBA, e *edit.Params, suppress []uint8) {
-	applyDetailIn(img, wholeRegion(img), e, suppress)
+	applyDetailIn(img, wholeRegion(img), e, suppress, nil)
 }
 
 // applyDetailIn is ApplyDetail for a buffer that is the part rg of the
 // output, with a margin of at least detailMargin around the pixels that
-// must come out right. RenderWindow never hands it dehaze: the veil is
-// measured over the whole frame.
-func applyDetailIn(img *image.RGBA, rg region, e *edit.Params, suppress []uint8) {
+// must come out right. Dehaze's veil comes from st where it is given (see
+// FrameStats); a buffer that is only part of the output must have it.
+func applyDetailIn(img *image.RGBA, rg region, e *edit.Params, suppress []uint8, st *FrameStats) {
 	if e == nil || (e.Dehaze == 0 && e.Clarity == 0 && e.Texture == 0 && e.Sharpen == 0) {
 		return
 	}
 	if e.Dehaze != 0 {
-		applyDehaze(img, e.Dehaze)
+		var veil int
+		switch {
+		case e.Dehaze < 0: // adds a veil: nothing to measure
+		case st != nil:
+			veil = st.veil
+		default:
+			veil = estimateVeil(img)
+		}
+		applyDehaze(img, e.Dehaze, veil)
 	}
 	if e.Clarity == 0 && e.Texture == 0 && e.Sharpen == 0 {
 		return
@@ -298,15 +306,15 @@ func boxBlurVU16(src, dst []uint16, w, h, r int) {
 	})
 }
 
-// applyDehaze estimates the atmospheric veil as a low percentile of the
-// min-channel (the dark-channel prior collapsed to one global value) and
-// stretches it out: out = (in − a·V) · 255/(255 − a·V). Negative amounts add
-// a veil instead, lifting everything toward a light gray. Both directions
-// are global, so they compile to one LUT applied per channel.
-func applyDehaze(img *image.RGBA, amount float64) {
+// applyDehaze takes away veil, the atmospheric veil estimateVeil measured
+// over the frame, and stretches the rest out: out = (in − a·V) ·
+// 255/(255 − a·V). Negative amounts add a veil instead, lifting everything
+// toward a light gray, and ignore veil. Both directions are global, so
+// they compile to one LUT applied per channel.
+func applyDehaze(img *image.RGBA, amount float64, veil int) {
 	var lut [256]uint8
 	if amount > 0 {
-		v := amount * float64(estimateVeil(img))
+		v := amount * float64(veil)
 		v = math.Min(v, 200)
 		scale := 255 / (255 - v)
 		for i := range lut {

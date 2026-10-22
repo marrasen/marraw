@@ -1,0 +1,119 @@
+package pyramid
+
+import (
+	"bytes"
+	"image"
+	"os"
+	"testing"
+
+	"github.com/marrasen/marraw/internal/decode"
+	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/jpegturbo"
+)
+
+// TestFrameStatsKeepEffects: the small render keeps what each effect
+// needs: the blur's levels, the shared buffer, and what the light passes
+// add only where no effect threw the detail away; nothing for a mask
+// without effects, and the veil for dehaze.
+func TestFrameStatsKeepEffects(t *testing.T) {
+	src := windowTestSource(2400, 1600)
+	radial := func(a edit.MaskAdjust) edit.Mask {
+		return edit.Mask{Type: edit.MaskRadial, CX: 0.5, CY: 0.5, RX: 0.3, RY: 0.3, Feather: 0.5, Adjust: a}
+	}
+	e := edit.Params{Dehaze: 0.5, LensMode: edit.LensOff, Masks: []edit.Mask{
+		radial(edit.MaskAdjust{ExpEV: 0.5}),
+		radial(edit.MaskAdjust{Blur: 0.5}),
+		radial(edit.MaskAdjust{Glow: 0.6, Streaks: 0.5}),
+		radial(edit.MaskAdjust{MotionBlur: 0.5}),
+	}}
+	e.Normalize()
+	st := FrameStatsFor(src, &e, 0, 0.72, nil, nil, nil)
+	if st == nil {
+		t.Fatal("no stats")
+	}
+	if st.veil < 24 {
+		t.Errorf("veil %d", st.veil)
+	}
+	if st.fx[0] != nil {
+		t.Error("a tone-only mask kept effects")
+	}
+	if b := st.fx[1]; b == nil || len(b.blur) != gradedBlurLevels || b.shared != nil {
+		t.Errorf("blur: %+v", b)
+	}
+	if g := st.fx[2]; g == nil || g.shared == nil || g.delta == nil {
+		t.Errorf("glow: %+v", g)
+	}
+	if m := st.fx[3]; m == nil || m.shared == nil || m.delta != nil {
+		t.Errorf("motion: %+v", m)
+	}
+	if s := st.fx[2].shared; max(s.w, s.h) != fxPlaneLongEdge {
+		t.Errorf("working size %dx%d", s.w, s.h)
+	}
+	if FrameStatsFor(src, &edit.Params{Dehaze: -0.3, Masks: []edit.Mask{radial(edit.MaskAdjust{ExpEV: 1})}}, 0, 0.72, nil, nil, nil) != nil {
+		t.Error("stats for an edit that reads nothing over the frame")
+	}
+}
+
+// TestWindowShowsEffects: a window of an edit with effects shows them —
+// it differs from the same edit without — so the window tests compare
+// renders that carry them.
+func TestWindowShowsEffects(t *testing.T) {
+	src := windowTestSource(2400, 1600)
+	with := edit.Params{Dehaze: 0.5, LensMode: edit.LensOff, Masks: []edit.Mask{{Type: edit.MaskRadial,
+		CX: 0.5, CY: 0.5, RX: 0.3, RY: 0.3, Feather: 0.5, Adjust: edit.MaskAdjust{Blur: 0.6, Glow: 0.5, ExpEV: 0.2}}}}
+	with.Normalize()
+	without := with
+	without.Dehaze, without.Masks = 0, []edit.Mask{with.Masks[0]}
+	without.Masks[0].Adjust = edit.MaskAdjust{ExpEV: 0.2}
+	win := image.Rect(1000, 600, 1400, 1000)
+	a := RenderWindow(t.Context(), src, win, 0.72, &with, 0, nil, nil, nil)
+	b := RenderWindow(t.Context(), src, win, 0.72, &without, 0, nil, nil, nil)
+	if n, worst, _ := windowDiff(a, b); n < len(a.Pix)/4 || worst < 20 {
+		t.Errorf("effects changed %d values, worst by %d", n, worst)
+	}
+}
+
+// TestWindowMatchesTilesWithEffects: on a real RAW, a window of an edit
+// with dehaze and mask effects, rendered from the kept decode, is the 1:1
+// tile there, byte for byte: the full render measures the frame as the
+// window does.
+func TestWindowMatchesTilesWithEffects(t *testing.T) {
+	f := newFullTestCatalog(t)
+	f.open(0)
+	params := edit.Params{Contrast: 0.2, Clarity: 0.3, Dehaze: 0.5, ExpEV: 0.3, Masks: []edit.Mask{
+		{Type: edit.MaskRadial, CX: 0.5, CY: 0.5, RX: 0.3, RY: 0.25, Feather: 0.5, Invert: true,
+			Adjust: edit.MaskAdjust{Blur: 0.5, ExpEV: -0.3}},
+		{Type: edit.MaskLinear, X0: 0.2, Y0: 0.1, X1: 0.6, Y1: 0.7, Adjust: edit.MaskAdjust{Glow: 0.7, Streaks: 0.5}},
+	}}
+	p := f.edit(0, params)
+	params.Normalize()
+	cache := f.cache
+	for _, at := range []image.Point{{0, 0}, {1, 1}, {2, 1}} {
+		path, err := cache.EnsureTile(t.Context(), p, at.X, at.Y, p.EditHash, decode.PriorityVisible)
+		if err != nil {
+			t.Fatalf("tile %v: %v", at, err)
+		}
+		tile, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src, expEV, _, ok := cache.KeptForWindow(p, &params)
+		if !ok {
+			t.Fatal("no decode kept for the window")
+		}
+		gamma := f.photo(0).LookGamma
+		win := image.Rect(at.X*TileSize, at.Y*TileSize, (at.X+1)*TileSize, (at.Y+1)*TileSize)
+		img := RenderWindow(t.Context(), src, win, gamma, &params, expEV, cache.Lenses.For(p),
+			cache.AIMaps.SetFor(p.CacheKey, &params), cache.Fills.SetFor(p.CacheKey, &params))
+		if img == nil {
+			t.Fatalf("tile %v: no window", at)
+		}
+		var buf bytes.Buffer
+		if err := jpegturbo.EncodeRGBA(&buf, img, 90); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(buf.Bytes(), tile) {
+			t.Errorf("tile %v: the window differs from the 1:1 render", at)
+		}
+	}
+}
