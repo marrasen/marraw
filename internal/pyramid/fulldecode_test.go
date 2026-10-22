@@ -473,7 +473,8 @@ func TestRenderDoesNotAsk(t *testing.T) {
 }
 
 // TestKeptForWindow: a window renders from the kept decode under the same
-// LibRaw inputs, or the same but for exposure, which it folds in.
+// LibRaw inputs, or the same but for exposure and white balance, which it
+// folds in.
 func TestKeptForWindow(t *testing.T) {
 	f := newFullTestCatalog(t)
 	f.open(0)
@@ -484,24 +485,72 @@ func TestKeptForWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	src, base, exact, ok := f.cache.KeptForWindow(p, start)
-	if !ok || !exact || src == nil {
-		t.Fatalf("own state: ok %v exact %v", ok, exact)
+	if !ok || !exact || src == nil || base.WB != nil {
+		t.Fatalf("own state: ok %v exact %v fold %+v", ok, exact, base)
 	}
 	look := *start
 	look.Contrast, look.Clarity = 0.5, 0.3
-	if _, ev, exact, ok := f.cache.KeptForWindow(p, &look); !ok || !exact || ev != base {
-		t.Errorf("look edit: ok %v exact %v expEV %v, want %v", ok, exact, ev, base)
+	if _, fold, exact, ok := f.cache.KeptForWindow(p, &look); !ok || !exact || fold != base {
+		t.Errorf("look edit: ok %v exact %v fold %+v, want %+v", ok, exact, fold, base)
 	}
 	brighter := *start
 	brighter.ExpEV = 1.2
-	if _, ev, exact, ok := f.cache.KeptForWindow(p, &brighter); !ok || exact || math.Abs(ev-base-0.7) > 1e-9 {
-		t.Errorf("exposure edit: ok %v exact %v expEV %v, want %v", ok, exact, ev, base+0.7)
+	if _, fold, exact, ok := f.cache.KeptForWindow(p, &brighter); !ok || exact || fold.WB != nil || math.Abs(fold.ExpEV-base.ExpEV-0.7) > 1e-9 {
+		t.Errorf("exposure edit: ok %v exact %v fold %+v, want expEV %v", ok, exact, fold, base.ExpEV+0.7)
 	}
 	warmer := *start
-	warmer.WBMode, warmer.WBKelvin = edit.WBKelvin, 7000
+	warmer.WBMode, warmer.WBKelvin, warmer.ExpEV = edit.WBKelvin, 7000, 0.9
 	warmer.Normalize()
-	if _, _, _, ok := f.cache.KeptForWindow(p, &warmer); ok {
-		t.Error("a white balance edit renders from the kept decode")
+	if _, fold, exact, ok := f.cache.KeptForWindow(p, &warmer); !ok || exact || fold.WB == nil || math.Abs(fold.ExpEV-base.ExpEV-0.4) > 1e-9 {
+		t.Errorf("white balance edit: ok %v exact %v fold %+v", ok, exact, fold)
+	}
+	auto := *start
+	auto.WBMode = edit.WBAuto
+	auto.Normalize()
+	if _, _, _, ok := f.cache.KeptForWindow(p, &auto); ok {
+		t.Error("auto white balance folds in")
+	}
+	// Custom with no multipliers yet: LibRaw takes the daylight balance,
+	// which is not known before it decodes.
+	custom := *start
+	custom.WBMode = edit.WBCustom
+	custom.Normalize()
+	if _, _, _, ok := f.cache.KeptForWindow(p, &custom); ok {
+		t.Error("a custom balance without multipliers folds in")
+	}
+	// Where the fold would guess at the highlights: recovery, highlight
+	// preservation, and a decode brighter than the edit.
+	for name, e := range map[string]func(*edit.Params){
+		"recovery":     func(e *edit.Params) { e.Highlight = 2 },
+		"preservation": func(e *edit.Params) { e.ExpPreserve = 0.5 },
+		"darker":       func(e *edit.Params) { e.ExpEV = -0.5 },
+	} {
+		q := warmer
+		e(&q)
+		q.Normalize()
+		if _, fold, _, ok := f.cache.KeptForWindow(p, &q); ok && fold.WB != nil {
+			t.Errorf("%s: a white balance folds in", name)
+		}
+	}
+	// Below 0 EV the shift neither clips nor preserves: those still fold,
+	// from a decode at or below 0 EV.
+	darkStart := *start
+	darkStart.ExpEV = -1
+	darkStart.Normalize()
+	f.cache.WantFull(p, &darkStart)
+	if err := f.cache.WarmFull(t.Context(), p, &darkStart); err != nil {
+		t.Fatal(err)
+	}
+	darker := darkStart
+	darker.WBMode, darker.WBKelvin, darker.ExpEV, darker.ExpPreserve = edit.WBKelvin, 7000, -2, 0.5
+	darker.Normalize()
+	if _, fold, _, ok := f.cache.KeptForWindow(p, &darker); !ok || fold.WB == nil {
+		t.Errorf("a darker edit with preservation does not fold: ok %v", ok)
+	}
+	denoised := warmer
+	denoised.NRThreshold = 200
+	if _, _, _, ok := f.cache.KeptForWindow(p, &denoised); ok {
+		t.Error("an edit of another LibRaw input renders from the kept decode")
 	}
 	if _, _, _, ok := f.cache.KeptForWindow(f.photo(1), start); ok {
 		t.Error("another photo renders from the kept decode")
@@ -537,8 +586,8 @@ func TestEditorWantsWindow(t *testing.T) {
 	if f.cache.EditorWants(p, &drag) {
 		t.Error("a look drag sharing the settled state's decode is wanted")
 	}
-	if _, _, _, ok := f.cache.KeptForWindow(p, &warmer); ok {
-		t.Fatal("kept before it was decoded")
+	if _, fold, exact, ok := f.cache.KeptForWindow(p, &warmer); !ok || exact || fold.WB == nil {
+		t.Fatalf("before its decode, not a fold of the one kept: ok %v exact %v", ok, exact)
 	}
 	if err := f.cache.WarmFull(t.Context(), p, &warmer); err != nil {
 		t.Fatal(err)

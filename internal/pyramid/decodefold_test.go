@@ -1,0 +1,233 @@
+package pyramid
+
+import (
+	"image"
+	"math"
+	"os"
+	"testing"
+
+	"github.com/marrasen/marraw/internal/decode"
+	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/jpegturbo"
+)
+
+// TestFoldWithoutWBIsExposure: without a change of white balance the fold
+// is the exposure fold, byte for byte, so a window of the decode's own
+// balance still matches the tiles.
+func TestFoldWithoutWBIsExposure(t *testing.T) {
+	e := &edit.Params{}
+	a, b := windowTestSource(300, 200), windowTestSource(300, 200)
+	ApplyFold(a, Fold{ExpEV: 0.4}, e)
+	ApplyExposureEV(b, 0.4, e)
+	if _, _, d := windowDiff(a, b); d != "" {
+		t.Error(d)
+	}
+}
+
+// TestWBFoldIdentity: folding a balance into itself changes nothing but
+// for rounding, and a warmer balance warms.
+func TestWBFoldIdentity(t *testing.T) {
+	rgbCam := [3][4]float64{{1.8, -0.6, -0.2}, {-0.2, 1.5, -0.3}, {0.05, -0.5, 1.45}}
+	mul := [4]float64{2.1, 1, 1.6, 1}
+	same, ok := newWBFold(mul, mul, rgbCam, 0, 0, 0, 1)
+	if !ok {
+		t.Fatal("no fold")
+	}
+	src := windowTestSource(300, 200)
+	img := copyRGBA(src, src.Bounds())
+	ApplyFold(img, Fold{WB: &same}, &edit.Params{})
+	if _, worst, _ := windowDiff(img, src); worst > 1 {
+		t.Errorf("an unchanged balance moved a value by %d", worst)
+	}
+	warm, _ := newWBFold(mul, [4]float64{2.6, 1, 1.3, 1}, rgbCam, 0, 0, 0, 1)
+	ApplyFold(img, Fold{WB: &warm}, &edit.Params{})
+	var dr, db int
+	for i := 0; i < len(img.Pix); i += 4 {
+		dr += int(img.Pix[i]) - int(src.Pix[i])
+		db += int(img.Pix[i+2]) - int(src.Pix[i+2])
+	}
+	if dr <= 0 || db >= 0 {
+		t.Errorf("a warmer balance: red moved %d, blue %d", dr, db)
+	}
+	// A bright sky running up to the output's clip has no step at it.
+	cool, _ := newWBFold(mul, [4]float64{1.5, 1, 2.4, 1}, rgbCam, 0, 0, 0, 1)
+	var last uint8
+	for v := 240; v <= 255; v++ {
+		px := image.NewRGBA(image.Rect(0, 0, 1, 1))
+		copy(px.Pix, []uint8{200, 230, uint8(v), 255})
+		ApplyFold(px, Fold{WB: &cool}, &edit.Params{})
+		if v > 240 && max(int(px.Pix[0])-int(last), int(last)-int(px.Pix[0])) > 16 {
+			t.Errorf("blue %d -> %d: red jumps %d -> %d", v-1, v, last, px.Pix[0])
+		}
+		last = px.Pix[0]
+	}
+	// Clipped white stays white: the exact decode clips every channel.
+	white := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	copy(white.Pix, []uint8{255, 255, 255, 255})
+	ApplyFold(white, Fold{WB: &warm}, &edit.Params{})
+	if p := white.Pix; max(p[0], p[1], p[2])-min(p[0], p[1], p[2]) > 2 {
+		t.Errorf("clipped white folds to %v", p[:3])
+	}
+}
+
+// TestDecodeClipped: a decode missing a channel across its lit pixels
+// cannot fold a white balance; one missing it in a few highlights can.
+func TestDecodeClipped(t *testing.T) {
+	img := windowTestSource(400, 300)
+	if decodeClipped(img) {
+		t.Error("an ordinary frame reads as clipped")
+	}
+	for i := 0; i < len(img.Pix)/10; i += 4 {
+		img.Pix[i+1] = 0
+	}
+	if decodeClipped(img) {
+		t.Error("a tenth of the frame without green reads as clipped")
+	}
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2] = 40, 0, 220 // blue stage light
+	}
+	if !decodeClipped(img) {
+		t.Error("a frame without green reads as whole")
+	}
+}
+
+// TestWBFoldNearTheDecode: on a real RAW, a window that folds another
+// white balance into the kept decode lands near the 1:1 tiles of that
+// balance, decoded for it, over six tiles: the colour change and the
+// brightness match, and blown highlights stay white. Counted in 4×4
+// blocks, so the highlight and "far" figures are of blocks.
+func TestWBFoldNearTheDecode(t *testing.T) {
+	f := newFullTestCatalog(t)
+	f.open(0)
+	start := edit.Params{Contrast: 0.2}
+	p := f.edit(0, start)
+	start.Normalize()
+	if _, err := f.cache.EnsureTile(t.Context(), p, 1, 1, p.EditHash, decode.PriorityVisible); err != nil {
+		t.Fatal(err)
+	}
+	// The bounds hold on two photos: a Canon CR2 with a blown sky, and the
+	// Sony ARW CI tests with, full of fine detail and bright coloured
+	// highlights. Those the decode clipped in the output lost the colour
+	// the fold would need, so they land furthest off: the ARW's 3200 K
+	// has 1 to 3 percent of blocks 20 levels off, nearly all of them
+	// highlights with a channel at 255.
+	for _, tc := range []struct {
+		wb func(*edit.Params)
+		// How far a channel may be off: on average, on average absolute,
+		// and on average in the highlights; and the share of blocks more
+		// than 20 levels off, in percent.
+		mean, abs, hi, far float64
+	}{
+		{func(e *edit.Params) { e.WBMode, e.WBKelvin = edit.WBKelvin, 7500 }, 1.5, 3, 6, 1},
+		{func(e *edit.Params) { e.WBMode, e.WBKelvin = edit.WBKelvin, 3200 }, 3, 5, 8, 3.5},
+		{func(e *edit.Params) { e.WBTemp, e.WBTint = -0.6, 0.4 }, 1.5, 3.5, 6, 1},
+		// Bright, so the highlights clip and must stay white. Folding 1.5
+		// stops into 8-bit pixels is off by 3.1 levels on average on the
+		// CR2 already, with no change of balance (the exposure fold windows
+		// had before).
+		{func(e *edit.Params) { e.WBMode, e.WBKelvin, e.ExpEV = edit.WBKelvin, 2500, 1.5 }, 3.5, 6.5, 8, 4.5},
+		// A darker brightness never reaches the output's clip.
+		{func(e *edit.Params) { e.WBMode, e.WBKelvin, e.Bright = edit.WBKelvin, 3200, 0.5 }, 1, 3, 6, 1},
+	} {
+		e := start
+		tc.wb(&e)
+		e.Normalize()
+		// The window first, from the as-shot decode kept, at exposure 0
+		// but e's other LibRaw inputs: then the tiles of e, decoded under
+		// its balance.
+		base := e
+		base.WBMode, base.WBKelvin, base.WBTemp, base.WBTint, base.ExpEV = "", 0, 0, 0, 0
+		f.edit(0, base)
+		if _, err := f.cache.EnsureTile(t.Context(), f.photo(0), 1, 1, f.photo(0).EditHash, decode.PriorityVisible); err != nil {
+			t.Fatal(err)
+		}
+		src, fold, _, ok := f.cache.KeptForWindow(f.photo(0), &e)
+		if !ok || fold.WB == nil {
+			t.Fatalf("%+v: no fold (ok %v)", e, ok)
+		}
+		gamma := f.photo(0).LookGamma
+		var wins []*image.RGBA
+		for ty := range 2 {
+			for tx := range 3 {
+				win := image.Rect(tx*TileSize, ty*TileSize, (tx+1)*TileSize, (ty+1)*TileSize)
+				wins = append(wins, RenderWindow(t.Context(), src, win, gamma, &e, fold, f.cache.Lenses.For(p), nil, nil))
+			}
+		}
+		q := f.edit(0, e)
+		var sum, abs, hiSum [3]float64
+		n, hiN, far := 0, 0, 0
+		for k, got := range wins {
+			path, err := f.cache.EnsureTile(t.Context(), q, k%3, k/3, q.EditHash, decode.PriorityVisible)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := jpegturbo.DecodeRGBA(b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Compared in 4×4 blocks: LibRaw demosaics after it balances,
+			// so edges interpolate a little differently under another
+			// balance, as they do for the drafts' fold. Colour and
+			// brightness errors survive the averaging; that does not.
+			const blk = 4
+			gb, wb := got.Bounds(), want.Bounds()
+			for by := 0; by+blk <= min(gb.Dy(), wb.Dy()); by += blk {
+				for bx := 0; bx+blk <= min(gb.Dx(), wb.Dx()); bx += blk {
+					var g, w [3]float64
+					for y := by; y < by+blk; y++ {
+						for x := bx; x < bx+blk; x++ {
+							gi, wi := got.PixOffset(x, y), want.PixOffset(x, y)
+							for c := range 3 {
+								g[c] += float64(got.Pix[gi+c])
+								w[c] += float64(want.Pix[wi+c])
+							}
+						}
+					}
+					hi := true
+					isFar := false
+					for c := range 3 {
+						g[c] /= blk * blk
+						w[c] /= blk * blk
+						hi = hi && w[c] > 240
+						if math.Abs(g[c]-w[c]) > 20 {
+							isFar = true
+						}
+					}
+					for c := range 3 {
+						d := g[c] - w[c]
+						sum[c] += d
+						abs[c] += math.Abs(d)
+						if hi {
+							hiSum[c] += d
+						}
+					}
+					n++
+					if hi {
+						hiN++
+					}
+					if isFar {
+						far++
+					}
+				}
+			}
+		}
+		for c := range 3 {
+			sum[c] /= float64(n)
+			abs[c] /= float64(n)
+			if hiN > 0 {
+				hiSum[c] /= float64(hiN)
+			}
+		}
+		t.Logf("wb %s %v/%v/%v exp %v: mean difference %.2f %.2f %.2f, mean absolute %.2f %.2f %.2f; %d highlights off by %.1f %.1f %.1f; %.2f%% over 20 levels off",
+			e.WBMode, e.WBKelvin, e.WBTemp, e.WBTint, e.ExpEV, sum[0], sum[1], sum[2], abs[0], abs[1], abs[2], hiN, hiSum[0], hiSum[1], hiSum[2], 100*float64(far)/float64(n))
+		for c := range 3 {
+			if math.Abs(sum[c]) > tc.mean || abs[c] > tc.abs || (hiN > 100 && math.Abs(hiSum[c]) > tc.hi) || float64(far*100) > tc.far*float64(n) {
+				t.Errorf("wb %+v: channel %d off by %.2f on average (%.2f absolute, %.1f in highlights)", e, c, sum[c], abs[c], hiSum[c])
+			}
+		}
+	}
+}

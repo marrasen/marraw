@@ -657,7 +657,7 @@ func (c *Cache) generate(ctx context.Context, proc *libraw.Processor, photo stor
 	// here, before the exposure folds into the decode in place.
 	var proxy *image.RGBA
 	if level == "full" && needsFrameStats(edits) {
-		proxy = frameProxy(rgba, edits, edits.ResidualExpEV()+wbCompEV, c.Lenses.For(photo))
+		proxy = frameProxy(rgba, edits, Fold{ExpEV: edits.ResidualExpEV() + wbCompEV}, c.Lenses.For(photo))
 	}
 	if delta := edits.ResidualExpEV() + wbCompEV; delta != 0 {
 		own()
