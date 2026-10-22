@@ -45,8 +45,10 @@ if (process.env.MARRAW_SHOT_USERDATA) {
 }
 const child = spawn(electron, args, { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
 child.stdout.on('data', (d) => {
-  const s = String(d).trim();
-  if (s.startsWith('UITEST_RESULT')) console.log(s);
+  // Line by line: the result can share a chunk with the line before it.
+  for (const s of String(d).split('\n')) {
+    if (s.startsWith('UITEST_RESULT')) console.log(s.trim());
+  }
 });
 const timer = setTimeout(() => {
   console.error('shot: timed out');

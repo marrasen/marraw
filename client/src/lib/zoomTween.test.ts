@@ -70,6 +70,12 @@ describe('snapReason', () => {
 });
 
 describe('zoomAt', () => {
+  it('ends exactly on the target', () => {
+    // 2 + (0.37 − 2) is not 0.37 in floating point.
+    expect(zoomAt(2, 0.37, ZOOM_DURATION_MS)).toBe(0.37);
+    expect(zoomAt(0.123, 1.5, ZOOM_DURATION_MS * 3)).toBe(1.5);
+  });
+
   it('starts where it was and finishes exactly on the target', () => {
     expect(zoomAt(1, 2, 0)).toBeCloseTo(1, 10);
     expect(zoomAt(1, 2, ZOOM_DURATION_MS)).toBeCloseTo(2, 10);

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { create } from 'zustand';
 
 import { ConnectionError, type ApiClient } from '@/api/client';
 import { openInEditor } from '@/api/edits';
@@ -24,6 +25,12 @@ const RETRY_RESET_MS = 30_000;
 // Without a connection-state feed, how often to look whether the client is
 // connected again.
 const RECONNECT_POLL_MS = 1000;
+
+// holdTick counts the holds made, a moment after each call goes out: by
+// then the backend holds the photo and decodes it, so a window it could not
+// make before (lib/previewWindow) is worth asking for again.
+export const useHoldTick = create<{ tick: number }>(() => ({ tick: 0 }));
+const HOLD_TICK_MS = 300;
 
 /**
  * holdPhoto holds photoId open in the editor, after HOLD_DWELL_MS, until the
@@ -77,6 +84,9 @@ export function holdPhoto(client: ApiClient, photoId: number): () => void {
       () => ended(null),
       (err: unknown) => ended(err),
     );
+    window.setTimeout(() => {
+      if (!ac.signal.aborted) useHoldTick.setState((s) => ({ tick: s.tick + 1 }));
+    }, HOLD_TICK_MS);
   };
   timer = window.setTimeout(hold, HOLD_DWELL_MS);
   return () => {
