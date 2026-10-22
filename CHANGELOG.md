@@ -8,13 +8,13 @@ release. Newest release first. When cutting a release: bump the version in
 package.json and add a section here — and when a beta cycle closes, fold its beta
 sections into the stable one so nobody reads the same news twice.
 
-## Unreleased
+## 0.11.0-beta.1 - 2026-10-22
 
 - Develop: **sharper previews while you drag a slider**. They are drawn at the size the photo covers on your screen, up to 2048 pixels, instead of a fixed 1024
 - Develop: **the full-resolution view comes back much sooner after an edit**. The photo open in Develop keeps its full-size decode in memory, so after a crop, a mask or any tone or colour slider the 1:1 view returns in about a third of the time on a 42-megapixel photo. It no longer waits a moment before it starts, either. Exposure and white balance still decode again
 - Develop: **zoomed in, an edit shows sharp at once**. While you drag a slider at 1:1, marraw now draws the part of the photo on screen at full resolution, in a fraction of a second, instead of a soft enlargement of the whole-photo preview. After a white balance change it comes back as soon as that change is saved; dehaze and the blur and glow effects on masks still show the soft preview until the full-resolution view returns
 - Develop: **every full-resolution render is faster**: the tone, colour, black and white, rotation and detail steps now use every processor core
-- Library: **thumbnails show the photo as marraw draws it**. A photo first shows the camera's own small JPEG, as before; once marraw has drawn the photo (opening it, or the pass after a shoot opens), its thumbnail changes to marraw's rendering, so the grid matches the photo view in colour and contrast
+- Library: **thumbnails show the photo as marraw draws it**. A photo first shows the camera's own small JPEG, as before; once marraw has drawn the photo (opening it, or the pass after a shoot opens), its thumbnail changes to marraw's rendering, so the grid matches the photo view in colour and contrast. Previews are drawn again once after the update
 - Platform: **images load and save faster**. marraw now reads and writes its previews with libjpeg-turbo: about 3.7 times as fast to read and 7 times as fast to write as before
 - Develop: **brightness and shadow drags are smooth on photos under blue or red stage light**. They used to decode the photo again on every frame, about 440 ms each; they now take 56 to 79 ms, as other sliders do. Temperature and tint on such photos still decode each frame
 - Fixed: an **AI mask could go missing from a photo's previews** for good when the mask's map was made while a preview of the photo was being drawn
