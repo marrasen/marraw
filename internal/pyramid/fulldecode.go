@@ -39,11 +39,21 @@ type fullDecode struct {
 	cacheKey string
 	key      string      // fullDecodeKey
 	noExpKey string      // fullDecodeKeyNoExp
+	noWBKey  string      // fullDecodeKeyNoWB
 	baked    float64     // the exposure LibRaw baked in (edit.BakedExpEV)
 	wbCompEV float64     // edit.WBCompEV for this decode's WB
 	rgba     *image.RGBA // never changed once kept
-	used     time.Time   // last render from it; guarded by fullMu
-	timer    *time.Timer // lets the decode go fullDecodeIdle after used
+	// What a window needs to fold another white balance in: the
+	// multipliers this decode was balanced with (none for auto WB, which
+	// dcraw works out from the pixels), the camera's as-shot balance and
+	// matrices, and whether the decode lost a channel (decodeClipped).
+	wbMul   [4]float64
+	camMul  [4]float64
+	camXYZ  [4][3]float64
+	rgbCam  [3][4]float64
+	wbFolds bool
+	used    time.Time   // last render from it; guarded by fullMu
+	timer   *time.Timer // lets the decode go fullDecodeIdle after used
 }
 
 // fullEditor is a photo held open in the editor.
@@ -89,6 +99,17 @@ func fullDecodeKeyNoExp(edits *edit.Params) string {
 	flat := *edits
 	flat.ExpEV, flat.ExpPreserve = 0, 0
 	return fmt.Sprintf("%+v", fullDecodeParams(&flat)) + "|" + edits.LibrawInputsHashNoExp()
+}
+
+// fullDecodeKeyNoWB is fullDecodeKeyNoExp with the white balance left out
+// too: decodes that differ only in exposure and white balance share it.
+func fullDecodeKeyNoWB(edits *edit.Params) string {
+	if edits == nil {
+		return fullDecodeKey(nil)
+	}
+	flat := *edits
+	flat.WBMode, flat.WBMul, flat.WBTemp, flat.WBTint, flat.WBKelvin = "", [4]float64{}, 0, 0, 0
+	return fullDecodeKeyNoExp(&flat)
 }
 
 // fullDecodeParams are the LibRaw params of a full-resolution render.
@@ -204,24 +225,38 @@ func (c *Cache) keptFull(cacheKey, key string) *fullDecode {
 
 // KeptForWindow returns photo's kept full-resolution decode when a window
 // of edits can render from it (RenderWindow): the decode of edits' LibRaw
-// inputs, or of the same ones but for exposure. expEV is what the window
-// folds in after the decode — the exposure the decode lacks, and its WB
-// compensation. exact reports the decode is edits' own, so the window
-// matches the 1:1 tiles; otherwise the exposure is folded into 8-bit
-// pixels, as the drafts fold it. The pixels are shared: only read them.
-func (c *Cache) KeptForWindow(photo store.Photo, edits *edit.Params) (src *image.RGBA, expEV float64, exact, ok bool) {
+// inputs, or of the same ones but for exposure and white balance. fold is
+// what the window folds in after the decode — the exposure the decode
+// lacks, its WB compensation, and the change to edits' white balance.
+// exact reports the decode is edits' own, so the window matches the 1:1
+// tiles; otherwise the fold lands near them, as the drafts' fold does. A
+// change of white balance needs both balances set (not auto) and a decode
+// that kept every channel (decodeClipped). The pixels are shared: only
+// read them.
+func (c *Cache) KeptForWindow(photo store.Photo, edits *edit.Params) (src *image.RGBA, fold Fold, exact, ok bool) {
 	if edits == nil {
-		return nil, 0, false, false // the base look is never kept
+		return nil, Fold{}, false, false // the base look is never kept
 	}
-	key, noExpKey := fullDecodeKey(edits), fullDecodeKeyNoExp(edits)
+	key, noExpKey, noWBKey := fullDecodeKey(edits), fullDecodeKeyNoExp(edits), fullDecodeKeyNoWB(edits)
 	c.fullMu.Lock()
 	defer c.fullMu.Unlock()
 	f := c.fullEntry
-	if f == nil || f.cacheKey != photo.CacheKey || f.noExpKey != noExpKey {
-		return nil, 0, false, false
+	if f == nil || f.cacheKey != photo.CacheKey {
+		return nil, Fold{}, false, false
+	}
+	fold.ExpEV = edits.ExpEV - f.baked + f.wbCompEV
+	if f.noExpKey != noExpKey {
+		if f.noWBKey != noWBKey || !f.wbFolds || edits.WBMode == edit.WBAuto {
+			return nil, Fold{}, false, false
+		}
+		wb, ok := wbFoldMatrix(f.wbMul, edits.EffectiveWBMul(f.camMul, f.camXYZ), f.rgbCam)
+		if !ok {
+			return nil, Fold{}, false, false
+		}
+		fold.WB = &wb
 	}
 	f.used = time.Now()
-	return f.rgba, edits.ExpEV - f.baked + f.wbCompEV, f.key == key, true
+	return f.rgba, fold, f.key == key, true
 }
 
 // EditorWants reports whether the editor holds photo and is on edits: the
@@ -305,7 +340,8 @@ func (c *Cache) decodeFull(ctx context.Context, proc *libraw.Processor, photo st
 	}
 	// Read the as-shot balance BEFORE Process resolves the chosen WB into
 	// pre_mul in place: the compensation is measured against it.
-	wbCompEV := edits.WBCompEV(proc.CamMul(), proc.CamXYZ())
+	camMul, camXYZ := proc.CamMul(), proc.CamXYZ()
+	wbCompEV := edits.WBCompEV(camMul, camXYZ)
 	img, err := proc.Process(ctx, fullDecodeParams(edits))
 	if err != nil {
 		return nil, err
@@ -317,7 +353,9 @@ func (c *Cache) decodeFull(ctx context.Context, proc *libraw.Processor, photo st
 	c.fullDecodes.Add(1)
 	return &fullDecode{
 		cacheKey: photo.CacheKey, key: fullDecodeKey(edits), noExpKey: fullDecodeKeyNoExp(edits),
-		baked: edits.BakedExpEV(), wbCompEV: wbCompEV, rgba: rgba,
+		noWBKey: fullDecodeKeyNoWB(edits), baked: edits.BakedExpEV(), wbCompEV: wbCompEV, rgba: rgba,
+		wbMul: edits.EffectiveWBMul(camMul, camXYZ), camMul: camMul, camXYZ: camXYZ, rgbCam: proc.RgbCam(),
+		wbFolds: edits != nil && edits.WBMode != edit.WBAuto && !decodeClipped(rgba),
 	}, nil
 }
 

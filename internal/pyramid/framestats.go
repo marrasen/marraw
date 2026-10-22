@@ -70,15 +70,15 @@ func FrameStatsFor(src *image.RGBA, e *edit.Params, expEV, gamma float64, lensc 
 	if !needsFrameStats(e) {
 		return nil
 	}
-	return measureFrame(context.Background(), frameProxy(src, e, expEV, lensc), gamma, e, ai, fills)
+	return measureFrame(context.Background(), frameProxy(src, e, Fold{ExpEV: expEV}, lensc), gamma, e, ai, fills)
 }
 
 // frameProxy is the working-size frame a render of e from the decode src
 // measures on: the decode shrunk to a size that leaves the crop at the
-// working size (shrinkDecode), then the exposure, lens correction and
-// geometry the render runs. src is only read.
-func frameProxy(src *image.RGBA, e *edit.Params, expEV float64, lensc *lens.Correction) *image.RGBA {
-	return proxyFrom(shrinkDecode(src, e), e, expEV, lensc)
+// working size (shrinkDecode), then the fold (the exposure), lens
+// correction and geometry the render runs. src is only read.
+func frameProxy(src *image.RGBA, e *edit.Params, fold Fold, lensc *lens.Correction) *image.RGBA {
+	return proxyFrom(shrinkDecode(src, e), e, fold, lensc)
 }
 
 // proxyMaxEdge bounds the shrunk decode frameProxy works from. A crop
@@ -118,13 +118,13 @@ var frameMeasures atomic.Int64
 // windowStats is FrameStatsFor for a window: src is a decode nothing
 // writes to, and what it measured last is windowKept. It returns nil when ctx is
 // done before it is measured.
-func windowStats(ctx context.Context, src *image.RGBA, e *edit.Params, expEV, gamma float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *FrameStats {
+func windowStats(ctx context.Context, src *image.RGBA, e *edit.Params, fold Fold, gamma float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *FrameStats {
 	if !needsFrameStats(e) {
 		return nil
 	}
 	ref := weak.Make(src)
 	edge := min(previewFrameEdge(src, fxPlaneLongEdge, e), proxyMaxEdge)
-	key := windowStatsKey(e, expEV, gamma, lensc, ai, fills)
+	key := windowStatsKey(e, fold, gamma, lensc, ai, fills)
 	windowKept.Lock()
 	same := windowKept.shrunk != nil && windowKept.src == ref && windowKept.edge == edge
 	shrunk, st := windowKept.shrunk, windowKept.st
@@ -141,7 +141,7 @@ func windowStats(ctx context.Context, src *image.RGBA, e *edit.Params, expEV, ga
 	if ctx.Err() != nil {
 		return nil
 	}
-	st = measureFrame(ctx, proxyFrom(copyRGBA(shrunk, shrunk.Bounds()), e, expEV, lensc), gamma, e, ai, fills)
+	st = measureFrame(ctx, proxyFrom(copyRGBA(shrunk, shrunk.Bounds()), e, fold, lensc), gamma, e, ai, fills)
 	if st == nil {
 		return nil
 	}
@@ -154,16 +154,19 @@ func windowStats(ctx context.Context, src *image.RGBA, e *edit.Params, expEV, ga
 
 // windowStatsKey says what FrameStats depend on: the edit but for the
 // stages after the measure (the detail sliders, dehaze's amount), the
-// exposure folded in, the look's lift, the lens profile and the AI maps
+// fold (exposure and white balance), the look's lift, the lens profile and the AI maps
 // and fill patches the edit reads.
-func windowStatsKey(e *edit.Params, expEV, gamma float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) string {
+func windowStatsKey(e *edit.Params, fold Fold, gamma float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) string {
 	flat := *e
 	flat.Clarity, flat.Texture, flat.Sharpen = 0, 0, 0
 	if flat.Dehaze > 0 {
 		flat.Dehaze = 1
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s|%v|%v|%p", flat.Hash(), expEV, gamma, lensc)
+	fmt.Fprintf(&b, "%s|%v|%v|%p", flat.Hash(), fold.ExpEV, gamma, lensc)
+	if fold.WB != nil {
+		fmt.Fprintf(&b, "|%v", *fold.WB)
+	}
 	for _, k := range slices.Sorted(maps.Keys(ai)) {
 		fmt.Fprintf(&b, "|%s=%p", k, ai[k])
 	}
@@ -183,8 +186,8 @@ func forgetWindowStats() {
 
 // proxyFrom is frameProxy from the shrunk decode work, which it may write
 // to.
-func proxyFrom(work *image.RGBA, e *edit.Params, expEV float64, lensc *lens.Correction) *image.RGBA {
-	ApplyExposureEV(work, expEV, e)
+func proxyFrom(work *image.RGBA, e *edit.Params, fold Fold, lensc *lens.Correction) *image.RGBA {
+	ApplyFold(work, fold, e)
 	b := work.Bounds()
 	work = ApplyLens(work, LensWarp(lensc, e, b.Dx(), b.Dy()), e)
 	return scaleToLongEdge(ApplyGeometry(work, e), fxPlaneLongEdge)

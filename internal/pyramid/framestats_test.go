@@ -66,8 +66,8 @@ func TestWindowShowsEffects(t *testing.T) {
 	without.Dehaze, without.Masks = 0, []edit.Mask{with.Masks[0]}
 	without.Masks[0].Adjust = edit.MaskAdjust{ExpEV: 0.2}
 	win := image.Rect(1000, 600, 1400, 1000)
-	a := RenderWindow(t.Context(), src, win, 0.72, &with, 0, nil, nil, nil)
-	b := RenderWindow(t.Context(), src, win, 0.72, &without, 0, nil, nil, nil)
+	a := RenderWindow(t.Context(), src, win, 0.72, &with, Fold{}, nil, nil, nil)
+	b := RenderWindow(t.Context(), src, win, 0.72, &without, Fold{}, nil, nil, nil)
 	if n, worst, _ := windowDiff(a, b); n < len(a.Pix)/4 || worst < 20 {
 		t.Errorf("effects changed %d values, worst by %d", n, worst)
 	}
@@ -97,13 +97,13 @@ func TestWindowMatchesTilesWithEffects(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		src, expEV, _, ok := cache.KeptForWindow(p, &params)
+		src, fold, _, ok := cache.KeptForWindow(p, &params)
 		if !ok {
 			t.Fatal("no decode kept for the window")
 		}
 		gamma := f.photo(0).LookGamma
 		win := image.Rect(at.X*TileSize, at.Y*TileSize, (at.X+1)*TileSize, (at.Y+1)*TileSize)
-		img := RenderWindow(t.Context(), src, win, gamma, &params, expEV, cache.Lenses.For(p),
+		img := RenderWindow(t.Context(), src, win, gamma, &params, fold, cache.Lenses.For(p),
 			cache.AIMaps.SetFor(p.CacheKey, &params), cache.Fills.SetFor(p.CacheKey, &params))
 		if img == nil {
 			t.Fatalf("tile %v: no window", at)
@@ -130,7 +130,7 @@ func TestWindowStatsReused(t *testing.T) {
 	e.Normalize()
 	window := func(e edit.Params, win image.Rectangle) {
 		t.Helper()
-		got := RenderWindow(t.Context(), src, win, 0.72, &e, 0, nil, nil, nil)
+		got := RenderWindow(t.Context(), src, win, 0.72, &e, Fold{}, nil, nil, nil)
 		want := copyRGBA(renderWholeForTest(src, 0.72, &e, 0, nil, nil, nil), win)
 		if _, _, d := windowDiff(got, want); d != "" {
 			t.Errorf("window %v: %s", win, d)
@@ -167,7 +167,7 @@ func TestTightCropShrinkBounded(t *testing.T) {
 	}
 	whole := renderWholeForTest(src, 0.72, &e, 0, nil, nil, nil)
 	win := image.Rect(200, 150, 700, 500).Intersect(whole.Bounds())
-	got := RenderWindow(t.Context(), src, win, 0.72, &e, 0, nil, nil, nil)
+	got := RenderWindow(t.Context(), src, win, 0.72, &e, Fold{}, nil, nil, nil)
 	if _, _, d := windowDiff(got, copyRGBA(whole, win)); d != "" {
 		t.Error(d)
 	}

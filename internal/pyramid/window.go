@@ -68,7 +68,7 @@ func windowGeom(decW, decH int, e *edit.Params) (cropGeom, int) {
 // matches the full render's pixels there, exactly. Dehaze and the mask
 // effects, which read the whole frame, take what they read from the small
 // render of it the full render measures too (FrameStatsFor).
-func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gamma float64, e *edit.Params, expEV float64, lensc *lens.Correction, ai AIMapSet, fills FillSet) *image.RGBA {
+func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gamma float64, e *edit.Params, fold Fold, lensc *lens.Correction, ai AIMapSet, fills FillSet) *image.RGBA {
 	sb := src.Bounds()
 	decW, decH := sb.Dx(), sb.Dy()
 	g, code := windowGeom(decW, decH, e)
@@ -78,7 +78,7 @@ func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gam
 		return nil
 	}
 	whole := region{outW: g.outW, outH: g.outH}
-	st := windowStats(ctx, src, e, expEV, gamma, lensc, ai, fills)
+	st := windowStats(ctx, src, e, fold, gamma, lensc, ai, fills)
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -103,7 +103,7 @@ func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gam
 	}
 	warp := LensWarp(lensc, e, decW, decH)
 	part := func(out image.Rectangle) *image.RGBA {
-		return renderGeometry(src, out, g, code, warp, e, expEV)
+		return renderGeometry(src, out, g, code, warp, e, fold)
 	}
 	img := part(need)
 	if ctx.Err() != nil {
@@ -141,7 +141,7 @@ func RenderWindow(ctx context.Context, src *image.RGBA, win image.Rectangle, gam
 // renderGeometry renders the part out of the output up to the spots: the
 // decode with the exposure folded in, lens-corrected, turned, cropped and
 // straightened. It reads only the part of src out comes from.
-func renderGeometry(src *image.RGBA, out image.Rectangle, g cropGeom, code int, warp *lens.Warp, e *edit.Params, expEV float64) *image.RGBA {
+func renderGeometry(src *image.RGBA, out image.Rectangle, g cropGeom, code int, warp *lens.Warp, e *edit.Params, fold Fold) *image.RGBA {
 	sb := src.Bounds()
 	turned := g.source(out)
 	if turned.Empty() {
@@ -154,7 +154,7 @@ func renderGeometry(src *image.RGBA, out image.Rectangle, g cropGeom, code int, 
 		read = lensSource(warp, lensed, sb)
 	}
 	img := copyRGBAAt(src, read)
-	ApplyExposureEV(img, expEV, e)
+	ApplyFold(img, fold, e)
 	switch {
 	case warp.Geometric():
 		img = lensInto(img, warp, e, lensed)

@@ -2,7 +2,7 @@
 // frame (dehaze, mask effects) against a running `marrawd --dev`: with a
 // photo open in the editor and such an edit saved, Edits.PreviewWindow
 // answers a JPEG (it used to answer null), and a window over a 1:1 tile is
-// that tile, byte for byte.
+// that tile, byte for byte. A white balance drag frame answers one too.
 // Usage: node scripts/fxwindow-verify.mjs "<disposable raw folder>"
 const FOLDER = process.argv[2];
 const PORT = process.env.MARRAW_PORT ?? 8483;
@@ -79,6 +79,11 @@ for (const [name, params] of Object.entries(edits)) {
   const frame = await call('Edits.PreviewWindow', [p.id, drag, 800, 600, 1920, 1080]);
   check(frame instanceof Uint8Array && frame.length > 1000, `${name}: a drag frame's 1920x1080 window comes (${Date.now() - t2} ms)`);
 }
+// A white balance drag frame over the kept decode: folded in, not null.
+const warm = { ...edits.effects, wbMode: 'kelvin', wbKelvin: 7200 };
+const t3 = Date.now();
+const wbFrame = await call('Edits.PreviewWindow', [p.id, warm, 800, 600, 1920, 1080]);
+check(wbFrame instanceof Uint8Array && wbFrame.length > 1000, `white balance: a drag frame's 1920x1080 window comes (${Date.now() - t3} ms)`);
 await call('Edits.ResetEdits', [[p.id]]).catch((e) => console.log(`  reset: ${e.message}`));
 await call('Library.SetSidecarWrites', [true]);
 console.log(failures ? `${failures} FAILED` : 'all passed');

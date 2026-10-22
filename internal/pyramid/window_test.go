@@ -258,7 +258,7 @@ func TestRenderWindowMatchesWhole(t *testing.T) {
 				wins = append(wins, image.Rect(x, y, x+w, y+h))
 			}
 			for _, win := range wins {
-				got := RenderWindow(t.Context(), src, win, 0.72, &e, expEV, lc, ai, fills)
+				got := RenderWindow(t.Context(), src, win, 0.72, &e, Fold{ExpEV: expEV}, lc, ai, fills)
 				want := copyRGBA(whole, win)
 				if got == nil {
 					t.Fatalf("window %v: nil", win)
@@ -291,7 +291,7 @@ func TestRenderWindowLargeStroke(t *testing.T) {
 			image.Rect(3450, 2250, 3550, 2350), // its middle
 			image.Rect(3800, 2300, 4000, 2500), // its right end
 		} {
-			got := RenderWindow(t.Context(), src, win, 0.72, &e, 0, nil, nil, nil)
+			got := RenderWindow(t.Context(), src, win, 0.72, &e, Fold{}, nil, nil, nil)
 			if _, _, d := windowDiff(got, copyRGBA(whole, win)); d != "" {
 				t.Errorf("radius %v, window %v: %s", r, win, d)
 			}
@@ -305,14 +305,14 @@ func TestRenderWindowBaseLook(t *testing.T) {
 	src := windowTestSource(900, 600)
 	whole := renderWholeForTest(src, 0.72, nil, 0, nil, nil, nil)
 	win := image.Rect(100, 50, 400, 350)
-	got := RenderWindow(t.Context(), src, win, 0.72, nil, 0, nil, nil, nil)
+	got := RenderWindow(t.Context(), src, win, 0.72, nil, Fold{}, nil, nil, nil)
 	if got == nil {
 		t.Fatal("nil window")
 	}
 	if _, _, d := windowDiff(got, copyRGBA(whole, win)); d != "" {
 		t.Error(d)
 	}
-	if RenderWindow(t.Context(), src, image.Rect(900, 0, 1000, 10), 0.72, nil, 0, nil, nil, nil) != nil {
+	if RenderWindow(t.Context(), src, image.Rect(900, 0, 1000, 10), 0.72, nil, Fold{}, nil, nil, nil) != nil {
 		t.Error("a window outside the output rendered")
 	}
 }
@@ -322,7 +322,7 @@ func TestRenderWindowCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	e := &edit.Params{Contrast: 0.3}
-	if RenderWindow(ctx, windowTestSource(64, 64), image.Rect(0, 0, 8, 8), 0.72, e, 0, nil, nil, nil) != nil {
+	if RenderWindow(ctx, windowTestSource(64, 64), image.Rect(0, 0, 8, 8), 0.72, e, Fold{}, nil, nil, nil) != nil {
 		t.Error("a cancelled window rendered")
 	}
 }
@@ -439,7 +439,7 @@ func TestRenderWindowFuzz(t *testing.T) {
 			w, h := 1+rnd.IntN(400), 1+rnd.IntN(300)
 			x, y := rnd.IntN(ow)-w/4, rnd.IntN(oh)-h/4
 			win := image.Rect(x, y, x+w, y+h)
-			got := RenderWindow(t.Context(), src, win, 0.72, &e, 0.2, lc, ai, nil)
+			got := RenderWindow(t.Context(), src, win, 0.72, &e, Fold{ExpEV: 0.2}, lc, ai, nil)
 			want := win.Intersect(whole.Bounds())
 			if got == nil {
 				if !want.Empty() {
@@ -470,7 +470,7 @@ func TestRenderWindowClampedSpot(t *testing.T) {
 		dx, dy := f.outputPoint(0.1804*f.frameW, 0.2323*f.frameH)
 		for _, d := range []int{60, 150, 251} {
 			win := image.Rect(int(dx)-d, int(dy)-d/2, int(dx)+d/3, int(dy)+d)
-			got := RenderWindow(t.Context(), src, win, 0.72, &e, 0, nil, nil, nil)
+			got := RenderWindow(t.Context(), src, win, 0.72, &e, Fold{}, nil, nil, nil)
 			if _, _, diff := windowDiff(got, copyRGBA(whole, win.Intersect(whole.Bounds()))); diff != "" {
 				t.Errorf("rotate %d, window %v: %s", rot, win, diff)
 			}
@@ -494,7 +494,7 @@ func TestRenderWindowStraightenedStroke(t *testing.T) {
 	fills := fillsForTest(&e)
 	whole := renderWholeForTest(src, 0.75, &e, 0.1, nil, nil, fills)
 	win := image.Rect(-97, 536, 13, 711)
-	got := RenderWindow(t.Context(), src, win, 0.75, &e, 0.1, nil, nil, fills)
+	got := RenderWindow(t.Context(), src, win, 0.75, &e, Fold{ExpEV: 0.1}, nil, nil, fills)
 	if _, _, d := windowDiff(got, copyRGBA(whole, win.Intersect(whole.Bounds()))); d != "" {
 		t.Errorf("window %v: %s", win, d)
 	}
