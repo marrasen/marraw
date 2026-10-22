@@ -146,7 +146,7 @@ func TestWBFoldNearTheDecode(t *testing.T) {
 		}
 		q := f.edit(0, e)
 		var sum, abs, hiSum [3]float64
-		n, hiN := 0, 0
+		n, hiN, far := 0, 0, 0
 		for k, got := range wins {
 			path, err := f.cache.EnsureTile(t.Context(), q, k%3, k/3, q.EditHash, decode.PriorityVisible)
 			if err != nil {
@@ -162,6 +162,12 @@ func TestWBFoldNearTheDecode(t *testing.T) {
 			}
 			for i := 0; i+3 < len(want.Pix) && i+3 < len(got.Pix); i += 4 {
 				hi := min(want.Pix[i], want.Pix[i+1], want.Pix[i+2]) > 240
+				for c := range 3 {
+					if d := int(got.Pix[i+c]) - int(want.Pix[i+c]); d > 20 || d < -20 {
+						far++
+						break
+					}
+				}
 				for c := range 3 {
 					d := float64(got.Pix[i+c]) - float64(want.Pix[i+c])
 					sum[c] += d
@@ -183,10 +189,10 @@ func TestWBFoldNearTheDecode(t *testing.T) {
 				hiSum[c] /= float64(hiN)
 			}
 		}
-		t.Logf("wb %s %v/%v/%v exp %v: mean difference %.2f %.2f %.2f, mean absolute %.2f %.2f %.2f; %d highlights off by %.1f %.1f %.1f",
-			e.WBMode, e.WBKelvin, e.WBTemp, e.WBTint, e.ExpEV, sum[0], sum[1], sum[2], abs[0], abs[1], abs[2], hiN, hiSum[0], hiSum[1], hiSum[2])
+		t.Logf("wb %s %v/%v/%v exp %v: mean difference %.2f %.2f %.2f, mean absolute %.2f %.2f %.2f; %d highlights off by %.1f %.1f %.1f; %.2f%% over 20 levels off",
+			e.WBMode, e.WBKelvin, e.WBTemp, e.WBTint, e.ExpEV, sum[0], sum[1], sum[2], abs[0], abs[1], abs[2], hiN, hiSum[0], hiSum[1], hiSum[2], 100*float64(far)/float64(n))
 		for c := range 3 {
-			if math.Abs(sum[c]) > tc.mean || abs[c] > tc.abs || (hiN > 1000 && math.Abs(hiSum[c]) > tc.hi) {
+			if math.Abs(sum[c]) > tc.mean || abs[c] > tc.abs || (hiN > 1000 && math.Abs(hiSum[c]) > tc.hi) || far*100 > n {
 				t.Errorf("wb %+v: channel %d off by %.2f on average (%.2f absolute, %.1f in highlights)", e, c, sum[c], abs[c], hiSum[c])
 			}
 		}

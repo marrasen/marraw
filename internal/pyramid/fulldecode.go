@@ -129,11 +129,15 @@ func wbKnown(edits *edit.Params) bool {
 // near the exact decode in its highlights too, where the decode clipped
 // them and the fold must guess (newWBFold). Not under highlight recovery,
 // which blends or rebuilds blown areas to a level of its own; not with the
-// exposure's highlight preservation, which bends the top of the range; and
-// not from a decode brighter than the edit's, whose clipped channels may
-// sit anywhere up to the new white. Those drags show the drafts.
+// exposure's highlight preservation, which bends the top of the range;
+// and not from a decode whose exposure shift clipped it lower than the
+// edit's, whose clipped channels may sit anywhere up to the new white.
+// LibRaw's shift only clips, and preservation only acts, when it raises
+// the exposure. Those drags show the drafts.
 func wbFoldsOver(f *fullDecode, edits *edit.Params) bool {
-	return edits.Highlight == 0 && edits.ExpPreserve == 0 && f.preserve == 0 && f.baked <= edits.BakedExpEV()
+	baked := edits.BakedExpEV()
+	return edits.Highlight == 0 && max(f.baked, 0) <= max(baked, 0) &&
+		(edits.ExpPreserve == 0 || baked <= 0) && (f.preserve == 0 || f.baked <= 0)
 }
 
 // fullDecodeParams are the LibRaw params of a full-resolution render.

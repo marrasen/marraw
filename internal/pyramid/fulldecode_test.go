@@ -532,6 +532,21 @@ func TestKeptForWindow(t *testing.T) {
 			t.Errorf("%s: a white balance folds in", name)
 		}
 	}
+	// Below 0 EV the shift neither clips nor preserves: those still fold,
+	// from a decode at or below 0 EV.
+	darkStart := *start
+	darkStart.ExpEV = -1
+	darkStart.Normalize()
+	f.cache.WantFull(p, &darkStart)
+	if err := f.cache.WarmFull(t.Context(), p, &darkStart); err != nil {
+		t.Fatal(err)
+	}
+	darker := darkStart
+	darker.WBMode, darker.WBKelvin, darker.ExpEV, darker.ExpPreserve = edit.WBKelvin, 7000, -2, 0.5
+	darker.Normalize()
+	if _, fold, _, ok := f.cache.KeptForWindow(p, &darker); !ok || fold.WB == nil {
+		t.Errorf("a darker edit with preservation does not fold: ok %v", ok)
+	}
 	denoised := warmer
 	denoised.NRThreshold = 200
 	if _, _, _, ok := f.cache.KeptForWindow(p, &denoised); ok {
