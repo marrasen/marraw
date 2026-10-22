@@ -29,17 +29,17 @@ func TestFoldWithoutWBIsExposure(t *testing.T) {
 func TestWBFoldIdentity(t *testing.T) {
 	rgbCam := [3][4]float64{{1.8, -0.6, -0.2}, {-0.2, 1.5, -0.3}, {0.05, -0.5, 1.45}}
 	mul := [4]float64{2.1, 1, 1.6, 1}
-	m, ok := wbFoldMatrix(mul, mul, rgbCam)
+	same, ok := newWBFold(mul, mul, rgbCam, 0)
 	if !ok {
-		t.Fatal("no matrix")
+		t.Fatal("no fold")
 	}
 	src := windowTestSource(300, 200)
 	img := copyRGBA(src, src.Bounds())
-	ApplyFold(img, Fold{WB: &m}, &edit.Params{})
+	ApplyFold(img, Fold{WB: &same}, &edit.Params{})
 	if _, worst, _ := windowDiff(img, src); worst > 1 {
 		t.Errorf("an unchanged balance moved a value by %d", worst)
 	}
-	warm, _ := wbFoldMatrix(mul, [4]float64{2.6, 1, 1.3, 1}, rgbCam)
+	warm, _ := newWBFold(mul, [4]float64{2.6, 1, 1.3, 1}, rgbCam, 0)
 	ApplyFold(img, Fold{WB: &warm}, &edit.Params{})
 	var dr, db int
 	for i := 0; i < len(img.Pix); i += 4 {
@@ -48,6 +48,13 @@ func TestWBFoldIdentity(t *testing.T) {
 	}
 	if dr <= 0 || db >= 0 {
 		t.Errorf("a warmer balance: red moved %d, blue %d", dr, db)
+	}
+	// Clipped white stays white: the exact decode clips every channel.
+	white := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	copy(white.Pix, []uint8{255, 255, 255, 255})
+	ApplyFold(white, Fold{WB: &warm}, &edit.Params{})
+	if p := white.Pix; max(p[0], p[1], p[2])-min(p[0], p[1], p[2]) > 2 {
+		t.Errorf("clipped white folds to %v", p[:3])
 	}
 }
 
@@ -74,7 +81,8 @@ func TestDecodeClipped(t *testing.T) {
 
 // TestWBFoldNearTheDecode: on a real RAW, a window that folds another
 // white balance into the kept decode lands near the 1:1 tiles of that
-// balance, decoded for it: the colour change and the brightness match.
+// balance, decoded for it, over six tiles: the colour change and the
+// brightness match, and blown highlights stay white.
 func TestWBFoldNearTheDecode(t *testing.T) {
 	f := newFullTestCatalog(t)
 	f.open(0)
@@ -84,13 +92,22 @@ func TestWBFoldNearTheDecode(t *testing.T) {
 	if _, err := f.cache.EnsureTile(t.Context(), p, 1, 1, p.EditHash, decode.PriorityVisible); err != nil {
 		t.Fatal(err)
 	}
-	for _, wb := range []func(*edit.Params){
-		func(e *edit.Params) { e.WBMode, e.WBKelvin = edit.WBKelvin, 7500 },
-		func(e *edit.Params) { e.WBMode, e.WBKelvin = edit.WBKelvin, 3200 },
-		func(e *edit.Params) { e.WBTemp, e.WBTint = -0.6, 0.4 },
+	for _, tc := range []struct {
+		wb func(*edit.Params)
+		// How far a channel may be off: on average, on average absolute,
+		// and on average in the highlights.
+		mean, abs, hi float64
+	}{
+		{func(e *edit.Params) { e.WBMode, e.WBKelvin = edit.WBKelvin, 7500 }, 1, 3, 6},
+		{func(e *edit.Params) { e.WBMode, e.WBKelvin = edit.WBKelvin, 3200 }, 1, 3, 6},
+		{func(e *edit.Params) { e.WBTemp, e.WBTint = -0.6, 0.4 }, 1, 3, 6},
+		// Bright, so the highlights clip and must stay white. Folding 1.5
+		// stops into 8-bit pixels is off by 3.1 levels on average already,
+		// with no change of balance (the exposure fold windows had before).
+		{func(e *edit.Params) { e.WBMode, e.WBKelvin, e.ExpEV = edit.WBKelvin, 2500, 1.5 }, 2.5, 4.5, 8},
 	} {
 		e := start
-		wb(&e)
+		tc.wb(&e)
 		e.Normalize()
 		// The window first, from the as-shot decode kept: then the tiles
 		// of e, decoded under its balance.
@@ -103,40 +120,57 @@ func TestWBFoldNearTheDecode(t *testing.T) {
 			t.Fatalf("%+v: no fold (ok %v)", e, ok)
 		}
 		gamma := f.photo(0).LookGamma
-		win := image.Rect(TileSize, TileSize, 2*TileSize, 2*TileSize)
-		got := RenderWindow(t.Context(), src, win, gamma, &e, fold, f.cache.Lenses.For(p), nil, nil)
-		q := f.edit(0, e)
-		path, err := f.cache.EnsureTile(t.Context(), q, 1, 1, q.EditHash, decode.PriorityVisible)
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want, err := jpegturbo.DecodeRGBA(b)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var sum, abs [3]float64
-		n := 0
-		for i := 0; i+3 < len(want.Pix) && i+3 < len(got.Pix); i += 4 {
-			for c := range 3 {
-				d := float64(got.Pix[i+c]) - float64(want.Pix[i+c])
-				sum[c] += d
-				abs[c] += math.Abs(d)
+		var wins []*image.RGBA
+		for ty := range 2 {
+			for tx := range 3 {
+				win := image.Rect(tx*TileSize, ty*TileSize, (tx+1)*TileSize, (ty+1)*TileSize)
+				wins = append(wins, RenderWindow(t.Context(), src, win, gamma, &e, fold, f.cache.Lenses.For(p), nil, nil))
 			}
-			n++
+		}
+		q := f.edit(0, e)
+		var sum, abs, hiSum [3]float64
+		n, hiN := 0, 0
+		for k, got := range wins {
+			path, err := f.cache.EnsureTile(t.Context(), q, k%3, k/3, q.EditHash, decode.PriorityVisible)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := jpegturbo.DecodeRGBA(b)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i+3 < len(want.Pix) && i+3 < len(got.Pix); i += 4 {
+				hi := min(want.Pix[i], want.Pix[i+1], want.Pix[i+2]) > 240
+				for c := range 3 {
+					d := float64(got.Pix[i+c]) - float64(want.Pix[i+c])
+					sum[c] += d
+					abs[c] += math.Abs(d)
+					if hi {
+						hiSum[c] += d
+					}
+				}
+				n++
+				if hi {
+					hiN++
+				}
+			}
 		}
 		for c := range 3 {
 			sum[c] /= float64(n)
 			abs[c] /= float64(n)
+			if hiN > 0 {
+				hiSum[c] /= float64(hiN)
+			}
 		}
-		t.Logf("wb %s %v/%v/%v: mean difference %.2f %.2f %.2f, mean absolute %.2f %.2f %.2f",
-			e.WBMode, e.WBKelvin, e.WBTemp, e.WBTint, sum[0], sum[1], sum[2], abs[0], abs[1], abs[2])
+		t.Logf("wb %s %v/%v/%v exp %v: mean difference %.2f %.2f %.2f, mean absolute %.2f %.2f %.2f; %d highlights off by %.1f %.1f %.1f",
+			e.WBMode, e.WBKelvin, e.WBTemp, e.WBTint, e.ExpEV, sum[0], sum[1], sum[2], abs[0], abs[1], abs[2], hiN, hiSum[0], hiSum[1], hiSum[2])
 		for c := range 3 {
-			if math.Abs(sum[c]) > 2 || abs[c] > 3 {
-				t.Errorf("wb %+v: channel %d off by %.2f on average (%.2f absolute)", e, c, sum[c], abs[c])
+			if math.Abs(sum[c]) > tc.mean || abs[c] > tc.abs || (hiN > 1000 && math.Abs(hiSum[c]) > tc.hi) {
+				t.Errorf("wb %+v: channel %d off by %.2f on average (%.2f absolute, %.1f in highlights)", e, c, sum[c], abs[c], hiSum[c])
 			}
 		}
 	}

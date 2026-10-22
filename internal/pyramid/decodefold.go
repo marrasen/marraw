@@ -5,19 +5,31 @@ import (
 	"math"
 
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/libraw"
 )
 
 // Fold is what a window folds into the kept decode it renders from
 // (KeptForWindow) to reach the edit it shows: the exposure the decode
 // lacks, with its white-balance compensation, and — when the edit's white
-// balance is not the decode's — the change of balance, a matrix on linear
-// light. Folding into 8-bit pixels lands near the exact decode, not on it,
-// as the drafts' fold does; the 1:1 tiles of the edit take its place.
+// balance is not the decode's — the change of balance. Folding into 8-bit
+// pixels lands near the exact decode, not on it, as the drafts' fold does;
+// the 1:1 tiles of the edit take its place.
 type Fold struct {
 	ExpEV float64
-	// WB, when set, takes the decode's linear output to the edit's white
-	// balance. Nil keeps the decode's own.
-	WB *[3][3]float64
+	// WB, when set, takes the decode to the edit's white balance. Nil
+	// keeps the decode's own.
+	WB *WBFold
+}
+
+// WBFold is a change of white balance on a decode's linear output. LibRaw
+// balances the camera channels, clips them, and then RGBCam takes them to
+// the output: so the fold takes the output back to the camera channels
+// (Inv), scales them (D), clips them where the decode of the new balance
+// would (Ceil), and takes them out again (RGBCam).
+type WBFold struct {
+	RGBCam, Inv [3][3]float64
+	D           [3]float64
+	Ceil        float64
 }
 
 // ApplyFold folds fold into img, a decode of edits' LibRaw inputs but for
@@ -28,14 +40,23 @@ func ApplyFold(img *image.RGBA, fold Fold, edits *edit.Params) {
 		ApplyExposureEV(img, fold.ExpEV, edits)
 		return
 	}
-	// The exposure scales linear light too, so it rides in the matrix.
-	var k [3][3]float32
+	wb := fold.WB
+	// The exposure scales linear light too, so it rides in the matrix out.
+	var inv, out [3][3]float32
+	var d [3]float32
 	scale := math.Exp2(fold.ExpEV)
 	for i := range 3 {
+		d[i] = float32(wb.D[i])
 		for j := range 3 {
-			k[i][j] = float32(fold.WB[i][j] * scale)
+			inv[i][j] = float32(wb.Inv[i][j])
+			out[i][j] = float32(wb.RGBCam[i][j] * scale)
 		}
 	}
+	ceil := float32(wb.Ceil)
+	// Where a camera channel of the decode sits at its white, give or take
+	// the 8-bit rounding.
+	const clipped = 0.995
+	const blownFrom = 180
 	pwr, ts := outputEncoding(edits)
 	dec := dcrawGammaDecoder(pwr, ts)
 	enc := dcrawGammaEncoder(pwr, ts)
@@ -46,62 +67,80 @@ func ApplyFold(img *image.RGBA, fold Fold, edits *edit.Params) {
 	// Fine enough that a level of the toe (linear 1/1147 at the default
 	// slope) spans many steps.
 	const steps = 1 << 14
-	var out [steps + 1]uint8
-	for i := range out {
-		out[i] = uint8(math.Round(255 * enc(float64(i)/steps)))
+	var table [steps + 1]uint8
+	for i := range table {
+		table[i] = uint8(math.Round(255 * enc(float64(i)/steps)))
 	}
 	encode := func(v float32) uint8 {
-		return out[int(min(max(v, 0), 1)*steps+0.5)]
+		return table[int(min(max(v, 0), 1)*steps+0.5)]
+	}
+	// A pixel the decode clipped in the output came from a saturated
+	// sensor: the output clip took the colour that would have told its
+	// camera channels apart, and the exact decode of any balance shows it
+	// near white. blown says how near, by how close its darkest channel
+	// came to the clip too.
+	var blown [256]float32
+	for v := blownFrom; v < 256; v++ {
+		blown[v] = float32(v-blownFrom) / float32(255-blownFrom)
+	}
+	// camera rebalances one camera channel v of the decode by d. A channel
+	// the decode clipped held anything from its white up, so it stays at
+	// the white of the new balance: a blown sky stays white, as the exact
+	// decode leaves it.
+	camera := func(v, d float32) float32 {
+		if v >= clipped {
+			return ceil
+		}
+		return min(d*v, ceil)
 	}
 	pixBands(img, func(pix []uint8) {
 		for i := 0; i+3 < len(pix); i += 4 {
 			r, g, b := lin[pix[i]], lin[pix[i+1]], lin[pix[i+2]]
-			pix[i] = encode(k[0][0]*r + k[0][1]*g + k[0][2]*b)
-			pix[i+1] = encode(k[1][0]*r + k[1][1]*g + k[1][2]*b)
-			pix[i+2] = encode(k[2][0]*r + k[2][1]*g + k[2][2]*b)
+			c0 := camera(inv[0][0]*r+inv[0][1]*g+inv[0][2]*b, d[0])
+			c1 := camera(inv[1][0]*r+inv[1][1]*g+inv[1][2]*b, d[1])
+			c2 := camera(inv[2][0]*r+inv[2][1]*g+inv[2][2]*b, d[2])
+			if t := blown[min(pix[i], pix[i+1], pix[i+2])]; t > 0 && max(pix[i], pix[i+1], pix[i+2]) >= 254 {
+				c0 += (ceil - c0) * t
+				c1 += (ceil - c1) * t
+				c2 += (ceil - c2) * t
+			}
+			pix[i] = encode(out[0][0]*c0 + out[0][1]*c1 + out[0][2]*c2)
+			pix[i+1] = encode(out[1][0]*c0 + out[1][1]*c1 + out[1][2]*c2)
+			pix[i+2] = encode(out[2][0]*c0 + out[2][1]*c1 + out[2][2]*c2)
 		}
 	})
 }
 
-// wbFoldMatrix is the change of white balance from the multipliers from to
-// to, on the decode's linear output: LibRaw balances the camera channels
-// before rgbCam takes them to the output, so the change is rgbCam · the
-// ratio of the two balances · its inverse. The balances are taken
+// newWBFold is the change of white balance from the multipliers from to
+// to, for a decode with highlight mode highlight. The balances are taken
 // relative to green, as the exposure compensation (edit.Params.WBCompEV)
-// keeps a change of balance from changing the brightness. A camera with a
+// keeps a change of balance from changing the brightness; LibRaw clips the
+// channels at its white after dividing the multipliers by their smallest
+// (libraw.ScaleNorm), which in those terms sits at Ceil. A camera with a
 // fourth colour, or a matrix that will not invert, scales the output
 // channels instead. ok is false when a multiplier is missing.
-func wbFoldMatrix(from, to [4]float64, rgbCam [3][4]float64) (m [3][3]float64, ok bool) {
-	var d [3]float64
+func newWBFold(from, to [4]float64, rgbCam [3][4]float64, highlight int) (f WBFold, ok bool) {
 	for c := range 3 {
-		if from[c] <= 0 || to[c] <= 0 || from[1] <= 0 || to[1] <= 0 {
-			return m, false
+		if from[c] <= 0 || to[c] <= 0 {
+			return f, false
 		}
-		d[c] = (to[c] / to[1]) / (from[c] / from[1])
+		f.D[c] = (to[c] / to[1]) / (from[c] / from[1])
 	}
-	var cam [3][3]float64
+	f.Ceil = (from[1] / libraw.ScaleNorm(from, highlight)) / (to[1] / libraw.ScaleNorm(to, highlight))
 	four := false
 	for i := range 3 {
 		four = four || math.Abs(rgbCam[i][3]) > 1e-6
 		for j := range 3 {
-			cam[i][j] = rgbCam[i][j]
+			f.RGBCam[i][j] = rgbCam[i][j]
 		}
 	}
-	inv, invertible := Invert3(cam)
+	inv, invertible := Invert3(f.RGBCam)
 	if four || !invertible {
-		for c := range 3 {
-			m[c][c] = d[c]
-		}
-		return m, true
+		f.RGBCam = [3][3]float64{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}
+		inv = f.RGBCam
 	}
-	for i := range 3 {
-		for j := range 3 {
-			for k := range 3 {
-				m[i][j] += cam[i][k] * d[k] * inv[k][j]
-			}
-		}
-	}
-	return m, true
+	f.Inv = inv
+	return f, true
 }
 
 // decodeClipped reports whether the 8-bit decode img has a channel at zero

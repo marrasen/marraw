@@ -510,6 +510,14 @@ func TestKeptForWindow(t *testing.T) {
 	if _, _, _, ok := f.cache.KeptForWindow(p, &auto); ok {
 		t.Error("auto white balance folds in")
 	}
+	// Custom with no multipliers yet: LibRaw takes the daylight balance,
+	// which is not known before it decodes.
+	custom := *start
+	custom.WBMode = edit.WBCustom
+	custom.Normalize()
+	if _, _, _, ok := f.cache.KeptForWindow(p, &custom); ok {
+		t.Error("a custom balance without multipliers folds in")
+	}
 	denoised := warmer
 	denoised.NRThreshold = 200
 	if _, _, _, ok := f.cache.KeptForWindow(p, &denoised); ok {

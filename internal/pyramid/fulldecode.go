@@ -112,6 +112,16 @@ func fullDecodeKeyNoWB(edits *edit.Params) string {
 	return fullDecodeKeyNoExp(&flat)
 }
 
+// wbKnown reports whether the multipliers LibRaw balances a decode of
+// edits with are known before it decodes (edit.Params.EffectiveWBMul): not
+// for auto white balance, which dcraw works out from the pixels, nor for a
+// custom balance with no multipliers, which LibRaw takes from the camera's
+// daylight balance.
+func wbKnown(edits *edit.Params) bool {
+	return edits != nil && edits.WBMode != edit.WBAuto &&
+		(edits.WBMode != edit.WBCustom || edits.WBMul != [4]float64{})
+}
+
 // fullDecodeParams are the LibRaw params of a full-resolution render.
 // Interactive full renders use PPG unless the edit picks a demosaic —
 // roughly half AHD's cost, visually equivalent at loupe zoom; export keeps
@@ -230,7 +240,7 @@ func (c *Cache) keptFull(cacheKey, key string) *fullDecode {
 // lacks, its WB compensation, and the change to edits' white balance.
 // exact reports the decode is edits' own, so the window matches the 1:1
 // tiles; otherwise the fold lands near them, as the drafts' fold does. A
-// change of white balance needs both balances set (not auto) and a decode
+// change of white balance needs both balances known (wbKnown) and a decode
 // that kept every channel (decodeClipped). The pixels are shared: only
 // read them.
 func (c *Cache) KeptForWindow(photo store.Photo, edits *edit.Params) (src *image.RGBA, fold Fold, exact, ok bool) {
@@ -246,10 +256,10 @@ func (c *Cache) KeptForWindow(photo store.Photo, edits *edit.Params) (src *image
 	}
 	fold.ExpEV = edits.ExpEV - f.baked + f.wbCompEV
 	if f.noExpKey != noExpKey {
-		if f.noWBKey != noWBKey || !f.wbFolds || edits.WBMode == edit.WBAuto {
+		if f.noWBKey != noWBKey || !f.wbFolds || !wbKnown(edits) {
 			return nil, Fold{}, false, false
 		}
-		wb, ok := wbFoldMatrix(f.wbMul, edits.EffectiveWBMul(f.camMul, f.camXYZ), f.rgbCam)
+		wb, ok := newWBFold(f.wbMul, edits.EffectiveWBMul(f.camMul, f.camXYZ), f.rgbCam, edits.Highlight)
 		if !ok {
 			return nil, Fold{}, false, false
 		}
@@ -355,7 +365,7 @@ func (c *Cache) decodeFull(ctx context.Context, proc *libraw.Processor, photo st
 		cacheKey: photo.CacheKey, key: fullDecodeKey(edits), noExpKey: fullDecodeKeyNoExp(edits),
 		noWBKey: fullDecodeKeyNoWB(edits), baked: edits.BakedExpEV(), wbCompEV: wbCompEV, rgba: rgba,
 		wbMul: edits.EffectiveWBMul(camMul, camXYZ), camMul: camMul, camXYZ: camXYZ, rgbCam: proc.RgbCam(),
-		wbFolds: edits != nil && edits.WBMode != edit.WBAuto && !decodeClipped(rgba),
+		wbFolds: wbKnown(edits) && !decodeClipped(rgba),
 	}, nil
 }
 

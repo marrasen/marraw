@@ -250,7 +250,7 @@ const windowMaxPixels = 16 << 20
 // exposure and white balance aside, which it folds in like the drafts do
 // (KeptForWindow says when it cannot fold a white balance). Neutral params
 // (the base look) are never kept either. The state the editor last settled
-// on or saved is the exception to the first: its decode is waited for.
+// on or saved is the exception: its own decode is waited for.
 func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Params, x, y, w, h int) (*aprot.Blob, error) {
 	// Each side first: a product of two huge sides wraps around.
 	if w <= 0 || h <= 0 || w > windowMaxPixels || h > windowMaxPixels || w*h > windowMaxPixels ||
@@ -267,10 +267,12 @@ func (e *Edits) PreviewWindow(ctx context.Context, photoID int64, params edit.Pa
 	}
 	cache := e.deps.Cache
 	src, fold, _, ok := cache.KeptForWindow(photo, &params)
-	if !ok && cache.EditorWants(photo, &params) {
+	if (!ok || fold.WB != nil) && cache.EditorWants(photo, &params) {
 		// The state the editor just settled on or saved, its decode not
 		// kept yet (a white balance change, say): wait for it, joining the
-		// 1:1 render's, so the window still comes well before the tiles.
+		// 1:1 render's, so the window still comes well before the tiles,
+		// and is theirs exactly. A fold of another balance would shift as
+		// they came; it is for the drag frames before.
 		// A drag frame is never the state the editor is on, so drags never
 		// decode here. The decode runs on its own: a window let go must not
 		// take with it the decode the tiles wait on. The editor moving on
