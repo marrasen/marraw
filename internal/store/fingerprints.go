@@ -99,3 +99,16 @@ func (db *DB) FolderByPath(ctx context.Context, path string) (id int64, photos i
 	}
 	return id, photos, err == nil, err
 }
+
+// ReadFolderPath is the catalog's spelling of the folder at path, matched in
+// any case, when the folder has been read.
+func (db *DB) ReadFolderPath(ctx context.Context, path string) (string, bool, error) {
+	var got string
+	err := db.QueryRowContext(ctx, `
+		SELECT path FROM folders WHERE path = ? COLLATE NOCASE AND last_scanned_at IS NOT NULL
+		ORDER BY path = ? DESC LIMIT 1`, path, path).Scan(&got)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return got, err == nil, err
+}

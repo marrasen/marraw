@@ -108,3 +108,42 @@ func TestHomesFollowTheShoots(t *testing.T) {
 		}
 	}
 }
+
+// Splitting a folder read as one shoot hands its subfolders' photos' rows
+// to them at once, so their shoots show their dates, picks and covers
+// before anyone opens them.
+func TestSplittingAFolderHandsItsRowsDown(t *testing.T) {
+	lib := t.TempDir()
+	trip := filepath.Join(lib, "2026-10-01 Trip")
+	touchRaw(t, filepath.Join(trip, "Day1", "x.ARW"))
+	touchRaw(t, filepath.Join(trip, "Day2", "y.ARW"))
+	roots := []LibraryRoot{{Path: lib, IsParent: true}}
+	l := libraryWith(t, roots)
+	l.upgraded = map[string]bool{lowerPath(lib): true}
+	l.deps.Scanner = &scan.Scanner{DB: l.deps.DB, Homes: l.Homes}
+	ctx := context.Background()
+	if _, n, err := l.deps.Scanner.OpenFolder(ctx, trip, l.scanRecursionFor(ctx, trip)); err != nil || n != 2 {
+		t.Fatalf("reading Trip as one shoot: %d photos, %v", n, err)
+	}
+
+	roots[0].FolderModes = map[string]string{lowerPath(trip): FolderSplit}
+	if err := l.SetLibraryRoots(ctx, roots); err != nil {
+		t.Fatal(err)
+	}
+	day2 := filepath.Join(trip, "Day2")
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		sums, err := l.deps.DB.FolderSummaries(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range sums {
+			if s.Path == day2 {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Day2 holds no rows after the split: %+v", sums)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

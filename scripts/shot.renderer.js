@@ -1374,6 +1374,19 @@ if (shot === 'cull') {
     item.click();
     await until(() => rows().some((r) => /2019 \/ Trip/.test(r) && !/Day 1/.test(r)), 15000);
     probe.rowsAfterOne = rows();
+    // Trip / Day 1 was open: the one shoot it is part of now opens.
+    probe.stage = 'following into the one shoot';
+    await until(() => /[\\/]Trip$/.test(ui().folderPath ?? ''), 15000);
+    probe.openedAfterOne = ui().folderPath;
+    probe.stage = 'trip split again';
+    await menuOf(find('2019 / Trip'));
+    const split = [...document.querySelectorAll('[role="menuitem"]')].find((m) =>
+      /Show its folders as separate shoots/.test(m.textContent),
+    );
+    split.click();
+    // Trip was open and is a shoot no longer: its first shoot opens.
+    await until(() => /Trip[\\/]Day 1$/.test(ui().folderPath ?? ''), 15000);
+    probe.openedAfterSplit = ui().folderPath;
     probe.stage = 'done';
   } catch (err) {
     probe.error = String(err);
