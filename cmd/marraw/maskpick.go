@@ -120,7 +120,7 @@ func (cu *culler) maskPickArm(in MaskAI) {
 				cu.fail("The "+map[string]string{"class": "scene", "person": "people"}[kind]+" could not be found", orNoAnswer(err))
 				return
 			}
-			if d.id != id || !d.open {
+			if d.id != id || !d.open || cu.batchShown {
 				return
 			}
 			p := &cu.masks.pick
@@ -214,7 +214,7 @@ func (p *maskPick) pickMask(id int) marrawclient.Mask {
 func (cu *culler) maskPickAt(id int) {
 	d := &cu.dev
 	p := &cu.masks.pick
-	if !d.open || p.photo != d.id || id <= 0 && p.kind == "person" || !p.ids()[id] {
+	if !d.open || cu.batchShown || p.photo != d.id || id <= 0 && p.kind == "person" || !p.ids()[id] {
 		return
 	}
 	d.params.Masks = append(slices.Clone(d.params.Masks), p.pickMask(id))

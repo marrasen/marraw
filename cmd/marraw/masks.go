@@ -232,7 +232,9 @@ func (cu *culler) maskAI(in MaskAI) {
 				cu.masksChanged()
 				return
 			}
-			if d.id != id || !d.open {
+			if d.id != id || !d.open || cu.batchShown {
+				// Another photo, or several selected now: the mask was
+				// the one photo's, and its edit is the batch's.
 				cu.masksChanged()
 				return
 			}
@@ -459,7 +461,7 @@ func (cu *culler) rangeAt(x, y float64) {
 				cu.tell(whyNot(err))
 				return
 			}
-			if d.id != id {
+			if d.id != id || cu.batchShown {
 				return
 			}
 			d.params = *res

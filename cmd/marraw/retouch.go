@@ -232,7 +232,7 @@ func (cu *culler) healSet(in HealSet) {
 // spotOK reports whether i is a spot of the edit showing.
 func (cu *culler) spotOK(i int) bool {
 	d := &cu.dev
-	return d.open && d.id == cu.photos[cu.at].ID && i >= 0 && i < len(d.params.Spots)
+	return d.open && !cu.batchShown && d.id == cu.photos[cu.at].ID && i >= 0 && i < len(d.params.Spots)
 }
 
 // spotAdd adds a spot placed on the photo, and chooses it: a heal's or a
