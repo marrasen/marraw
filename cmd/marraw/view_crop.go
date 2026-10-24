@@ -49,18 +49,20 @@ func abs32(x float32) float32 {
 // cropUI is the cull view's crop: the bar at the foot, and a drag of the
 // crop under way, from start at from, as grip, showing local.
 type cropUI struct {
-	bar      gunim.Node
-	barRect  geom.Rect
-	aspects  *widget.Segmented
-	angle    *widget.Slider
-	degrees  *widget.Label
-	info     *widget.Label
-	dragging bool
-	g        grip
-	start    cropRect
-	from     geom.Point
-	local    cropRect
-	hasLocal bool
+	// placeLater is a crop begun before the view had a size.
+	placeLater bool
+	bar        gunim.Node
+	barRect    geom.Rect
+	aspects    *widget.Segmented
+	angle      *widget.Slider
+	degrees    *widget.Label
+	info       *widget.Label
+	dragging   bool
+	g          grip
+	start      cropRect
+	from       geom.Point
+	local      cropRect
+	hasLocal   bool
 	// auto crops around the subject, saying so while it looks.
 	auto *widget.Button
 }
@@ -137,7 +139,11 @@ func (v *cullView) cropShow(s, prev Cull, u *gunim.UI) {
 	was := prev.Crop != nil && prev.Crop.Ready
 	now := s.Crop != nil && s.Crop.Ready
 	th := u.Theme()
-	if now {
+	if now && (v.box.W <= 0 || v.box.H <= 0) {
+		// Not laid out yet, as when R opens Develop from the library:
+		// the first layout places the frame.
+		c.placeLater = true
+	} else if now {
 		// The whole frame, as large as fits above the bar: again as a
 		// turn gives the frame another shape.
 		z, mid := v.cropPlace()

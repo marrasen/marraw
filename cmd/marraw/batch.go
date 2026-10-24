@@ -47,38 +47,93 @@ func (cu *culler) batchPreset(in BatchPreset) {
 		}
 	}
 	cu.notify("Applying the preset to " + itoa(int64(len(ids))) + " photos…")
+	var (
+		mu   sync.Mutex
+		name string
+	)
+	cu.eachPhoto(ids, func(ctx context.Context, id int64) error {
+		base, err := cu.api.Edits.GetEditParams(ctx, id)
+		if err != nil {
+			return err
+		}
+		if base == nil {
+			// No edit stored: the preset goes on a neutral one.
+			base = &marrawclient.Params{}
+		}
+		j := presetJob{id: id, base: *base, ev: evs[id], users: users, autos: autos}
+		p, n, err := cu.presetParams(ctx, j, in.Auto, in.Index)
+		if err != nil {
+			return err
+		}
+		mu.Lock()
+		name = n
+		mu.Unlock()
+		_, err = cu.api.Edits.PasteEditParams(ctx, []int64{id}, p)
+		return err
+	}, func(err error) {
+		if err != nil {
+			cu.fail("The preset could not be applied to every photo", err)
+			return
+		}
+		cu.notify(name + " applied to " + itoa(int64(len(ids))) + " photos")
+	})
+}
+
+// BatchAuto runs the autos of Sections on every photo selected, each on
+// its own edit, as Ctrl and U do on the one in hand.
+type BatchAuto struct{ Sections []string }
+
+// batchAuto runs in.Sections' autos on each photo selected, a few at a
+// time.
+func (cu *culler) batchAuto(in BatchAuto) {
+	ids := cu.targetIDs()
+	if len(ids) == 0 {
+		return
+	}
+	label := "Auto tone"
+	if len(in.Sections) > 0 && in.Sections[0] != "tone" {
+		label = "Auto color"
+	}
+	cu.notify(label + " on " + itoa(int64(len(ids))) + " photos…")
+	cu.eachPhoto(ids, func(ctx context.Context, id int64) error {
+		base, err := cu.api.Edits.GetEditParams(ctx, id)
+		if err != nil {
+			return err
+		}
+		if base == nil {
+			base = &marrawclient.Params{}
+		}
+		p, err := cu.api.Edits.AutoAdjust(ctx, id, *base, in.Sections)
+		if err != nil || p == nil {
+			return orNoAnswer(err)
+		}
+		_, err = cu.api.Edits.PasteEditParams(ctx, []int64{id}, *p)
+		return err
+	}, func(err error) {
+		if err != nil {
+			cu.fail(label+" did not work on every photo", err)
+			return
+		}
+		cu.notify(label + " on " + itoa(int64(len(ids))) + " photos")
+	})
+}
+
+// eachPhoto runs fn on each of ids, four at a time, away from the
+// controller, then done on it with the first error.
+func (cu *culler) eachPhoto(ids []int64, fn func(ctx context.Context, id int64) error, done func(error)) {
 	go func() {
 		ctx, cancel := context.WithTimeout(cu.ctx, 10*time.Minute)
 		defer cancel()
 		var (
 			mu    sync.Mutex
 			first error
-			name  string
 			wg    sync.WaitGroup
 		)
 		work := make(chan int64)
 		for range 4 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				for id := range work {
-					err := func() error {
-						base, err := cu.api.Edits.GetEditParams(ctx, id)
-						if err != nil {
-							return err
-						}
-						j := presetJob{id: id, base: *base, ev: evs[id], users: users, autos: autos}
-						p, n, err := cu.presetParams(ctx, j, in.Auto, in.Index)
-						if err != nil {
-							return err
-						}
-						mu.Lock()
-						name = n
-						mu.Unlock()
-						_, err = cu.api.Edits.PasteEditParams(ctx, []int64{id}, p)
-						return err
-					}()
-					if err != nil {
+					if err := fn(ctx, id); err != nil {
 						mu.Lock()
 						if first == nil {
 							first = err
@@ -86,7 +141,7 @@ func (cu *culler) batchPreset(in BatchPreset) {
 						mu.Unlock()
 					}
 				}
-			}()
+			})
 		}
 		for _, id := range ids {
 			select {
@@ -97,13 +152,7 @@ func (cu *culler) batchPreset(in BatchPreset) {
 		close(work)
 		wg.Wait()
 		select {
-		case cu.do <- func() {
-			if first != nil {
-				cu.fail("The preset could not be applied to every photo", first)
-				return
-			}
-			cu.notify(name + " applied to " + itoa(int64(len(ids))) + " photos")
-		}:
+		case cu.do <- func() { done(first) }:
 		case <-cu.ctx.Done():
 		}
 	}()

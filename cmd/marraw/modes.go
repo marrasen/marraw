@@ -94,3 +94,29 @@ func (m *modeSwitch) show(md int, u *gunim.UI) {
 		m.seg.SetSelected(md, u)
 	}
 }
+
+// DevelopTool goes to Develop on the photo in hand and takes up Tool
+// there, "crop" or "heal", as R and Q do from the library.
+type DevelopTool struct{ Tool string }
+
+// developTool opens Develop and, once the edit is loaded, the tool.
+func (cu *culler) developTool(tool string) {
+	cu.setMode(modeDevelop)
+	d := &cu.dev
+	if !cu.culling || !d.open || d.hidden {
+		return
+	}
+	run := func() {
+		switch {
+		case tool == "crop" && !cu.crop.on:
+			cu.toggleCrop()
+		case tool == "heal" && !cu.heal.on:
+			cu.healToggle()
+		}
+	}
+	if d.mounted && d.id == cu.photos[cu.at].ID && len(d.pending) == 0 {
+		run()
+		return
+	}
+	d.pending = append(d.pending, run)
+}

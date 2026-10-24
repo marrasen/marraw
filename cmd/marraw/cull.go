@@ -539,6 +539,10 @@ func (cu *culler) serve() error {
 				cu.batchDelta(in)
 			case BatchPreset:
 				cu.batchPreset(in)
+			case BatchAuto:
+				cu.batchAuto(in)
+			case DevelopTool:
+				cu.developTool(in.Tool)
 			case RailToggle:
 				cu.railToggle(in.Key)
 			case RailFilter:
@@ -1205,6 +1209,9 @@ func (cu *culler) scriptStep(k string) bool {
 	case strings.HasPrefix(k, "ctrl+") && len(k) == 6 && k[5] >= 'a' && k[5] <= 'z':
 		// Ctrl and a letter.
 		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyA + input.Key(k[5]-'a'), Mods: input.ModControl, Time: now})
+	case strings.HasPrefix(k, "ctrl+") && len(k) == 6 && k[5] >= '1' && k[5] <= '9':
+		// Ctrl and a digit.
+		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.Key1 + input.Key(k[5]-'1'), Mods: input.ModControl, Time: now})
 	case k == "w":
 		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyW, Time: now})
 	default:

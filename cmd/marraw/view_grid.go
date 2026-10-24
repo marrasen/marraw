@@ -614,8 +614,30 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 				_, cursor := v.grid.Selected()
 				openPalette(v, geom.Rc(v.railX(), v.top, v.box.W-v.railX(), v.box.H-v.top), u, paletteFor{cursor: cursor})
 				return true
+			case input.KeyU:
+				// Auto tone on the photos selected; with Shift white
+				// balance and colour; with Alt everything.
+				secs := []string{"tone"}
+				switch {
+				case e.Mods.Has(input.ModAlt):
+					secs = []string{"all"}
+				case e.Mods.Has(input.ModShift):
+					secs = []string{"wb", "color"}
+				}
+				u.Send(v, BatchAuto{Sections: secs})
+				return true
+			}
+			// Ctrl and 1 to 9 lay an auto preset over the photos
+			// selected, with Shift one of my presets.
+			if e.Key >= input.Key1 && e.Key <= input.Key9 && !e.Mods.Has(input.ModAlt) {
+				u.Send(v, BatchPreset{Auto: !e.Mods.Has(input.ModShift), Index: int(e.Key - input.Key1)})
+				return true
 			}
 			return false
+		}
+		if e.Key == input.KeyF11 {
+			u.SetFullScreen(!u.FullScreen())
+			return true
 		}
 		if e.Key == input.KeyDelete {
 			u.Send(v, AskDelete{})
@@ -626,6 +648,12 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 		}
 		if in, ok := burstKey(e); ok {
 			u.Send(v, in)
+			return true
+		}
+		// R crops and Q heals the photo in hand, in Develop.
+		if (e.Key == input.KeyR || e.Key == input.KeyQ) && e.Mods == 0 {
+			tool := map[bool]string{true: "crop", false: "heal"}[e.Key == input.KeyR]
+			u.Send(v, DevelopTool{Tool: tool})
 			return true
 		}
 		if in, ok := markKey(e.Key); ok {

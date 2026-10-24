@@ -134,7 +134,8 @@ var namedKeys = map[string]input.Key{
 	"right": input.KeyRight, "left": input.KeyLeft, "escape": input.KeyEscape, "enter": input.KeyEnter, "tab": input.KeyTab,
 	"up": input.KeyUp, "down": input.KeyDown, "q": input.KeyQ, "e": input.KeyE, "c": input.KeyC, "a": input.KeyA,
 	"plus": input.KeyKPAdd, "minus": input.KeyKPSubtract, "delete": input.KeyDelete,
-	"backspace": input.KeyBackspace,
+	"backspace": input.KeyBackspace, "f11": input.KeyF11, "g": input.KeyG,
+	"6": input.Key6, "7": input.Key7, "8": input.Key8, "9": input.Key9,
 }
 
 // markKey is the rating or flag a key gives, as marraw's keys do.
