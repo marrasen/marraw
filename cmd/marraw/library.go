@@ -474,24 +474,35 @@ func (cu *culler) libraryHolds(path string) bool {
 	return false
 }
 
-// regroup is a folder made one shoot or split while the shoot open, folder,
-// is it or lies in it. before is the shape of the shoots of the library
-// folder parent, so the change shows when they come again.
+// regroup is the folder at path made one shoot or split while the shoot
+// open, folder, is it or lies in it. before is the shape of the shoots of
+// the library folder parent, so the change shows when they come again.
 type regroup struct {
-	parent, folder, before string
+	parent, path, folder, before string
 }
 
 // followRegroup opens the shoot that holds the open folder's photos now,
 // once the shoots of the library folder key show the change: the one
 // shoot a group was made, or the first of a split folder's shoots. A
-// folder still a shoot stays open, and its photos follow on their own.
+// folder still a shoot stays open, read again so its photos follow.
 func (cu *culler) followRegroup(key string) {
 	g := cu.lib.regroup
 	if g == nil || g.parent != key || shootsShape(cu.lib.shoots[key]) == g.before {
 		return
 	}
 	cu.lib.regroup = nil
-	if cu.set != nil || cu.opening != "" || !strings.EqualFold(cu.folderPath, g.folder) || cu.libraryHolds(g.folder) {
+	if cu.set != nil || cu.opening != "" || !strings.EqualFold(cu.folderPath, g.folder) {
+		return
+	}
+	if cu.libraryHolds(g.folder) {
+		// Still a shoot, read now with or without its folders: read it
+		// again and show the photos it holds now.
+		if strings.EqualFold(g.folder, g.path) {
+			if cu.culling {
+				cu.cullNext = cu.folderPath
+			}
+			cu.loadShoot(cu.folderPath)
+		}
 		return
 	}
 	sort := ""
@@ -1011,7 +1022,7 @@ func (cu *culler) railAct(in RailAct) {
 		}
 		if cu.set == nil && (strings.EqualFold(cu.folderPath, it.Path) || hasPathUnder(cu.folderPath, it.Path)) {
 			key := strings.ToLower(it.Parent)
-			cu.lib.regroup = &regroup{parent: key, folder: cu.folderPath, before: shootsShape(cu.lib.shoots[key])}
+			cu.lib.regroup = &regroup{parent: key, path: it.Path, folder: cu.folderPath, before: shootsShape(cu.lib.shoots[key])}
 		}
 		cu.saveRoots(next, nil)
 	case "hide":
@@ -1256,6 +1267,12 @@ func (cu *culler) openShoot(path string) {
 		cu.notify(it.Name + " is offline. Reconnect its drive and it comes back on its own.")
 		return
 	}
+	cu.loadShoot(path)
+}
+
+// loadShoot reads the folder at path and shows it in the grid, the one
+// showing too, as openShoot does.
+func (cu *culler) loadShoot(path string) {
 	cu.opening = path
 	cu.railChanged()
 	go func() {
