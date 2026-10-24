@@ -56,3 +56,48 @@ func TestAShootTakesItsRowsThroughTheScanner(t *testing.T) {
 		t.Fatalf("Day1 = %+v, %v; want photo %d", got, err, old[0].ID)
 	}
 }
+
+// A photo's home is the folder the sidebar's rules read it in.
+func TestHomesFollowTheShoots(t *testing.T) {
+	lib := t.TempDir()
+	for _, p := range []string{
+		"loose.ARW",
+		"2019/Trip/a.ARW",
+		"2019/Trip/CamA/b.ARW",
+		"2019/Added/Inner/c.ARW",
+		"Exports/e.ARW",
+		"Hidden/h.ARW",
+		"Mixed/m.ARW",
+		"Mixed/Deep/Deeper/d.ARW",
+		"2020-05-01 Wedding/CamB/w.ARW",
+	} {
+		touchRaw(t, filepath.Join(lib, p))
+	}
+	j := func(p ...string) string { return filepath.Join(append([]string{lib}, p...)...) }
+	roots := []LibraryRoot{
+		{Path: lib, IsParent: true,
+			ExcludedChildren: []string{lowerPath(j("Hidden"))},
+			FolderModes:      map[string]string{lowerPath(j("Mixed")): FolderSplit}},
+		// Added on its own inside a shoot, and inside a group.
+		{Path: j("2019", "Trip", "CamA")},
+		{Path: j("2019", "Added"), IncludeSubfolders: true},
+	}
+	l := libraryWith(t, roots)
+	home := l.Homes()
+	for file, want := range map[string]string{
+		j("loose.ARW"):                            lib,
+		j("2019", "Trip", "a.ARW"):                j("2019", "Trip"),
+		j("2019", "Trip", "CamA", "b.ARW"):        j("2019", "Trip"),
+		j("2019", "Added", "Inner", "c.ARW"):      j("2019", "Added"),
+		j("Exports", "e.ARW"):                     "",
+		j("Hidden", "h.ARW"):                      "",
+		j("Mixed", "m.ARW"):                       j("Mixed"),
+		j("Mixed", "Deep", "Deeper", "d.ARW"):     j("Mixed", "Deep", "Deeper"),
+		j("2020-05-01 Wedding", "CamB", "w.ARW"):  j("2020-05-01 Wedding"),
+		filepath.Join(t.TempDir(), "outside.ARW"): "",
+	} {
+		if got := home(file); got != want {
+			t.Errorf("home of %s = %q, want %q", file, got, want)
+		}
+	}
+}

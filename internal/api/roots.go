@@ -39,11 +39,17 @@ func (l *Library) GetLibraryRoots(ctx context.Context) ([]LibraryRoot, error) {
 // toggle include-subfolders, and reorder are all "send the new list").
 func (l *Library) SetLibraryRoots(ctx context.Context, roots []LibraryRoot) error {
 	l.rootsMu.Lock()
-	defer l.rootsMu.Unlock()
-	return l.setRoots(ctx, roots)
+	err := l.setRoots(ctx, roots)
+	l.rootsMu.Unlock()
+	if err == nil {
+		// Outside the lock: the watcher's loop may be waiting on it, in a
+		// read it started, as this waits on the loop.
+		l.syncWatchedParents(roots)
+	}
+	return err
 }
 
-// setRoots is SetLibraryRoots, rootsMu held.
+// setRoots is SetLibraryRoots, rootsMu held, without telling the watcher.
 func (l *Library) setRoots(ctx context.Context, roots []LibraryRoot) error {
 	if roots == nil {
 		roots = []LibraryRoot{}
@@ -65,7 +71,6 @@ func (l *Library) setRoots(ctx context.Context, roots []LibraryRoot) error {
 	// A newly added root has no cached reachability yet; GetRootStatus stats it
 	// on demand, and the poller adopts it on its next tick.
 	aprot.TriggerRefresh(ctx, rootStatusKey)
-	l.syncWatchedParents(roots)
 	for _, r := range roots {
 		if r.IsParent {
 			aprot.TriggerRefresh(ctx, shootsKey(r.Path))
@@ -540,7 +545,10 @@ func (l *Library) RenameFolderOnDisk(ctx context.Context, path string, newName s
 	if r, ok := l.libraryFolderOf(ctx, newPath); ok {
 		keys = append(keys, shootsKey(r.Path))
 	}
-	aprot.TriggerRefresh(ctx, keys...)
+	// One call a key: aprot joins a call's keys into one.
+	for _, k := range keys {
+		aprot.TriggerRefresh(ctx, k)
+	}
 	return &RenameResult{Path: newPath}, nil
 }
 

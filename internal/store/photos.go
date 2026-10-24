@@ -268,7 +268,8 @@ func (db *DB) SyncFolder(ctx context.Context, folderID int64, folderPath string,
 // than before, and all they hold. home names the catalog folder, by path,
 // a photo's row belongs in by the library's rules ("" where they say
 // none), as of before the sync: it is called with the database busy, so
-// it must not use it. A folder that is a photo's home takes over the row
+// it must not use it, and it is asked of every photo first, before the
+// write lock is taken, so it can keep its answers for then. A folder that is a photo's home takes over the row
 // another catalog folder above or below it has of the photo; a photo the
 // folder no longer takes in, still on disk, has its row moved to its home,
 // made unread where the catalog has none. With home nil no row moves. It
@@ -297,10 +298,17 @@ func (db *DB) SyncFolderWith(ctx context.Context, folderID int64, folderPath str
 	// after.
 	stays := map[string]bool{}
 	if home != nil {
+		// The homes asked for too, which a rule may answer from the disk,
+		// so the transaction finds them known.
+		for _, e := range entries {
+			home(filepath.Join(folderPath, e.Name))
+		}
 		if names, err := db.photoNames(ctx, folderID); err == nil {
 			for _, name := range names {
 				if !seen[name] {
-					stays[name] = dropped(name)
+					if stays[name] = dropped(name); stays[name] {
+						home(filepath.Join(folderPath, name))
+					}
 				}
 			}
 		}

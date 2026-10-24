@@ -345,7 +345,10 @@ func (d *Deps) TriggerRefresh(keys ...string) {
 	s := d.server
 	d.mu.RUnlock()
 	if s != nil {
-		s.TriggerRefresh(keys...)
+		// One call a key: the server joins a call's keys into one.
+		for _, k := range keys {
+			s.TriggerRefresh(k)
+		}
 	}
 }
 
