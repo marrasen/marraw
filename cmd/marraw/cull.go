@@ -1979,7 +1979,10 @@ func toggleRun(sel [][2]int, i, n int) [][2]int {
 // BatchPanel is the batch panel's state: N photos selected, and the
 // presets to lay over them.
 type BatchPanel struct {
-	N       int
+	N int
+	// Sel names the photos selected: another selection starts the
+	// sliders at nought, as its changes are made from there.
+	Sel     string
 	Presets []PresetCard
 }
 
@@ -1994,6 +1997,9 @@ func (cu *culler) selChanged() {
 		cu.wbFinish(true)
 		cu.cropDone()
 		cu.heal.on = false
+		// A mask chosen, or a pick armed, was the one photo's.
+		cu.disarmPick()
+		cu.masks.sel, cu.masks.active, cu.masks.rangePick, cu.masks.brush.Painting = -1, "", false, false
 		// What dials asked of the edit while it loaded goes: the batch
 		// panel has the photos now.
 		d.pending = nil
@@ -2002,9 +2008,9 @@ func (cu *culler) selChanged() {
 			_ = cu.c.Unmount("develop")
 		}
 		cu.batchShown = true
-		_ = cu.c.Mount("cull", "batchpanel", "batchpanel", BatchPanel{N: n, Presets: cu.presetCards()})
+		_ = cu.c.Mount("cull", "batchpanel", "batchpanel", BatchPanel{N: n, Sel: fmt.Sprint(cu.sel), Presets: cu.presetCards()})
 	case want:
-		_ = cu.c.Update("batchpanel", BatchPanel{N: n, Presets: cu.presetCards()})
+		_ = cu.c.Update("batchpanel", BatchPanel{N: n, Sel: fmt.Sprint(cu.sel), Presets: cu.presetCards()})
 	case cu.batchShown:
 		cu.batchShown = false
 		_ = cu.c.Unmount("batchpanel")

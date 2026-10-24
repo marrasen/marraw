@@ -112,6 +112,10 @@ func (cu *culler) healToggle() {
 	if !d.open || !cu.culling {
 		return
 	}
+	if cu.batchShown && !cu.heal.on {
+		cu.tell("Choose one photo to heal")
+		return
+	}
 	h := &cu.heal
 	h.on = !h.on
 	if h.on {
@@ -236,7 +240,7 @@ func (cu *culler) spotOK(i int) bool {
 // moment before; a fill's is made.
 func (cu *culler) spotAdd(s marrawclient.Spot) {
 	d := &cu.dev
-	if !d.open || !cu.heal.on {
+	if !d.open || !cu.heal.on || cu.batchShown {
 		return
 	}
 	s.Mode = marrawclient.SpotMode(cu.heal.mode)

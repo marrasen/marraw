@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1159,6 +1160,11 @@ func (cu *culler) railWidth(px int) {
 
 // railHide puts the sidebar away, or brings it back.
 func (cu *culler) railHide(hidden bool) {
+	if cu.sheet {
+		// The contact sheet keeps the window to itself; the setting is
+		// the library's.
+		return
+	}
 	if cu.ui != nil {
 		cu.ui.RailHidden = hidden
 	}
@@ -1175,6 +1181,11 @@ func (cu *culler) addFolders(paths []string) {
 	// as a folder of its own, it would show twice. Its shoot opens, where
 	// it is one.
 	paths = slices.DeleteFunc(slices.Clone(paths), func(p string) bool {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			// A photo dragged in: folders join the library, files not.
+			cu.notify(baseName(p) + " is a file: drop a folder to add it to the library")
+			return true
+		}
 		for _, r := range cu.lib.roots {
 			if r.IsParent && hasPathUnder(p, r.Path) {
 				cu.notify(baseName(p) + " is in the library already")

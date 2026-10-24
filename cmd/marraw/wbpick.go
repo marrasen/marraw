@@ -42,7 +42,7 @@ type wbPick struct {
 // keeping what it picked.
 func (cu *culler) devWBPick(on bool) {
 	d := &cu.dev
-	if on && (!d.open || d.hidden || !cu.culling) {
+	if on && (!d.open || d.hidden || !cu.culling || cu.batchShown) {
 		return
 	}
 	if on == cu.wb.on {

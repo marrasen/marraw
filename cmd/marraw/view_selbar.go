@@ -348,7 +348,7 @@ func (c *batchCard) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids g
 // photos selected in Cull or Develop, on the panel's glass.
 type batchPanel struct {
 	card *batchCard
-	n    int
+	sel  string
 }
 
 func newBatchPanel(s BatchPanel) *batchPanel {
@@ -361,9 +361,9 @@ func newBatchPanel(s BatchPanel) *batchPanel {
 // show takes how many are selected and the presets; a new selection
 // starts the sliders at nought.
 func (b *batchPanel) show(s BatchPanel, u *gunim.UI) {
-	if s.N != b.n {
+	if s.Sel != b.sel {
 		b.card.fresh(u)
-		b.n = s.N
+		b.sel = s.Sel
 	}
 	b.card.set(s.N, s.Presets, u)
 }

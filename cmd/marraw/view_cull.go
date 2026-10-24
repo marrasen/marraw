@@ -753,7 +753,7 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			u.Send(v, DevWBBar{Act: map[bool]string{false: "cancel", true: "done"}[e.Key == input.KeyEnter]})
 			return true
 		}
-		if v.st.Panel && !e.Mods.Has(input.ModShift) && e.Key == input.KeyW {
+		if v.st.Panel && v.st.Selected < 2 && !e.Mods.Has(input.ModShift) && e.Key == input.KeyW {
 			u.Send(v, DevWBPick{On: !v.st.WBPick})
 			return true
 		}

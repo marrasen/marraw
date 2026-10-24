@@ -63,6 +63,7 @@ type gridView struct {
 	batch                       *batchCard
 	aside                       *libAside
 	selN                        int
+	selKey                      string
 	selIn, asideIn              *anim.Float
 	asideOn                     bool
 	// status is the line at the foot, and band the top band's handle that
@@ -135,7 +136,7 @@ func newGridView(GridState) *gridView {
 			n += r[1] - r[0]
 		}
 		v.head.selected(n)
-		v.selCount(n, u)
+		v.selCount(n, fmt.Sprint(sel), u)
 		return Selected{Runs: sel, Cursor: cursor}
 	}
 	v.grid.OnActivate = func(i int, _ *gunim.UI) gunim.Intent { return OpenCull{Index: i} }
@@ -269,7 +270,7 @@ func (v *gridView) gridSel(g GridSel, u *gunim.UI) {
 		n += r[1] - r[0]
 	}
 	v.head.selected(n)
-	v.selCount(n, u)
+	v.selCount(n, fmt.Sprint(g.Runs), u)
 	u.Invalidate()
 }
 
@@ -533,11 +534,13 @@ func (v *gridView) coveredIn(c Covered, u *gunim.UI) {
 
 // selCount shows n photos selected: with more than one, the selection's
 // bar in the bar's place, and its card unless the user hid it.
-func (v *gridView) selCount(n int, u *gunim.UI) {
+func (v *gridView) selCount(n int, sel string, u *gunim.UI) {
 	many := n > 1
-	if n != v.selN && many {
+	if sel != v.selKey && many {
+		// Another selection: the card's changes start from nought.
 		v.batch.fresh(u)
 	}
+	v.selKey = sel
 	v.selN = n
 	v.barGate.open, v.selGate.open = !many, many
 	v.aside.many = many

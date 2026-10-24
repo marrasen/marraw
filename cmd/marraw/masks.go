@@ -164,7 +164,7 @@ func (cu *culler) maskEdit(commit bool, label string) {
 // maskOK reports whether i is a mask of the edit showing.
 func (cu *culler) maskOK(i int) bool {
 	d := &cu.dev
-	return d.open && cu.culling && d.id == cu.photos[cu.at].ID && i >= 0 && i < len(d.params.Masks)
+	return d.open && cu.culling && !cu.batchShown && d.id == cu.photos[cu.at].ID && i >= 0 && i < len(d.params.Masks)
 }
 
 // maskAdd adds a mask, chosen, as a step.

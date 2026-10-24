@@ -42,7 +42,7 @@ func (v *cullView) healKey(e input.KeyPress, u *gunim.UI) bool {
 	if e.Mods.Has(input.ModControl) || e.Mods.Has(input.ModAlt) {
 		return false
 	}
-	if e.Key == input.KeyQ && v.st.Panel && v.st.Crop == nil && !v.st.WBPick {
+	if e.Key == input.KeyQ && v.st.Panel && v.st.Selected < 2 && v.st.Crop == nil && !v.st.WBPick {
 		u.Send(v, HealToggle{})
 		return true
 	}
