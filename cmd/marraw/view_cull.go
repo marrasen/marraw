@@ -139,12 +139,16 @@ type cullView struct {
 	// gap control and the window's buttons along the top, over a band
 	// that moves the window, and the confirm bar at the foot; their
 	// rects, where they take the pointer and fade.
-	shoot                         *shootPill
-	modes                         *modeSwitch
-	gap                           *gapControl
-	winPill                       gunim.Node
-	pop                           *widget.IconButton
-	confirm                       *confirmBar
+	shoot   *shootPill
+	modes   *modeSwitch
+	gap     *gapControl
+	winPill gunim.Node
+	pop     *widget.IconButton
+	confirm *confirmBar
+	// render is the chip that says the photo is being rendered at full
+	// resolution, coming in as renderIn does.
+	render                        *renderChip
+	renderIn                      *anim.Float
 	band                          *dragBand
 	shootRect, modesRect, topRect geom.Rect
 	confirmRect                   geom.Rect
@@ -196,7 +200,7 @@ func newCullView(s Cull) *cullView {
 		filmIn: anim.NewFloat(1), idle: anim.NewFloat(1), lastInput: time.Now(), adjust: newAdjustHUD(), adjustIn: anim.NewFloat(0),
 		headName: widget.NewLabel(s.Name), headExif: widget.NewLabel(s.Exif), errors: newErrorTray(),
 		shoot: newShootPill(), modes: newModeSwitch(map[bool]int{false: modeCull, true: modeDevelop}[s.Panel]), gap: newGapControl(),
-		confirm: newConfirmBar(), band: &dragBand{}}
+		confirm: newConfirmBar(), band: &dragBand{}, render: newRenderChip(), renderIn: anim.NewFloat(0)}
 	v.winPill, v.pop = newWindowPill()
 	v.confirm.onZoom = func(pct float32, u *gunim.UI) {
 		v.zoomTo(pct/max(v.percent(1), 0.01), v.room().Center(), u)
@@ -228,7 +232,7 @@ func newCullView(s Cull) *cullView {
 	if s.Panel {
 		v.side.Jump(1)
 	}
-	v.Add(v.z, v.c, v.in, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin, v.maskTintIn, v.filmIn, v.idle, v.flipX, v.flipY, v.adjustIn)
+	v.Add(v.z, v.c, v.in, v.side, v.shape, v.noticeIn, v.origIn, v.wbIn, v.cropIn, v.cropOver, v.spin, v.maskTintIn, v.filmIn, v.idle, v.flipX, v.flipY, v.adjustIn, v.renderIn)
 	v.note.Color = noteInk
 	v.note.Size = noteSize
 	v.hud = widget.NewPad(widget.Column(v.name, v.note))
@@ -288,6 +292,7 @@ func (v *cullView) show(s Cull, u *gunim.UI) {
 	v.origIn.Animate(map[bool]float32{false: 0, true: 1}[s.Original], widget.Quick.Get(th))
 	v.wbIn.Animate(map[bool]float32{false: 0, true: 1}[s.WBPick], widget.Quick.Get(th))
 	v.cropShow(s, prev, u)
+	v.renderShow(s, prev, u)
 	v.film.show(s, prev, u)
 	v.maskShow(s, u)
 	if s.NoticeSeq != v.noticeSeq {
@@ -513,7 +518,7 @@ func (v *cullView) askTilesBy(send func(gunim.Node, gunim.Intent)) {
 // Children implements [gunim.Composite].
 func (v *cullView) Children() []gunim.Node {
 	return []gunim.Node{v.hero, v.hud, v.slot, v.notice, v.labelOrig, v.wbBar, v.wbRead, v.wbWarn, v.crop.bar, v.crop.info, v.film,
-		v.headName, v.headExif, v.errors, v.adjust, v.band, v.shoot, v.modes.node, v.gap, v.winPill, v.confirm}
+		v.headName, v.headExif, v.errors, v.adjust, v.band, v.shoot, v.modes.node, v.gap, v.winPill, v.confirm, v.render}
 }
 
 // Cursor implements [gunim.CursorShaper]: a crosshair while the
@@ -1251,6 +1256,13 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	} else {
 		kids.At(20).Place(v.confirmRect.Min)
 	}
+	// The render's chip above the confirm bar, or where it would be.
+	rs := kids.At(21).Layout(gunim.Loose(box))
+	if v.renderIn.Value() > 0.01 {
+		kids.At(21).Place(geom.Pt(fr.Center().X-rs.W/2, foot-14-cfs.H-12-rs.H))
+	} else {
+		kids.At(21).Place(geom.Pt(-10000, -10000))
+	}
 
 	return box
 }
@@ -1327,6 +1339,12 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 		}
 		kids.At(20).Paint(p)
 	})
+	if k := v.renderIn.Value(); k > 0.01 {
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(k, 1)})()
+			kids.At(21).Paint(p)
+		}()
+	}
 	v.faded(p, "top", func() {
 		kids.At(16).Paint(p)
 		kids.At(17).Paint(p)
@@ -1862,3 +1880,23 @@ func (v *cullView) openRoom() geom.Rect {
 
 // drawerWidth is the develop panel's width, as marraw's drawer's.
 const drawerWidth = 352
+
+// renderShow brings the render's chip in a moment after a full-resolution
+// render starts, so one that ends at once never shows it, and takes it out
+// as it ends; meanwhile its bar follows how far the render has got.
+func (v *cullView) renderShow(s, prev Cull, u *gunim.UI) {
+	if s.Rendering {
+		v.render.set(s.RenderFrac)
+	}
+	switch {
+	case s.Rendering && !prev.Rendering:
+		u.After(150*time.Millisecond, func(u *gunim.UI) {
+			if v.st.Rendering {
+				v.renderIn.Animate(1, widget.Quick.Get(u.Theme()))
+				u.Invalidate()
+			}
+		})
+	case !s.Rendering && prev.Rendering:
+		v.renderIn.Animate(0, widget.Quick.Get(u.Theme()))
+	}
+}

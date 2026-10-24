@@ -57,6 +57,11 @@ type (
 		WindowAt image.Rectangle
 		// TileNote says how the tiles stand.
 		TileNote string
+		// Rendering says the photo is being rendered at full resolution,
+		// RenderFrac how far it has got, below nought before the backend
+		// says.
+		Rendering  bool
+		RenderFrac float64
 		// Panel says the develop panel is open beside the photo, and Live
 		// that Img is a live preview of an edit under way.
 		Panel bool
@@ -238,6 +243,8 @@ type culler struct {
 	probeNow bool
 	probeSeq int
 	tileNote string
+	// render is the full-resolution render the tiles wait for.
+	render *renderRun
 	// errs are the errors the user has not cleared, and errSeq the last
 	// one's number.
 	errs   []ErrorNote
@@ -434,6 +441,14 @@ func (cu *culler) serve() error {
 		}
 	})
 	defer stopProgress()
+	// How far a full-resolution render has got, for its chip.
+	stopRender := cu.api.OnRenderProgressEvent(func(ev marrawclient.RenderProgressEvent) {
+		select {
+		case cu.do <- func() { cu.renderProgress(ev.PhotoID, ev.Fraction) }:
+		case <-cu.ctx.Done():
+		}
+	})
+	defer stopRender()
 	go cu.loadSettings()
 	defer func() {
 		if cu.stopLive != nil {
@@ -780,8 +795,11 @@ func (cu *culler) serve() error {
 func (cu *culler) state() Cull {
 	p := cu.photos[cu.at]
 	st := Cull{Viewer: cu.viewer.win != nil, Index: cu.at, Total: len(cu.photos), ID: p.ID, Name: p.FileName, Exif: exifLine(p), Errors: cu.errs, Tasks: cu.shownTasks(), Aspect: cu.aspectOf(p), Full: cu.fullOf(p),
-		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p),
+		Tiles: cu.tilesShowing(p), TileNote: cu.tileNote, RenderFrac: -1, Rating: p.Rating, Flag: string(p.Flag), Aids: cu.aids.of(p),
 		Shoot: baseName(cu.folderOf(p)), Taken: takenAt(p.TakenAt), Gap: cu.libView.Gap}
+	if r := cu.render; r != nil && r.id == p.ID {
+		st.Rendering, st.RenderFrac = true, r.frac
+	}
 	gapAt := map[int]int{}
 	groups := gapGroups(cu.photos, cu.libView.Gap, cu.libView.Sort)
 	days := spansDays(groups)

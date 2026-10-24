@@ -144,7 +144,7 @@ func (cu *culler) probeTilesAt(p marrawclient.Photo, now bool, t image.Point) {
 		_, err := cu.im.tile(ctx, p, t, true)
 		rendered := false
 		if err == errMissing {
-			cu.say(gen, "tiles: rendering the full resolution")
+			cu.rendering(gen, seq, p.ID)
 			select {
 			case <-time.After(wait):
 				_, err = cu.im.tile(ctx, p, t, false)
@@ -165,6 +165,10 @@ func (cu *culler) probeTilesAt(p marrawclient.Photo, now bool, t image.Point) {
 			latest := cu.probeSeq == seq
 			if latest {
 				cu.probing, cu.probeStop = 0, nil
+			}
+			if r := cu.render; r != nil && r.seq == seq {
+				cu.render = nil
+				cu.showCull()
 			}
 			if err != nil && t != (image.Point{}) {
 				// A re-render of a thinned set (fetchTiles) that did not
@@ -294,6 +298,39 @@ func (cu *culler) say(gen int, note string) {
 		}
 	}:
 	case <-cu.ctx.Done():
+	}
+}
+
+// renderRun is a full-resolution render the tiles of photo id wait for,
+// as the probe numbered seq found, and how far it has got: frac, below
+// nought before the backend says.
+type renderRun struct {
+	id   int64
+	seq  int
+	frac float64
+}
+
+// rendering says, from a goroutine, that the photo of gen is being
+// rendered at full resolution, as the probe numbered seq found.
+func (cu *culler) rendering(gen, seq int, id int64) {
+	select {
+	case cu.do <- func() {
+		if cu.gen != gen || cu.probeSeq != seq {
+			return
+		}
+		cu.render = &renderRun{id: id, seq: seq, frac: -1}
+		cu.setTileNote("tiles: rendering the full resolution")
+	}:
+	case <-cu.ctx.Done():
+	}
+}
+
+// renderProgress takes how far a render of photo id has got, for the one
+// the tiles wait for.
+func (cu *culler) renderProgress(id int64, frac float64) {
+	if r := cu.render; r != nil && r.id == id && frac > r.frac {
+		r.frac = frac
+		cu.showCull()
 	}
 }
 
