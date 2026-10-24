@@ -3,17 +3,31 @@ package api
 import (
 	"context"
 	"log"
+	"os"
 
+	"github.com/marrasen/marraw/internal/foldermeta"
+	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/sidecar"
 	"github.com/marrasen/marraw/internal/store"
 )
 
-// writeSidecarFor mirrors a photo's portable intent (rating, flag, edit) to
-// disk next to its RAW, unless sidecar writes are disabled. Best-effort:
-// sidecar I/O must never fail a catalog write, so failures are logged and
-// swallowed.
+// writeSidecarFor records a photo's portable intent (rating, flag, edit) in
+// the marraw.json of its folder, unless sidecar writes are disabled. An old
+// per-photo sidecar already beside the RAW is kept in step too, so the
+// Electron app still reads the same until the user removes those; no new
+// one is made. Best-effort: sidecar I/O must never fail a catalog write, so
+// failures are logged and swallowed.
 func (d *Deps) writeSidecarFor(ctx context.Context, p store.Photo) {
 	if !d.DB.SidecarWritesEnabled(ctx) {
+		return
+	}
+	if d.Meta != nil {
+		fp, _ := d.DB.Fingerprint(ctx, p.ID)
+		entry := scan.MetaEntry(p, fp)
+		dir, name := scan.MetaLoc(p.Path())
+		d.Meta.Change(dir, func(f *foldermeta.File) { f.SetPhoto(name, entry) })
+	}
+	if _, err := os.Stat(sidecar.PathFor(p.Path())); err != nil {
 		return
 	}
 	editJSON := ""

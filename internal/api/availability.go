@@ -160,6 +160,13 @@ func (l *Library) GetRootStatus(ctx context.Context) ([]RootStatus, error) {
 		}
 	}
 	fresh := reachableAll(unknown)
+	// What the rail shows of each root from the catalog; a failed lookup
+	// leaves it out rather than failing the status.
+	summaries, err := l.deps.DB.FolderSummaries(ctx)
+	if err != nil {
+		summaries = nil
+	}
+	earliest := folderEarliest(summaries)
 
 	out := make([]RootStatus, 0, len(roots))
 	for _, r := range roots {
@@ -167,7 +174,10 @@ func (l *Library) GetRootStatus(ctx context.Context) ([]RootStatus, error) {
 		if !cached {
 			online = fresh[strings.ToLower(r.Path)]
 		}
-		out = append(out, RootStatus{Path: r.Path, Online: online})
+		st := RootStatus{Path: r.Path, Online: online,
+			EarliestTakenAt: earliestFor(earliest, r.Path, !r.IncludeSubfolders)}
+		st.Picked, st.Rejected, st.Cover = summaryFor(summaries, r.Path, !r.IncludeSubfolders)
+		out = append(out, st)
 	}
 	return out, nil
 }

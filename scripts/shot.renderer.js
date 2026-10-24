@@ -1323,6 +1323,62 @@ if (shot === 'cull') {
     croppedAspect: cellAspect('sample2.arw'),
     rotatedAspect: cellAspect('sample3.arw'),
   };
+} else if (shot === 'railtree') {
+  // Shoots at any depth: the opened folder's parent is a library folder
+  // holding 2019/Trip/Day 1 and 2019/Hike/Day 1 (one name, two places) and
+  // Wedding, which has RAWs and a folder of its own. The rail must say
+  // where a nested shoot is, offer the folder modes, open a nested shoot,
+  // and show a group as one shoot when asked.
+  ui().setMode('library');
+  const folder = ui().folderPath;
+  const lib = folder.replace(/[\\/][^\\/]+$/, '');
+  await mw.setLibraryRoots([
+    { path: lib, alias: '', includeSubfolders: false, photoCount: 0, isParent: true },
+  ]);
+  const rows = () =>
+    [...document.querySelectorAll('[data-testid="rail-shoot"]')].map((r) => r.textContent.trim());
+  const probe = (window.__railTreeProbe = { stage: 'waiting for rail' });
+  const menuOf = async (row) => {
+    row.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: row.getBoundingClientRect().top + 8 }),
+    );
+    await sleep(500);
+    const items = [...document.querySelectorAll('[role="menuitem"]')].map((m) => m.textContent.trim());
+    return items;
+  };
+  const closeMenu = async () => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(400);
+  };
+  try {
+    await until(() => rows().length >= 3, 15000);
+    probe.rows = rows();
+    const find = (text) =>
+      [...document.querySelectorAll('[data-testid="rail-shoot"]')].find((r) => r.textContent.includes(text));
+    probe.stage = 'menus';
+    probe.tripMenu = await menuOf(find('Trip / Day 1'));
+    await closeMenu();
+    probe.weddingMenu = await menuOf(find('Wedding'));
+    await closeMenu();
+    probe.stage = 'opening a nested shoot';
+    find('Trip / Day 1').click();
+    await until(() => ui().folderPath && /Day 1$/.test(ui().folderPath) && /Trip/.test(ui().folderPath), 15000);
+    await until(() => ui().visibleIds.length > 0, 15000);
+    probe.opened = ui().folderPath;
+    probe.openedPhotos = ui().visibleIds.length;
+    ui().setMode('library');
+    await sleep(800);
+    probe.stage = 'trip as one shoot';
+    await menuOf(find('Trip / Day 1'));
+    const item = [...document.querySelectorAll('[role="menuitem"]')].find((m) => /Show Trip as one shoot/.test(m.textContent));
+    item.click();
+    await until(() => rows().some((r) => /2019 \/ Trip/.test(r) && !/Day 1/.test(r)), 15000);
+    probe.rowsAfterOne = rows();
+    probe.stage = 'done';
+  } catch (err) {
+    probe.error = String(err);
+    probe.rowsAtError = rows();
+  }
 } else if (shot === 'share' || shot === 'share-publish') {
   // The share dialog, reached the way a user reaches it: right-click a shoot
   // in the rail. Needs MARRAW_SHOT_OWN_DAEMON=1 — the shared `marrawd --dev`
@@ -3064,6 +3120,7 @@ const probe =
   window.__windowProbe ??
   window.__settleProbe ??
   window.__restoreProbe ??
+  window.__railTreeProbe ??
   window.__welcomeProbe ??
   window.__folderViewProbe ??
   window.__exportCopyProbe ??

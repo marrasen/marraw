@@ -18,6 +18,7 @@ import (
 	"github.com/marrasen/marraw/internal/discovery"
 	"github.com/marrasen/marraw/internal/diskio"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/foldermeta"
 	"github.com/marrasen/marraw/internal/infer"
 	"github.com/marrasen/marraw/internal/pairing"
 	"github.com/marrasen/marraw/internal/pyramid"
@@ -35,6 +36,8 @@ type Deps struct {
 	Cache   *pyramid.Cache
 	Handles *decode.HandleCache
 	Scanner *scan.Scanner
+	// Meta writes the folders' marraw.json; nil writes none.
+	Meta *foldermeta.Writer
 	// Janitor bounds the preview cache; Settings adjusts its cap live.
 	Janitor *pyramid.Janitor
 	// DefaultCacheDir is the built-in preview-cache location (under the app
@@ -43,6 +46,12 @@ type Deps struct {
 	// WatermarkDir stores the user's watermark images (under the app data
 	// dir); AddWatermarkAsset writes it, exports and GET /wm/{name} read it.
 	WatermarkDir string
+	// dirs caches the folders' listings for finding shoots at any depth,
+	// and groupDirs are the group folders found under each library folder
+	// (by its lowercased path), watched as the library folders are.
+	dirs      dirCache
+	groupMu   sync.Mutex
+	groupDirs map[string][]string
 	// Watch notices new folders and new photos on disk. Nil is valid: a
 	// zero-value Deps is used for TypeScript generation, and a daemon whose
 	// watch handle failed to open still works through manual rescans.
@@ -336,7 +345,10 @@ func (d *Deps) TriggerRefresh(keys ...string) {
 	s := d.server
 	d.mu.RUnlock()
 	if s != nil {
-		s.TriggerRefresh(keys...)
+		// One call a key: the server joins a call's keys into one.
+		for _, k := range keys {
+			s.TriggerRefresh(k)
+		}
 	}
 }
 

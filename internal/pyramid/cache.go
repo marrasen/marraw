@@ -7,6 +7,8 @@ package pyramid
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -109,6 +111,13 @@ type Cache struct {
 	// keeps every open direct.
 	IOGate *diskio.Gate
 
+	// epochs counts each edit state's invalidations, keyed cacheKey|editHash.
+	// A render reads it before it starts and after it lands: a map made (or
+	// any other render input outside the edit hash changing) while it ran
+	// means what it wrote predates the change, so it is dropped and redone.
+	epochMu sync.Mutex
+	epochs  map[string]uint64
+
 	// fullMu guards the kept full-resolution decode and the decodes of it
 	// under way (see fulldecode.go).
 	fullMu      sync.Mutex
@@ -119,13 +128,6 @@ type Cache struct {
 	fullClosed  bool
 	settles     map[string]chan struct{} // CacheKey|hash → settle under way (settle.go)
 	fullDecodes atomic.Int64             // full-resolution decodes run, for tests
-
-	// epochs counts each edit state's invalidations, keyed cacheKey|editHash.
-	// A render reads it before it starts and after it lands: a map made (or
-	// any other render input outside the edit hash changing) while it ran
-	// means what it wrote predates the change, so it is dropped and redone.
-	epochMu sync.Mutex
-	epochs  map[string]uint64
 }
 
 func New(dir string, pool *decode.Pool, db *store.DB) (*Cache, error) {
@@ -216,6 +218,10 @@ func nested(a, b string) bool {
 // Must match RENDER_VERSION in client/src/lib/backend.ts — image URLs are
 // cached as immutable, so the version has to appear in the URL too.
 const renderVersion = "r16"
+
+// RenderVersion is renderVersion for a client in Go, which puts it in its
+// image URLs as the TypeScript client's RENDER_VERSION does.
+const RenderVersion = renderVersion
 
 // PathFor is the cache file location for one rendition.
 func (c *Cache) PathFor(cacheKey, level, editHash string) string {
@@ -1209,6 +1215,46 @@ func encodeJPEG(w io.Writer, img image.Image, quality int) error {
 		return jpegturbo.EncodeRGBA(w, rgba, quality)
 	}
 	return jpeg.Encode(w, img, &jpeg.Options{Quality: quality})
+}
+
+// coverEdge is the long edge of a folder's cover read from a RAW's
+// embedded preview; see FilePreview.
+const coverEdge = 512
+
+// FilePreview returns a small JPEG of the embedded preview of the RAW at
+// path, coverEdge on its long edge: the library sidebar's cover of a
+// folder not scanned yet. It never decodes RAW data, runs on the fast
+// pool behind the images someone is waiting on, and is kept under the
+// cache's covers folder, named for the file's path, size and time, so it
+// is read from the RAW once.
+func (c *Cache) FilePreview(ctx context.Context, path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha1.Sum([]byte(fmt.Sprintf("%s|%d|%d|%d", path, info.Size(), info.ModTime().UnixNano(), coverEdge)))
+	dst := filepath.Join(c.Dir(), "covers", hex.EncodeToString(sum[:])+".jpg")
+	if b, err := os.ReadFile(dst); err == nil {
+		return b, nil
+	}
+	err = c.fastPool.Do(ctx, "cover|"+dst, decode.PriorityPrefetch, func(_ context.Context, proc *libraw.Processor) error {
+		if _, err := os.Stat(dst); err == nil {
+			return nil
+		}
+		// Direct open: the preview is a small slice of the file.
+		if err := proc.Open(path); err != nil {
+			return err
+		}
+		rgba := thumbRGBA(proc)
+		if rgba == nil {
+			return fs.ErrNotExist
+		}
+		return writeJPEGFile(dst, scaleToLongEdge(rgba, coverEdge), 80)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(dst)
 }
 
 // tmpSeq disambiguates concurrent writes of the same cache file.

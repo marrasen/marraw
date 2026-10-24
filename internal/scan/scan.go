@@ -10,10 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/foldermeta"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
 	"github.com/marrasen/marraw/internal/sidecar"
@@ -79,6 +81,42 @@ func HasRaw(ctx context.Context, root string) bool {
 		}
 	}
 	return false
+}
+
+// FirstRaw returns the first RAW file beneath root, or "": the first by
+// name in root itself, else in the shallowest folder under it that has
+// one, folders taken by name. It is what stands for a folder not scanned
+// yet, as its cover in the library's sidebar, and reads no file.
+func FirstRaw(ctx context.Context, root string) string {
+	const maxDepth = 12
+	type dirItem struct {
+		abs   string
+		depth int
+	}
+	queue := []dirItem{{abs: root}}
+	for len(queue) > 0 {
+		if ctx.Err() != nil {
+			return ""
+		}
+		d := queue[0]
+		queue = queue[1:]
+		// ReadDir lists by name.
+		dirents, err := os.ReadDir(d.abs)
+		if err != nil {
+			continue
+		}
+		for _, de := range dirents {
+			if !de.IsDir() && IsRawFile(de.Name()) {
+				return filepath.Join(d.abs, de.Name())
+			}
+		}
+		for _, de := range dirents {
+			if de.IsDir() && d.depth < maxDepth && !skipDirName(de.Name()) {
+				queue = append(queue, dirItem{abs: filepath.Join(d.abs, de.Name()), depth: d.depth + 1})
+			}
+		}
+	}
+	return ""
 }
 
 // skipDirName filters noise directories out of recursive walks: exports,
@@ -172,9 +210,16 @@ type Scanner struct {
 	DB    *store.DB
 	Cache *pyramid.Cache
 	Pool  *decode.Pool
+	// Meta writes the folders' marraw.json; nil writes none.
+	Meta *foldermeta.Writer
 	// OnPhotosChanged is called (already throttled) when a folder's photo
 	// rows changed and subscribers should refresh.
 	OnPhotosChanged func(folderID int64)
+	// Homes gives, as a folder is read, the library's rules for where each
+	// photo's row belongs (store.SyncFolderWith), taken once before the
+	// read: the rule it returns runs with the catalog busy. Nil moves no
+	// row between folders.
+	Homes func() func(file string) string
 }
 
 // OpenFolder syncs the folder's directory listing into the store (fast; no
@@ -196,9 +241,19 @@ func (s *Scanner) OpenFolder(ctx context.Context, path string, recursive bool) (
 	if err != nil {
 		return 0, 0, err
 	}
-	count, err := s.DB.SyncFolder(ctx, folderID, abs, entries)
+	var home func(string) string
+	if s.Homes != nil {
+		home = s.Homes()
+	}
+	count, touched, err := s.DB.SyncFolderWith(ctx, folderID, abs, entries, home)
 	if err != nil {
 		return 0, 0, err
+	}
+	// Folders that gave this one rows, or took them, list otherwise now.
+	if s.OnPhotosChanged != nil {
+		for _, id := range touched {
+			s.OnPhotosChanged(id)
+		}
 	}
 	// Reconcile portable sidecars: adopt edits copied in with the folder, and
 	// backfill sidecars for catalog-only intent. Best-effort — a folder must
@@ -209,19 +264,28 @@ func (s *Scanner) OpenFolder(ctx context.Context, path string, recursive bool) (
 	return folderID, count, nil
 }
 
-// importSidecars reconciles each RAW's on-disk sidecar with its catalog row.
-// When a sidecar is present and newer it overwrites the row (last-writer-wins,
-// enforced in the store); when a sidecar is absent but the row carries intent,
-// a sidecar is written so the folder becomes self-contained. Returns after
+// importSidecars reconciles what the folder's photos carry on disk with
+// their catalog rows. A photo's record is its entry in the marraw.json of the
+// folder it lies in, or an older per-photo sidecar beside it; the newer of
+// the two wins over the row where it is newer than the row (last writer wins,
+// enforced in the store). Then marraw.json is brought up to date with every
+// row that carries intent and is newer than its entry, which also carries the
+// old sidecars' work into it. No new per-photo sidecar is made. Returns after
 // notifying subscribers if any row changed.
 func (s *Scanner) importSidecars(ctx context.Context, folderID int64, folderPath string, entries []store.FileEntry) error {
-	photos, err := s.DB.ListPhotos(ctx, folderID)
-	if err != nil {
-		return err
-	}
-	byName := make(map[string]store.Photo, len(photos))
-	for _, p := range photos {
-		byName[p.FileName] = p
+	// A recursive folder's photos lie in its subfolders, each with a
+	// marraw.json of its own.
+	files := map[string]*foldermeta.File{}
+	fileOf := func(dir string) *foldermeta.File {
+		if f, ok := files[dir]; ok {
+			return f
+		}
+		f, err := foldermeta.Read(dir)
+		if err != nil {
+			log.Printf("scan: read %s: %v", filepath.Join(dir, foldermeta.Name), err)
+		}
+		files[dir] = f
+		return f
 	}
 
 	var applied int
@@ -230,34 +294,64 @@ func (s *Scanner) importSidecars(ctx context.Context, folderID int64, folderPath
 			return ctx.Err()
 		}
 		rawPath := filepath.Join(folderPath, e.Name)
-		sc, err := sidecar.Read(rawPath)
+		dir, name := MetaLoc(rawPath)
+		var best *sidecar.File
+		if mp, ok := fileOf(dir).Photos[name]; ok && (mp.HasIntent() || mp.UpdatedAt > 0) {
+			best = &sidecar.File{V: sidecar.Version, File: name, FileSize: mp.Size, Rating: mp.Rating, Flag: mp.Flag, Edit: mp.Edit, UpdatedAt: mp.UpdatedAt}
+		}
+		old, err := sidecar.Read(rawPath)
 		if err != nil {
 			log.Printf("scan: read sidecar %s: %v", e.Name, err)
-			continue
 		}
-		if sc != nil {
-			if s.applySidecar(ctx, folderID, e, sc) {
-				applied++
-			}
-			continue
+		if old != nil && (best == nil || old.UpdatedAt > best.UpdatedAt) {
+			best = old
 		}
-		// No sidecar on disk: backfill one from existing catalog intent, unless
-		// sidecar writes are disabled (importing above still runs regardless).
-		if p, ok := byName[e.Name]; ok && hasIntent(p) && s.DB.SidecarWritesEnabled(ctx) {
-			editJSON := ""
-			if p.EditParams.Valid {
-				editJSON = p.EditParams.String
+		if best != nil && s.applySidecar(ctx, folderID, e, best) {
+			applied++
+		}
+	}
+
+	// marraw.json up to date with the rows, which now hold the newest of
+	// everything.
+	if s.Meta != nil && s.DB.SidecarWritesEnabled(ctx) {
+		photos, err := s.DB.ListPhotos(ctx, folderID)
+		if err != nil {
+			return err
+		}
+		for _, p := range photos {
+			if !hasIntent(p) {
+				continue
 			}
-			f := sidecar.Build(p.FileName, p.FileSize, p.Rating, p.Flag, editJSON, sidecarUpdatedMs(p))
-			if err := sidecar.Write(rawPath, f); err != nil {
-				log.Printf("scan: backfill sidecar %s: %v", e.Name, err)
+			dir, name := MetaLoc(p.Path())
+			mp, ok := fileOf(dir).Photos[name]
+			if ok && mp.HasIntent() && mp.UpdatedAt >= sidecarUpdatedMs(p) {
+				continue
 			}
+			fp, _ := s.DB.Fingerprint(ctx, p.ID)
+			entry := MetaEntry(p, fp)
+			s.Meta.Change(dir, func(f *foldermeta.File) { f.SetPhoto(name, entry) })
 		}
 	}
 	if applied > 0 && s.OnPhotosChanged != nil {
 		s.OnPhotosChanged(folderID)
 	}
 	return nil
+}
+
+// MetaLoc is the folder whose marraw.json holds the photo at path, and the
+// photo's name there.
+func MetaLoc(path string) (dir, name string) {
+	return filepath.Dir(path), filepath.Base(path)
+}
+
+// MetaEntry is a catalog row as its marraw.json entry, with its fingerprint
+// fp, where it has one.
+func MetaEntry(p store.Photo, fp string) foldermeta.Photo {
+	e := foldermeta.Photo{Size: p.FileSize, FP: fp, Rating: p.Rating, Flag: p.Flag, UpdatedAt: sidecarUpdatedMs(p)}
+	if p.EditParams.Valid && p.EditParams.String != "" {
+		e.Edit = json.RawMessage(p.EditParams.String)
+	}
+	return e
 }
 
 // applySidecar validates a sidecar against the file it names and, if it wins
@@ -315,6 +409,82 @@ func sidecarUpdatedMs(p store.Photo) int64 {
 	return 0
 }
 
+// photoMeta is a RAW's metadata as the catalog keeps it.
+func photoMeta(md libraw.Metadata) store.PhotoMeta {
+	return store.PhotoMeta{
+		Width: md.Width, Height: md.Height, Orientation: md.Orientation,
+		Make: md.Make, Model: md.Model,
+		ISO: md.ISO, Shutter: md.Shutter, Aperture: md.Aperture,
+		FocalLen: md.FocalLen, TakenAt: md.TakenAt.Unix(),
+		Lens:   md.Lens,
+		GPSLat: sql.NullFloat64{Float64: md.Latitude, Valid: md.GPSValid},
+		GPSLon: sql.NullFloat64{Float64: md.Longitude, Valid: md.GPSValid},
+		GPSAlt: sql.NullFloat64{Float64: md.Altitude, Valid: md.AltValid},
+	}
+}
+
+// QuickMeta reads the metadata of the folder's photos that have none yet,
+// workers at a time, each with a LibRaw handle of its own, before the folder
+// is listed to the client: a header read only, a few milliseconds a file,
+// with no pixel decode. Without it the capture times arrive from Backfill a
+// batch at a time, behind queued renders, and the client re-sorts and
+// re-groups the folder with every batch. It stops at budget and leaves what
+// is left to Backfill, so a vast or slow folder still opens. It returns how
+// many photos it read.
+func (s *Scanner) QuickMeta(ctx context.Context, folderID int64, workers int, budget time.Duration) (int, error) {
+	photos, err := s.DB.PhotosNeedingMeta(ctx, folderID)
+	if err != nil || len(photos) == 0 {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	work := make(chan store.Photo)
+	var mu sync.Mutex
+	done := 0
+	var wg sync.WaitGroup
+	for range max(1, min(workers, len(photos))) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			proc, err := libraw.New()
+			if err != nil {
+				for range work {
+				}
+				return
+			}
+			defer proc.Close()
+			for ph := range work {
+				if ctx.Err() != nil {
+					continue
+				}
+				if err := proc.Open(ph.Path()); err != nil {
+					continue
+				}
+				if err := s.DB.SetMeta(ctx, ph.ID, photoMeta(proc.Metadata())); err != nil {
+					continue
+				}
+				mu.Lock()
+				done++
+				mu.Unlock()
+				// Queue the grid thumbnail, as Backfill does for the photos
+				// it reads.
+				if p2, err := s.DB.GetPhoto(ctx, ph.ID); err == nil {
+					go s.Cache.Ensure(context.WithoutCancel(ctx), p2, "512", edit.BaseHash, decode.PriorityBackground)
+				}
+			}
+		}()
+	}
+	for _, ph := range photos {
+		if ctx.Err() != nil {
+			break
+		}
+		work <- ph
+	}
+	close(work)
+	wg.Wait()
+	return done, nil
+}
+
 // MetaCount returns how many photos in the folder still need metadata.
 func (s *Scanner) MetaCount(ctx context.Context, folderID int64) (int, error) {
 	photos, err := s.DB.PhotosNeedingMeta(ctx, folderID)
@@ -325,6 +495,17 @@ func (s *Scanner) MetaCount(ctx context.Context, folderID int64) (int, error) {
 // thumbnails, notifying subscribers in batches. It stops when ctx is
 // canceled (a rescan or a client cancel supersedes it).
 func (s *Scanner) Backfill(ctx context.Context, folderID int64, onProgress func(done, total int)) error {
+	return s.backfill(ctx, folderID, onProgress, true)
+}
+
+// BackfillMeta is Backfill without the thumbnails: for reading many
+// folders at once, where a render queued per photo would outlive a cancel.
+// What is shown asks for its thumbnails itself.
+func (s *Scanner) BackfillMeta(ctx context.Context, folderID int64, onProgress func(done, total int)) error {
+	return s.backfill(ctx, folderID, onProgress, false)
+}
+
+func (s *Scanner) backfill(ctx context.Context, folderID int64, onProgress func(done, total int), thumbs bool) error {
 	photos, err := s.DB.PhotosNeedingMeta(ctx, folderID)
 	if err != nil {
 		return err
@@ -359,17 +540,7 @@ func (s *Scanner) Backfill(ctx context.Context, folderID int64, onProgress func(
 			if err := proc.Open(ph.Path()); err != nil {
 				return err
 			}
-			md := proc.Metadata()
-			return s.DB.SetMeta(ctx, ph.ID, store.PhotoMeta{
-				Width: md.Width, Height: md.Height, Orientation: md.Orientation,
-				Make: md.Make, Model: md.Model,
-				ISO: md.ISO, Shutter: md.Shutter, Aperture: md.Aperture,
-				FocalLen: md.FocalLen, TakenAt: md.TakenAt.Unix(),
-				Lens:   md.Lens,
-				GPSLat: sql.NullFloat64{Float64: md.Latitude, Valid: md.GPSValid},
-				GPSLon: sql.NullFloat64{Float64: md.Longitude, Valid: md.GPSValid},
-				GPSAlt: sql.NullFloat64{Float64: md.Altitude, Valid: md.AltValid},
-			})
+			return s.DB.SetMeta(ctx, ph.ID, photoMeta(proc.Metadata()))
 		})
 		if err != nil {
 			log.Printf("scan: meta %s: %v", ph.FileName, err)
@@ -377,8 +548,10 @@ func (s *Scanner) Backfill(ctx context.Context, folderID int64, onProgress func(
 			notify(false)
 			// Queue the grid thumbnail; Ensure dedups against on-demand
 			// requests.
-			if p2, err := s.DB.GetPhoto(ctx, ph.ID); err == nil {
-				go s.Cache.Ensure(context.WithoutCancel(ctx), p2, "512", edit.BaseHash, decode.PriorityBackground)
+			if thumbs {
+				if p2, err := s.DB.GetPhoto(ctx, ph.ID); err == nil {
+					go s.Cache.Ensure(context.WithoutCancel(ctx), p2, "512", edit.BaseHash, decode.PriorityBackground)
+				}
 			}
 		}
 		if onProgress != nil {
