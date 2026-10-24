@@ -1169,6 +1169,21 @@ func (cu *culler) railHide(hidden bool) {
 // addFolders adds the folders at paths to the library, each as a library
 // folder or a shoot as its photos lie, and opens the last.
 func (cu *culler) addFolders(paths []string) {
+	// A folder inside a library folder is in the library already: added
+	// as a folder of its own, it would show twice. Its shoot opens, where
+	// it is one.
+	paths = slices.DeleteFunc(slices.Clone(paths), func(p string) bool {
+		for _, r := range cu.lib.roots {
+			if r.IsParent && hasPathUnder(p, r.Path) {
+				cu.notify(baseName(p) + " is in the library already")
+				if cu.libraryHolds(p) {
+					cu.openShoot(p)
+				}
+				return true
+			}
+		}
+		return false
+	})
 	if len(paths) == 0 {
 		return
 	}

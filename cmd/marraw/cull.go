@@ -1186,6 +1186,20 @@ func (cu *culler) scriptStep(k string) bool {
 	case k == "shift+plus":
 		_ = cu.c.Input(cu.ctx, input.KeyPress{Key: input.KeyMinus, Mods: input.ModShift, Typed: true, Char: '+', Time: now})
 		_ = cu.c.Input(cu.ctx, input.TextInput{Text: "?", Time: now})
+	case ok && verb == "drop":
+		// drop:x:y:path drops the folder at path there, as from a file
+		// manager.
+		var x, y float32
+		var path string
+		if parts := strings.SplitN(arg, ":", 3); len(parts) == 3 {
+			fmt.Sscan(parts[0], &x)
+			fmt.Sscan(parts[1], &y)
+			path = parts[2]
+		}
+		pos := geom.Pt(x, y)
+		_ = cu.c.Input(cu.ctx, input.DragOver{Pos: pos, Data: input.Files{Paths: []string{path}}, Time: now})
+		_ = cu.c.Input(cu.ctx, input.Drop{Pos: pos, Data: input.Files{Paths: []string{path}}, Paths: []string{path}, Time: now})
+		return true
 	case ok && verb == "wait":
 		ms, _ := strconv.Atoi(arg)
 		time.Sleep(time.Duration(ms) * time.Millisecond)

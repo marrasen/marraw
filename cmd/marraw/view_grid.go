@@ -80,6 +80,9 @@ type gridView struct {
 	ov   *overviewView
 	ovIn *anim.Float
 	ovOn bool
+	// lobby is the page with no shoot open, coming in as lobbyIn does.
+	lobby   *lobby
+	lobbyIn *anim.Float
 }
 
 const (
@@ -106,6 +109,7 @@ func newGridView(GridState) *gridView {
 	v.asideOn = true
 	v.dim = anim.NewFloat(1)
 	v.ov, v.ovIn = newOverviewView(v), anim.NewFloat(0)
+	v.lobby, v.lobbyIn = newLobby(), anim.NewFloat(0)
 	v.sel = newSelBar(func(u *gunim.UI) { u.Send(v, AsideToggle{}) })
 	v.batch = newBatchCard(func(u *gunim.UI) { u.Send(v, AsideToggle{}) })
 	v.aside = newLibAside(v.batch)
@@ -182,6 +186,7 @@ func (v *gridView) show(s GridState, u *gunim.UI) {
 	}
 	v.head.set(s, v.shown, u.Theme())
 	v.showNone(s, u)
+	v.showLobby(u)
 	if !v.shown {
 		// The folder opens: its tiles grow in, one after another.
 		v.shown = true
@@ -318,6 +323,19 @@ func (v *gridView) railIn(s RailState, u *gunim.UI) {
 		v.dim.Animate(map[bool]float32{false: 1, true: 0.35}[s.Opening != ""], widget.Quick.Get(u.Theme()))
 	}
 	v.bar.setRail(s.Hidden, u)
+	v.showLobby(u)
+	u.Invalidate()
+}
+
+// showLobby brings the page in with no shoot open, nor one opening, nor
+// a folder's overview up, once the sidebar knows the library: how to
+// start where the library is empty, where to go next where it is not.
+func (v *gridView) showLobby(u *gunim.UI) {
+	show := v.st.FolderID == 0 && v.head.opening == "" && !v.ovOn && v.rail.st.Loaded
+	if show {
+		v.lobby.set(v.rail.st.Folders == 0)
+	}
+	v.lobbyIn.Animate(on(show), widget.Settle.Get(u.Theme()))
 	u.Invalidate()
 }
 
@@ -415,7 +433,7 @@ func (v *gridView) newTile(i int) gunim.Node {
 func (v *gridView) Children() []gunim.Node {
 	// The cards come last, over the info panel and the rest, so a click
 	// on one reaches it wherever it lies.
-	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.selGate, v.asideGate, v.status, v.band, v.ov, v.errors, v.bar.lead}
+	return []gunim.Node{v.head, v.grid, v.rail, v.notice, v.barGate, v.empty, v.selGate, v.asideGate, v.status, v.band, v.ov, v.errors, v.bar.lead, v.lobby}
 }
 
 // asideIn shows the info panel, or puts it away.
@@ -458,6 +476,7 @@ func (v *gridView) overviewIn(in OverviewIn, u *gunim.UI) {
 	v.ov.show(in, u)
 	if in.On != v.ovOn {
 		v.ovOn = in.On
+		v.showLobby(u)
 		v.ovIn.Animate(map[bool]float32{false: 0, true: 1}[in.On], widget.Quick.Get(u.Theme()))
 		focus := gunim.Node(v.grid)
 		if in.On {
@@ -532,7 +551,8 @@ func (v *gridView) Step(dt time.Duration) bool {
 	e := v.rw.Step(dt)
 	g := v.dim.Step(dt)
 	h := v.ovIn.Step(dt)
-	return a || b || c || d || e || g || h
+	i := v.lobbyIn.Step(dt)
+	return a || b || c || d || e || g || h || i
 }
 
 // gridNotice pops a note in over the grid, and lets it fade after a
@@ -567,6 +587,16 @@ func (v *gridView) Handle(e input.Event, u *gunim.UI) bool {
 			}
 		})
 		return false
+	case input.DragOver:
+		// A folder dropped anywhere in the window joins the library, as
+		// on the sidebar.
+		_, ok := e.Data.(input.Files)
+		return ok
+	case input.Drop:
+		if len(e.Paths) > 0 {
+			u.Send(v, AddFolders{Paths: e.Paths})
+			return true
+		}
 	case input.HistoryStep:
 		// The mouse's back button goes back to the overview the shoot
 		// was opened from, as the Back button does.
@@ -720,6 +750,15 @@ func (v *gridView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	empty.Place(geom.Pt(railWidth+w/2-es.W/2, gridTop+top+80))
 	kids.At(11).Layout(gunim.Tight(box))
 	kids.At(11).Place(geom.Point{})
+	lob := kids.At(13)
+	gh := max(0, box.H-gridTop-top-statusH)
+	lbs := lob.Layout(gunim.Loose(geom.Sz(gw, gh)))
+	if v.lobbyIn.Value() > 0.01 {
+		lob.Place(geom.Pt(railWidth+gw/2-lbs.W/2, gridTop+top+max(0, (gh-lbs.H)/2-40)))
+	} else {
+		// Out of sight, out of reach of the pointer too.
+		lob.Place(geom.Pt(-10000, 0))
+	}
 	sel := kids.At(6)
 	sel.Layout(gunim.Tight(geom.Sz(w, barHeight)))
 	sel.Place(geom.Pt(railWidth, gridHeadHeight+top))
@@ -813,6 +852,13 @@ func (v *gridView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gu
 			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: k})()
 			defer p.Push(paint.Translate(geom.Pt(0, (1-k)*8)))()
 			e.Paint(p)
+		}()
+	}
+	if k := v.lobbyIn.Value(); k > 0.01 {
+		func() {
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(k, 1)})()
+			defer p.Push(paint.Translate(geom.Pt(0, (1-k)*8)))()
+			kids.At(13).Paint(p)
 		}()
 	}
 	if v.asideIn.Value() > 0.01 {
