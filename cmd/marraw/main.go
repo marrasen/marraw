@@ -259,6 +259,7 @@ func run(o options) error {
 			if first {
 				firstWin = w
 				cu = newCuller(ctx, w.Client(), api, im, info.FolderID, path, photos)
+				cu.restore = info.FolderID == 0
 				if proc != nil {
 					proc.onRestart = func(why string) { cu.onDo(func() { cu.fail("The backend restarted", errors.New(why)) }) }
 				}

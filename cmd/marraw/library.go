@@ -1235,6 +1235,15 @@ func (cu *culler) loadSettings() {
 			return
 		}
 		cu.ui = ui
+		if cu.restore {
+			// The folder open when marraw last closed, unless one opens
+			// already. One that fails to open stays remembered: its drive
+			// plugged in again, the next start lands there.
+			cu.restore = false
+			if ui.LastFolder != "" && cu.folder == 0 && cu.opening == "" {
+				cu.openShoot(ui.LastFolder)
+			}
+		}
 		if v := viewFor(ui, cu.folderPath); cu.folder != 0 && v != cu.libView && !cu.culling {
 			cu.libView = v
 			cu.applyView()
@@ -1332,6 +1341,14 @@ func (cu *culler) showFolder(id int64, path string, photos []marrawclient.Photo)
 	cu.gridStop, cu.load, cu.warm, cu.stopLive = nil, nil, nil, nil
 	cu.stopTiles()
 	cu.folder, cu.folderPath = id, path
+	if id > 0 && !cu.secondary {
+		// Opened again on the next start, as marraw does.
+		go func() {
+			if err := cu.api.Settings.SetLastFolder(cu.ctx, path); err != nil && cu.ctx.Err() == nil {
+				log.Printf("last folder: %v", err)
+			}
+		}()
+	}
 	cu.stopSetRead()
 	cu.set = nil
 	cu.setAll(photos)

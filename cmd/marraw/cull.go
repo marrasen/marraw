@@ -170,6 +170,10 @@ type culler struct {
 	// ovSources where each of its covers comes from.
 	ov, ovBack *overviewSel
 	ovSources  map[string]coverSource
+	// restore says to open the folder open when marraw last closed, once
+	// the settings that remember it come: the first window, started with
+	// no folder.
+	restore bool
 	// secondary says this window is not the first: it leaves telling of
 	// updates to that one. newWindow opens another window on the folder
 	// at path, or on the library for "".
