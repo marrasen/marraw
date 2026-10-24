@@ -44,6 +44,10 @@ type Library struct {
 	// rootsMu serializes the writes of the library roots, the user's and
 	// the upgrade's, so neither undoes the other.
 	rootsMu sync.Mutex
+
+	// rereads are the folders being read again after their mode changed
+	// (rereadRegrouped), for a test to wait on.
+	rereads sync.WaitGroup
 }
 
 // ListDrives returns the filesystem roots to seed the folder tree.

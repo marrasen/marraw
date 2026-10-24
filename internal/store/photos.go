@@ -373,6 +373,13 @@ func (db *DB) SyncFolderWith(ctx context.Context, folderID int64, folderPath str
 			if !asked {
 				still = dropped(g.name)
 			}
+			if still && strings.EqualFold(home(filepath.Join(folderPath, g.name)), folderPath) {
+				// Still on disk and still this folder's, though this read
+				// left it out: the rules changed under the read, as a
+				// split undone at once does. The row stays, with all it
+				// holds, for the next read.
+				continue
+			}
 			if still {
 				moved, err := m.handOver(ctx, folderPath, g)
 				if err != nil {

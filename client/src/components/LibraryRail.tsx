@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
+  listShoots,
   openFolder,
   renameFolderOnDisk,
   renderFolderFullres,
@@ -979,8 +980,10 @@ function ShootRow({
 
   // How a folder shows (LibraryRoot.folderModes): its subfolders as shoots
   // of their own ("split"), everything beneath it as one shoot ("one"), or
-  // as the daemon's rules have it (no entry).
-  const setFolderMode = (path: string, mode: 'split' | 'one' | null) => {
+  // as the daemon's rules have it (no entry). When that takes the open
+  // shoot away, the shoot that holds its photos now opens: the one shoot
+  // made of a folder it is in, or the first of the split folder's own.
+  const setFolderMode = async (path: string, mode: 'split' | 'one' | null) => {
     const k = path.toLowerCase();
     const next = roots.map((r) => {
       if (!samePath(r.path, parent.path)) return r;
@@ -989,7 +992,23 @@ function ShootRow({
       else delete modes[k];
       return { ...r, folderModes: modes };
     });
-    void saveRoots(client, next);
+    const open = useUIStore.getState().folderPath;
+    await saveRoots(client, next);
+    if (!open || !isUnder(open, path) || useUIStore.getState().folderPath !== open) return;
+    const shoots = await listShoots(client, parent.path).catch(() => null);
+    if (!shoots || useUIStore.getState().folderPath !== open) return;
+    if (shoots.some((s) => samePath(s.path, open))) {
+      // Still a shoot, read now with or without its folders: read it again
+      // so its photos are the ones it holds now.
+      if (samePath(open, path)) await openFolder(client, open).catch(() => {});
+      return;
+    }
+    const sorted = sortShoots(shoots, useUIStore.getState().shootSort);
+    const holder = sorted
+      .filter((s) => !s.isSelf && !s.split && isUnder(open, s.path))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    const to = holder ?? sorted.find((s) => !s.isSelf && isUnder(s.path, open));
+    if (to) await openShoot(client, to);
   };
   // The folder the shoot is grouped under, the nearest of the folders
   // between the library folder and it, which "Show as one shoot" makes a
@@ -1086,19 +1105,19 @@ function ShootRow({
           </ContextMenuItem>
         )}
         {shoot.split ? (
-          <ContextMenuItem onClick={() => setFolderMode(shoot.path, null)}>
+          <ContextMenuItem onClick={() => void setFolderMode(shoot.path, null)}>
             <Folder /> <span className="flex-1">Show as one shoot</span>
           </ContextMenuItem>
         ) : (
           shoot.subfolders &&
           !shoot.isSelf && (
-            <ContextMenuItem onClick={() => setFolderMode(shoot.path, 'split')}>
+            <ContextMenuItem onClick={() => void setFolderMode(shoot.path, 'split')}>
               <FolderTree /> <span className="flex-1">Show its folders as separate shoots</span>
             </ContextMenuItem>
           )
         )}
         {groupPath && (
-          <ContextMenuItem onClick={() => setFolderMode(groupPath, 'one')}>
+          <ContextMenuItem onClick={() => void setFolderMode(groupPath, 'one')}>
             <Folder /> <span className="flex-1">Show {baseName(groupPath)} as one shoot</span>
           </ContextMenuItem>
         )}
