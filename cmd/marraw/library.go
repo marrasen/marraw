@@ -120,7 +120,10 @@ type library struct {
 	status map[string]marrawclient.RootStatus
 	links  []marrawclient.ShareLink
 	filter string
-	loaded bool
+	// regroup is a change of how a folder shows that takes the open
+	// shoot with it, waiting for its library folder's shoots to change.
+	regroup *regroup
+	loaded  bool
 	// covers are the covers' pictures held, and coverWant those on their
 	// way, by their keys; live the counts and covers known here of shoots
 	// culled since the backend listed them, by lowercased path.
@@ -214,6 +217,7 @@ func (cu *culler) rootsIn(roots []marrawclient.LibraryRoot) {
 						l.shoots[key] = s
 						cu.dropLive(r.Path)
 						cu.railChanged()
+						cu.followRegroup(key)
 					}
 				})
 			}
@@ -468,6 +472,72 @@ func (cu *culler) libraryHolds(path string) bool {
 		}
 	}
 	return false
+}
+
+// regroup is a folder made one shoot or split while the shoot open, folder,
+// is it or lies in it. before is the shape of the shoots of the library
+// folder parent, so the change shows when they come again.
+type regroup struct {
+	parent, folder, before string
+}
+
+// followRegroup opens the shoot that holds the open folder's photos now,
+// once the shoots of the library folder key show the change: the one
+// shoot a group was made, or the first of a split folder's shoots. A
+// folder still a shoot stays open, and its photos follow on their own.
+func (cu *culler) followRegroup(key string) {
+	g := cu.lib.regroup
+	if g == nil || g.parent != key || shootsShape(cu.lib.shoots[key]) == g.before {
+		return
+	}
+	cu.lib.regroup = nil
+	if cu.set != nil || cu.opening != "" || !strings.EqualFold(cu.folderPath, g.folder) || cu.libraryHolds(g.folder) {
+		return
+	}
+	sort := ""
+	if cu.ui != nil {
+		sort = string(cu.ui.ShootSort)
+	}
+	to := ""
+	shoots := sortShoots(cu.lib.shoots[key], sort)
+	for _, s := range shoots {
+		// The shoot made of a group the folder is in.
+		if !s.IsSelf && !s.Split && hasPathUnder(g.folder, s.Path) && len(s.Path) > len(to) {
+			to = s.Path
+		}
+	}
+	for _, s := range shoots {
+		// Or the first of the folder's own, as the sidebar orders them.
+		if to == "" && hasPathUnder(s.Path, g.folder) {
+			to = s.Path
+		}
+	}
+	if to == "" {
+		return
+	}
+	if cu.culling {
+		cu.openShootCull(to)
+		return
+	}
+	cu.openShoot(to)
+}
+
+// shootsShape names which shoots there are and which are split.
+func shootsShape(shoots []marrawclient.Shoot) string {
+	var b strings.Builder
+	for _, s := range shoots {
+		fmt.Fprintf(&b, "%s|%v\n", strings.ToLower(s.Path), s.Split)
+	}
+	return b.String()
+}
+
+// hasPathUnder reports whether path lies inside dir, in any case.
+func hasPathUnder(path, dir string) bool {
+	if path == "" || dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(strings.ToLower(dir), strings.ToLower(path))
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // hasKey reports whether m holds k.
@@ -938,6 +1008,10 @@ func (cu *culler) railAct(in RailAct) {
 				m[k] = mode
 			}
 			next[i].FolderModes = m
+		}
+		if cu.set == nil && (strings.EqualFold(cu.folderPath, it.Path) || hasPathUnder(cu.folderPath, it.Path)) {
+			key := strings.ToLower(it.Parent)
+			cu.lib.regroup = &regroup{parent: key, folder: cu.folderPath, before: shootsShape(cu.lib.shoots[key])}
 		}
 		cu.saveRoots(next, nil)
 	case "hide":
