@@ -53,12 +53,12 @@ type SettingsState struct {
 	ThumbFit string
 	// Features are the culling aids on or off, by their ids, and the
 	// bursts' sensitivity and time window.
-	Features                map[string]bool
-	BurstHamming, BurstGap  int
-	Prerender               bool
+	Features               map[string]bool
+	BurstHamming, BurstGap int
+	Prerender              bool
 	// CullDials and QuickDials are the dials of Cull's bar and of
 	// Develop's.
-	CullDials, QuickDials []string
+	CullDials, QuickDials   []string
 	Sidecars, SidecarsKnown bool
 	Cache                   *marrawclient.CacheInfo
 	Models                  *marrawclient.ModelsInfo
