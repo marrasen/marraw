@@ -34,6 +34,9 @@ type (
 		// Presets are the presets the batch card can lay over a
 		// selection.
 		Presets []PresetCard
+		// Sheet says the grid is Cull's contact sheet: the shoot's photos
+		// as a sheet, the sidebar away, until Esc goes back to the photo.
+		Sheet bool
 		// Set says the photos are a folder's, of Shoots shoots, grouped
 		// a shoot each.
 		Set    bool
@@ -100,6 +103,8 @@ type (
 	// goes back to the grid.
 	OpenCull  struct{ Index int }
 	LeaveCull struct{}
+	// ContactSheet leaves the photo for Cull's contact sheet, as G does.
+	ContactSheet struct{}
 )
 
 // gridState is the grid's state: every photo in the folder.
@@ -120,6 +125,7 @@ func (cu *culler) gridState() GridState {
 	st.Natural = cu.ui != nil && cu.ui.ThumbFit == "natural"
 	st.Presets = cu.presetCards()
 	st.Path = cu.folderPath
+	st.Sheet = cu.sheet
 	st.Aside = cu.ui == nil || !cu.ui.EditPanelHidden
 	for _, p := range cu.photos {
 		st.Photos = append(st.Photos, GridPhoto{ID: p.ID, Name: p.FileName, Aspect: cu.aspectOf(p), Rating: p.Rating, Flag: string(p.Flag),
@@ -162,6 +168,11 @@ func (cu *culler) needThumbs(n NeedThumbs) {
 func (cu *culler) openCull(i int) {
 	if cu.culling || i < 0 || i >= len(cu.photos) {
 		return
+	}
+	if cu.sheet {
+		cu.sheet = false
+		cu.railChanged()
+		_ = cu.c.Update("grid", cu.gridState())
 	}
 	cu.culling = true
 	cu.dev.mounted = false

@@ -797,7 +797,8 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			// the library.
 			u.Send(v, SetMode{Mode: map[bool]int{false: modeLibrary, true: modeCull}[v.st.Panel]})
 		case input.KeyG:
-			u.Send(v, LeaveCull{})
+			// The contact sheet, as marraw's G in Cull.
+			u.Send(v, ContactSheet{})
 		case input.KeyD:
 			u.Send(v, ToggleDevelop{})
 		default:

@@ -32,6 +32,11 @@ func (cu *culler) setMode(m int) {
 	switch m {
 	case modeLibrary:
 		cu.leaveCull()
+		if cu.sheet {
+			cu.sheet = false
+			cu.railChanged()
+			_ = cu.c.Update("grid", cu.gridState())
+		}
 	case modeCull, modeDevelop:
 		if !cu.culling {
 			if len(cu.photos) == 0 {
@@ -119,4 +124,18 @@ func (cu *culler) developTool(tool string) {
 		return
 	}
 	d.pending = append(d.pending, run)
+}
+
+// contactSheet leaves the photo for the contact sheet: the grid, the
+// sidebar away, the photo flying back to its tile and the keyboard on it,
+// as marraw's G in Cull. Esc, Enter, a double click or G again go back to
+// the photo.
+func (cu *culler) contactSheet() {
+	if !cu.culling {
+		return
+	}
+	cu.sheet = true
+	cu.leaveCull()
+	cu.railChanged()
+	_ = cu.c.Update("grid", cu.gridState())
 }

@@ -247,6 +247,8 @@ func (cu *culler) railChanged() {
 		}
 		cu.rail.Width, cu.rail.Hidden = ui.RailWidth, ui.RailHidden
 	}
+	// The contact sheet has the window to itself.
+	cu.rail.Hidden = cu.rail.Hidden || cu.sheet
 	cu.rail.Current = cu.folderPath
 	if cu.opening != "" {
 		cu.rail.Current = cu.opening

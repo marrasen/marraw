@@ -184,7 +184,13 @@ func (v *gridView) show(s GridState, u *gunim.UI) {
 			t.setAids(s.Photos[i].Aids, u)
 		}
 	}
+	v.head.sheet = s.Sheet
 	v.head.set(s, v.shown, u.Theme())
+	if s.Sheet {
+		v.head.modes.show(modeCull, u)
+	} else if !v.band.off {
+		v.head.modes.show(modeLibrary, u)
+	}
 	v.showNone(s, u)
 	v.showLobby(u)
 	if !v.shown {
@@ -518,8 +524,9 @@ func (v *gridView) libMarksIn(m LibMarks, u *gunim.UI) {
 func (v *gridView) coveredIn(c Covered, u *gunim.UI) {
 	v.band.off = c.On
 	if !c.On {
-		// Back in the library: its switch stands on Library again.
-		v.head.modes.show(modeLibrary, u)
+		// Back in the library: its switch stands on Library again, or
+		// on Cull for its contact sheet.
+		v.head.modes.show(map[bool]int{false: modeLibrary, true: modeCull}[v.st.Sheet], u)
 	}
 	u.Invalidate()
 }
@@ -1072,6 +1079,8 @@ func pixelFit(r geom.Rect, img *paint.Image) geom.Rect {
 // are the status bar's, each popping as it changes.
 type gridHead struct {
 	title, sub *widget.Label
+	// sheet says the grid shows as Cull's contact sheet.
+	sheet bool
 	// subFull is the count line in full, subShort its photos alone, for
 	// a heading too narrow for the rest; both empty for other lines.
 	subFull, subShort string
@@ -1183,6 +1192,10 @@ func (h *gridHead) selected(n int) {
 
 func (h *gridHead) subText() {
 	h.subFull, h.subShort = "", ""
+	if h.sheet && !h.none && h.opening == "" {
+		h.sub.Text = fmt.Sprintf("Contact sheet · %d %s · Esc for the photo", h.total, map[bool]string{false: "photos", true: "photo"}[h.total == 1])
+		return
+	}
 	if h.over != "" {
 		h.sub.Text = h.overSub
 		return
@@ -1432,4 +1445,20 @@ func (v *gridView) setNatural(on bool, u *gunim.UI) {
 func lerpRect(a, b geom.Rect, t float32) geom.Rect {
 	l := func(x, y float32) float32 { return x + (y-x)*t }
 	return geom.Rect{Min: geom.Pt(l(a.Min.X, b.Min.X), l(a.Min.Y, b.Min.Y)), Max: geom.Pt(l(a.Max.X, b.Max.X), l(a.Max.Y, b.Max.Y))}
+}
+
+// Overhear implements [gunim.Overhearer]: on the contact sheet, Esc and G
+// go back to the photo the keyboard is on, before the tiles take Esc to
+// clear the selection.
+func (v *gridView) Overhear(e input.Event, u *gunim.UI) {
+	k, ok := e.(input.KeyPress)
+	if !ok || !v.st.Sheet || v.band.off || k.Mods != 0 || k.Repeat || u.Focused() != gunim.Node(v.grid) {
+		return
+	}
+	if k.Key != input.KeyEscape && k.Key != input.KeyG {
+		return
+	}
+	if _, cur := v.grid.Selected(); cur >= 0 {
+		u.Send(v, OpenCull{Index: cur})
+	}
 }

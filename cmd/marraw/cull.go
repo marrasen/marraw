@@ -264,6 +264,8 @@ type culler struct {
 	// batchShown says the batch panel takes the develop panel's place, as
 	// it does for several photos selected.
 	batchShown bool
+	// sheet says the grid shows as Cull's contact sheet.
+	sheet bool
 	// errs are the errors the user has not cleared, and errSeq the last
 	// one's number.
 	errs   []ErrorNote
@@ -513,12 +515,18 @@ func (cu *culler) serve() error {
 			case NeedThumbs:
 				cu.needThumbs(in)
 			case Selected:
+				if cu.culling {
+					// The cull view, over the grid, has the selection.
+					break
+				}
 				cu.sel, cu.cursor = in.Runs, in.Cursor
 				cu.sendLibInfo()
 			case OpenCull:
 				cu.openCull(in.Index)
 			case LeaveCull:
 				cu.leaveCull()
+			case ContactSheet:
+				cu.contactSheet()
 			case ToggleDevelop:
 				cu.toggleDevelop()
 			case DevSet:
