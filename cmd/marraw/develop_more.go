@@ -138,6 +138,11 @@ func (cu *culler) devChoose(in DevChoice) {
 // devAuto has the backend set the sections named, and takes the result as
 // a step.
 func (cu *culler) devAuto(in DevAuto) {
+	if len(cu.targets()) > 1 {
+		// Several selected: each its own auto.
+		cu.batchAuto(BatchAuto(in))
+		return
+	}
 	d := &cu.dev
 	if !d.open || d.id != cu.photos[cu.at].ID {
 		return
@@ -217,7 +222,7 @@ func (cu *culler) editPaste() {
 		return
 	}
 	params := *cu.clipboard
-	if cu.culling {
+	if cu.culling && len(cu.targets()) == 1 {
 		id := cu.photos[cu.at].ID
 		if d := &cu.dev; d.open && d.id == id {
 			d.params = params

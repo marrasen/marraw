@@ -140,7 +140,7 @@ func (cu *culler) resetLoad(id int64, seq int, tries int) {
 // with the panel open; otherwise of the photos selected or showing.
 func (cu *culler) devReset() {
 	d := &cu.dev
-	if cu.culling && d.open && d.mounted && d.id == cu.photos[cu.at].ID {
+	if cu.culling && d.open && d.mounted && d.id == cu.photos[cu.at].ID && len(cu.targets()) == 1 {
 		id := d.id
 		// Saved as the neutral edit, which clears it as a reset does: an own
 		// save like any, so its answer sets the hash the photo is on, and

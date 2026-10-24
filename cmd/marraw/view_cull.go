@@ -323,6 +323,12 @@ func (v *cullView) readout(z float32) {
 	if n := aidsNote(v.st.Aids); n != "" && taken != "" {
 		taken += " · " + n
 	}
+	if n := v.st.Selected; n > 1 {
+		if taken != "" {
+			taken += " · "
+		}
+		taken += fmt.Sprintf("%d selected", n)
+	}
 	v.shoot.set(v.st.Shoot, taken, v.st.Index+1, v.st.Panel, v.st.Name)
 	if v.lastUI != nil {
 		pct := float32(0)
@@ -684,6 +690,11 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 			case input.KeyK:
 				openPalette(v, v.room(), u, paletteFor{culling: true, panel: v.st.Panel})
 				return true
+			case input.KeyA:
+				if !e.Mods.Has(input.ModShift) {
+					u.Send(v, SelectAll{})
+					return true
+				}
 			case input.KeyU:
 				// Auto tone; with Shift white balance and colour; with Alt
 				// everything, as marraw's keys have it.
@@ -752,7 +763,7 @@ func (v *cullView) Handle(e input.Event, u *gunim.UI) bool {
 		// With the develop panel open, Up and Down walk its controls, + and
 		// - step the one chosen, a letter chooses one, and Escape lets it
 		// go, as marraw's keys do.
-		if v.st.Panel && v.developKey(e, u) {
+		if v.st.Panel && v.st.Selected < 2 && v.developKey(e, u) {
 			return true
 		}
 		if in, ok := burstKey(e); ok {
@@ -1357,7 +1368,8 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 		// The panel slides away for the crop and the eyedropper.
 		defer p.Push(paint.Translate(geom.Pt((1-v.side.Value())*(drawerWidth+32), 0)))()
 		kids.At(2).Paint(p)
-		if v.st.Panel {
+		if v.st.Panel && v.st.Selected < 2 {
+			// The batch panel heads itself, for several photos.
 			v.paintHead(p, f.Theme, kids.At(11), kids.At(12))
 		}
 	})
@@ -1410,7 +1422,7 @@ func (v *cullView) floatMarksRect() geom.Rect {
 }
 
 // headOn says the marks are in the panel's header.
-func (v *cullView) headOn() bool { return v.st.Panel && v.side.Value() > 0.5 }
+func (v *cullView) headOn() bool { return v.st.Panel && v.st.Selected < 2 && v.side.Value() > 0.5 }
 
 // drawerShift is how far the panel is slid out to the right.
 func (v *cullView) drawerShift() float32 { return (1 - v.side.Value()) * (drawerWidth + 32) }

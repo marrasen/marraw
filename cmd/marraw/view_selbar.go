@@ -213,8 +213,9 @@ type batchCard struct {
 	close   *widget.IconButton
 	busy    int
 	// bare is the card in the library's info panel: no glass and no
-	// cross of its own, as wide as the panel.
-	bare bool
+	// cross of its own, as wide as the panel, or width where set.
+	bare  bool
+	width float32
 }
 
 // batchFields are the fields the card's sliders change, as their deltas
@@ -321,6 +322,9 @@ func (c *batchCard) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Child
 	w := float32(batchCardW)
 	if c.bare {
 		w = asideW
+		if c.width > 0 {
+			w = c.width
+		}
 	}
 	bs := kids.At(0).Layout(gunim.Loose(geom.Sz(w-2*pad, cs.Max.H)))
 	kids.At(0).Place(geom.Pt(pad, pad))
@@ -338,4 +342,44 @@ func (c *batchCard) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids g
 	if !c.bare {
 		kids.At(1).Paint(p)
 	}
+}
+
+// batchPanel is the batch card in the develop panel's place, for several
+// photos selected in Cull or Develop, on the panel's glass.
+type batchPanel struct {
+	card *batchCard
+	n    int
+}
+
+func newBatchPanel(s BatchPanel) *batchPanel {
+	// Bare, it has no cross: D puts the panel away.
+	c := newBatchCard(func(*gunim.UI) {})
+	c.bare, c.width = true, drawerWidth
+	return &batchPanel{card: c}
+}
+
+// show takes how many are selected and the presets; a new selection
+// starts the sliders at nought.
+func (b *batchPanel) show(s BatchPanel, u *gunim.UI) {
+	if s.N != b.n {
+		b.card.fresh(u)
+		b.n = s.N
+	}
+	b.card.set(s.N, s.Presets, u)
+}
+
+// Children implements [gunim.Composite].
+func (b *batchPanel) Children() []gunim.Node { return []gunim.Node{b.card} }
+
+// Layout implements [gunim.Node].
+func (b *batchPanel) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
+	kids.At(0).Layout(gunim.Loose(c.Max))
+	kids.At(0).Place(geom.Point{})
+	return c.Max
+}
+
+// Paint implements [gunim.Node].
+func (b *batchPanel) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids gunim.Children) {
+	paintGlass(p, geom.Rect{Max: box.Point()}, 14)
+	kids.At(0).Paint(p)
 }

@@ -330,6 +330,12 @@ func (s *filmstrip) offset(content float32) float32 {
 	return off
 }
 
+// The rings of the photos selected, beside the one showing.
+var (
+	stripSelRing = color.NRGBA{R: 0x9b, G: 0xa3, B: 0xff, A: 0xb0}
+	stripSelWash = color.NRGBA{R: 0x5e, G: 0x6a, B: 0xff, A: 0x30}
+)
+
 // Handle implements [gunim.Handler]: a click on a photo goes to it, and
 // the wheel scrolls the strip.
 func (s *filmstrip) Handle(e input.Event, u *gunim.UI) bool {
@@ -339,7 +345,9 @@ func (s *filmstrip) Handle(e input.Event, u *gunim.UI) bool {
 			return false
 		}
 		if i := s.at(e.Pos); i >= 0 {
-			u.Send(s, Jump{To: i})
+			// Shift selects from the last photo gone to, Ctrl adds one
+			// or takes it out, as in the grid.
+			u.Send(s, Jump{To: i, Extend: e.Mods.Has(input.ModShift), Toggle: e.Mods.Has(input.ModControl)})
 		}
 		return true
 	case input.PointerMove:
@@ -475,8 +483,13 @@ func (s *filmstrip) paintThumb(p *paint.Painter, th *theme.Live, t Thumb, off fl
 	if t.Index == s.hot && t.Index != s.st.Index {
 		p.RRect(r, 3, paint.Solid(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0x18}))
 	}
-	if t.Index == s.st.Index {
+	switch {
+	case t.Index == s.st.Index:
 		p.RRectStroke(r.Inset(geom.Uniform(1)), 3, paint.Fill{}, paint.Stroke{Width: 2, Color: stripRing})
+	case t.Selected:
+		// Among those selected: a lighter ring, and a wash of the accent.
+		p.RRect(r, 3, paint.Solid(stripSelWash))
+		p.RRectStroke(r.Inset(geom.Uniform(1)), 3, paint.Fill{}, paint.Stroke{Width: 1.5, Color: stripSelRing})
 	}
 	// The badges: the flag's square at the top right, the rating's stars at
 	// the bottom left, the burst at the top left, soft and eyes at the

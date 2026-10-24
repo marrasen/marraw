@@ -170,7 +170,12 @@ func (cu *culler) openCull(i int) {
 	_ = cu.c.Mount(gunim.Root, "cull", "cull", cu.state())
 	_ = cu.c.Focus("cull")
 	_ = cu.c.Patch("grid", Covered{On: true})
-	cu.goTo(i)
+	if runsLen(cu.sel) > 1 && inRuns(cu.sel, i) {
+		// The photos selected in the grid stay selected.
+		cu.goToSel(i, cu.sel)
+	} else {
+		cu.goTo(i)
+	}
 	// Opened on purpose, not stepped past: its maps are seen to at once.
 	cu.ensureAIMaps(cu.photos[i].ID)
 }
@@ -191,6 +196,10 @@ func (cu *culler) leaveCull() {
 		cu.dev.stop()
 	}
 	cu.dev.live = nil
+	if cu.batchShown {
+		cu.batchShown = false
+		_ = cu.c.Unmount("batchpanel")
+	}
 	cu.culling = false
 	for _, stop := range []context.CancelFunc{cu.load, cu.warm, cu.tileStop, cu.probeStop} {
 		if stop != nil {
@@ -199,6 +208,10 @@ func (cu *culler) leaveCull() {
 	}
 	cu.load, cu.warm, cu.tileStop, cu.probeStop, cu.probing = nil, nil, nil, nil, 0
 	_ = cu.c.Patch("grid", GridAt{Folder: cu.folder, Index: cu.at})
+	if runsLen(cu.sel) > 1 {
+		// The photos selected in the cull view stay selected.
+		_ = cu.c.Patch("grid", GridSel{Folder: cu.folder, Runs: cu.sel, Cursor: cu.at})
+	}
 	_ = cu.c.Unmount("cull")
 	_ = cu.c.Focus("grid")
 	_ = cu.c.Patch("grid", Covered{})

@@ -289,6 +289,11 @@ func (cu *culler) presetParams(ctx context.Context, j presetJob, auto bool, i in
 // presetApply lays a preset over the edit showing, as a step of its
 // history.
 func (cu *culler) presetApply(in PresetApply) {
+	if cu.culling && len(cu.targets()) > 1 {
+		// Several selected: over each its own edit.
+		cu.batchPreset(BatchPreset{Auto: in.Auto, Index: in.Index})
+		return
+	}
 	d := &cu.dev
 	if !d.open || !cu.culling || d.id != cu.photos[cu.at].ID {
 		return

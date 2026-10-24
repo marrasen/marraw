@@ -221,6 +221,7 @@ func (cu *culler) toggleDevelop() {
 	} else {
 		cu.closeDevelop()
 	}
+	cu.selChanged()
 	cu.showCull()
 }
 
@@ -244,6 +245,10 @@ func (cu *culler) closeDevelop() {
 	if d.mounted {
 		d.mounted = false
 		_ = cu.c.Unmount("develop")
+	}
+	if cu.batchShown {
+		cu.batchShown = false
+		_ = cu.c.Unmount("batchpanel")
 	}
 	// The edit may have changed while it was open: Cull's dials fetch it
 	// anew.
@@ -304,7 +309,10 @@ func (cu *culler) loadEdit(i int) {
 			}
 			// The edit as first loaded is the history's original.
 			cu.historyOf(id, d.params)
-			if !d.mounted {
+			if cu.batchShown {
+				// Several photos selected: the batch panel shows in its
+				// place, and the edit loads for the one showing alone.
+			} else if !d.mounted {
 				d.mounted = true
 				_ = cu.c.Mount("cull", "develop", "develop", cu.developState(), "develop")
 			} else {

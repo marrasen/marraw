@@ -57,6 +57,9 @@ type (
 		WindowAt image.Rectangle
 		// TileNote says how the tiles stand.
 		TileNote string
+		// Selected is how many photos are selected, where more than one
+		// with the one showing among them; else nought.
+		Selected int
 		// Rendering says the photo is being rendered at full resolution,
 		// RenderFrac how far it has got, below nought before the backend
 		// says.
@@ -121,6 +124,8 @@ type (
 		// GapBefore is the minutes since the group before, where the
 		// photo starts a group of the grid's, or below nought.
 		GapBefore int
+		// Selected says the photo is among several selected.
+		Selected bool
 	}
 	// Rate rates the photo showing, 0 to 5 stars.
 	// With ID it rates that photo alone, as a click on its stars does,
@@ -151,7 +156,15 @@ type (
 	// Step moves through the folder by By photos.
 	Step struct{ By int }
 	// Jump goes to the photo at To, or, negative, to the last.
-	Jump struct{ To int }
+	// Jump goes to photo To; Extend selects the photos from the last one
+	// gone to on, as a Shift click does, and Toggle adds it to the
+	// selection or takes it out, as a Ctrl click.
+	Jump struct {
+		To             int
+		Extend, Toggle bool
+	}
+	// SelectAll selects every photo showing, as Ctrl and A do.
+	SelectAll struct{}
 	// Quit closes the window.
 	Quit struct{}
 )
@@ -245,6 +258,12 @@ type culler struct {
 	tileNote string
 	// render is the full-resolution render the tiles wait for.
 	render *renderRun
+	// anchor is the photo a Shift click selects from: the last one gone
+	// to but by one.
+	anchor int64
+	// batchShown says the batch panel takes the develop panel's place, as
+	// it does for several photos selected.
+	batchShown bool
 	// errs are the errors the user has not cleared, and errSeq the last
 	// one's number.
 	errs   []ErrorNote
@@ -478,11 +497,11 @@ func (cu *culler) serve() error {
 			case Step:
 				cu.goTo(cu.at + in.By)
 			case Jump:
-				to := in.To
-				if to < 0 {
-					to = len(cu.photos) - 1
+				cu.jump(in)
+			case SelectAll:
+				if cu.culling && len(cu.photos) > 0 {
+					cu.selectInCull([][2]int{{0, len(cu.photos)}})
 				}
-				cu.goTo(to)
 			case WantTiles:
 				cu.wantTiles(in, false)
 			case FitEdge:
@@ -817,6 +836,10 @@ func (cu *culler) state() Cull {
 		}
 	}
 	st.GroupCount = len(groups)
+	many := runsLen(cu.sel) > 1 && inRuns(cu.sel, cu.at)
+	if many {
+		st.Selected = runsLen(cu.sel)
+	}
 	for i := max(0, cu.at-stripReach); i <= min(len(cu.photos)-1, cu.at+stripReach); i++ {
 		q := cu.photos[i]
 		gap, ok := gapAt[i]
@@ -824,7 +847,7 @@ func (cu *culler) state() Cull {
 			gap = -1
 		}
 		st.Strip = append(st.Strip, Thumb{Index: i, Img: cu.thumbs[q.ID], Aspect: cu.aspectOf(q), Rating: q.Rating, Flag: string(q.Flag),
-			Aids: cu.aids.of(q), GapBefore: gap})
+			Aids: cu.aids.of(q), GapBefore: gap, Selected: many && inRuns(cu.sel, i)})
 	}
 	if e, ok := cu.cache.get(p.ID); ok {
 		st.Img, st.Note = e.img, e.note
@@ -878,15 +901,35 @@ func (cu *culler) state() Cull {
 
 // goTo moves to the photo at i: what is cached shows at once, the pipeline
 // for the rest starts, and the old one stops.
-func (cu *culler) goTo(i int) {
+func (cu *culler) goTo(i int) { cu.goToSel(i, nil) }
+
+// goToSel goes to photo i with the photos of sel selected, or i alone with
+// none.
+func (cu *culler) goToSel(i int, sel [][2]int) {
 	i = max(0, min(i, len(cu.photos)-1))
-	if !cu.culling || i == cu.at && cu.load != nil {
+	plain := sel == nil
+	if plain {
+		sel = [][2]int{{i, i + 1}}
+		if i >= 0 && i < len(cu.photos) {
+			cu.anchor = cu.photos[i].ID
+		}
+	}
+	if !cu.culling {
+		return
+	}
+	if i == cu.at && cu.load != nil {
+		// Here already: a step past the end still leaves a selection
+		// for this photo alone, as a step does.
+		if plain && runsLen(cu.sel) > 1 {
+			cu.selectInCull(sel)
+		}
 		return
 	}
 	// The eyedropper goes, keeping what it picked, and cropping ends.
 	cu.wbFinish(true)
 	cu.cropDone()
 	cu.at, cu.gen, cu.stepped = i, cu.gen+1, time.Now()
+	cu.sel, cu.cursor = sel, i
 	cu.ensureAIMapsSoon(i)
 	if cu.load != nil {
 		cu.load()
@@ -908,9 +951,12 @@ func (cu *culler) goTo(i int) {
 	cu.showCull()
 	cu.developFollows(i)
 	// The grid follows, so the photo flies back to its own tile.
-	cu.sel, cu.cursor = [][2]int{{i, i + 1}}, i
 	_ = cu.c.Patch("grid", GridAt{Folder: cu.folder, Index: i})
+	if runsLen(sel) > 1 {
+		_ = cu.c.Patch("grid", GridSel{Folder: cu.folder, Runs: sel, Cursor: i})
+	}
 	cu.loadStrip()
+	cu.selChanged()
 	p := cu.photos[i]
 	// Where the user is, so the backend's pre-render works outward from
 	// here.
@@ -1123,6 +1169,17 @@ func (cu *culler) scriptStep(k string) bool {
 		time.Sleep(50 * time.Millisecond)
 		_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonBack, Clicks: 1, Time: now})
 		_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: at, Button: input.ButtonBack, Time: now})
+	case ok && (verb == "shift+click" || verb == "ctrl+click"):
+		// A click with Shift or Ctrl held, as to select.
+		xs, ys, _ := strings.Cut(arg, ":")
+		x, _ := strconv.ParseFloat(xs, 32)
+		y, _ := strconv.ParseFloat(ys, 32)
+		at := geom.Pt(float32(x), float32(y))
+		mods := map[bool]input.Mods{true: input.ModShift, false: input.ModControl}[verb == "shift+click"]
+		_ = cu.c.Input(cu.ctx, input.PointerMove{Pos: at, Time: now})
+		time.Sleep(50 * time.Millisecond)
+		_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonPrimary, Clicks: 1, Mods: mods, Time: now})
+		_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: at, Button: input.ButtonPrimary, Mods: mods, Time: now})
 	case ok && (verb == "click" || verb == "move" || verb == "dclick"):
 		xs, ys, _ := strings.Cut(arg, ":")
 		x, _ := strconv.ParseFloat(xs, 32)
@@ -1696,7 +1753,7 @@ func (cu *culler) targetsOf(id int64) []int {
 }
 
 func (cu *culler) targets() []int {
-	if cu.culling {
+	if cu.culling && (runsLen(cu.sel) < 2 || !inRuns(cu.sel, cu.at)) {
 		return []int{cu.at}
 	}
 	var out []int
@@ -1793,4 +1850,129 @@ func (cu *culler) patched(ps []marrawclient.PhotoPatch) {
 		cu.loadStrip()
 	}
 	cu.refilter()
+}
+
+// jump goes to the photo a click on the filmstrip, or the contact sheet,
+// chose: alone, or, with Shift, the photos from the anchor to it selected,
+// or, with Ctrl, it added to the selection or taken out.
+func (cu *culler) jump(in Jump) {
+	to := in.To
+	if to < 0 {
+		to = len(cu.photos) - 1
+	}
+	if !cu.culling || to < 0 || to >= len(cu.photos) {
+		return
+	}
+	switch {
+	case in.Extend:
+		from, ok := cu.index[cu.anchor]
+		if !ok {
+			from = cu.at
+		}
+		cu.selectInCull([][2]int{{min(from, to), max(from, to) + 1}}, to)
+	case in.Toggle:
+		cu.anchor = cu.photos[to].ID
+		sel := toggleRun(cu.sel, to, len(cu.photos))
+		if runsLen(sel) == 0 {
+			sel = [][2]int{{to, to + 1}}
+		}
+		cu.selectInCull(sel, to)
+	default:
+		cu.goTo(to)
+	}
+}
+
+// selectInCull selects the photos of sel in the cull view, going to at,
+// or staying where it is with none given.
+func (cu *culler) selectInCull(sel [][2]int, at ...int) {
+	i := cu.at
+	if len(at) > 0 {
+		i = at[0]
+	}
+	if i != cu.at {
+		cu.goToSel(i, sel)
+		return
+	}
+	cu.sel, cu.cursor = sel, i
+	_ = cu.c.Patch("grid", GridSel{Folder: cu.folder, Runs: sel, Cursor: i})
+	cu.selChanged()
+	cu.showCull()
+}
+
+// runsLen is how many photos the runs sel hold.
+func runsLen(sel [][2]int) int {
+	n := 0
+	for _, r := range sel {
+		n += r[1] - r[0]
+	}
+	return n
+}
+
+// inRuns reports whether photo i is in the runs sel.
+func inRuns(sel [][2]int, i int) bool {
+	for _, r := range sel {
+		if i >= r[0] && i < r[1] {
+			return true
+		}
+	}
+	return false
+}
+
+// toggleRun is sel with photo i taken out, or put in, of n photos.
+func toggleRun(sel [][2]int, i, n int) [][2]int {
+	on := make([]bool, n)
+	for _, r := range sel {
+		for j := max(r[0], 0); j < min(r[1], n); j++ {
+			on[j] = true
+		}
+	}
+	on[i] = !on[i]
+	var out [][2]int
+	for j := 0; j < n; j++ {
+		if !on[j] {
+			continue
+		}
+		k := j
+		for k < n && on[k] {
+			k++
+		}
+		out = append(out, [2]int{j, k})
+		j = k
+	}
+	return out
+}
+
+// BatchPanel is the batch panel's state: N photos selected, and the
+// presets to lay over them.
+type BatchPanel struct {
+	N       int
+	Presets []PresetCard
+}
+
+// selChanged shows Develop's panel for the photos selected: for several,
+// the batch panel, which changes them all; for one, its own.
+func (cu *culler) selChanged() {
+	d := &cu.dev
+	n := runsLen(cu.sel)
+	want := cu.culling && n > 1 && inRuns(cu.sel, cu.at) && d.open && !d.hidden
+	switch {
+	case want && !cu.batchShown:
+		cu.wbFinish(true)
+		cu.cropDone()
+		cu.heal.on = false
+		if d.mounted {
+			d.mounted = false
+			_ = cu.c.Unmount("develop")
+		}
+		cu.batchShown = true
+		_ = cu.c.Mount("cull", "batchpanel", "batchpanel", BatchPanel{N: n, Presets: cu.presetCards()})
+	case want:
+		_ = cu.c.Update("batchpanel", BatchPanel{N: n, Presets: cu.presetCards()})
+	case cu.batchShown:
+		cu.batchShown = false
+		_ = cu.c.Unmount("batchpanel")
+		if cu.culling && d.open && !d.hidden && !d.mounted {
+			cu.loadEdit(cu.at)
+		}
+	}
 }

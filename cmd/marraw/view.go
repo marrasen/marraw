@@ -51,6 +51,7 @@ func registerViews(w *gunim.Window) {
 	gunim.RegisterPatch(w, "watermarks", (*wmView).assetAdded)
 	gunim.RegisterView(w, "shortcuts", newShortcutsDialog, nil)
 	gunim.RegisterView(w, "preset", newPresetDialog, nil)
+	gunim.RegisterView(w, "batchpanel", newBatchPanel, (*batchPanel).show)
 	gunim.RegisterPatch(w, "develop", (*developView).histIn)
 	gunim.RegisterPatch(w, "develop", (*developView).presetThumbIn)
 }
