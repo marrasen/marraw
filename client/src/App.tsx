@@ -31,9 +31,9 @@ import { useFolderScan } from '@/lib/useFolderScan';
 import type { LibraryRoot } from '@/api/library';
 import {
   baseName,
+  isUnder,
   openRoot,
   openShoot,
-  parentPath,
   samePath,
   saveRoots,
   useLibraryRoots,
@@ -81,9 +81,10 @@ function useDropFolder() {
         toast.info('That folder is already in the library');
         return;
       }
-      // Already discovered as a child of a library folder: adding it as a root
-      // of its own would pull it out of that block into a duplicate group.
-      if (roots.some((r) => r.isParent && samePath(r.path, parentPath(path)))) {
+      // Already discovered under a library folder, at any depth: adding it as
+      // a root of its own would pull it out of that block into a duplicate
+      // group.
+      if (roots.some((r) => r.isParent && isUnder(path, r.path))) {
         toast.info('That folder is already in the library');
         void openShoot(client, {
           path,
@@ -91,6 +92,8 @@ function useDropFolder() {
           photoCount: 0,
           isSelf: false,
           earliestTakenAt: 0,
+          picked: 0,
+          rejected: 0,
         });
         return;
       }
