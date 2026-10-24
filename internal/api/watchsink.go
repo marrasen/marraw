@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"log"
-	"path/filepath"
 
 	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/watch"
@@ -42,10 +41,13 @@ type watchSink struct {
 	bg context.Context
 }
 
-// ParentChanged re-lists a managed parent's children. No scan: ListShoots reads
-// the disk itself.
-func (s *watchSink) ParentChanged(parent string) {
-	s.lib.deps.TriggerRefresh(shootsKey(parent))
+// ParentChanged re-lists a managed parent's shoots, where a folder in it, or
+// in one of its group folders, came or went. No scan: ListShoots reads the
+// disk itself.
+func (s *watchSink) ParentChanged(dir string) {
+	if r, ok := s.lib.libraryFolderOf(context.Background(), dir); ok {
+		s.lib.deps.TriggerRefresh(shootsKey(r.Path))
+	}
 }
 
 // FolderChanged syncs a folder's photo rows, then — only if the folder is open
@@ -66,8 +68,8 @@ func (s *watchSink) FolderChanged(path string) {
 		return
 	}
 	s.lib.deps.TriggerRefresh(photosKey(folderID))
-	if parent := filepath.Dir(path); s.lib.isParentRoot(ctx, parent) {
-		s.lib.deps.TriggerRefresh(shootsKey(parent)) // the rail's photo count
+	if r, ok := s.lib.libraryFolderOf(ctx, path); ok {
+		s.lib.deps.TriggerRefresh(shootsKey(r.Path)) // the rail's photo count
 	}
 
 	if focused {

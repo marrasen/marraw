@@ -66,10 +66,12 @@ export interface LibraryRoot {
     photoCount: number;
     isParent: boolean;
     excludedChildren?: string[];
+    folderModes?: Record<string, string>;
 }
 
 export interface Photo {
     id: number;
+    folderId: number;
     fileName: string;
     cacheKey: string;
     editHash: string;
@@ -142,6 +144,10 @@ export interface RenderProgressEvent {
 export interface RootStatus {
     path: string;
     online: boolean;
+    earliestTakenAt: number;
+    picked: number;
+    rejected: number;
+    cover?: ShootCover;
 }
 
 export interface Shoot {
@@ -150,6 +156,22 @@ export interface Shoot {
     photoCount: number;
     isSelf: boolean;
     earliestTakenAt: number;
+    group?: string;
+    subfolders?: boolean;
+    split?: boolean;
+    picked: number;
+    rejected: number;
+    cover?: ShootCover;
+}
+
+export interface ShootCover {
+    photoId: number;
+    cacheKey: string;
+    editHash: string;
+}
+
+export interface ShootPreview {
+    jpeg: string;
 }
 
 
@@ -348,6 +370,19 @@ export function subscribeOpenFolder(client: ApiClient, path: string, callback: (
 }
 
 
+export function readShoots(client: ApiClient, folder: string, paths: string[], options?: RequestOptions): Promise<void> {
+    return client.request<void>('Library.ReadShoots', [folder, paths], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+readShoots.method = 'Library.ReadShoots' as const;
+
+export function subscribeReadShoots(client: ApiClient, folder: string, paths: string[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<void>('Library.ReadShoots', [folder, paths], callback, onError, options);
+}
+
+
 export function renameFolderOnDisk(client: ApiClient, path: string, newName: string, options?: RequestOptions): Promise<RenameResult> {
     return client.request<RenameResult>('Library.RenameFolderOnDisk', [path, newName], options);
 }
@@ -371,6 +406,19 @@ renderFolderFullres.method = 'Library.RenderFolderFullres' as const;
 
 export function subscribeRenderFolderFullres(client: ApiClient, path: string, callback: (data: FolderInfo) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<FolderInfo>('Library.RenderFolderFullres', [path], callback, onError, options);
+}
+
+
+export function scannedFolders(client: ApiClient, paths: string[], options?: RequestOptions): Promise<FolderInfo[]> {
+    return client.request<FolderInfo[]>('Library.ScannedFolders', [paths], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+scannedFolders.method = 'Library.ScannedFolders' as const;
+
+export function subscribeScannedFolders(client: ApiClient, paths: string[], callback: (data: FolderInfo[]) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<FolderInfo[]>('Library.ScannedFolders', [paths], callback, onError, options);
 }
 
 
@@ -462,6 +510,19 @@ setVisible.method = 'Library.SetVisible' as const;
 
 export function subscribeSetVisible(client: ApiClient, folderID: number, ids: number[], callback: (data: void) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
     return client.subscribe<void>('Library.SetVisible', [folderID, ids], callback, onError, options);
+}
+
+
+export function shootPreview(client: ApiClient, path: string, options?: RequestOptions): Promise<ShootPreview> {
+    return client.request<ShootPreview>('Library.ShootPreview', [path], options);
+}
+// Wire-method tag consumed by useQuerySuspense to key the promise cache and
+// open the matching server subscription. Stable identifier across builds
+// (unaffected by minification, unlike Function.name).
+shootPreview.method = 'Library.ShootPreview' as const;
+
+export function subscribeShootPreview(client: ApiClient, path: string, callback: (data: ShootPreview) => void, onError?: (error: Error) => void, options?: { onPatch?: (patch: unknown) => void }): () => void {
+    return client.subscribe<ShootPreview>('Library.ShootPreview', [path], callback, onError, options);
 }
 
 export function onPhotoPatchEvent(client: ApiClient, handler: PushHandler<PhotoPatchEvent>): () => void {
@@ -697,6 +758,21 @@ export function useOpenFolder(path: string, options?: UseQueryOptions<FolderInfo
 }
 
 /**
+ * Subscribes to `Library.ReadShoots` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useReadShoots(folder: string, paths: string[], options?: UseQueryOptions<void>): UseQueryResult<void> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, folder: string, paths: string[]) => readShoots(client, folder, paths, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [folder, paths], _subscribe: { method: 'Library.ReadShoots', params: [folder, paths] } });
+}
+
+/**
  * Subscribes to `Library.RenameFolderOnDisk` with the given parameters and re-renders
  * automatically when the server triggers a refresh. When the parameters
  * change, the previous subscription is canceled and a new one starts.
@@ -724,6 +800,21 @@ export function useRenderFolderFullres(path: string, options?: UseQueryOptions<F
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Library.RenderFolderFullres', params: [path] } });
+}
+
+/**
+ * Subscribes to `Library.ScannedFolders` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useScannedFolders(paths: string[], options?: UseQueryOptions<FolderInfo[]>): UseQueryResult<FolderInfo[]> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, paths: string[]) => scannedFolders(client, paths, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [paths], _subscribe: { method: 'Library.ScannedFolders', params: [paths] } });
 }
 
 /**
@@ -829,6 +920,21 @@ export function useSetVisible(folderID: number, ids: number[], options?: UseQuer
         [],
     );
     return useQuery(wrappedFn, { ...options, params: [folderID, ids], _subscribe: { method: 'Library.SetVisible', params: [folderID, ids] } });
+}
+
+/**
+ * Subscribes to `Library.ShootPreview` with the given parameters and re-renders
+ * automatically when the server triggers a refresh. When the parameters
+ * change, the previous subscription is canceled and a new one starts.
+ * See {@link UseQueryResult} for return value details — including the
+ * query-scoped `mutate(action)` helper for refetch-after-mutation flows.
+ */
+export function useShootPreview(path: string, options?: UseQueryOptions<ShootPreview>): UseQueryResult<ShootPreview> {
+    const wrappedFn = useCallback(
+        (client: ApiClient, signal: AbortSignal, path: string) => shootPreview(client, path, { signal }),
+        [],
+    );
+    return useQuery(wrappedFn, { ...options, params: [path], _subscribe: { method: 'Library.ShootPreview', params: [path] } });
 }
 
 export function usePhotoPatchEvent(options?: { maxEvents?: number }): UsePushResult<PhotoPatchEvent> {

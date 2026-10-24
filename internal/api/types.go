@@ -108,7 +108,10 @@ func ExifModeValues() []ExifMode {
 
 // Photo is the client-facing photo record.
 type Photo struct {
-	ID         int64  `json:"id"`
+	ID int64 `json:"id"`
+	// FolderID is the catalog folder the photo was read in: a folder's
+	// photos as one view tell its shoots apart by it.
+	FolderID   int64  `json:"folderId"`
 	FileName   string `json:"fileName"`
 	CacheKey   string `json:"cacheKey"`
 	EditHash   string `json:"editHash"`
@@ -208,18 +211,32 @@ type LibraryRoot struct {
 	// RPC makes that impossible rather than merely unlikely.
 	IsParent bool `json:"isParent"`
 	// ExcludedChildren are discovered children the user hid, as lowercased
-	// absolute paths. Only meaningful on a parent.
+	// absolute paths, at any depth. Only meaningful on a parent.
 	ExcludedChildren []string `json:"excludedChildren,omitempty"`
+	// FolderModes are how the user wants folders under a parent shown, by
+	// their lowercased absolute paths: "split" shows a folder's subfolders
+	// as shoots of their own, and "one" makes a folder one shoot of
+	// everything beneath it. Folders not here follow the rules in
+	// shoottree.go. Only meaningful on a parent.
+	FolderModes map[string]string `json:"folderModes,omitempty"`
 }
 
-// RootStatus is the live reachability of one stored root. It is served apart
-// from LibraryRoot on purpose: that struct round-trips through SetLibraryRoots,
-// so a derived field would be written back into the stored config.
+// RootStatus is the live reachability of one stored root, and what the rail
+// shows of it from the catalog. It is served apart from LibraryRoot on
+// purpose: that struct round-trips through SetLibraryRoots, so a derived
+// field would be written back into the stored config.
 type RootStatus struct {
 	Path string `json:"path"`
 	// Online is false when the folder's storage is disconnected — an external
 	// drive that is unplugged, or a network share that is unreachable.
 	Online bool `json:"online"`
+	// EarliestTakenAt, Picked, Rejected and Cover are as a Shoot's, over the
+	// root's photos, its subfolders' too where it includes them. Zero and nil
+	// until the folder is scanned.
+	EarliestTakenAt int64       `json:"earliestTakenAt"`
+	Picked          int         `json:"picked"`
+	Rejected        int         `json:"rejected"`
+	Cover           *ShootCover `json:"cover,omitempty"`
 }
 
 // Shoot is one folder discovered beneath a managed parent, or the parent's own
@@ -238,6 +255,35 @@ type Shoot struct {
 	// folder's catalogued photos, 0 until the metadata pass has read one.
 	// Display only — feeds the rail's date sort and time grouping.
 	EarliestTakenAt int64 `json:"earliestTakenAt"`
+	// Group is the folders between the library folder and the shoot, "/"
+	// between them, as "2019" or "Client/Project"; "" for a shoot right in
+	// the library folder.
+	Group string `json:"group,omitempty"`
+	// Subfolders says the shoot has folders in it, which can be shown as
+	// shoots of their own; Split says they are, and the shoot is its own
+	// RAWs alone.
+	Subfolders bool `json:"subfolders,omitempty"`
+	Split      bool `json:"split,omitempty"`
+	// Picked and Rejected count the shoot's photos flagged so, for the
+	// rail's cull progress; 0 until the folder is scanned.
+	Picked   int `json:"picked"`
+	Rejected int `json:"rejected"`
+	// Cover is the photo the rail shows for the shoot: its first pick, or
+	// its first photo. Nil until the folder is scanned.
+	Cover *ShootCover `json:"cover,omitempty"`
+}
+
+// ShootPreview is a folder's cover before it is scanned: the embedded
+// preview of its first RAW, as a small JPEG, or empty where it has none.
+type ShootPreview struct {
+	JPEG []byte `json:"jpeg"`
+}
+
+// ShootCover names a shoot's cover photo, with what its image URL needs.
+type ShootCover struct {
+	PhotoID  int64  `json:"photoId"`
+	CacheKey string `json:"cacheKey"`
+	EditHash string `json:"editHash"`
 }
 
 // PickEntry is one folder row in the Add-folder picker: a subdirectory with

@@ -16,7 +16,7 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-const schemaVersion = 11
+const schemaVersion = 12
 
 type DB struct {
 	*sql.DB
@@ -156,6 +156,20 @@ func (db *DB) migrate(ctx context.Context) error {
 			if _, err := tx.ExecContext(ctx,
 				`ALTER TABLE photos ADD COLUMN eyes_closed REAL`); err != nil {
 				return fmt.Errorf("store: migrate v11: %w", err)
+			}
+		}
+		if v < 12 {
+			// A photo's fingerprint (internal/fingerprint), and the photos
+			// deleted on purpose, by theirs, so an import does not bring
+			// them back even where their folder is gone.
+			for _, q := range []string{
+				`ALTER TABLE photos ADD COLUMN fingerprint TEXT`,
+				`CREATE INDEX idx_photos_fingerprint ON photos(fingerprint)`,
+				deletedPhotosSQL,
+			} {
+				if _, err := tx.ExecContext(ctx, q); err != nil {
+					return fmt.Errorf("store: migrate v12: %w", err)
+				}
 			}
 		}
 	}

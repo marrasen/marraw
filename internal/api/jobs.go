@@ -20,15 +20,18 @@ import (
 	"github.com/marrasen/marraw/internal/aimask"
 	"github.com/marrasen/marraw/internal/decode"
 	"github.com/marrasen/marraw/internal/edit"
+	"github.com/marrasen/marraw/internal/fingerprint"
+	"github.com/marrasen/marraw/internal/foldermeta"
 	"github.com/marrasen/marraw/internal/libraw"
 	"github.com/marrasen/marraw/internal/pyramid"
+	"github.com/marrasen/marraw/internal/scan"
 	"github.com/marrasen/marraw/internal/store"
 )
 
 // TaskMeta is the typed metadata attached to shared background tasks so the
 // client task tray can render kind-specific UI (reveal export folder, …).
 type TaskMeta struct {
-	Kind string `json:"kind"` // "scan" | "calibrate" | "prerender" | "fullres" | "export" | "aimask" | "subjects" | "eyes" | "fill"
+	Kind string `json:"kind"` // "scan" | "readshoots" | "calibrate" | "prerender" | "fullres" | "export" | "aimask" | "subjects" | "eyes" | "fill"
 	// Folder is the album's display name (base of FolderPath), shown in the
 	// tray sub-label.
 	Folder string `json:"folder,omitempty"`
@@ -70,6 +73,7 @@ func (l *Library) startFolderJobs(reqCtx context.Context, folderID int64, path s
 // and the watcher's ingest path (which must not touch that slot).
 func (l *Library) folderPasses(ctx context.Context, folderID int64, path string) {
 	l.metaPass(ctx, folderID, path)
+	l.fingerprintPass(ctx, folderID)
 	l.calibratePass(ctx, folderID, path)
 	l.prerenderPass(ctx, folderID, path)
 	// Opt-in: 1:1 full-resolution tiles, the most expensive pass, runs
@@ -77,6 +81,71 @@ func (l *Library) folderPasses(ctx context.Context, folderID int64, path string)
 	if raw, _ := l.deps.DB.GetSetting(ctx, settingUIPrerenderFull); raw == "true" {
 		l.fullresPass(ctx, folderID, path)
 	}
+}
+
+// ReadShoots reads into the catalogue those of the shoots at paths it has
+// not read yet, one at a time, under one shared task named for folder: their
+// photos and metadata, and nothing more. Nothing is rendered, and the shoots
+// are neither remembered as recent nor watched, as opening one would. It is
+// how a folder's photos shown as one fill in: the client looks again as the
+// task moves on. Only paths in the library are read. It returns when every
+// one is read, or the task is cancelled from the tray.
+func (l *Library) ReadShoots(ctx context.Context, folder string, paths []string) error {
+	var todo []string
+	for _, p := range paths {
+		p = filepath.Clean(p)
+		if _, inLib := l.libraryFolderOf(ctx, p); !inLib {
+			if _, isRoot := l.rootFor(ctx, p); !isRoot {
+				continue
+			}
+		}
+		if _, _, read, err := l.deps.DB.FolderByPath(ctx, p); err != nil {
+			return err
+		} else if !read {
+			todo = append(todo, p)
+		}
+	}
+	if len(todo) == 0 {
+		return nil
+	}
+	name := filepath.Base(filepath.Clean(folder))
+	title := fmt.Sprintf("Reading %d shoots in %s", len(todo), name)
+	if len(todo) == 1 {
+		title = "Reading " + filepath.Base(todo[0])
+	}
+	tctx, task := tasks.StartTask[TaskMeta](ctx, title, tasks.Shared())
+	task.SetMeta(TaskMeta{Kind: "readshoots", Folder: name, FolderPath: filepath.Clean(folder)})
+	task.Progress(0, len(todo))
+	var err error
+	for i, p := range todo {
+		if err = tctx.Err(); err != nil {
+			break
+		}
+		id, _, oerr := l.deps.Scanner.OpenFolder(tctx, p, l.scanRecursionFor(tctx, p))
+		if oerr != nil {
+			if err = tctx.Err(); err != nil {
+				break
+			}
+			// One shoot that will not read (its drive gone, say) leaves
+			// the rest to go on.
+			task.Output(filepath.Base(p) + ": " + oerr.Error())
+		} else {
+			if berr := l.deps.Scanner.Backfill(tctx, id, func(int, int) {}); berr != nil {
+				if err = tctx.Err(); err != nil {
+					break
+				}
+				task.Output(filepath.Base(p) + ": " + berr.Error())
+			}
+			l.deps.TriggerRefresh(photosKey(id))
+			if r, ok := l.libraryFolderOf(ctx, p); ok {
+				l.deps.TriggerRefresh(shootsKey(r.Path))
+			}
+		}
+		task.Progress(i+1, len(todo))
+	}
+	l.deps.TriggerRefresh(rootStatusKey)
+	task.Err(err)
+	return err
 }
 
 // RenderFolderFullres pre-renders 1:1 full-resolution tiles for every photo in
@@ -311,6 +380,51 @@ func (l *Library) calibratePass(ctx context.Context, folderID int64, path string
 	l.deps.TriggerRefresh(photosKey(folderID))
 }
 
+// fingerprintPass takes the fingerprints of the folder's photos that have
+// none yet, a few files at a time, and records them in the catalog and in
+// the folders' marraw.json. Two small reads a file, once; quiet, as it is
+// over in moments for a local folder and needs no task to watch.
+func (l *Library) fingerprintPass(ctx context.Context, folderID int64) {
+	photos, err := l.deps.DB.Unfingerprinted(ctx, folderID)
+	if err != nil || len(photos) == 0 {
+		return
+	}
+	writes := l.deps.Meta != nil && l.deps.DB.SidecarWritesEnabled(ctx)
+	work := make(chan store.Photo)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for p := range work {
+				fp, err := fingerprint.Of(p.Path())
+				if err != nil {
+					continue
+				}
+				if err := l.deps.DB.SetFingerprint(ctx, p.ID, fp); err != nil {
+					continue
+				}
+				if writes {
+					dir, name := scan.MetaLoc(p.Path())
+					size := p.FileSize
+					l.deps.Meta.Change(dir, func(f *foldermeta.File) { f.SetFingerprint(name, size, fp) })
+				}
+			}
+		}()
+	}
+	for _, p := range photos {
+		select {
+		case work <- p:
+		case <-ctx.Done():
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	close(work)
+	wg.Wait()
+}
+
 // metaPass backfills missing photo metadata under a shared task.
 func (l *Library) metaPass(ctx context.Context, folderID int64, path string) {
 	name := filepath.Base(path)
@@ -332,6 +446,8 @@ func (l *Library) metaPass(ctx context.Context, folderID int64, path string) {
 	if l.isParentRoot(ctx, path) {
 		l.deps.TriggerRefresh(shootsKey(path))
 	}
+	// A root added by hand shows its date and cover through its status.
+	l.deps.TriggerRefresh(rootStatusKey)
 }
 
 // prerenderPass renders the loupe-ready 2048 rendition (which also yields

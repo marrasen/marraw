@@ -37,9 +37,19 @@ CREATE TABLE photos (
     subject_sharpness REAL,
     phash       INTEGER,
     eyes_closed REAL,
+    fingerprint TEXT,
     UNIQUE(folder_id, file_name)
 );
 CREATE INDEX idx_photos_folder ON photos(folder_id, file_name);
+CREATE INDEX idx_photos_fingerprint ON photos(fingerprint);
+
+CREATE TABLE deleted_photos (
+    fingerprint TEXT PRIMARY KEY,
+    file_name   TEXT    NOT NULL,
+    folder_path TEXT    NOT NULL,
+    taken_at    INTEGER NOT NULL DEFAULT 0,
+    deleted_at  INTEGER NOT NULL
+);
 
 CREATE TABLE settings (
     key   TEXT PRIMARY KEY,
