@@ -182,7 +182,9 @@ func (cu *culler) openCull(i int) {
 	_ = cu.c.Focus("cull")
 	_ = cu.c.Patch("grid", Covered{On: true})
 	if runsLen(cu.sel) > 1 && inRuns(cu.sel, i) {
-		// The photos selected in the grid stay selected.
+		// The photos selected in the grid stay selected, a Shift click
+		// selecting on from the photo opened.
+		cu.anchor = cu.photos[i].ID
 		cu.goToSel(i, cu.sel)
 	} else {
 		cu.goTo(i)
@@ -219,6 +221,11 @@ func (cu *culler) leaveCull() {
 	}
 	cu.load, cu.warm, cu.tileStop, cu.probeStop, cu.probing = nil, nil, nil, nil, 0
 	_ = cu.c.Patch("grid", GridAt{Folder: cu.folder, Index: cu.at})
+	if !inRuns(cu.sel, cu.at) {
+		// The photo showing was taken out of the selection: the grid
+		// selects it alone, as it shows, so what it acts on is in sight.
+		cu.sel = [][2]int{{cu.at, cu.at + 1}}
+	}
 	if runsLen(cu.sel) > 1 {
 		// The photos selected in the cull view stay selected.
 		_ = cu.c.Patch("grid", GridSel{Folder: cu.folder, Runs: cu.sel, Cursor: cu.at})

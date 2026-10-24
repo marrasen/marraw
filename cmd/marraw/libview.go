@@ -190,6 +190,7 @@ func (cu *culler) refilter() {
 	if i < len(out) && out[i].ID == atID {
 		// The photo showing stays: only its place changed.
 		cu.at = i
+		cu.selChanged()
 		cu.showCull()
 		cu.loadStrip()
 		return

@@ -207,8 +207,10 @@ func (cu *culler) toggleDevelop() {
 	}
 	d := &cu.dev
 	if d.open && d.hidden {
-		// Open for a dial of Cull's bar: the panel comes out on it.
+		// Open for a dial of Cull's bar: the panel comes out on it, or
+		// the batch panel for several photos selected.
 		d.hidden = false
+		cu.selChanged()
 		cu.showCull()
 		return
 	}

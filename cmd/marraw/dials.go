@@ -170,7 +170,9 @@ func (cu *culler) panelShown() bool { return cu.dev.open && !cu.dev.hidden }
 // and in Cull, where it is not, after loading it without the panel.
 func (cu *culler) dial(fn func()) {
 	d := &cu.dev
-	if !cu.culling || len(cu.photos) == 0 {
+	if !cu.culling || len(cu.photos) == 0 || cu.batchShown {
+		// With several photos selected the batch panel changes them; a
+		// dial would change the one showing alone.
 		return
 	}
 	id := cu.photos[cu.at].ID
@@ -282,6 +284,9 @@ func (cu *culler) wantDialParams() {
 // dialView is what the bar's dials show: the edit, and whether it is the
 // photo's own yet (the dials take no input until it is).
 func (cu *culler) dialView(p marrawclient.Photo) (*marrawclient.Params, bool) {
+	if cu.batchShown {
+		return nil, false
+	}
 	if d := &cu.dev; d.open && d.id == p.ID {
 		params := d.params
 		if d.hover != nil {

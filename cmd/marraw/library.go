@@ -1357,6 +1357,10 @@ func (cu *culler) showFolder(id int64, path string, photos []marrawclient.Photo)
 	}
 	cu.gridStop, cu.load, cu.warm, cu.stopLive = nil, nil, nil, nil
 	cu.stopTiles()
+	if cu.sheet && id != cu.folder {
+		// Another shoot: the contact sheet was this one's.
+		cu.sheet = false
+	}
 	cu.folder, cu.folderPath = id, path
 	if id > 0 && !cu.secondary {
 		// Opened again on the next start, as marraw does.

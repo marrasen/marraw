@@ -1968,6 +1968,9 @@ func (cu *culler) selChanged() {
 		cu.wbFinish(true)
 		cu.cropDone()
 		cu.heal.on = false
+		// What dials asked of the edit while it loaded goes: the batch
+		// panel has the photos now.
+		d.pending = nil
 		if d.mounted {
 			d.mounted = false
 			_ = cu.c.Unmount("develop")

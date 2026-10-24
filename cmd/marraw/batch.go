@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -40,6 +41,10 @@ func (cu *culler) batchPreset(in BatchPreset) {
 		return
 	}
 	users, autos := cu.presetsOf()
+	if n := map[bool]int{false: len(users), true: len(autos)}[in.Auto]; in.Index < 0 || in.Index >= n {
+		cu.notify(fmt.Sprintf("There is no preset %d", in.Index+1))
+		return
+	}
 	evs := map[int64]float64{}
 	for _, id := range ids {
 		if i, ok := cu.index[id]; ok {
@@ -91,7 +96,10 @@ func (cu *culler) batchAuto(in BatchAuto) {
 		return
 	}
 	label := "Auto tone"
-	if len(in.Sections) > 0 && in.Sections[0] != "tone" {
+	switch {
+	case len(in.Sections) > 0 && in.Sections[0] == "all":
+		label = "Auto"
+	case len(in.Sections) > 0 && in.Sections[0] != "tone":
 		label = "Auto color"
 	}
 	cu.notify(label + " on " + itoa(int64(len(ids))) + " photos…")

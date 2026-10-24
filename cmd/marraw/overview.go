@@ -81,6 +81,11 @@ func (cu *culler) openOverview(key string) {
 	if !ok || !it.Group || it.Kind == "time" || it.Kind == "note" {
 		return
 	}
+	if cu.sheet {
+		cu.sheet = false
+		cu.railChanged()
+		_ = cu.c.Update("grid", cu.gridState())
+	}
 	cu.ov = &overviewSel{key: key, kind: it.Kind, title: it.Name, path: it.Path, parent: it.Parent}
 	if it.Kind == "parent" {
 		cu.ov.parent = it.Path
