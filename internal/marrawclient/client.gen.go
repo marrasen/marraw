@@ -447,12 +447,11 @@ func (h EditsClient) SubscribePreviewExact(ctx context.Context, photoID int64, p
 // slider drags or the 1:1 tiles of a new state render. The JPEG covers the
 // clipped part. It renders from the full-resolution decode the backend
 // keeps for the photo open in the editor (OpenInEditor), so it answers
-// null when it cannot: no decode is kept under the state's LibRaw inputs
-// (exposure aside, which it folds in like the drafts do), or the edit
-// uses dehaze or mask effects, which work over the whole frame. Neutral
-// params (the base look) are never kept either. The state the editor
-// last settled on or saved is the exception to the first: its decode is
-// waited for, so a window comes right after a white balance change too.
+// null when it cannot: no decode is kept under the state's LibRaw inputs,
+// exposure and white balance aside, which it folds in like the drafts do
+// (KeptForWindow says when it cannot fold a white balance). Neutral params
+// (the base look) are never kept either. The state the editor last settled
+// on or saved is the exception: its own decode is waited for.
 func (h EditsClient) PreviewWindow(ctx context.Context, photoID int64, params_ Params, x_ int, y int, w int, h_ int) (*client.Blob, error) {
 	return client.Call[*client.Blob](ctx, h.c, "Edits.PreviewWindow", []any{photoID, params_, x_, y, w, h_})
 }

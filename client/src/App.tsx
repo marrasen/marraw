@@ -30,17 +30,16 @@ import { usePhotos } from '@/lib/usePhotos';
 import { useFolderScan } from '@/lib/useFolderScan';
 import type { LibraryRoot } from '@/api/library';
 import {
-  baseName,
+  isUnder,
   openRoot,
   openShoot,
-  parentPath,
   samePath,
   saveRoots,
   useLibraryRoots,
 } from '@/lib/library';
 import { updateLastSeenVersion, updateRailWidth, UISettingsSync } from '@/lib/uiSettings';
 import { useLastFolder } from '@/lib/lastFolder';
-import { openFolder, setFocus } from '@/api/library';
+import { listShoots, openFolder, setFocus } from '@/api/library';
 import { canUseHostFs } from '@/lib/backend';
 import { useApiClient } from '@/api/client';
 import '@/lib/electron';
@@ -81,17 +80,16 @@ function useDropFolder() {
         toast.info('That folder is already in the library');
         return;
       }
-      // Already discovered as a child of a library folder: adding it as a root
-      // of its own would pull it out of that block into a duplicate group.
-      if (roots.some((r) => r.isParent && samePath(r.path, parentPath(path)))) {
+      // Under a library folder, at any depth, it is already in the library:
+      // adding it as a root of its own would pull it out of that block into
+      // a duplicate group. One of the folder's shoots opens; a group, or a
+      // folder inside a shoot, is no shoot of its own to open.
+      const lib = roots.find((r) => r.isParent && isUnder(path, r.path));
+      if (lib) {
         toast.info('That folder is already in the library');
-        void openShoot(client, {
-          path,
-          name: baseName(path),
-          photoCount: 0,
-          isSelf: false,
-          earliestTakenAt: 0,
-        });
+        const shoots = await listShoots(client, lib.path).catch(() => []);
+        const shoot = shoots.find((s) => samePath(s.path, path));
+        if (shoot) void openShoot(client, shoot);
         return;
       }
       const next: LibraryRoot[] = [

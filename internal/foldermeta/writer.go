@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -21,14 +22,19 @@ type Writer struct {
 	pending map[string][]func(*File)
 	timers  map[string]*time.Timer
 	// writing serializes the writes, so two never read and write one
-	// file at once.
-	writing sync.Mutex
+	// file at once; inFlight counts, under mu, the writes taken from
+	// pending and not yet done, and done wakes Flush as it drops to none.
+	writing  sync.Mutex
+	inFlight int
+	done     *sync.Cond
 }
 
 // NewWriter returns a Writer that writes a folder's file delay after its
 // last change.
 func NewWriter(delay time.Duration) *Writer {
-	return &Writer{Delay: delay, pending: map[string][]func(*File){}, timers: map[string]*time.Timer{}}
+	w := &Writer{Delay: delay, pending: map[string][]func(*File){}, timers: map[string]*time.Timer{}}
+	w.done = sync.NewCond(&w.mu)
+	return w
 }
 
 // Change queues fn to change dir's file: fn is run on the file as it is on
@@ -44,7 +50,8 @@ func (w *Writer) Change(dir string, fn func(*File)) {
 	w.timers[dir] = time.AfterFunc(w.Delay, func() { w.flush(dir) })
 }
 
-// Flush writes every folder's waiting changes now.
+// Flush writes every folder's waiting changes now, and returns once a
+// write a timer started before it has ended too.
 func (w *Writer) Flush() {
 	w.mu.Lock()
 	dirs := make([]string, 0, len(w.pending))
@@ -55,6 +62,11 @@ func (w *Writer) Flush() {
 	for _, d := range dirs {
 		w.flush(d)
 	}
+	w.mu.Lock()
+	for w.inFlight > 0 {
+		w.done.Wait()
+	}
+	w.mu.Unlock()
 }
 
 // flush writes dir's waiting changes.
@@ -66,10 +78,20 @@ func (w *Writer) flush(dir string) {
 		t.Stop()
 		delete(w.timers, dir)
 	}
+	if len(fns) > 0 {
+		w.inFlight++
+	}
 	w.mu.Unlock()
 	if len(fns) == 0 {
 		return
 	}
+	defer func() {
+		w.mu.Lock()
+		if w.inFlight--; w.inFlight == 0 {
+			w.done.Broadcast()
+		}
+		w.mu.Unlock()
+	}()
 	w.writing.Lock()
 	defer w.writing.Unlock()
 	if err := Update(dir, func(f *File) {
@@ -82,11 +104,14 @@ func (w *Writer) flush(dir string) {
 }
 
 // Update reads dir's file, as it is on disk now, changes it with fn and
-// writes it back. A folder gone from the disk is left gone.
+// writes it back. A folder gone from the disk is left gone, and a folder
+// with no file gets none while there is nothing to keep in it.
 func Update(dir string, fn func(*File)) error {
 	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
+	_, err := os.Stat(filepath.Join(dir, Name))
+	had := err == nil
 	f, err := Read(dir)
 	if err != nil {
 		// Unreadable as it stands: write nothing over it, which would
@@ -94,5 +119,8 @@ func Update(dir string, fn func(*File)) error {
 		return err
 	}
 	fn(f)
+	if !had && len(f.Photos) == 0 && len(f.Deleted) == 0 {
+		return nil
+	}
 	return Write(dir, f)
 }

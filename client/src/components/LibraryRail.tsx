@@ -64,6 +64,7 @@ import { expiryLabel, relativeTime } from '@/lib/relativeTime';
 import { cn } from '@/lib/utils';
 import {
   baseName,
+  joinPath,
   openRoot,
   openShoot,
   parentKey,
@@ -725,7 +726,12 @@ function ManagedParent({
   const rows = useMemo(
     () =>
       sortShoots(
-        (shoots ?? []).filter((s) => !filter || s.name.toLowerCase().includes(filter)),
+        (shoots ?? []).filter(
+          (s) =>
+            !filter ||
+            s.name.toLowerCase().includes(filter) ||
+            (s.group ?? '').toLowerCase().includes(filter),
+        ),
         shootSort,
       ),
     [shoots, filter, shootSort],
@@ -971,6 +977,27 @@ function ShootRow({
     toast.success(`Hid ${shoot.name}`, { description: 'Files stay on disk.' });
   };
 
+  // How a folder shows (LibraryRoot.folderModes): its subfolders as shoots
+  // of their own ("split"), everything beneath it as one shoot ("one"), or
+  // as the daemon's rules have it (no entry).
+  const setFolderMode = (path: string, mode: 'split' | 'one' | null) => {
+    const k = path.toLowerCase();
+    const next = roots.map((r) => {
+      if (!samePath(r.path, parent.path)) return r;
+      const modes = { ...r.folderModes };
+      if (mode) modes[k] = mode;
+      else delete modes[k];
+      return { ...r, folderModes: modes };
+    });
+    void saveRoots(client, next);
+  };
+  // The folder the shoot is grouped under, the nearest of the folders
+  // between the library folder and it, which "Show as one shoot" makes a
+  // shoot of everything beneath it.
+  const groupPath = shoot.group
+    ? joinPath(parent.path, shoot.group.split('/').join(parent.path.includes('\\') ? '\\' : '/'))
+    : null;
+
   const renameOnDisk = async () => {
     const name = window.prompt('New folder name on disk:', shoot.name);
     if (!name || name === shoot.name) return;
@@ -1003,6 +1030,9 @@ function ShootRow({
           strokeWidth={1.5}
         />
         <span className="flex-1 truncate">
+          {/* A shoot deeper in the library folder says where: two trips
+              can each have a "Day 1". */}
+          {shoot.group && <span className="text-faint">{shoot.group.split('/').join(' / ')} / </span>}
           {shoot.name}
           {shoot.isSelf && <span className="ml-1 text-faint">· loose files</span>}
         </span>
@@ -1053,6 +1083,23 @@ function ShootRow({
         {!shoot.isSelf && (
           <ContextMenuItem onClick={renameOnDisk}>
             <FolderPen /> <span className="flex-1">Rename on disk…</span>
+          </ContextMenuItem>
+        )}
+        {shoot.split ? (
+          <ContextMenuItem onClick={() => setFolderMode(shoot.path, null)}>
+            <Folder /> <span className="flex-1">Show as one shoot</span>
+          </ContextMenuItem>
+        ) : (
+          shoot.subfolders &&
+          !shoot.isSelf && (
+            <ContextMenuItem onClick={() => setFolderMode(shoot.path, 'split')}>
+              <FolderTree /> <span className="flex-1">Show its folders as separate shoots</span>
+            </ContextMenuItem>
+          )
+        )}
+        {groupPath && (
+          <ContextMenuItem onClick={() => setFolderMode(groupPath, 'one')}>
+            <Folder /> <span className="flex-1">Show {baseName(groupPath)} as one shoot</span>
           </ContextMenuItem>
         )}
         {canUseHostFs() && (

@@ -164,19 +164,26 @@ func (f *File) SetPhoto(name string, p Photo) {
 
 // SetFingerprint records name's size and fingerprint, leaving what the
 // user made of it as it is.
+// A photo with no entry gets none: the entry written when the user rates or
+// edits it carries its fingerprint, and a folder nobody touched keeps no
+// file.
 func (f *File) SetFingerprint(name string, size int64, fp string) {
-	p := f.Photos[name]
+	p, ok := f.Photos[name]
+	if !ok {
+		return
+	}
 	p.Size, p.FP = size, fp
 	f.Photos[name] = p
 }
 
-// AddDeleted records a photo deleted on purpose, once by its fingerprint.
+// AddDeleted records a photo deleted on purpose, once by its name and
+// fingerprint: a photo and a copy of it deleted both are two records.
 func (f *File) AddDeleted(d Deleted) {
 	if d.FP == "" {
 		return
 	}
 	for i, e := range f.Deleted {
-		if e.FP == d.FP {
+		if e.FP == d.FP && e.Name == d.Name {
 			if d.DeletedAt > e.DeletedAt {
 				f.Deleted[i] = d
 			}
@@ -194,14 +201,17 @@ func (f *File) Delete(name string, d Deleted) {
 }
 
 // dropDeleted drops the entries of photos deleted after their last change:
-// a merge must not bring back a photo deleted on another computer.
+// a merge must not bring back a photo deleted on another computer. A
+// record matches by name and fingerprint both: a copy of a photo has the
+// same fingerprint under another name, and deleting the copy must leave
+// the photo's own entry.
 func (f *File) dropDeleted() {
 	for name, p := range f.Photos {
 		if p.FP == "" {
 			continue
 		}
 		for _, d := range f.Deleted {
-			if d.FP == p.FP && d.DeletedAt >= p.UpdatedAt {
+			if d.Name == name && d.FP == p.FP && d.DeletedAt >= p.UpdatedAt {
 				delete(f.Photos, name)
 				break
 			}

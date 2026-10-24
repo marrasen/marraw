@@ -38,6 +38,19 @@ func (l *Library) GetLibraryRoots(ctx context.Context) ([]LibraryRoot, error) {
 // SetLibraryRoots replaces the stored root list (add, remove, alias-rename,
 // toggle include-subfolders, and reorder are all "send the new list").
 func (l *Library) SetLibraryRoots(ctx context.Context, roots []LibraryRoot) error {
+	l.rootsMu.Lock()
+	err := l.setRoots(ctx, roots)
+	l.rootsMu.Unlock()
+	if err == nil {
+		// Outside the lock: the watcher's loop may be waiting on it, in a
+		// read it started, as this waits on the loop.
+		l.syncWatchedParents(roots)
+	}
+	return err
+}
+
+// setRoots is SetLibraryRoots, rootsMu held, without telling the watcher.
+func (l *Library) setRoots(ctx context.Context, roots []LibraryRoot) error {
 	if roots == nil {
 		roots = []LibraryRoot{}
 	}
@@ -58,7 +71,6 @@ func (l *Library) SetLibraryRoots(ctx context.Context, roots []LibraryRoot) erro
 	// A newly added root has no cached reachability yet; GetRootStatus stats it
 	// on demand, and the poller adopts it on its next tick.
 	aprot.TriggerRefresh(ctx, rootStatusKey)
-	l.syncWatchedParents(roots)
 	for _, r := range roots {
 		if r.IsParent {
 			aprot.TriggerRefresh(ctx, shootsKey(r.Path))
@@ -88,12 +100,6 @@ func (l *Library) syncWatchedParents(roots []LibraryRoot) {
 	l.deps.Watch.SetParents(parents)
 }
 
-// isParentRoot reports whether path is a stored managed parent.
-func (l *Library) isParentRoot(ctx context.Context, path string) bool {
-	r, ok := l.rootFor(ctx, path)
-	return ok && r.IsParent
-}
-
 // scanRecursionFor decides how deep a folder is scanned.
 //
 // An exact stored root always wins: if the user configured D:\Shoots\Wedding as
@@ -103,6 +109,8 @@ func (l *Library) isParentRoot(ctx context.Context, path string) bool {
 // shoots of their own, unless the user split it, which leaves it its own RAWs.
 func (l *Library) scanRecursionFor(ctx context.Context, path string) bool {
 	clean := filepath.Clean(path)
+	// An older catalog's shoots are kept before a folder of one is read.
+	l.upgradeShootTree(ctx)
 	roots := l.libraryRoots(ctx)
 	for _, r := range roots {
 		if strings.EqualFold(r.Path, clean) {
@@ -139,6 +147,7 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 		return nil, aprot.ErrInvalidParams(fmt.Sprintf("cannot read %s: %v", parent, err))
 	}
 
+	l.upgradeShootTree(ctx)
 	roots := l.libraryRoots(ctx)
 	var root LibraryRoot
 	excluded := map[string]bool{}
@@ -529,17 +538,27 @@ func (l *Library) RenameFolderOnDisk(ctx context.Context, path string, newName s
 		}
 	}
 	aprot.TriggerRefresh(ctx, libraryRootsKey)
-	// The renamed folder may be a discovered child of a managed parent, or a
-	// parent itself; refresh both listings so the rail follows the rename.
-	aprot.TriggerRefresh(ctx, shootsKey(filepath.Dir(oldPath)), shootsKey(oldPath), shootsKey(newPath))
+	// The renamed folder may be a shoot of a library folder, at any depth,
+	// or a library folder itself; refresh the listings so the rail follows
+	// the rename.
+	keys := []string{shootsKey(filepath.Dir(oldPath)), shootsKey(oldPath), shootsKey(newPath)}
+	if r, ok := l.libraryFolderOf(ctx, newPath); ok {
+		keys = append(keys, shootsKey(r.Path))
+	}
+	// One call a key: aprot joins a call's keys into one.
+	for _, k := range keys {
+		aprot.TriggerRefresh(ctx, k)
+	}
 	return &RenameResult{Path: newPath}, nil
 }
 
 // hasPathPrefixFold reports whether path lies strictly beneath prefix
 // (case-insensitive, separator-aware).
 func hasPathPrefixFold(path, prefix string) bool {
-	if len(path) <= len(prefix) {
+	if len(path) <= len(prefix) || prefix == "" {
 		return false
 	}
-	return strings.EqualFold(path[:len(prefix)], prefix) && os.IsPathSeparator(path[len(prefix)])
+	// A drive's or a share's root ends in its separator already: E:\.
+	return strings.EqualFold(path[:len(prefix)], prefix) &&
+		(os.IsPathSeparator(path[len(prefix)]) || os.IsPathSeparator(prefix[len(prefix)-1]))
 }

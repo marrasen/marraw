@@ -253,6 +253,9 @@ func Start(ctx context.Context, o Options) (*Daemon, error) {
 		Infer: infer.NewManager(filepath.Join(o.DataDir, "models")), IOGate: ioGate, Tokens: tokens, Pairing: broker,
 		Advertiser: advertiser, Funnel: funnel, LoopbackOnly: loopbackOnly}
 	registry, library, _, _ := api.NewRegistry(deps)
+	// A folder read another way than before keeps its photos' rows, moved
+	// to the folder the library's rules make each photo's home.
+	scanner.Homes = library.Homes
 	// StreamChunking batches streamed items into stream_chunk frames
 	// (defaults: 128 items / 64 KiB / 20 ms) — cheap insurance for any
 	// future large streams; the generated client understands both framings.

@@ -87,11 +87,13 @@ func (db *DB) WasDeleted(ctx context.Context, fp string) (DeletedPhoto, bool, er
 }
 
 // FolderByPath is the catalog's folder at path: its id and how many photos
-// it holds, and false where the catalog has not read it.
+// it holds, and false where the catalog has not read it. A folder made to
+// hold photos handed over from another (SyncFolder) has not been read until
+// a scan of its own.
 func (db *DB) FolderByPath(ctx context.Context, path string) (id int64, photos int, ok bool, err error) {
 	err = db.QueryRowContext(ctx, `
 		SELECT f.id, (SELECT COUNT(*) FROM photos p WHERE p.folder_id = f.id)
-		FROM folders f WHERE f.path = ? COLLATE NOCASE`, path).Scan(&id, &photos)
+		FROM folders f WHERE f.path = ? COLLATE NOCASE AND f.last_scanned_at IS NOT NULL`, path).Scan(&id, &photos)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, 0, false, nil
 	}

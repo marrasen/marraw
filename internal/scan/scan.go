@@ -215,6 +215,11 @@ type Scanner struct {
 	// OnPhotosChanged is called (already throttled) when a folder's photo
 	// rows changed and subscribers should refresh.
 	OnPhotosChanged func(folderID int64)
+	// Homes gives, as a folder is read, the library's rules for where each
+	// photo's row belongs (store.SyncFolderWith), taken once before the
+	// read: the rule it returns runs with the catalog busy. Nil moves no
+	// row between folders.
+	Homes func() func(file string) string
 }
 
 // OpenFolder syncs the folder's directory listing into the store (fast; no
@@ -236,9 +241,19 @@ func (s *Scanner) OpenFolder(ctx context.Context, path string, recursive bool) (
 	if err != nil {
 		return 0, 0, err
 	}
-	count, err := s.DB.SyncFolder(ctx, folderID, abs, entries)
+	var home func(string) string
+	if s.Homes != nil {
+		home = s.Homes()
+	}
+	count, touched, err := s.DB.SyncFolderWith(ctx, folderID, abs, entries, home)
 	if err != nil {
 		return 0, 0, err
+	}
+	// Folders that gave this one rows, or took them, list otherwise now.
+	if s.OnPhotosChanged != nil {
+		for _, id := range touched {
+			s.OnPhotosChanged(id)
+		}
 	}
 	// Reconcile portable sidecars: adopt edits copied in with the folder, and
 	// backfill sidecars for catalog-only intent. Best-effort — a folder must
@@ -480,6 +495,17 @@ func (s *Scanner) MetaCount(ctx context.Context, folderID int64) (int, error) {
 // thumbnails, notifying subscribers in batches. It stops when ctx is
 // canceled (a rescan or a client cancel supersedes it).
 func (s *Scanner) Backfill(ctx context.Context, folderID int64, onProgress func(done, total int)) error {
+	return s.backfill(ctx, folderID, onProgress, true)
+}
+
+// BackfillMeta is Backfill without the thumbnails: for reading many
+// folders at once, where a render queued per photo would outlive a cancel.
+// What is shown asks for its thumbnails itself.
+func (s *Scanner) BackfillMeta(ctx context.Context, folderID int64, onProgress func(done, total int)) error {
+	return s.backfill(ctx, folderID, onProgress, false)
+}
+
+func (s *Scanner) backfill(ctx context.Context, folderID int64, onProgress func(done, total int), thumbs bool) error {
 	photos, err := s.DB.PhotosNeedingMeta(ctx, folderID)
 	if err != nil {
 		return err
@@ -522,8 +548,10 @@ func (s *Scanner) Backfill(ctx context.Context, folderID int64, onProgress func(
 			notify(false)
 			// Queue the grid thumbnail; Ensure dedups against on-demand
 			// requests.
-			if p2, err := s.DB.GetPhoto(ctx, ph.ID); err == nil {
-				go s.Cache.Ensure(context.WithoutCancel(ctx), p2, "512", edit.BaseHash, decode.PriorityBackground)
+			if thumbs {
+				if p2, err := s.DB.GetPhoto(ctx, ph.ID); err == nil {
+					go s.Cache.Ensure(context.WithoutCancel(ctx), p2, "512", edit.BaseHash, decode.PriorityBackground)
+				}
 			}
 		}
 		if onProgress != nil {

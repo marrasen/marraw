@@ -144,3 +144,93 @@ func shootsByName(t *testing.T, l *Library, lib string) map[string]Shoot {
 }
 
 func lowerPath(p string) string { return strings.ToLower(filepath.Clean(p)) }
+
+// A folder right in the library folder that an older marraw read as one
+// shoot of its subfolders stays one, once, as the user's own choice, so its
+// catalog rows are not left behind; one the catalog has not read follows
+// the rules.
+func TestAFolderReadAsOneShootStaysOne(t *testing.T) {
+	lib := t.TempDir()
+	for _, p := range []string{
+		"Smith Wedding/CamA/a.ARW",
+		"Smith Wedding/CamB/b.ARW",
+		"Jones Party/CamA/c.ARW",
+		"Jones Party/CamB/d.ARW",
+	} {
+		touchRaw(t, filepath.Join(lib, p))
+	}
+	l := libraryWith(t, []LibraryRoot{{Path: lib, IsParent: true}})
+	ctx := context.Background()
+	smith := filepath.Join(lib, "Smith Wedding")
+	id, err := l.deps.DB.UpsertFolder(ctx, smith)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.deps.DB.SyncFolder(ctx, id, smith, []store.FileEntry{
+		{Name: filepath.Join("CamA", "a.ARW"), Size: 3, MtimeNs: 1},
+		{Name: filepath.Join("CamB", "b.ARW"), Size: 3, MtimeNs: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := shootsByName(t, l, lib)
+	if s, ok := got["Smith Wedding"]; !ok || s.Group != "" || s.PhotoCount != 2 {
+		t.Errorf("the folder read as one shoot: %+v, %v", s, ok)
+	}
+	if !l.scanRecursionFor(ctx, smith) {
+		t.Error("the folder read as one shoot is no longer read with its subfolders")
+	}
+	if _, ok := got["Jones Party"]; ok {
+		t.Error("a folder not read before was made one shoot")
+	}
+	if s, ok := got["CamA"]; !ok || s.Group != "Jones Party" {
+		t.Errorf("Jones Party's subfolders: %+v", got)
+	}
+	// Kept as the user's own choice, which the user can undo, and which a
+	// listing once made never makes again.
+	roots := l.libraryRoots(ctx)
+	if roots[0].FolderModes[lowerPath(smith)] != FolderOne {
+		t.Fatalf("modes after the upgrade: %v", roots[0].FolderModes)
+	}
+	roots[0].FolderModes[lowerPath(smith)] = FolderSplit
+	setRoots(t, l, roots)
+	l.upgraded = nil
+	shoots, err := l.ListShoots(ctx, lib)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range shoots {
+		if strings.EqualFold(s.Path, smith) {
+			t.Error("the upgrade undid the user's split")
+		}
+	}
+}
+
+// A first read called off does not take the library folders done for none
+// done: a folder the user made follow the rules after its upgrade stays so.
+func TestAnUpgradeCalledOffForgetsNothingDone(t *testing.T) {
+	lib := t.TempDir()
+	touchRaw(t, filepath.Join(lib, "Smith Wedding", "CamA", "a.ARW"))
+	l := libraryWith(t, []LibraryRoot{{Path: lib, IsParent: true}})
+	ctx := context.Background()
+	smith := filepath.Join(lib, "Smith Wedding")
+	id, _ := l.deps.DB.UpsertFolder(ctx, smith)
+	if _, err := l.deps.DB.SyncFolder(ctx, id, smith, []store.FileEntry{{Name: filepath.Join("CamA", "a.ARW"), Size: 3, MtimeNs: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	l.upgradeShootTree(ctx)
+	roots := l.libraryRoots(ctx)
+	if roots[0].FolderModes[lowerPath(smith)] != FolderOne {
+		t.Fatalf("not upgraded: %v", roots[0].FolderModes)
+	}
+	// The user makes it follow the rules; the app starts again.
+	delete(roots[0].FolderModes, lowerPath(smith))
+	setRoots(t, l, roots)
+	l.upgraded = nil
+	off, cancel := context.WithCancel(ctx)
+	cancel()
+	l.upgradeShootTree(off)
+	l.upgradeShootTree(ctx)
+	if m := l.libraryRoots(ctx)[0].FolderModes[lowerPath(smith)]; m != "" {
+		t.Fatalf("the upgrade ran again after a read called off: %q", m)
+	}
+}
