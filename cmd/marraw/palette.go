@@ -66,6 +66,8 @@ func paletteEntries(at paletteFor) []paletteEntry {
 	}
 	if at.culling {
 		add("Back to the grid", "Esc", LeaveCull{}, "library", "grid")
+		add("Contact sheet", "G", ContactSheet{}, "grid", "overview", "sheet")
+		add("Select all", "Ctrl+A", SelectAll{}, "selection", "batch")
 		add("Develop panel", "D", ToggleDevelop{}, "edit", "adjust")
 		add("Develop tab", "Tab", DevTab{Index: tabDevelop, Open: true}, "panel")
 		add("Curve tab", "", DevTab{Index: tabCurve, Open: true}, "panel", "tone curve")
@@ -197,16 +199,20 @@ var shortcutGroups = []struct {
 		{"Shift+P / Shift+X", "Pick this burst frame and reject the rest / only reject the rest"},
 		{"Ctrl+Z / Ctrl+Shift+Z", "Undo / redo"}, {"Ctrl+C / Ctrl+V", "Copy / paste edit settings"},
 		{"Ctrl+0", "Reset edit"}, {"Ctrl+E", "Export"}, {"Delete", "Move to the Recycle Bin"},
-		{"Ctrl+K", "Command palette"}, {"?", "These keys"},
+		{"Ctrl+K", "Command palette"}, {"F11", "Full screen"}, {"?", "These keys"},
 	}},
 	{"Grid", [][2]string{
 		{"Arrows, click, Ctrl, Shift", "Select"}, {"Enter, double click", "Open in the cull view"},
-		{"Ctrl+wheel", "Tile size"},
+		{"Ctrl+wheel", "Tile size"}, {"Ctrl+U (Shift, Alt)", "Auto tone (colour, everything) on those selected"},
+		{"Ctrl+1–9 / Ctrl+Shift+1–9", "Creative preset / your own preset on those selected"},
+		{"R / Q", "Crop / heal the photo in Develop"},
 	}},
 	{"Cull view", [][2]string{
 		{"Left / Right", "Previous / next photo"}, {"Home / End", "First / last"},
 		{"Z, Space, double click", "Fit or 100%"}, {"+ / −, wheel", "Zoom"}, {"Shift+arrows, drag, flick", "Pan"},
 		{"Backspace (hold)", "The original, before any edit"}, {"D", "Develop panel"}, {"Esc, Enter", "Back to the grid"},
+		{"G", "Contact sheet; Esc or G there for the photo"},
+		{"Shift / Ctrl+click in the strip, Ctrl+A", "Select several: marks, autos, presets and paste go to them all"},
 	}},
 	{"Develop panel", [][2]string{
 		{"Up / Down", "Choose a control"}, {"+ / − (Shift)", "Step it (further)"},
