@@ -80,7 +80,12 @@ func (cu *culler) batchPreset(in BatchPreset) {
 			cu.fail("The preset could not be applied to every photo", err)
 			return
 		}
-		cu.notify(name + " applied to " + itoa(int64(len(ids))) + " photos")
+		note := name + " applied to " + itoa(int64(len(ids))) + " photos"
+		if !in.Auto && len(users[in.Index].Params.Masks) > 0 {
+			// Its masks are made one photo at a time, in Develop.
+			note += ", without its smart masks: apply it to one photo in Develop for those"
+		}
+		cu.notify(note)
 	})
 }
 
