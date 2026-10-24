@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/marrasen/aprot"
 
@@ -39,14 +41,72 @@ func (l *Library) GetLibraryRoots(ctx context.Context) ([]LibraryRoot, error) {
 // toggle include-subfolders, and reorder are all "send the new list").
 func (l *Library) SetLibraryRoots(ctx context.Context, roots []LibraryRoot) error {
 	l.rootsMu.Lock()
+	before := l.libraryRoots(ctx)
 	err := l.setRoots(ctx, roots)
 	l.rootsMu.Unlock()
 	if err == nil {
 		// Outside the lock: the watcher's loop may be waiting on it, in a
 		// read it started, as this waits on the loop.
 		l.syncWatchedParents(roots)
+		l.rereadRegrouped(ctx, changedModes(before, roots))
 	}
 	return err
+}
+
+// changedModes are the folders whose FolderModes entry differs between
+// before and after, by their lowercased paths, each with the path of its
+// library folder.
+func changedModes(before, after []LibraryRoot) map[string]string {
+	changed := map[string]string{}
+	for _, a := range after {
+		var was map[string]string
+		for _, b := range before {
+			if strings.EqualFold(b.Path, a.Path) {
+				was = b.FolderModes
+			}
+		}
+		for k, m := range a.FolderModes {
+			if was[k] != m {
+				changed[k] = a.Path
+			}
+		}
+		for k := range was {
+			if _, ok := a.FolderModes[k]; !ok {
+				changed[k] = a.Path
+			}
+		}
+	}
+	return changed
+}
+
+// rereadRegrouped reads again, in the background, each folder in changed
+// that the catalog has read and that now reads only its own RAWs. A folder
+// read as one shoot and then split holds its subfolders' photos' rows; read
+// again, it hands them to those folders, so their shoots show their dates,
+// picks and covers before anyone opens them. A folder made one shoot needs
+// nothing: its shoot counts the rows beneath it, and they move when it is
+// opened.
+func (l *Library) rereadRegrouped(ctx context.Context, changed map[string]string) {
+	if len(changed) == 0 || l.deps.Scanner == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+	l.rereads.Go(func() {
+		defer cancel()
+		for key, root := range changed {
+			path, ok, err := l.deps.DB.ReadFolderPath(ctx, key)
+			if err != nil || !ok || l.scanRecursionFor(ctx, path) {
+				continue
+			}
+			id, _, err := l.deps.Scanner.OpenFolder(ctx, path, false)
+			if err != nil {
+				log.Printf("library: read %s again: %v", path, err)
+				continue
+			}
+			// A window with it open shows the photos it still holds.
+			l.deps.TriggerRefresh(photosKey(id), shootsKey(root))
+		}
+	})
 }
 
 // setRoots is SetLibraryRoots, rootsMu held, without telling the watcher.
