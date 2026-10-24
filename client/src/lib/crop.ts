@@ -50,6 +50,53 @@ export function renderedDims(fullW: number, fullH: number, p: AspectGeometry | n
   return [Math.max(1, Math.round(p!.cropW! * fullW)), Math.max(1, Math.round(p!.cropH! * fullH))];
 }
 
+// geometryMatrix is the CSS transform that lays a full-frame image, drawn
+// fullW x fullH from its top left corner (transform-origin 0 0), out as the
+// backend's ApplyGeometry does: quarter turns, mirror, straighten about the
+// turned frame's middle, then the crop's corner to the origin. The result
+// covers renderedDims(fullW, fullH, p) from the origin; what the straighten
+// leaves uncovered falls outside the image, as the backend leaves it black.
+// The hold-to-compare original uses it to show the unedited photo in the
+// edit's frame.
+export function geometryMatrix(
+  fullW: number,
+  fullH: number,
+  p: Pick<Params, 'rotate' | 'flipH' | 'cropX' | 'cropY' | 'cropW' | 'cropH' | 'cropAngle'>,
+): string {
+  // Affine maps as [a, b, c, d, e, f]: x' = a·x + c·y + e, y' = b·x + d·y + f.
+  type M = [number, number, number, number, number, number];
+  const then = (m: M, n: M): M => [
+    n[0] * m[0] + n[2] * m[1],
+    n[1] * m[0] + n[3] * m[1],
+    n[0] * m[2] + n[2] * m[3],
+    n[1] * m[2] + n[3] * m[3],
+    n[0] * m[4] + n[2] * m[5] + n[4],
+    n[1] * m[4] + n[3] * m[5] + n[5],
+  ];
+  const turns = rotateTurns(p);
+  let m: M = (
+    [
+      [1, 0, 0, 1, 0, 0],
+      [0, 1, -1, 0, fullH, 0],
+      [-1, 0, 0, -1, fullW, fullH],
+      [0, -1, 1, 0, 0, fullW],
+    ] as M[]
+  )[turns];
+  const [fw, fh] = rotatedDims(fullW, fullH, p);
+  if (p.flipH) m = then(m, [-1, 0, 0, 1, fw, 0]);
+  const angle = p.cropAngle ?? 0;
+  if (angle !== 0) {
+    const r = (angle * Math.PI) / 180;
+    const cos = Math.cos(r);
+    const sin = Math.sin(r);
+    const cx = fw / 2;
+    const cy = fh / 2;
+    m = then(m, [cos, sin, -sin, cos, cx - cos * cx + sin * cy, cy - sin * cx - cos * cy]);
+  }
+  if (hasCrop(p)) m = then(m, [1, 0, 0, 1, -(p.cropX ?? 0) * fw, -(p.cropY ?? 0) * fh]);
+  return `matrix(${m.map((v) => +v.toFixed(6)).join(', ')})`;
+}
+
 // rotateCropPatch returns the params patch for one more quarter turn of the
 // DISPLAYED image in the given direction. The stored transform is
 // flip∘rotate, so under a mirror the stored turn runs the opposite way
