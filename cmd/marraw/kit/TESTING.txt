@@ -16,6 +16,29 @@ New in this build
     recent folders.
   - Worth trying on a big folder: does the grid stay usable while it
     fills, and does the order (oldest shoot first) hold as shoots join?
+  - Presets, on the panel's Presets tab: rest the pointer on one of your
+    own cards. Three small buttons show at its top right: the pencil
+    renames it, the arrows overwrite it with the photo's edit as it is
+    now, and the cross deletes it. Renaming and overwriting keep its
+    place, so Ctrl+Shift and its number still apply it.
+  - The two buttons at the right of "Save the edit as a preset…" export
+    your presets to a file and import them from one. It is the same file
+    marraw's other app writes, so presets move between them. Imported
+    presets are added after yours; a name you have already gets (2).
+  - Saving a preset: "Adapts" runs Auto tone, Auto WB or Auto colour
+    again on each photo and lays your edit over it as its difference
+    from this photo's auto. The card says "auto". Each one needs its
+    group ticked under Carries.
+  - With a subject, background, depth, scene, people or range mask on the
+    photo, the dialog offers "Smart masks". The preset carries them, and
+    applying it makes them again on the new photo, as a step of their
+    own in History. Painted masks (linear, radial, brush) stay behind.
+    Untick every group and keep Smart masks: a preset of the masks
+    alone, marked "masks".
+  - Settings → Auto presets edits the creative presets that Ctrl+1 to 9
+    apply: the name, the autos each runs, and the sliders. Sliders whose
+    auto is ticked are added to the auto's result; the rest are set as
+    they are. Add preset, Delete (click twice) and Restore defaults.
 
 From the build before (v0.1.20)
   - Shoots view: one click on a card selects it, so the arrow keys move
@@ -459,8 +482,7 @@ Presets (new)
     pointer on a card: the photo shows the preset. Click: it is kept, a
     step in History.
   - "Save the edit as a preset…" asks for a name, which groups it carries,
-    and whether it adds to a photo's own edit. A cross on your own cards
-    deletes them.
+    and whether it adds to a photo's own edit.
   - Ctrl+1 to 9 apply a creative preset by its place, Ctrl+Shift+1 to 9
     one of your own.
   - The pictures render only while the Presets tab shows.

@@ -68,6 +68,13 @@ type SettingsState struct {
 	Links                   []marrawclient.ShareLink
 	LinksKnown              bool
 	Busy                    string
+
+	// AutoPresets are the creative auto presets, and AutoGen counts the
+	// times one was added or deleted, or all restored, which makes their
+	// page anew.
+	AutoPresets []marrawclient.AutoPreset
+	AutoGen     int
+
 	// Updates is how the installed marraw takes newer releases, as
 	// install.UpdateMode names it, where UpdatesKnown; and UpdateNote
 	// what Check now found.
@@ -81,7 +88,7 @@ type SettingsState struct {
 type PresetChoice struct{ ID, Name string }
 
 // settingsSections are the dialog's sections, in order.
-var settingsSections = []string{"General", "Features", "Toolbars", "Default presets", "Cache", "Models", "Sidecars", "Shared albums"}
+var settingsSections = []string{"General", "Features", "Toolbars", "Auto presets", "Default presets", "Cache", "Models", "Sidecars", "Shared albums"}
 
 // features are the culling aids that can be turned off, as marraw's, with
 // whether each is on by default.
@@ -142,6 +149,7 @@ func (cu *culler) settingsState() SettingsState {
 		s.Prerender = ui.PrerenderFullres
 		s.CullDials, s.QuickDials = ui.CullDials, ui.QuickDials
 		s.Defaults = maps.Clone(ui.DefaultPresets)
+		s.AutoPresets = cloneAutoPresets(ui.AutoPresets)
 		for _, p := range ui.UserPresets {
 			if len(p.AutoSections) == 0 {
 				s.Presets = append(s.Presets, PresetChoice{ID: p.ID, Name: p.Name})

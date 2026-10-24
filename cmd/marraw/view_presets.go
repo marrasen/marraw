@@ -2,6 +2,7 @@ package main
 
 import (
 	"image/color"
+	"slices"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/anim"
@@ -33,12 +34,14 @@ type PresetThumb struct {
 // presetGrid is the panel's presets, as marraw's Presets tab has them:
 // the user's own and the creative autos as cards in two columns, each
 // with its small picture of the photo as the preset makes it. The pointer
-// over a card shows the preset on the photo; a click keeps it.
+// over a card shows the preset on the photo; a click keeps it. Beside
+// Save, the presets go out to a file and come in from one.
 type presetGrid struct {
 	v              *developView
 	mine, creative *widget.Label
 	none           *widget.Label
 	save           *widget.Button
+	export, imp    *widget.Button
 	cards          map[string]*presetCard
 	thumbs         map[string]*paint.Image
 	photo          int64
@@ -53,6 +56,12 @@ func newPresetGrid(v *developView) *presetGrid {
 	g.none.MaxLines = 2
 	g.save = widget.NewButton("Save the edit as a preset…")
 	g.save.Ghost, g.save.KeepFocus, g.save.OnClick = true, true, widget.Sends(AskPreset{})
+	g.export, g.imp = widget.NewButton(""), widget.NewButton("")
+	g.export.Icon, g.export.Tooltip, g.export.OnClick = icon.Download, "Export all presets to a file", widget.Sends(PresetsExport{})
+	g.imp.Icon, g.imp.Tooltip, g.imp.OnClick = icon.Upload, "Import presets from a file", widget.Sends(PresetsImport{})
+	for _, b := range []*widget.Button{g.export, g.imp} {
+		b.Ghost, b.KeepFocus = true, true
+	}
 	return g
 }
 
@@ -66,6 +75,7 @@ func (g *presetGrid) show(s DevelopState, u *gunim.UI) {
 		}
 	}
 	g.list = s.Presets
+	g.export.Disabled = !slices.ContainsFunc(s.Presets, func(p PresetCard) bool { return !p.Auto })
 	u.Invalidate()
 }
 
@@ -83,7 +93,7 @@ func (g *presetGrid) thumbIn(t PresetThumb, u *gunim.UI) {
 
 // Children implements [gunim.Composite]: the cards are built as they come.
 func (g *presetGrid) Children() []gunim.Node {
-	return []gunim.Node{g.mine, g.none, g.save, g.creative}
+	return []gunim.Node{g.mine, g.none, g.save, g.creative, g.export, g.imp}
 }
 
 // presetGap is the room between cards.
@@ -163,7 +173,19 @@ func (g *presetGrid) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Child
 		kids.At(1).Place(geom.Pt(-10000, 0))
 	}
 	grid(false)
-	place(kids.At(2), 40)
+	// Export and import sit at the right of Save's row.
+	save := kids.At(2)
+	ss := save.Layout(gunim.Loose(geom.Sz(w-80, 40)))
+	save.Place(geom.Pt(0, y))
+	bx := w
+	for _, i := range []int{5, 4} {
+		k := kids.At(i)
+		s := k.Layout(gunim.Loose(geom.Sz(40, 40)))
+		bx -= s.W
+		k.Place(geom.Pt(bx, y+(ss.H-s.H)/2))
+		bx -= 2
+	}
+	y += ss.H + 8
 	place(kids.At(3), 30)
 	grid(true)
 	return geom.Sz(w, y)
@@ -177,8 +199,9 @@ func (g *presetGrid) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gu
 }
 
 // presetCard is a preset's card: its small picture, which lifts and rings
-// under the pointer, and its name. A user preset's card shows a cross to
-// delete it under the pointer.
+// under the pointer, and its name. A user preset's card shows its actions
+// under the pointer, as marraw's: rename, overwrite with the edit, and
+// delete.
 type presetCard struct {
 	anim.Group
 	card     PresetCard
@@ -186,11 +209,22 @@ type presetCard struct {
 	img, old *paint.Image
 	hot, in  *anim.Float
 	box      geom.Size
-	overDel  bool
+	// overAct is the action under the pointer, or -1.
+	overAct int
+}
+
+// presetCardActs are a user preset's card's actions, left to right.
+var presetCardActs = []struct {
+	icon *icon.Icon
+	send func(i int) gunim.Intent
+}{
+	{icon.Pencil, func(i int) gunim.Intent { return PresetRename{Index: i} }},
+	{icon.RefreshCw, func(i int) gunim.Intent { return PresetOverwrite{Index: i} }},
+	{icon.X, func(i int) gunim.Intent { return PresetDelete{Index: i} }},
 }
 
 func newPresetCard(p PresetCard) *presetCard {
-	c := &presetCard{card: p, name: newSmallLabel(p.Name), hot: anim.NewFloat(0), in: anim.NewFloat(1)}
+	c := &presetCard{card: p, name: newSmallLabel(p.Name), hot: anim.NewFloat(0), in: anim.NewFloat(1), overAct: -1}
 	c.name.MaxLines = 1
 	c.Add(c.hot, c.in)
 	return c
@@ -209,8 +243,24 @@ func (c *presetCard) Children() []gunim.Node { return []gunim.Node{c.name} }
 // picRect is the card's picture.
 func (c *presetCard) picRect() geom.Rect { return geom.Rc(0, 0, c.box.W, c.box.W*2/3) }
 
-// delRect is the cross that deletes a user preset.
-func (c *presetCard) delRect() geom.Rect { return geom.Rc(c.box.W-22, 4, 18, 18) }
+// actRect is the place of action i on a user preset's card.
+func (c *presetCard) actRect(i int) geom.Rect {
+	n := len(presetCardActs)
+	return geom.Rc(c.box.W-4-float32(n-i)*21, 4, 18, 18)
+}
+
+// actAt is the action at pos, or -1.
+func (c *presetCard) actAt(pos geom.Point) int {
+	if c.card.Auto {
+		return -1
+	}
+	for i := range presetCardActs {
+		if c.actRect(i).Inset(geom.Uniform(-1)).Contains(pos) {
+			return i
+		}
+	}
+	return -1
+}
 
 // Layout implements [gunim.Node].
 func (c *presetCard) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
@@ -229,18 +279,20 @@ func (c *presetCard) Handle(e input.Event, u *gunim.UI) bool {
 		c.hot.Animate(1, widget.Quick.Get(th))
 		u.Send(c, PresetHover{Auto: c.card.Auto, Index: c.card.Index})
 	case input.PointerMove:
-		c.overDel = !c.card.Auto && c.delRect().Contains(e.Pos)
+		c.overAct = c.actAt(e.Pos)
 	case input.PointerLeave:
 		c.hot.Animate(0, widget.Quick.Get(th))
-		c.overDel = false
+		c.overAct = -1
 		u.Send(c, PresetHover{Index: -1})
 	case input.PointerDown:
 		if e.Button != input.ButtonPrimary {
 			return false
 		}
-		if !c.card.Auto && c.delRect().Contains(e.Pos) {
+		if a := c.actAt(e.Pos); a >= 0 {
+			// The look showing goes back to the edit first: the card may
+			// go, or a dialog cover it, under a pointer that does not move.
 			u.Send(c, PresetHover{Index: -1})
-			u.Send(c, PresetDelete{Index: c.card.Index})
+			u.Send(c, presetCardActs[a].send(c.card.Index))
 			return true
 		}
 		u.Send(c, PresetApply{Auto: c.card.Auto, Index: c.card.Index})
@@ -274,13 +326,18 @@ func (c *presetCard) Paint(p *paint.Painter, f gunim.Frame, _ geom.Size, kids gu
 			p.RRectStroke(r, 6, paint.Fill{}, paint.Stroke{Width: 2, Color: withAlpha(ring, hot)})
 		}
 		if !c.card.Auto && hot > 0.01 {
-			d := c.delRect()
-			bg := color.NRGBA{A: 0xa0}
-			if c.overDel {
-				bg = rejectInk
+			for i, a := range presetCardActs {
+				d := c.actRect(i)
+				bg := color.NRGBA{A: 0xa0}
+				switch {
+				case c.overAct == i && a.icon == icon.X:
+					bg = rejectInk
+				case c.overAct == i:
+					bg = widget.Accent.Get(f.Theme)
+				}
+				p.RRect(d, 9, paint.Solid(withAlpha(bg, hot)))
+				p.Mask(icon.Stroke{Icon: a.icon, Width: 2.5, Progress: 1}, d.Inset(geom.Uniform(4)), withAlpha(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}, hot))
 			}
-			p.RRect(d, 9, paint.Solid(withAlpha(bg, hot)))
-			p.Mask(icon.Stroke{Icon: icon.X, Width: 2.5, Progress: 1}, d.Inset(geom.Uniform(4)), withAlpha(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}, hot))
 		}
 	}()
 	kids.At(0).Paint(p)

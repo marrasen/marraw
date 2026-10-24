@@ -124,6 +124,8 @@ func (b *settingsBody) page(name string) settingsPage {
 		p = newFeaturesPage()
 	case "Toolbars":
 		p = newToolbarsPage()
+	case "Auto presets":
+		p = newAutoPresetsPage(b.st)
 	case "Default presets":
 		p = newDefaultsPage(b.st)
 	case "Cache":
@@ -145,6 +147,8 @@ func (b *settingsBody) page(name string) settingsPage {
 func pageKey(name string, s SettingsState) string {
 	var parts []string
 	switch name {
+	case "Auto presets":
+		parts = append(parts, fmt.Sprint(s.AutoGen, len(s.AutoPresets)))
 	case "Default presets":
 		for _, c := range s.Cameras {
 			parts = append(parts, c.Key)
