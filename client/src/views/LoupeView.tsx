@@ -38,7 +38,7 @@ import { dropWindow, noteShownEdit, useLoupeWindow, wantWindow } from '@/lib/pre
 import { useDevicePixelRatio } from '@/lib/useDevicePixelRatio';
 import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
-import { displayDims as fullDisplayDims, renderedDims, rotatedDims, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
+import { displayDims as fullDisplayDims, geometryMatrix, renderedDims, rotatedDims, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
@@ -512,6 +512,10 @@ export function CinemaImage({
 
   const boxW = Math.max(1, Math.round(dw * shownScale));
   const boxH = Math.max(1, Math.round(dh * shownScale));
+  // The hold-to-compare original in the edit's frame: its crop and turns
+  // over the full frame at the box's scale, when the edit is known here.
+  const origEdit = liveCrop ?? cropMemo.get(photo.id);
+  const origGeometry = origEdit ? geometryMatrix(fdw * (boxW / dw), fdh * (boxW / dw), origEdit) : null;
   // Slack pads the scrollable content so the photo can be dragged clear of
   // overlaid chrome (develop drawer, control bars) at ANY zoom: per axis it
   // allows flush-to-flush travel when the box fits the viewport, plus an
@@ -1283,7 +1287,16 @@ export function CinemaImage({
             )}
             {/* Keyed on the photo so a hold that outlives an arrow-key step
                 starts clean instead of holding the previous photo's original. */}
-            {originalUI && <OriginalLayer key={photo.id} photo={photo} level={fitLevel} />}
+            {originalUI && (
+              <OriginalLayer
+                key={photo.id}
+                photo={photo}
+                level={fitLevel}
+                geometry={origGeometry}
+                fullW={fdw * (boxW / dw)}
+                fullH={fdh * (boxW / dw)}
+              />
+            )}
           </div>
           </div>
         ) : (
@@ -1811,24 +1824,38 @@ function SharpImage({
 // frame, on top of every tool overlay so what's on screen is unambiguously
 // the original.
 //
-// The base render is a different SHAPE whenever the photo is cropped or
-// rotated, so it is CONTAINED in the developed frame's box rather than
-// stretched into it: with no crop it covers the box exactly (nothing moves as
-// the hold starts), and with one the whole original letterboxes inside — the
-// honest answer to "what did this look like before". The opaque backing only
-// appears once a frame has actually decoded, so the moment before that shows
-// the developed photo rather than an empty rectangle.
+// It keeps the edit's crop, quarter turns, mirror and straighten
+// (geometry, a CSS matrix from lib/crop.ts over the full frame drawn
+// fullW x fullH), so it lands where the edit does and only the look changes.
+// Where the edit's geometry is not known here — no edit session for the
+// photo has loaded it yet — the whole original letterboxes inside the box
+// instead. The opaque backing only appears once a frame has actually
+// decoded, so the moment before that shows the developed photo rather than
+// an empty rectangle.
 //
 // Never render-allowed: the base 512/1024 is written at scan time and the fast
 // path derives the rest from the camera's embedded JPEG, so a hold paints in
 // tens of milliseconds and only one that dwells pays for a decode — the same
 // no-stall rule the browse follows.
-function OriginalLayer({ photo, level }: { photo: Photo; level: Level }) {
+function OriginalLayer({
+  photo,
+  level,
+  geometry,
+  fullW,
+  fullH,
+}: {
+  photo: Photo;
+  level: Level;
+  geometry: string | null;
+  fullW: number;
+  fullH: number;
+}) {
   const [shown, setShown] = useState('');
   return (
     <div
-      className={cn('absolute inset-0 z-20', shown && 'bg-background')}
+      className={cn('absolute inset-0 z-20 overflow-hidden', shown && (geometry ? 'bg-black' : 'bg-background'))}
       data-testid="original-layer"
+      data-geometry={geometry ?? undefined}
     >
       <SharpImage
         photo={photo}
@@ -1837,7 +1864,8 @@ function OriginalLayer({ photo, level }: { photo: Photo; level: Level }) {
         renderAllowed={false}
         editHash="base"
         onShown={setShown}
-        className="size-full object-contain"
+        className={geometry ? 'absolute top-0 left-0 max-w-none origin-top-left' : 'size-full object-contain'}
+        style={geometry ? { width: fullW, height: fullH, transform: geometry } : undefined}
       />
     </div>
   );
