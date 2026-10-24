@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Params } from '@/api/edit';
-import { flipCropPatch, hasCrop, renderedDims, rotateCropPatch, rotateTurns } from '@/lib/crop';
+import { flipCropPatch, geometryMatrix, hasCrop, renderedDims, rotateCropPatch, rotateTurns } from '@/lib/crop';
 
 // The geometry helpers read only the crop, rotate, flip and mask fields, but
 // their parameter is the whole generated Params. One cast here beats spelling
@@ -148,4 +148,56 @@ describe('hasCrop / rotateTurns / renderedDims', () => {
     expect(w).toBe(Math.round(6000 * CROP.cropW));
     expect(h).toBe(Math.round(4000 * CROP.cropH));
   });
+});
+
+// The hold-to-compare original lands where the edit does: a point of the
+// output, taken back to the full image the way internal/pyramid/geometry.go
+// samples it (straighten about the turned frame's middle, then the mirror and
+// the quarter turns undone), must come out at the same point through the
+// CSS matrix.
+describe('geometryMatrix', () => {
+  const W = 300;
+  const H = 200;
+  const apply = (m: string, x: number, y: number) => {
+    const [a, b, c, d, e, f] = m.slice(7, -1).split(',').map(Number);
+    return [a * x + c * y + e, b * x + d * y + f];
+  };
+  const cases: Partial<Params>[] = [
+    {},
+    { rotate: 1 },
+    { rotate: 2, flipH: true },
+    { rotate: 3, ...CROP },
+    { ...CROP, cropAngle: 4.5 },
+    { rotate: 1, flipH: true, ...CROP, cropAngle: -3.2 },
+    { rotate: 3, flipH: true, ...CROP, cropAngle: 2.5 },
+    { cropAngle: 7 },
+  ];
+  for (const over of cases) {
+    it(JSON.stringify(over), () => {
+      const p = geom(over);
+      const m = geometryMatrix(W, H, p);
+      const turns = rotateTurns(p);
+      const [fw, fh] = turns % 2 ? [H, W] : [W, H];
+      const [ow, oh] = renderedDims(W, H, p);
+      for (const [ox, oy] of [[0, 0], [ow, 0], [0, oh], [ow * 0.3, oh * 0.7]]) {
+        // Output to the straightened frame, then back onto the turned frame.
+        const fx = (hasCrop(p) ? p.cropX! * fw : 0) + ox - fw / 2;
+        const fy = (hasCrop(p) ? p.cropY! * fh : 0) + oy - fh / 2;
+        const r = (-(p.cropAngle ?? 0) * Math.PI) / 180;
+        let sx = fw / 2 + fx * Math.cos(r) - fy * Math.sin(r);
+        const sy = fh / 2 + fx * Math.sin(r) + fy * Math.cos(r);
+        if (p.flipH) sx = fw - sx;
+        // The turned frame back to the image.
+        const [ix, iy] = [
+          [sx, sy],
+          [sy, H - sx],
+          [W - sx, H - sy],
+          [W - sy, sx],
+        ][turns];
+        const [gx, gy] = apply(m, ix, iy);
+        expect(gx).toBeCloseTo(ox, 3);
+        expect(gy).toBeCloseTo(oy, 3);
+      }
+    });
+  }
 });

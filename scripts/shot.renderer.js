@@ -52,8 +52,9 @@ if (shot === 'cull') {
 } else if (shot === 'original' || shot === 'original-released') {
   // Hold-to-compare: the dock's Original button and \ both show the photo's
   // BASE rendition over the developed one, and BOTH must let go. A crop is
-  // part of the edit so the layer's letterboxing (the original is a different
-  // shape than the developed frame) is exercised, not just its pixels.
+  // part of the edit so the layer's framing (the original keeps the edit's
+  // crop, so it lands where the developed frame does) is exercised, not just
+  // its pixels.
   // `original` captures mid-hold; `original-released` captures after the
   // release, where the same edit must be back on screen.
   ui().setMode('develop');
@@ -150,8 +151,9 @@ if (shot === 'cull') {
   const offAfterBlur = ui().showOriginal;
 
   // Pass 2 — GEOMETRY. A wide crop of a portrait frame: the original's own
-  // aspect is nothing like the developed box's, so the containment (rather
-  // than a stretch into the cropped box) is unmistakable in the capture.
+  // aspect is nothing like the developed box's, so whether it is cropped
+  // like the edit (rather than letterboxed or stretched) is unmistakable in
+  // the capture.
   mw.esUpdate({ cropX: 0.05, cropY: 0.3, cropW: 0.9, cropH: 0.34 });
   mw.esCommit();
   await until(() => mw.esPreviewSettled(), 30000);
@@ -192,13 +194,22 @@ if (shot === 'cull') {
     lumaDeveloped: meanLuma(pxDeveloped),
     meanDiff: meanDiff(pxDeveloped, pxOriginal),
     pixelsDiffer: meanDiff(pxDeveloped, pxOriginal) > 10,
-    // Cropped to 0.9×0.34 of the frame: the original keeps the full frame's
-    // aspect, so it letterboxes inside the developed box instead of stretching.
+    // Cropped to 0.9×0.34 of the frame from (0.05, 0.3): the original keeps
+    // the edit's crop, so the full frame it draws is the box over 0.9 wide,
+    // starts 0.05 of itself left of the box, and covers the box.
     cropped: draft.cropW > 0 && draft.cropW < 1,
+    geometry: document.querySelector('[data-testid="original-layer"]').dataset.geometry ?? null,
     boxAspect: Math.round((boxRect.width / boxRect.height) * 100) / 100,
-    // object-contain: the painted image's own aspect, not the box's.
     naturalAspect: Math.round((img.naturalWidth / img.naturalHeight) * 100) / 100,
-    fitsInBox: imgRect.width <= boxRect.width + 1 && imgRect.height <= boxRect.height + 1,
+    coversBox:
+      imgRect.left <= boxRect.left + 1 &&
+      imgRect.top <= boxRect.top + 1 &&
+      imgRect.right >= boxRect.right - 1 &&
+      imgRect.bottom >= boxRect.bottom - 1,
+    framedLikeEdit:
+      Math.abs(imgRect.width * draft.cropW - boxRect.width) < 2 &&
+      Math.abs(boxRect.left - imgRect.left - draft.cropX * imgRect.width) < 2 &&
+      Math.abs(boxRect.top - imgRect.top - draft.cropY * imgRect.height) < 2,
   };
   // Released variant: let go only after the measurements above (the layer's
   // nodes are gone the moment React re-renders).
