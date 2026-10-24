@@ -97,7 +97,7 @@ export function geometryMatrix(
   return `matrix(${m.map((v) => +v.toFixed(6)).join(', ')})`;
 }
 
-// rotateCropPatch returns the params patch// rotateCropPatch returns the params patch for one more quarter turn of the
+// rotateCropPatch returns the params patch for one more quarter turn of the
 // DISPLAYED image in the given direction. The stored transform is
 // flip∘rotate, so under a mirror the stored turn runs the opposite way
 // (mirror∘R_cw = R_ccw∘mirror). An existing crop rectangle is remapped in

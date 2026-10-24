@@ -169,6 +169,7 @@ describe('geometryMatrix', () => {
     { rotate: 3, ...CROP },
     { ...CROP, cropAngle: 4.5 },
     { rotate: 1, flipH: true, ...CROP, cropAngle: -3.2 },
+    { rotate: 3, flipH: true, ...CROP, cropAngle: 2.5 },
     { cropAngle: 7 },
   ];
   for (const over of cases) {

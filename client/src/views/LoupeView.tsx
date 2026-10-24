@@ -38,7 +38,7 @@ import { dropWindow, noteShownEdit, useLoupeWindow, wantWindow } from '@/lib/pre
 import { useDevicePixelRatio } from '@/lib/useDevicePixelRatio';
 import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
-import { displayDims as fullDisplayDims, geometryMatrix, renderedDims, rotatedDims, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
+import { displayDims as fullDisplayDims, geometryMatrix, renderedDims, rotatedDims, rotateTurns, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
@@ -513,9 +513,19 @@ export function CinemaImage({
   const boxW = Math.max(1, Math.round(dw * shownScale));
   const boxH = Math.max(1, Math.round(dh * shownScale));
   // The hold-to-compare original in the edit's frame: its crop and turns
-  // over the full frame at the box's scale, when the edit is known here.
-  const origEdit = liveCrop ?? cropMemo.get(photo.id);
-  const origGeometry = origEdit ? geometryMatrix(fdw * (boxW / dw), fdh * (boxW / dw), origEdit) : null;
+  // over the full frame at the box's scale, when the edit is known here. A
+  // remembered crop counts only while it is still the photo's saved one,
+  // as far as the photo row tells (an edit made elsewhere since, say).
+  const memo = cropMemo.get(photo.id);
+  const memoCurrent =
+    memo != null &&
+    rotateTurns(memo) === rotateTurns(photo) &&
+    Math.abs((memo.cropW ?? 0) - (photo.cropW ?? 0)) < 1e-6 &&
+    Math.abs((memo.cropH ?? 0) - (photo.cropH ?? 0)) < 1e-6;
+  const origEdit = liveCrop ?? (memoCurrent ? memo : null);
+  const origW = fdw * (boxW / dw);
+  const origH = fdh * (boxW / dw);
+  const origGeometry = origEdit ? geometryMatrix(origW, origH, origEdit) : null;
   // Slack pads the scrollable content so the photo can be dragged clear of
   // overlaid chrome (develop drawer, control bars) at ANY zoom: per axis it
   // allows flush-to-flush travel when the box fits the viewport, plus an
@@ -590,6 +600,11 @@ export function CinemaImage({
   const src = previewUrl ?? imgUrl(photo, plan.srcLevel);
   // The pyramid level fit displays (never 'tiles' in the fit branch below).
   const fitLevel: Level = plan.srcLevel;
+  // The original in the edit's frame draws the whole frame, larger than the
+  // crop the fit level is sized for: its own level, from the cache alone
+  // (2048 at most, as the layer never renders).
+  const origPx = levelForPx(Math.max(origW, origH) * window.devicePixelRatio);
+  const origLevel: Level = !origGeometry ? fitLevel : origPx === 'tiles' ? '2048' : origPx;
   // Warm neighbours whenever the loupe is showing committed renditions (fit
   // included — that path has no tile layer to bridge a cold 2048).
   useTilePrefetch(photos, photo, !previewUrl && !cropping && haveDims, plan.prefetchTiles, fitLevel);
@@ -1291,10 +1306,10 @@ export function CinemaImage({
               <OriginalLayer
                 key={photo.id}
                 photo={photo}
-                level={fitLevel}
+                level={origLevel}
                 geometry={origGeometry}
-                fullW={fdw * (boxW / dw)}
-                fullH={fdh * (boxW / dw)}
+                fullW={origW}
+                fullH={origH}
               />
             )}
           </div>
