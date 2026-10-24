@@ -261,7 +261,12 @@ func (l *Library) shootTreeModes(ctx context.Context) (adds map[string]map[strin
 			if !ok || sub.raws > 0 || datedName.MatchString(s) || cardCopy(sub) {
 				continue
 			}
-			if n, scanned, err := l.deps.DB.FolderPhotoCount(ctx, dir); err != nil || !scanned || n == 0 {
+			n, scanned, err := l.deps.DB.FolderPhotoCount(ctx, dir)
+			if err != nil {
+				// Called off, say: looked at again on the next read.
+				return nil, nil
+			}
+			if !scanned || n == 0 {
 				continue
 			}
 			if adds[key] == nil {
@@ -299,7 +304,9 @@ func (l *Library) keepModes(ctx context.Context, adds map[string]map[string]stri
 		log.Printf("library: keep the shoots of an older catalog: %v", err)
 		return false
 	}
-	l.syncWatchedParents(roots)
+	// No word to the watcher: modes leave the library folders as they
+	// were, and the watcher's own loop may be the one reading here. The
+	// shoots' refresh lists them again, which watches their groups.
 	l.deps.TriggerRefresh(libraryRootsKey)
 	for p := range adds {
 		l.deps.TriggerRefresh(shootsKey(p))
@@ -433,6 +440,18 @@ func (l *Library) homeFrom(holding []LibraryRoot, i int, file string) string {
 		}
 		return ""
 	}
+	if h := l.walkHome(holding, i, file, dir); h != "" || i+1 >= len(holding) {
+		return h
+	}
+	// The walk stopped short of a root added inside, in a folder hidden or
+	// skipped: that root still reads its own.
+	return l.homeFrom(holding, i+1, file)
+}
+
+// walkHome is homeFrom's walk down the library folder holding[i] to dir,
+// file's folder.
+func (l *Library) walkHome(holding []LibraryRoot, i int, file, dir string) string {
+	root := holding[i]
 	rel, err := filepath.Rel(root.Path, dir)
 	if err != nil {
 		return ""

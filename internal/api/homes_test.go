@@ -70,17 +70,22 @@ func TestHomesFollowTheShoots(t *testing.T) {
 		"Mixed/m.ARW",
 		"Mixed/Deep/Deeper/d.ARW",
 		"2020-05-01 Wedding/CamB/w.ARW",
+		"Old/Kept/CamA/k.ARW",
+		"Exports/Final/f.ARW",
 	} {
 		touchRaw(t, filepath.Join(lib, p))
 	}
 	j := func(p ...string) string { return filepath.Join(append([]string{lib}, p...)...) }
 	roots := []LibraryRoot{
 		{Path: lib, IsParent: true,
-			ExcludedChildren: []string{lowerPath(j("Hidden"))},
+			ExcludedChildren: []string{lowerPath(j("Hidden")), lowerPath(j("Old"))},
 			FolderModes:      map[string]string{lowerPath(j("Mixed")): FolderSplit}},
 		// Added on its own inside a shoot, and inside a group.
 		{Path: j("2019", "Trip", "CamA")},
 		{Path: j("2019", "Added"), IncludeSubfolders: true},
+		// Added on its own under a hidden folder, and a skipped one.
+		{Path: j("Old", "Kept"), IncludeSubfolders: true},
+		{Path: j("Exports", "Final")},
 	}
 	l := libraryWith(t, roots)
 	home := l.Homes()
@@ -95,6 +100,8 @@ func TestHomesFollowTheShoots(t *testing.T) {
 		j("Mixed", "Deep", "Deeper", "d.ARW"):     j("Mixed", "Deep", "Deeper"),
 		j("2020-05-01 Wedding", "CamB", "w.ARW"):  j("2020-05-01 Wedding"),
 		filepath.Join(t.TempDir(), "outside.ARW"): "",
+		j("Old", "Kept", "CamA", "k.ARW"):         j("Old", "Kept"),
+		j("Exports", "Final", "f.ARW"):            j("Exports", "Final"),
 	} {
 		if got := home(file); got != want {
 			t.Errorf("home of %s = %q, want %q", file, got, want)
