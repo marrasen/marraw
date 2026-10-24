@@ -97,6 +97,10 @@ func cleanPreset(p marrawclient.UserPreset) marrawclient.UserPreset {
 		masks = append(masks, r)
 	}
 	p.Params = stripToLook(p.Params)
+	if p.Params.WBMode == marrawclient.WBModeCamera {
+		// The camera's, as a preset leaves white balance alone.
+		p.Params.WBMode = ""
+	}
 	p.Params.Masks = masks
 	p.ID = newPresetID()
 	return p
@@ -198,7 +202,10 @@ func (cu *culler) presetsImported(got []marrawclient.UserPreset, err error) {
 		return
 	}
 	if cu.ui == nil {
-		cu.ui = &marrawclient.UISettings{}
+		// The presets had not loaded: saving these alone would drop
+		// the others.
+		cu.notify("Your presets have not loaded yet, so nothing was imported")
+		return
 	}
 	ps := slices.Clone(cu.ui.UserPresets)
 	for _, p := range got {

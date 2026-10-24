@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"reflect"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/marrasen/marraw/internal/marrawclient"
@@ -129,7 +132,7 @@ func (cu *culler) presetMasks(id int64, p marrawclient.UserPreset, download bool
 			}
 			if !download {
 				if st, err := cu.api.Edits.AIModelStatus(ctx, k); err == nil && st != nil && !st.Downloaded {
-					cu.askModel("presetMasks:"+p.ID, aiModelWhat[string(k)], st.Bytes)
+					cu.askModel(fmt.Sprintf("presetMasks:%d:%s", id, p.ID), aiModelWhat[string(k)], st.Bytes)
 					return
 				}
 			}
@@ -166,11 +169,13 @@ func (cu *culler) presetMasks(id int64, p marrawclient.UserPreset, download bool
 	}()
 }
 
-// presetMasksDownload adds the smart masks of the user preset id to the
-// photo showing, its model downloaded with the user's leave.
-func (cu *culler) presetMasksDownload(id string) {
+// presetMasksDownload adds the smart masks of a user preset to the photo
+// they were asked for, its model downloaded with the user's leave: what
+// says "<photo>:<preset>". A photo stepped away from meanwhile takes none.
+func (cu *culler) presetMasksDownload(what string) {
 	d := &cu.dev
-	if cu.ui == nil || !d.open {
+	photo, id, _ := strings.Cut(what, ":")
+	if cu.ui == nil || !d.open || photo != strconv.FormatInt(d.id, 10) {
 		return
 	}
 	i := slices.IndexFunc(cu.ui.UserPresets, func(p marrawclient.UserPreset) bool { return p.ID == id })

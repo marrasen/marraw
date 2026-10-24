@@ -3,6 +3,7 @@ package main
 import (
 	"image/color"
 	"slices"
+	"strings"
 
 	"github.com/marrasen/gunim"
 	"github.com/marrasen/gunim/anim"
@@ -216,11 +217,11 @@ type presetCard struct {
 // presetCardActs are a user preset's card's actions, left to right.
 var presetCardActs = []struct {
 	icon *icon.Icon
-	send func(i int) gunim.Intent
+	send func(id string) gunim.Intent
 }{
-	{icon.Pencil, func(i int) gunim.Intent { return PresetRename{Index: i} }},
-	{icon.RefreshCw, func(i int) gunim.Intent { return PresetOverwrite{Index: i} }},
-	{icon.X, func(i int) gunim.Intent { return PresetDelete{Index: i} }},
+	{icon.Pencil, func(id string) gunim.Intent { return PresetRename{ID: id} }},
+	{icon.RefreshCw, func(id string) gunim.Intent { return PresetOverwrite{ID: id} }},
+	{icon.X, func(id string) gunim.Intent { return PresetDelete{ID: id} }},
 }
 
 func newPresetCard(p PresetCard) *presetCard {
@@ -292,7 +293,7 @@ func (c *presetCard) Handle(e input.Event, u *gunim.UI) bool {
 			// The look showing goes back to the edit first: the card may
 			// go, or a dialog cover it, under a pointer that does not move.
 			u.Send(c, PresetHover{Index: -1})
-			u.Send(c, presetCardActs[a].send(c.card.Index))
+			u.Send(c, presetCardActs[a].send(strings.TrimPrefix(c.card.Key, "u:")))
 			return true
 		}
 		u.Send(c, PresetApply{Auto: c.card.Auto, Index: c.card.Index})

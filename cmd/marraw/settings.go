@@ -151,7 +151,7 @@ func (cu *culler) settingsState() SettingsState {
 		s.Defaults = maps.Clone(ui.DefaultPresets)
 		s.AutoPresets = cloneAutoPresets(ui.AutoPresets)
 		for _, p := range ui.UserPresets {
-			if len(p.AutoSections) == 0 {
+			if len(p.AutoSections) == 0 && !isMasksOnlyPreset(p) {
 				s.Presets = append(s.Presets, PresetChoice{ID: p.ID, Name: p.Name})
 			}
 		}

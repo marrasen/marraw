@@ -6,10 +6,10 @@ import (
 	"crypto/rand"
 	"fmt"
 	"image/jpeg"
-	"log"
 	"math"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marrasen/gunim"
@@ -59,7 +59,10 @@ var presetWhole = []struct {
 			d.ToneCurve, d.ToneCurveR = slices.Clone(s.ToneCurve), slices.Clone(s.ToneCurveR)
 			d.ToneCurveG, d.ToneCurveB = slices.Clone(s.ToneCurveG), slices.Clone(s.ToneCurveB)
 		}},
-	{"wb", func(p *marrawclient.Params) bool { return p.WBMode == "" }, func(d, s *marrawclient.Params) { d.WBMode = s.WBMode }},
+	// The camera's white balance is the neutral one, whichever way it is
+	// spelled: a preset made in marraw says "camera".
+	{"wb", func(p *marrawclient.Params) bool { return p.WBMode == "" || p.WBMode == marrawclient.WBModeCamera },
+		func(d, s *marrawclient.Params) { d.WBMode = s.WBMode }},
 	{"wb", func(p *marrawclient.Params) bool { return p.WBMul == [4]float64{} }, func(d, s *marrawclient.Params) { d.WBMul = s.WBMul }},
 	{"wb", func(p *marrawclient.Params) bool { return p.WBKelvin == 0 }, func(d, s *marrawclient.Params) { d.WBKelvin = s.WBKelvin }},
 	{"color", func(p *marrawclient.Params) bool { return !p.BW }, func(d, s *marrawclient.Params) { d.BW = s.BW }},
@@ -245,12 +248,14 @@ type (
 		Auto     []string
 		Masks    bool
 	}
-	// PresetDelete deletes the user preset at Index.
-	PresetDelete struct{ Index int }
-	// PresetRename asks for a new name for the user preset at Index, and
+	// PresetDelete deletes the user preset ID. They name it by its id, not
+	// its place, so two clicks before the cards redraw never reach
+	// another.
+	PresetDelete struct{ ID string }
+	// PresetRename asks for a new name for the user preset ID, and
 	// PresetOverwrite saves the photo's edit over it.
-	PresetRename    struct{ Index int }
-	PresetOverwrite struct{ Index int }
+	PresetRename    struct{ ID string }
+	PresetOverwrite struct{ ID string }
 	// PresetsExport writes the user presets to a file, and PresetsImport
 	// adds the presets of one.
 	PresetsExport struct{}
@@ -696,11 +701,16 @@ func (cu *culler) presetOverwrite(i int) {
 				cu.fail("Auto adjust failed", orNoAnswer(err))
 				return
 			}
-			masks := x.Params.Masks
-			x.Params = adaptiveLookDiff(draft, *auto)
-			x.Params.Masks = masks
-			x.BaseExpEV = 0
-			cu.overwritten(x)
+			// The look alone: a rename meanwhile stays.
+			i := slices.IndexFunc(cu.ui.UserPresets, func(p marrawclient.UserPreset) bool { return p.ID == x.ID })
+			if i < 0 {
+				return
+			}
+			now := cu.ui.UserPresets[i]
+			now.Params = adaptiveLookDiff(draft, *auto)
+			now.Params.Masks = x.Params.Masks
+			now.BaseExpEV = 0
+			cu.overwritten(now)
 		})
 	}()
 }
@@ -718,14 +728,22 @@ func (cu *culler) overwritten(x marrawclient.UserPreset) {
 	cu.tell("“" + x.Name + "” overwritten with the current edit")
 }
 
-// savePresets saves the user presets, and shows them.
+// savePresets saves the user presets, and shows them. The saves go in
+// order: one started after another never loses to it.
 func (cu *culler) savePresets() {
-	all := slices.Clone(cu.ui.UserPresets)
-	go func() {
-		if err := cu.api.Settings.SetUserPresets(cu.ctx, all); err != nil {
-			log.Printf("presets: %v", err)
+	cu.userSeq++
+	seq, all := cu.userSeq, slices.Clone(cu.ui.UserPresets)
+	cu.call("The presets could not be saved", func(ctx context.Context) error {
+		userSaving.Lock()
+		defer userSaving.Unlock()
+		if seq <= userSaving.sent {
+			return nil
 		}
-	}()
+		userSaving.sent = seq
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		return cu.api.Settings.SetUserPresets(ctx, all)
+	}, nil)
 	if cu.dev.mounted {
 		_ = cu.c.Update("develop", cu.developState())
 		cu.loadPresetThumbs()
@@ -852,4 +870,19 @@ func (cu *culler) showTab(i int) {
 	if cu.dev.mounted {
 		_ = cu.c.Update("develop", cu.developState())
 	}
+}
+
+// userSaving keeps the user presets' saves in order, as autoSaving does
+// the creative autos'.
+var userSaving struct {
+	sync.Mutex
+	sent int
+}
+
+// presetIndex is the place of the user preset id, or -1.
+func (cu *culler) presetIndex(id string) int {
+	if cu.ui == nil {
+		return -1
+	}
+	return slices.IndexFunc(cu.ui.UserPresets, func(p marrawclient.UserPreset) bool { return p.ID == id })
 }

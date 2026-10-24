@@ -97,7 +97,9 @@ func cloneAutoPresets(ps []marrawclient.AutoPreset) []marrawclient.AutoPreset {
 // autoPresetOp changes the creative auto presets, and saves them.
 func (cu *culler) autoPresetOp(in AutoPresetOp) {
 	if cu.ui == nil {
-		cu.ui = &marrawclient.UISettings{}
+		// Not loaded: a save would drop the presets kept.
+		cu.notify("The auto presets have not loaded yet")
+		return
 	}
 	ps := cloneAutoPresets(cu.ui.AutoPresets)
 	ok := in.Index >= 0 && in.Index < len(ps)

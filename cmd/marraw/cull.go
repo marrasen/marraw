@@ -317,6 +317,8 @@ type culler struct {
 	// autoSeq counts the creative auto presets' saves, so an older one
 	// never lands after a newer.
 	autoSeq int
+	// userSeq counts the user presets' saves, as autoSeq does.
+	userSeq int
 	// masks are the develop panel's masks: the one chosen, the brush; and
 	// devTab is the panel's tab showing.
 	masks  maskState
@@ -749,11 +751,11 @@ func (cu *culler) serve() error {
 			case PresetSave:
 				cu.presetSave(in)
 			case PresetDelete:
-				cu.presetDelete(in.Index)
+				cu.presetDelete(cu.presetIndex(in.ID))
 			case PresetRename:
-				cu.askPresetRename(in.Index)
+				cu.askPresetRename(cu.presetIndex(in.ID))
 			case PresetOverwrite:
-				cu.presetOverwrite(in.Index)
+				cu.presetOverwrite(cu.presetIndex(in.ID))
 			case PresetsExport:
 				cu.presetsExport()
 			case PresetsImport:
