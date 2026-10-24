@@ -10,12 +10,15 @@ import (
 	"github.com/marrasen/gunim/icon"
 	"github.com/marrasen/gunim/input"
 	"github.com/marrasen/gunim/paint"
+	"github.com/marrasen/gunim/theme"
 	"github.com/marrasen/gunim/widget"
 )
 
 // viewerView is the pop-out viewer: the photo the main window has in
 // hand, fitted, with its own zoom and pan kept from photo to photo, and
-// a pin and full screen that come up as the pointer moves.
+// a pill of the pin, full screen and the window's own buttons that comes
+// up as the pointer moves. It has no title bar: the band along the top
+// moves the window.
 type viewerView struct {
 	anim.Group
 	st        ViewerState
@@ -34,6 +37,9 @@ type viewerView struct {
 	full   *widget.IconButton
 	name   *widget.Label
 	ctrls  gunim.Node
+	band   *dragBand
+	// woke says the pill has shown once.
+	woke bool
 	// drag is where a press to pan began, and from the centre then.
 	dragging bool
 	dragAt   geom.Point
@@ -43,7 +49,7 @@ type viewerView struct {
 
 func newViewerView(s ViewerState) *viewerView {
 	v := &viewerView{st: s, mix: anim.NewFloat(1), z: anim.NewFloat(1), c: anim.NewPoint(geom.Pt(0.5, 0.5)),
-		chrome: anim.NewFloat(0), name: newSmallLabel(""), scale: 1}
+		chrome: anim.NewFloat(0), name: newSmallLabel(""), scale: 1, band: &dragBand{}}
 	v.Add(v.mix, v.z, v.c, v.chrome)
 	v.name.Face, v.name.Color = widget.MonoFont, noteInk
 	v.pin = widget.NewIconButton(icon.Pin, "Keep over other windows (P)")
@@ -55,7 +61,13 @@ func newViewerView(s ViewerState) *viewerView {
 		u.SetFullScreen(!u.FullScreen())
 		return nil
 	}
-	v.ctrls = &hflow{items: []gunim.Node{v.pin, v.full}, gap: 4, pad: 6}
+	wc := widget.NewWindowControls()
+	wc.Compact = true
+	row := widget.Row(v.pin, v.full, wc)
+	row.Cross = widget.CrossCenter
+	// As the main window's pill.
+	th := marrawTheme().With(theme.Set(widget.TitleBarCompactHeight, 28), theme.Set(widget.ButtonHeight, 28), theme.Set(widget.IconSize, 14))
+	v.ctrls = widget.NewThemed(&glassPill{child: &fixedHeight{h: 28, child: row}, radius: 9, pad: 3}, th)
 	return v
 }
 
@@ -68,6 +80,12 @@ func (v *viewerView) show(s ViewerState, u *gunim.UI) {
 			v.mix.Animate(1, widget.Crossfade.Get(u.Theme()))
 		}
 		v.img = s.Img
+	}
+	if !v.woke {
+		// The pill shows as the window opens, then fades, so its buttons
+		// are found.
+		v.woke = true
+		v.wake(u)
 	}
 	v.st = s
 	v.name.Text = s.Name
@@ -88,15 +106,20 @@ func (v *viewerView) setPinned(on bool, u *gunim.UI) gunim.Intent {
 }
 
 // Children implements [gunim.Composite].
-func (v *viewerView) Children() []gunim.Node { return []gunim.Node{v.ctrls, v.name} }
+func (v *viewerView) Children() []gunim.Node { return []gunim.Node{v.ctrls, v.name, v.band} }
 
 // Layout implements [gunim.Node].
 func (v *viewerView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Children) geom.Size {
 	v.box, v.scale, v.top = c.Max, max(f.Scale, 0.1), f.Safe.Top
 	cs := kids.At(0).Layout(gunim.Loose(c.Max))
-	kids.At(0).Place(geom.Pt(c.Max.W-cs.W-14, v.top+10))
+	at := geom.Pt(c.Max.W-cs.W-18, v.top+pillTop)
+	kids.At(0).Place(at)
 	ns := kids.At(1).Layout(gunim.Loose(geom.Sz(c.Max.W-28, 30)))
 	kids.At(1).Place(geom.Pt(14, c.Max.H-ns.H-12))
+	// The band moves the window, but where the pill is.
+	v.band.holes = []geom.Rect{geom.Rc(at.X, at.Y, cs.W, cs.H)}
+	kids.At(2).Layout(gunim.Tight(geom.Sz(c.Max.W, bandH+v.top)))
+	kids.At(2).Place(geom.Point{})
 	return c.Max
 }
 
@@ -292,14 +315,11 @@ func (v *viewerView) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids 
 	if t >= 1 {
 		v.prev = nil
 	}
+	kids.At(2).Paint(p)
 	if k := v.chrome.Value(); k > 0.01 {
 		func() {
 			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: min(k, 1)})()
-			ctrls := kids.At(0)
-			r := geom.Rect{Min: geom.Pt(box.W-ctrls.Size().W-14, v.top+10)}
-			r.Max = r.Min.Add(ctrls.Size().Point())
-			paintGlass(p, r, 10)
-			ctrls.Paint(p)
+			kids.At(0).Paint(p)
 			kids.At(1).Paint(p)
 		}()
 	}

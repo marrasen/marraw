@@ -105,8 +105,10 @@ func (cu *culler) openViewer() {
 	}
 	prefs := loadViewerPrefs()
 	pinned := prefs.Pinned == nil || *prefs.Pinned
+	// No title bar: the view's pill has the window's buttons. The title
+	// names the window to the system alone, as in the taskbar.
 	o := gunim.WindowOptions{Title: "marraw viewer", Size: geom.Sz(1000, 680), UnderTitleBar: true, AskToClose: ViewerClose{},
-		Root: newFullSurface(), Icons: appIcons()}
+		Root: newFullSurface(), Icons: appIcons(), TitleBar: bareTitleBar{}}
 	if prefs.Place != nil {
 		o.Place = prefs.Place
 	}
