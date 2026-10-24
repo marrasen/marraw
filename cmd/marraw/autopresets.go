@@ -174,6 +174,7 @@ var autoSaving struct {
 
 // saveAutoPresets saves the creative auto presets as they are now.
 func (cu *culler) saveAutoPresets() {
+	defer cu.presetsChanged()
 	cu.autoSeq++
 	seq, all := cu.autoSeq, cloneAutoPresets(cu.ui.AutoPresets)
 	cu.call("The auto presets could not be saved", func(ctx context.Context) error {

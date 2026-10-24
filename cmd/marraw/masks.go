@@ -170,6 +170,9 @@ func (cu *culler) maskOK(i int) bool {
 // maskAdd adds a mask, chosen, as a step.
 func (cu *culler) maskAdd(kind string) {
 	d := &cu.dev
+	if cu.oneOnly("add a mask") {
+		return
+	}
 	if !d.open || !cu.culling || d.id != cu.photos[cu.at].ID {
 		return
 	}
@@ -184,6 +187,9 @@ func (cu *culler) maskAdd(kind string) {
 // then the photo's map made, then the mask.
 func (cu *culler) maskAI(in MaskAI) {
 	d := &cu.dev
+	if cu.oneOnly("add a mask") {
+		return
+	}
 	if !d.open || !cu.culling || d.id != cu.photos[cu.at].ID {
 		return
 	}

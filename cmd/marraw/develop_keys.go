@@ -143,7 +143,7 @@ func (cu *culler) devNudge(in DevNudge) {
 		select {
 		case cu.do <- func() {
 			d.nudge = nil
-			if !d.open || d.id != cu.photos[cu.at].ID {
+			if !d.open || d.id != cu.photos[cu.at].ID || cu.batchShown {
 				return
 			}
 			cu.edited(true)

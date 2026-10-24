@@ -41,6 +41,18 @@ func (cu *culler) batchPreset(in BatchPreset) {
 		return
 	}
 	users, autos := cu.presetsOf()
+	if in.Key != "" {
+		in.Index = -1
+		for _, c := range cu.presetCards() {
+			if c.Key == in.Key {
+				in.Index = c.Index
+			}
+		}
+		if in.Index < 0 {
+			cu.notify("That preset is gone")
+			return
+		}
+	}
 	if n := map[bool]int{false: len(users), true: len(autos)}[in.Auto]; in.Index < 0 || in.Index >= n {
 		cu.notify(fmt.Sprintf("There is no preset %d", in.Index+1))
 		return

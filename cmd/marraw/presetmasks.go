@@ -145,7 +145,7 @@ func (cu *culler) presetMasks(id int64, p marrawclient.UserPreset, download bool
 		}
 		cu.onDo(func() {
 			d := &cu.dev
-			if !d.open || d.id != id {
+			if !d.open || d.id != id || cu.batchShown {
 				return
 			}
 			ms := slices.Clone(d.params.Masks)

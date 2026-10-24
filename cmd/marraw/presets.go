@@ -546,7 +546,7 @@ func newPresetDialog(s PresetAsk) *widget.Dialog {
 // askPreset opens the dialog to save the edit showing as a preset.
 func (cu *culler) askPreset() {
 	d := &cu.dev
-	if !d.open || !cu.culling || cu.asking {
+	if !d.open || !cu.culling || cu.asking || cu.oneOnly("save its edit as a preset") {
 		return
 	}
 	users, _ := cu.presetsOf()
@@ -753,6 +753,28 @@ func (cu *culler) savePresets() {
 		_ = cu.c.Update("develop", cu.developState())
 		cu.loadPresetThumbs()
 	}
+	cu.presetsChanged()
+}
+
+// presetsChanged shows the presets anew on the batch cards, which list
+// them for several photos selected.
+func (cu *culler) presetsChanged() {
+	if cu.batchShown {
+		cu.selChanged()
+	}
+	if !cu.culling {
+		_ = cu.c.Update("grid", cu.gridState())
+	}
+}
+
+// oneOnly tells, and reports, that what is done to one photo waits while
+// several are selected: the batch panel has them.
+func (cu *culler) oneOnly(what string) bool {
+	if !cu.batchShown {
+		return false
+	}
+	cu.tell("Choose one photo to " + what)
+	return true
 }
 
 // newPresetID is a new preset's id, unique enough for one person's list.

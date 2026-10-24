@@ -2000,9 +2000,15 @@ func (cu *culler) selChanged() {
 		// A mask chosen, or a pick armed, was the one photo's.
 		cu.disarmPick()
 		cu.masks.sel, cu.masks.active, cu.masks.rangePick, cu.masks.brush.Painting = -1, "", false, false
-		// What dials asked of the edit while it loaded goes: the batch
-		// panel has the photos now.
-		d.pending = nil
+		// What dials asked of the edit while it loaded goes, and a preset
+		// hovered, applied or nudged on the way: the batch panel has the
+		// photos now.
+		d.pending, d.hover = nil, nil
+		cu.presetGen++
+		if d.nudge != nil {
+			d.nudge.Stop()
+			d.nudge = nil
+		}
 		if d.mounted {
 			d.mounted = false
 			_ = cu.c.Unmount("develop")

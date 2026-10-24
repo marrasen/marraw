@@ -21,9 +21,13 @@ type (
 		Field string
 		By    float64
 	}
+	// Key, where set, names the preset as its card does ("u:" or "a:"
+	// and its id), found again as it applies: the list may have
+	// changed since the menu was made.
 	BatchPreset struct {
 		Auto  bool
 		Index int
+		Key   string
 	}
 )
 
@@ -291,7 +295,7 @@ func (c *batchCard) set(n int, presets []PresetCard, u *gunim.UI) {
 		if i < 0 || i >= len(presets) {
 			return nil
 		}
-		return BatchPreset{Auto: presets[i].Auto, Index: presets[i].Index}
+		return BatchPreset{Auto: presets[i].Auto, Index: presets[i].Index, Key: presets[i].Key}
 	}
 	c.showStatus(n)
 	u.Invalidate()

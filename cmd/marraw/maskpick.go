@@ -77,6 +77,9 @@ func pickKind(button string) string {
 // regions found already serve again, and found first otherwise, the
 // model asked for where it is missing. Pressed while armed, it disarms.
 func (cu *culler) maskPickArm(in MaskAI) {
+	if cu.oneOnly("pick a mask") {
+		return
+	}
 	d := &cu.dev
 	kind := pickKind(in.Kind)
 	m := &cu.masks

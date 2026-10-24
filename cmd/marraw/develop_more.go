@@ -159,7 +159,7 @@ func (cu *culler) devAuto(in DevAuto) {
 				cu.fail("Auto did not work", orNoAnswer(err))
 				return
 			}
-			if !d.open || d.id != id {
+			if !d.open || d.id != id || cu.batchShown {
 				return
 			}
 			d.params = *res
