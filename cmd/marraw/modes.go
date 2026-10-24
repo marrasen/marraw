@@ -39,7 +39,10 @@ func (cu *culler) setMode(m int) {
 			}
 			cu.openCull(max(0, min(cu.cursor, len(cu.photos)-1)))
 		}
-		if open := m == modeDevelop; cu.dev.open != open {
+		if open := m == modeDevelop; cu.panelShown() != open {
+			if !open && cu.dev.hidden {
+				break
+			}
 			cu.toggleDevelop()
 		}
 	case modeExport:

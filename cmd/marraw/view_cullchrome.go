@@ -100,8 +100,11 @@ type confirmBar struct {
 	// develop shows the dock's Original in place of the name, the stars,
 	// Pick and Reject.
 	develop bool
-	// zoomX is where the zoom starts, for the rule before it.
-	zoomX float32
+	// rules are where the rules between the parts stand, from the last
+	// layout.
+	rules []float32
+	// dials are the dials the bar can hold, the chosen ones showing.
+	dials *dialRow
 	// onZoom zooms to a percent; onFit fits or goes to 1:1.
 	onZoom func(pct float32, u *gunim.UI)
 	onFit  func(one bool, u *gunim.UI)
@@ -151,6 +154,8 @@ func newConfirmBar() *confirmBar {
 		theme.Set(widget.ButtonRadius, 7), theme.Set(widget.TextSize, 11), theme.Set(widget.IconSize, 13),
 		theme.Set(widget.ButtonFill, frost(0x0d)), theme.Set(widget.ButtonHover, frost(0x18)))
 	b.kids = append(b.kids, widget.NewThemed(&tintEdge{child: b.orig.Button, node: b.orig, ink: frost(0x40), edgeOnly: true}, origTh))
+	b.dials = newDialRow()
+	b.kids = append(b.kids, b.dials)
 	return b
 }
 
@@ -183,18 +188,34 @@ func (b *confirmBar) set(name string, rating int, flag string, pct float32, fitt
 func (b *confirmBar) Children() []gunim.Node { return b.kids }
 
 // Layout implements [gunim.Node]: the name over the stars, a rule, Pick
-// and Reject, a rule, and the zoom; in Develop, Original and the zoom.
+// and Reject, then the dials chosen for Cull and a rule before the zoom;
+// in Develop, the dials chosen for it and a rule, then Original and the
+// zoom, as marraw's quick dock.
 func (b *confirmBar) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Children) geom.Size {
 	const padX, padY, gap, h = 18, 12, 16, 40
 	mid := float32(padY + h/2)
 	x := float32(padX)
+	b.rules = b.rules[:0]
 	// What the other mode shows goes where no pointer reaches it.
 	away := geom.Pt(-10000, -10000)
+	dials := kids.At(8)
+	ds := dials.Layout(gunim.Loose(geom.Sz(c.Max.W, 60)))
+	placeDials := func() {
+		if ds.W == 0 {
+			dials.Place(away)
+			return
+		}
+		dials.Place(geom.Pt(x, mid-ds.H/2))
+		x += ds.W + gap
+		b.rules = append(b.rules, x)
+		x += 1 + gap
+	}
 	if b.develop {
 		for i := 0; i <= 3; i++ {
 			kids.At(i).Layout(gunim.Loose(geom.Sz(200, h)))
 			kids.At(i).Place(away)
 		}
+		placeDials()
 		os := kids.At(7).Layout(gunim.Loose(geom.Sz(200, h)))
 		kids.At(7).Place(geom.Pt(x, mid-os.H/2))
 		x += os.W + 14
@@ -205,17 +226,21 @@ func (b *confirmBar) Layout(c gunim.Constraints, _ gunim.Frame, kids gunim.Child
 		kids.At(0).Place(geom.Pt(x, padY))
 		kids.At(1).Layout(gunim.Loose(geom.Sz(112, 20)))
 		kids.At(1).Place(geom.Pt(x-2, padY+ns.H+3))
-		x += 112 + gap + 1 + gap
+		x += 112 + gap
+		b.rules = append(b.rules, x)
+		x += 1 + gap
 		for i := 2; i <= 3; i++ {
 			s := kids.At(i).Layout(gunim.Loose(geom.Sz(200, h)))
 			kids.At(i).Place(geom.Pt(x, mid-s.H/2))
 			x += s.W + 8
 		}
-		x += gap - 8 + 1 + gap
+		x += gap - 8
+		b.rules = append(b.rules, x)
+		x += 1 + gap
+		placeDials()
 	}
 	fs := kids.At(4).Layout(gunim.Loose(geom.Sz(120, h)))
 	kids.At(4).Place(geom.Pt(x, mid-fs.H/2))
-	b.zoomX = x
 	x += fs.W + 10
 	zs := kids.At(5).Layout(gunim.Tight(geom.Sz(110, 24)))
 	kids.At(5).Place(geom.Pt(x, mid-zs.H/2))
@@ -231,17 +256,14 @@ func (b *confirmBar) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, kids 
 	r := geom.Rect{Max: box.Point()}
 	paintGlass(p, r, 14)
 	p.RRectStroke(r.Inset(geom.Uniform(0.5)), 13.5, paint.Fill{}, paint.Stroke{Width: 1, Color: frost(0x18)})
-	if b.develop {
-		kids.At(4).Paint(p)
-		kids.At(5).Paint(p)
-		kids.At(6).Paint(p)
-		kids.At(7).Paint(p)
-		return
+	for _, x := range b.rules {
+		p.RRect(geom.Rc(x-1, (box.H-36)/2, 1, 36), 0, paint.Solid(frost(0x26)))
 	}
-	rule := func(x float32) { p.RRect(geom.Rc(x, (box.H-36)/2, 1, 36), 0, paint.Solid(frost(0x26))) }
-	rule(18 + 112 + 16)
-	rule(b.zoomX - 16 - 1)
-	for i := 0; i <= 6; i++ {
+	shown := []int{0, 1, 2, 3, 4, 5, 6, 8}
+	if b.develop {
+		shown = []int{4, 5, 6, 7, 8}
+	}
+	for _, i := range shown {
 		kids.At(i).Paint(p)
 	}
 }

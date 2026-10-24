@@ -131,7 +131,7 @@ func (cu *culler) toggleCrop() {
 		return
 	}
 	d := &cu.dev
-	if !cu.culling || !d.open || !d.mounted || d.id != cu.photos[cu.at].ID {
+	if !cu.culling || !d.open || d.hidden || !d.mounted || d.id != cu.photos[cu.at].ID {
 		cu.tell("Open the develop panel (D) to crop")
 		return
 	}

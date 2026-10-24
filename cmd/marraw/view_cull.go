@@ -325,6 +325,7 @@ func (v *cullView) readout(z float32) {
 			pct = v.percent(z)
 		}
 		v.confirm.setDevelop(v.st.Panel, v.st.Original)
+		v.confirm.dials.set(v.st.Dials, v.st.DialEdit, v.st.DialLive, DevelopState{BaseExpEV: v.st.BaseExpEV}, v.lastUI)
 		v.confirm.set(v.st.Name, v.st.Rating, v.st.Flag, pct, z < 1.01, v.lastUI)
 	}
 }

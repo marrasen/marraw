@@ -122,6 +122,8 @@ func (b *settingsBody) page(name string) settingsPage {
 		p = newGeneralPage()
 	case "Features":
 		p = newFeaturesPage()
+	case "Toolbars":
+		p = newToolbarsPage()
 	case "Default presets":
 		p = newDefaultsPage(b.st)
 	case "Cache":

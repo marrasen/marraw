@@ -75,6 +75,14 @@ type (
 		// NoticeSeq changes, as an undo says what it undid.
 		Notice    string
 		NoticeSeq int
+		// Dials are the dials the bar at the foot shows, Develop's while the
+		// panel is out and Cull's otherwise; DialEdit the edit they show,
+		// nil until it is known, and DialLive whether they take input;
+		// BaseExpEV the photo's exposure at rest, for the exposure dial.
+		Dials     []string
+		DialEdit  *marrawclient.Params
+		DialLive  bool
+		BaseExpEV float64
 		// Aids are the photo's culling aids.
 		Aids Aids
 		// Groups are the time-gap groups the filmstrip shows of, and
@@ -293,6 +301,8 @@ type culler struct {
 
 	// dev is the develop panel's side.
 	dev developer
+	// dialP is the edit Cull's dials show, fetched as the view steps.
+	dialP dialParams
 
 	// cullSteps are the ratings and flags given, to undo, and cullAt how
 	// many of them stand.
@@ -475,6 +485,12 @@ func (cu *culler) serve() error {
 				cu.toggleDevelop()
 			case DevSet:
 				cu.devSet(in)
+			case DialsSet:
+				cu.dialsSet(in)
+			case DialSet:
+				cu.dialSet(in)
+			case DialStep:
+				cu.dialStep(in)
 			case DevCurve:
 				cu.devCurve(in)
 			case DevChannel:
@@ -493,7 +509,7 @@ func (cu *culler) serve() error {
 				}
 				cu.setActive(in.Key)
 			case DevTab:
-				if in.Open && !cu.dev.open {
+				if in.Open && !cu.panelShown() {
 					cu.toggleDevelop()
 				}
 				if in.By != 0 {
@@ -816,9 +832,19 @@ func (cu *culler) state() Cull {
 		st.Live, cu.swapNow = true, false
 	}
 	st.Thumb = cu.thumbs[p.ID]
-	st.Panel = cu.dev.open
-	if cu.dev.open {
+	st.Panel = cu.panelShown()
+	if st.Panel {
 		st.Active = cu.dev.active
+	}
+	if ui := cu.ui; ui != nil {
+		st.Dials = ui.CullDials
+		if st.Panel {
+			st.Dials = ui.QuickDials
+		}
+	}
+	if len(st.Dials) > 0 {
+		st.DialEdit, st.DialLive = cu.dialView(p)
+		st.BaseExpEV = p.BaseExpEV
 	}
 	st.Notice, st.NoticeSeq = cu.notice, cu.noticeSeq
 	return st
@@ -1044,8 +1070,10 @@ func (cu *culler) record(what string, sharp bool) {
 // let it go; drag:x:y:x:y
 // drags from one point to another; type:text
 // types; shift+plus presses Shift and + as a Swedish keyboard does, which
-// types ?; shift+ a key presses it with Shift; ctrl+z, ctrl+shift+n and w press those; wait:ms waits; and shot:name writes the window to name.png. It
-// reports whether k was one.
+// types ?; shift+ a key presses it with Shift; ctrl+z, ctrl+shift+n and w press those; wait:ms waits; and shot:name writes the window to name.png;
+// dials:cull:a+b and dials:develop:a+b choose a bar's dials, and
+// dial:key:value moves one of them there and lets go. It reports whether
+// k was one.
 func (cu *culler) scriptStep(k string) bool {
 	verb, arg, ok := strings.Cut(k, ":")
 	now := time.Now()
@@ -1126,6 +1154,24 @@ func (cu *culler) scriptStep(k string) bool {
 	case ok && verb == "settings":
 		// The settings dialog, at the section named.
 		cu.do <- func() { cu.askSettings(arg) }
+	case ok && verb == "dials":
+		// dials:cull:expEV+contrast or dials:develop:... chooses a bar's
+		// dials, as the Toolbars settings do.
+		bar, list, _ := strings.Cut(arg, ":")
+		keys := strings.Split(list, "+")
+		cu.do <- func() { cu.dialsSet(DialsSet{Develop: bar == "develop", Keys: keys}) }
+	case ok && verb == "dial":
+		// dial:contrast:0.4 moves a dial of the bar there and lets go.
+		key, val, _ := strings.Cut(arg, ":")
+		v, _ := strconv.ParseFloat(val, 64)
+		cu.do <- func() {
+			if _, isChoice := devChoices[key]; isChoice {
+				cu.dialStep(DialStep{Key: key})
+				return
+			}
+			cu.dialSet(DialSet{Key: key, Value: v})
+			cu.dialSet(DialSet{Key: key, Value: v, Commit: true})
+		}
 	case ok && verb == "fail":
 		// A made-up failure, to see the error tray.
 		cu.do <- func() { cu.fail(arg, errors.New("made up by the test script for "+arg)) }

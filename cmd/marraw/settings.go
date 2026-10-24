@@ -56,6 +56,9 @@ type SettingsState struct {
 	Features                map[string]bool
 	BurstHamming, BurstGap  int
 	Prerender               bool
+	// CullDials and QuickDials are the dials of Cull's bar and of
+	// Develop's.
+	CullDials, QuickDials []string
 	Sidecars, SidecarsKnown bool
 	Cache                   *marrawclient.CacheInfo
 	Models                  *marrawclient.ModelsInfo
@@ -78,7 +81,7 @@ type SettingsState struct {
 type PresetChoice struct{ ID, Name string }
 
 // settingsSections are the dialog's sections, in order.
-var settingsSections = []string{"General", "Features", "Default presets", "Cache", "Models", "Sidecars", "Shared albums"}
+var settingsSections = []string{"General", "Features", "Toolbars", "Default presets", "Cache", "Models", "Sidecars", "Shared albums"}
 
 // features are the culling aids that can be turned off, as marraw's, with
 // whether each is on by default.
@@ -137,6 +140,7 @@ func (cu *culler) settingsState() SettingsState {
 			s.BurstGap = ui.BurstGapSeconds
 		}
 		s.Prerender = ui.PrerenderFullres
+		s.CullDials, s.QuickDials = ui.CullDials, ui.QuickDials
 		s.Defaults = maps.Clone(ui.DefaultPresets)
 		for _, p := range ui.UserPresets {
 			if len(p.AutoSections) == 0 {

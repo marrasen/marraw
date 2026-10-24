@@ -84,6 +84,12 @@ type (
 // and the live previews of it.
 type developer struct {
 	open, mounted bool
+	// hidden says the session is open without the panel: a dial of Cull's
+	// bar opened it (dials.go). It ends as the view steps to another photo,
+	// so culling never loads an edit or holds a decode it was not asked
+	// for. pending are the dial changes made while the edit loads.
+	hidden  bool
+	pending []func()
 	// id is the photo whose edit is loaded, params the edit, gen counts
 	// loads so a late one is dropped.
 	id      int64
@@ -200,6 +206,12 @@ func (cu *culler) toggleDevelop() {
 		return
 	}
 	d := &cu.dev
+	if d.open && d.hidden {
+		// Open for a dial of Cull's bar: the panel comes out on it.
+		d.hidden = false
+		cu.showCull()
+		return
+	}
 	d.open = !d.open
 	if d.open {
 		// A new session: an edit of the last one, saved or failed and
@@ -221,7 +233,7 @@ func (cu *culler) closeDevelop() {
 		d.thumbStop()
 		d.thumbStop = nil
 	}
-	d.hover = nil
+	d.hover, d.hidden, d.pending = nil, false, nil
 	if d.stop != nil {
 		d.stop()
 	}
@@ -233,6 +245,10 @@ func (cu *culler) closeDevelop() {
 		d.mounted = false
 		_ = cu.c.Unmount("develop")
 	}
+	// The edit may have changed while it was open: Cull's dials fetch it
+	// anew.
+	cu.dialP = dialParams{gen: cu.dialP.gen + 1}
+	cu.wantDialParams()
 }
 
 // loadEdit loads photo i's edit for the panel, and mounts the panel with
@@ -297,6 +313,12 @@ func (cu *culler) loadEdit(i int) {
 			cu.histogramShowing()
 			cu.loadPresetThumbs()
 			cu.wantWindow()
+			// What a dial did while the edit loaded.
+			pending := d.pending
+			d.pending = nil
+			for _, fn := range pending {
+				fn()
+			}
 		}:
 		case <-cu.ctx.Done():
 		}
@@ -606,7 +628,14 @@ func (cu *culler) devChannel(ch int) {
 
 // developFollows moves the panel to photo i, as the cull view steps.
 func (cu *culler) developFollows(i int) {
-	if cu.dev.open && cu.culling {
+	d := &cu.dev
+	switch {
+	case d.open && d.hidden:
+		// Opened for a dial of Cull's bar: it ends with the photo.
+		d.open = false
+		cu.closeDevelop()
+	case d.open && cu.culling:
 		cu.loadEdit(i)
 	}
+	cu.wantDialParams()
 }
