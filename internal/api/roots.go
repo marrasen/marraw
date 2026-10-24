@@ -88,12 +88,6 @@ func (l *Library) syncWatchedParents(roots []LibraryRoot) {
 	l.deps.Watch.SetParents(parents)
 }
 
-// isParentRoot reports whether path is a stored managed parent.
-func (l *Library) isParentRoot(ctx context.Context, path string) bool {
-	r, ok := l.rootFor(ctx, path)
-	return ok && r.IsParent
-}
-
 // scanRecursionFor decides how deep a folder is scanned.
 //
 // An exact stored root always wins: if the user configured D:\Shoots\Wedding as
@@ -529,9 +523,14 @@ func (l *Library) RenameFolderOnDisk(ctx context.Context, path string, newName s
 		}
 	}
 	aprot.TriggerRefresh(ctx, libraryRootsKey)
-	// The renamed folder may be a discovered child of a managed parent, or a
-	// parent itself; refresh both listings so the rail follows the rename.
-	aprot.TriggerRefresh(ctx, shootsKey(filepath.Dir(oldPath)), shootsKey(oldPath), shootsKey(newPath))
+	// The renamed folder may be a shoot of a library folder, at any depth,
+	// or a library folder itself; refresh the listings so the rail follows
+	// the rename.
+	keys := []string{shootsKey(filepath.Dir(oldPath)), shootsKey(oldPath), shootsKey(newPath)}
+	if r, ok := l.libraryFolderOf(ctx, newPath); ok {
+		keys = append(keys, shootsKey(r.Path))
+	}
+	aprot.TriggerRefresh(ctx, keys...)
 	return &RenameResult{Path: newPath}, nil
 }
 

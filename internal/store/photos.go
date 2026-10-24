@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -98,7 +99,8 @@ func (db *DB) UpsertFolder(ctx context.Context, path string) (int64, error) {
 }
 
 // FolderPhotoCount returns the catalogued photo count for a folder path, and
-// whether the folder has ever been scanned. Comparing paths case-insensitively
+// whether the folder has ever been scanned (a folder made to hold photos
+// handed over from another has not). Comparing paths case-insensitively
 // matches how the rest of the app treats Windows paths.
 func (db *DB) FolderPhotoCount(ctx context.Context, path string) (int, bool, error) {
 	path = filepath.Clean(path)
@@ -107,7 +109,7 @@ func (db *DB) FolderPhotoCount(ctx context.Context, path string) (int, bool, err
 	// unscanned folder as an empty one.
 	var id int64
 	err := db.QueryRowContext(ctx,
-		`SELECT id FROM folders WHERE path = ? COLLATE NOCASE`, path).Scan(&id)
+		`SELECT id FROM folders WHERE path = ? COLLATE NOCASE AND last_scanned_at IS NOT NULL`, path).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
@@ -256,12 +258,24 @@ type FileEntry struct {
 // SyncFolder reconciles the photos table with the current directory listing:
 // inserts new files, refreshes changed ones (new cache key, metadata reset),
 // and deletes rows whose files vanished. Returns the number of photos.
+//
+// A folder read another way than before keeps its photos' rows, and all
+// they hold: read with its subfolders, it takes over the rows a subfolder
+// read on its own has of them; read without, it hands the rows of its
+// subfolders' photos, still on disk, to those subfolders.
 func (db *DB) SyncFolder(ctx context.Context, folderID int64, folderPath string, entries []FileEntry) (int, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
+
+	folders := map[string]int64{}
+	for _, e := range entries {
+		if err := adoptRow(ctx, tx, folderID, folderPath, e.Name, folders); err != nil {
+			return 0, err
+		}
+	}
 
 	seen := make(map[string]bool, len(entries))
 	for _, e := range entries {
@@ -276,7 +290,10 @@ func (db *DB) SyncFolder(ctx context.Context, folderID int64, folderPath string,
 				cache_key = excluded.cache_key,
 				meta_loaded = CASE WHEN photos.mtime_ns = excluded.mtime_ns
 					AND photos.file_size = excluded.file_size
-					THEN photos.meta_loaded ELSE 0 END`,
+					THEN photos.meta_loaded ELSE 0 END,
+				fingerprint = CASE WHEN photos.mtime_ns = excluded.mtime_ns
+					AND photos.file_size = excluded.file_size
+					THEN photos.fingerprint ELSE NULL END`,
 			folderID, e.Name, e.Size, e.MtimeNs, key); err != nil {
 			return 0, err
 		}
@@ -287,7 +304,7 @@ func (db *DB) SyncFolder(ctx context.Context, folderID int64, folderPath string,
 	if err != nil {
 		return 0, err
 	}
-	var gone []int64
+	var gone []goneRow
 	for rows.Next() {
 		var id int64
 		var name string
@@ -296,12 +313,19 @@ func (db *DB) SyncFolder(ctx context.Context, folderID int64, folderPath string,
 			return 0, err
 		}
 		if !seen[name] {
-			gone = append(gone, id)
+			gone = append(gone, goneRow{id, name})
 		}
 	}
 	rows.Close()
-	for _, id := range gone {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM photos WHERE id = ?`, id); err != nil {
+	for _, g := range gone {
+		moved, err := handOver(ctx, tx, folderPath, g, folders)
+		if err != nil {
+			return 0, err
+		}
+		if moved {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM photos WHERE id = ?`, g.id); err != nil {
 			return 0, err
 		}
 	}
@@ -313,6 +337,91 @@ func (db *DB) SyncFolder(ctx context.Context, folderID int64, folderPath string,
 		return 0, err
 	}
 	return len(entries), nil
+}
+
+// goneRow is a photo row whose file a folder's listing no longer has.
+type goneRow struct {
+	id   int64
+	name string
+}
+
+// folderIn is the id of the catalog folder at path, made if create is set
+// and there is none; nought where there is none and create is not set.
+// folders caches the answers.
+func folderIn(ctx context.Context, tx *sql.Tx, path string, create bool, folders map[string]int64) (int64, error) {
+	key := strings.ToLower(path)
+	if id, ok := folders[key]; ok && (id != 0 || !create) {
+		return id, nil
+	}
+	var id int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM folders WHERE path = ? COLLATE NOCASE`, path).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		err, id = nil, 0
+		if create {
+			err = tx.QueryRowContext(ctx, `INSERT INTO folders (path) VALUES (?) RETURNING id`, path).Scan(&id)
+		}
+	}
+	if err != nil {
+		return 0, err
+	}
+	folders[key] = id
+	return id, nil
+}
+
+// adoptRow moves into folder folderID the row another catalog folder under
+// it has of the photo at name (a path under folderPath), where this folder
+// has none of its own: the photo was read in a subfolder on its own before.
+func adoptRow(ctx context.Context, tx *sql.Tx, folderID int64, folderPath, name string, folders map[string]int64) error {
+	parts := strings.Split(filepath.ToSlash(name), "/")
+	for k := len(parts) - 1; k >= 1; k-- {
+		from, err := folderIn(ctx, tx, filepath.Join(folderPath, filepath.Join(parts[:k]...)), false, folders)
+		if err != nil {
+			return err
+		}
+		if from == 0 || from == folderID {
+			continue
+		}
+		res, err := tx.ExecContext(ctx, `
+			UPDATE photos SET folder_id = ?, file_name = ?
+			WHERE folder_id = ? AND file_name = ?
+			AND NOT EXISTS (SELECT 1 FROM photos WHERE folder_id = ? AND file_name = ?)`,
+			folderID, name, from, filepath.Join(parts[k:]...), folderID, name)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			return nil
+		}
+	}
+	return nil
+}
+
+// handOver moves the row g, of a photo in a subfolder of folderPath that
+// the folder's listing no longer takes in, to that subfolder's catalog
+// folder, made unread if it has none, where the file is still there and
+// that folder has no row of it. It reports whether it moved the row.
+func handOver(ctx context.Context, tx *sql.Tx, folderPath string, g goneRow, folders map[string]int64) (bool, error) {
+	if !strings.ContainsAny(g.name, `/\`) {
+		return false, nil
+	}
+	full := filepath.Join(folderPath, g.name)
+	if _, err := os.Stat(full); err != nil {
+		return false, nil
+	}
+	to, err := folderIn(ctx, tx, filepath.Dir(full), true, folders)
+	if err != nil {
+		return false, err
+	}
+	base := filepath.Base(full)
+	res, err := tx.ExecContext(ctx, `
+		UPDATE photos SET folder_id = ?, file_name = ?
+		WHERE id = ? AND NOT EXISTS (SELECT 1 FROM photos WHERE folder_id = ? AND file_name = ?)`,
+		to, base, g.id, to, base)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
 }
 
 const photoCols = `p.id, p.folder_id, f.path, p.file_name, p.file_size, p.mtime_ns, p.cache_key,

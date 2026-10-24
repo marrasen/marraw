@@ -480,6 +480,17 @@ func (s *Scanner) MetaCount(ctx context.Context, folderID int64) (int, error) {
 // thumbnails, notifying subscribers in batches. It stops when ctx is
 // canceled (a rescan or a client cancel supersedes it).
 func (s *Scanner) Backfill(ctx context.Context, folderID int64, onProgress func(done, total int)) error {
+	return s.backfill(ctx, folderID, onProgress, true)
+}
+
+// BackfillMeta is Backfill without the thumbnails: for reading many
+// folders at once, where a render queued per photo would outlive a cancel.
+// What is shown asks for its thumbnails itself.
+func (s *Scanner) BackfillMeta(ctx context.Context, folderID int64, onProgress func(done, total int)) error {
+	return s.backfill(ctx, folderID, onProgress, false)
+}
+
+func (s *Scanner) backfill(ctx context.Context, folderID int64, onProgress func(done, total int), thumbs bool) error {
 	photos, err := s.DB.PhotosNeedingMeta(ctx, folderID)
 	if err != nil {
 		return err
@@ -522,8 +533,10 @@ func (s *Scanner) Backfill(ctx context.Context, folderID int64, onProgress func(
 			notify(false)
 			// Queue the grid thumbnail; Ensure dedups against on-demand
 			// requests.
-			if p2, err := s.DB.GetPhoto(ctx, ph.ID); err == nil {
-				go s.Cache.Ensure(context.WithoutCancel(ctx), p2, "512", edit.BaseHash, decode.PriorityBackground)
+			if thumbs {
+				if p2, err := s.DB.GetPhoto(ctx, ph.ID); err == nil {
+					go s.Cache.Ensure(context.WithoutCancel(ctx), p2, "512", edit.BaseHash, decode.PriorityBackground)
+				}
 			}
 		}
 		if onProgress != nil {

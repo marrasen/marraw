@@ -127,14 +127,14 @@ func (l *Library) OpenFolder(ctx context.Context, path string) (*FolderInfo, err
 	// batch as the metadata pass finds them. Bounded: what it leaves, the
 	// pass behind it reads.
 	quick := time.Now()
-	if n, err := l.deps.Scanner.QuickMeta(ctx, folderID, 6, 4*time.Second); err != nil {
+	if n, err := l.deps.Scanner.QuickMeta(ctx, folderID, 6, time.Second); err != nil {
 		log.Printf("open %s: quick metadata: %v", path, err)
 	} else if n > 0 {
 		log.Printf("open %s: read %d photos' metadata up front in %s", path, n, time.Since(quick).Round(time.Millisecond))
 	}
 	aprot.TriggerRefresh(ctx, photosKey(folderID))
-	if parent := filepath.Dir(filepath.Clean(path)); l.isParentRoot(ctx, parent) {
-		aprot.TriggerRefresh(ctx, shootsKey(parent))
+	if r, ok := l.libraryFolderOf(ctx, path); ok {
+		aprot.TriggerRefresh(ctx, shootsKey(r.Path))
 	}
 	l.rememberRecent(ctx, path)
 	l.rememberFocus(path, context.WithoutCancel(ctx))

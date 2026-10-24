@@ -130,7 +130,10 @@ func (l *Library) ReadShoots(ctx context.Context, folder string, paths []string)
 			// the rest to go on.
 			task.Output(filepath.Base(p) + ": " + oerr.Error())
 		} else {
-			if berr := l.deps.Scanner.Backfill(tctx, id, func(int, int) {}); berr != nil {
+			// Metadata alone: a thumbnail queued per photo of many shoots
+			// would outlive a cancel. The rail and grid ask for what they
+			// show.
+			if berr := l.deps.Scanner.BackfillMeta(tctx, id, func(int, int) {}); berr != nil {
 				if err = tctx.Err(); err != nil {
 					break
 				}
@@ -438,13 +441,10 @@ func (l *Library) metaPass(ctx context.Context, folderID int64, path string) {
 	task.Err(l.deps.Scanner.Backfill(tctx, folderID, task.Progress))
 	// The backfill just wrote taken_at values the rail's shoot list was built
 	// without; re-list so Shoot.earliestTakenAt (the date sort/grouping key)
-	// reflects them. A shoot lives in its parent's listing; a managed parent's
-	// own loose-RAW row lives in its own.
-	if parent := filepath.Dir(filepath.Clean(path)); l.isParentRoot(ctx, parent) {
-		l.deps.TriggerRefresh(shootsKey(parent))
-	}
-	if l.isParentRoot(ctx, path) {
-		l.deps.TriggerRefresh(shootsKey(path))
+	// reflects them. A shoot, at any depth, lives in its library folder's
+	// listing, as a library folder's own loose-RAW row does.
+	if r, ok := l.libraryFolderOf(ctx, path); ok {
+		l.deps.TriggerRefresh(shootsKey(r.Path))
 	}
 	// A root added by hand shows its date and cover through its status.
 	l.deps.TriggerRefresh(rootStatusKey)

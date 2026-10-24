@@ -25,6 +25,10 @@ import (
 //   - So is a folder holding a DCIM folder, whatever its name: a memory
 //     card copied as it is, with the photos in DCIM/100MSDCF and the
 //     camera's own folders, as PRIVATE and AVF_INFO, beside it.
+//   - So is a folder right in the library folder that the catalog already
+//     read as one shoot, of photos in its subfolders: marraw once made a
+//     shoot of every folder there, and splitting one now would leave its
+//     catalog rows, and all they hold, behind.
 //   - Any other folder without RAWs directly in it is a group, such as a
 //     year or a client, and the folders in it are looked at the same way.
 //
@@ -171,6 +175,9 @@ func (w *shootWalk) visit(dir, group string, depth int) bool {
 		}
 		w.add(dir, group, false, len(in.subdirs) > 0)
 		return true
+	case depth == 1 && mode != FolderSplit && w.readAsOne(dir):
+		w.add(dir, group, false, len(in.subdirs) > 0)
+		return true
 	}
 	if depth >= shootDepth {
 		return false
@@ -185,6 +192,13 @@ func (w *shootWalk) visit(dir, group string, depth int) bool {
 		w.groups = append(w.groups, dir)
 	}
 	return any
+}
+
+// readAsOne reports whether the catalog holds photos read under dir, which
+// has none directly in it: it was read as one shoot of its subfolders.
+func (w *shootWalk) readAsOne(dir string) bool {
+	n, scanned, err := w.l.deps.DB.FolderPhotoCount(w.ctx, dir)
+	return err == nil && scanned && n > 0
 }
 
 // add lists the shoot at dir: split, its own RAWs alone; else everything

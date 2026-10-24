@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -44,7 +45,8 @@ func (w *Writer) Change(dir string, fn func(*File)) {
 	w.timers[dir] = time.AfterFunc(w.Delay, func() { w.flush(dir) })
 }
 
-// Flush writes every folder's waiting changes now.
+// Flush writes every folder's waiting changes now, and returns once a
+// write a timer started before it has ended too.
 func (w *Writer) Flush() {
 	w.mu.Lock()
 	dirs := make([]string, 0, len(w.pending))
@@ -55,6 +57,8 @@ func (w *Writer) Flush() {
 	for _, d := range dirs {
 		w.flush(d)
 	}
+	w.writing.Lock()
+	w.writing.Unlock() //nolint:staticcheck // waits for a write under way
 }
 
 // flush writes dir's waiting changes.
@@ -82,11 +86,14 @@ func (w *Writer) flush(dir string) {
 }
 
 // Update reads dir's file, as it is on disk now, changes it with fn and
-// writes it back. A folder gone from the disk is left gone.
+// writes it back. A folder gone from the disk is left gone, and a folder
+// with no file gets none while there is nothing to keep in it.
 func Update(dir string, fn func(*File)) error {
 	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
+	_, err := os.Stat(filepath.Join(dir, Name))
+	had := err == nil
 	f, err := Read(dir)
 	if err != nil {
 		// Unreadable as it stands: write nothing over it, which would
@@ -94,5 +101,8 @@ func Update(dir string, fn func(*File)) error {
 		return err
 	}
 	fn(f)
+	if !had && len(f.Photos) == 0 && len(f.Deleted) == 0 {
+		return nil
+	}
 	return Write(dir, f)
 }
