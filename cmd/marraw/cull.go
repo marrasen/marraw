@@ -1038,7 +1038,8 @@ func (cu *culler) record(what string, sharp bool) {
 // scriptStep takes a step of -keys that is not a key: click:x:y and
 // move:x:y move the pointer, in the window, and click there, dclick:x:y
 // twice, rclick:x:y with the secondary button, mouseback:x:y with the
-// back side button; drag:x:y:x:y
+// back side button; press:x:y and release:x:y hold the button down and
+// let it go; drag:x:y:x:y
 // drags from one point to another; type:text
 // types; shift+plus presses Shift and + as a Swedish keyboard does, which
 // types ?; shift+ a key presses it with Shift; ctrl+z, ctrl+shift+n and w press those; wait:ms waits; and shot:name writes the window to name.png. It
@@ -1076,6 +1077,20 @@ func (cu *culler) scriptStep(k string) bool {
 			time.Sleep(50 * time.Millisecond)
 			clicks := map[bool]int{false: 1, true: 2}[verb == "dclick"]
 			_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonPrimary, Clicks: clicks, Time: now})
+			_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: at, Button: input.ButtonPrimary, Time: now})
+		}
+	case ok && (verb == "press" || verb == "release"):
+		// press:x:y holds the primary button down at x, y and release:x:y
+		// lets it go there, for what acts while held.
+		xs, ys, _ := strings.Cut(arg, ":")
+		x, _ := strconv.ParseFloat(xs, 32)
+		y, _ := strconv.ParseFloat(ys, 32)
+		at := geom.Pt(float32(x), float32(y))
+		_ = cu.c.Input(cu.ctx, input.PointerMove{Pos: at, Time: now})
+		if verb == "press" {
+			time.Sleep(50 * time.Millisecond)
+			_ = cu.c.Input(cu.ctx, input.PointerDown{Pos: at, Button: input.ButtonPrimary, Clicks: 1, Time: now})
+		} else {
 			_ = cu.c.Input(cu.ctx, input.PointerUp{Pos: at, Button: input.ButtonPrimary, Time: now})
 		}
 	case ok && verb == "drag":

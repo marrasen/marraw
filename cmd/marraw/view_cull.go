@@ -324,6 +324,7 @@ func (v *cullView) readout(z float32) {
 		if v.box.W > 0 {
 			pct = v.percent(z)
 		}
+		v.confirm.setDevelop(v.st.Panel, v.st.Original)
 		v.confirm.set(v.st.Name, v.st.Rating, v.st.Flag, pct, z < 1.01, v.lastUI)
 	}
 }
@@ -1501,7 +1502,11 @@ func (v *cullView) faded(p *paint.Painter, piece string, paintIt func()) {
 	if piece == v.keep {
 		a = 1
 	}
-	a *= 1 - v.origIn.Value()
+	// The original takes the chrome away, but for Original held on the
+	// bar, as marraw keeps what the pointer rests on.
+	if piece != "confirm" || !v.confirmRect.Contains(v.pointer) {
+		a *= 1 - v.origIn.Value()
+	}
 	a *= 1 - min(max(v.adjustIn.Value(), 0), 1)
 	if a < 0.01 {
 		return
