@@ -40,6 +40,10 @@ type Library struct {
 	// lowercased paths.
 	upgradeMu sync.Mutex
 	upgraded  map[string]bool
+
+	// rootsMu serializes the writes of the library roots, the user's and
+	// the upgrade's, so neither undoes the other.
+	rootsMu sync.Mutex
 }
 
 // ListDrives returns the filesystem roots to seed the folder tree.

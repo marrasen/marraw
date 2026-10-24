@@ -38,6 +38,13 @@ func (l *Library) GetLibraryRoots(ctx context.Context) ([]LibraryRoot, error) {
 // SetLibraryRoots replaces the stored root list (add, remove, alias-rename,
 // toggle include-subfolders, and reorder are all "send the new list").
 func (l *Library) SetLibraryRoots(ctx context.Context, roots []LibraryRoot) error {
+	l.rootsMu.Lock()
+	defer l.rootsMu.Unlock()
+	return l.setRoots(ctx, roots)
+}
+
+// setRoots is SetLibraryRoots, rootsMu held.
+func (l *Library) setRoots(ctx context.Context, roots []LibraryRoot) error {
 	if roots == nil {
 		roots = []LibraryRoot{}
 	}
@@ -393,29 +400,6 @@ func (l *Library) libraryRoots(ctx context.Context) []LibraryRoot {
 	return roots
 }
 
-// SameOwner reports whether the folders a and b belong to one root of the
-// library: the nearest stored root holding each, a library folder or a
-// folder added on its own, is the same, or neither lies in one. Photo rows
-// move only between such folders (scan.Scanner.Related), so a folder added
-// with its subfolders around a library folder never takes its shoots'.
-func (l *Library) SameOwner(a, b string) bool {
-	roots := l.libraryRoots(context.Background())
-	return ownerOf(roots, a) == ownerOf(roots, b)
-}
-
-// ownerOf is the nearest of roots holding path, lowercased; "" for none.
-func ownerOf(roots []LibraryRoot, path string) string {
-	clean := filepath.Clean(path)
-	best := ""
-	for _, r := range roots {
-		rp := filepath.Clean(r.Path)
-		if (strings.EqualFold(rp, clean) || hasPathPrefixFold(clean, rp)) && len(rp) > len(best) {
-			best = strings.ToLower(rp)
-		}
-	}
-	return best
-}
-
 // rootFor finds the stored root config for a path (case-insensitive, as
 // Windows paths are).
 func (l *Library) rootFor(ctx context.Context, path string) (LibraryRoot, bool) {
@@ -563,8 +547,10 @@ func (l *Library) RenameFolderOnDisk(ctx context.Context, path string, newName s
 // hasPathPrefixFold reports whether path lies strictly beneath prefix
 // (case-insensitive, separator-aware).
 func hasPathPrefixFold(path, prefix string) bool {
-	if len(path) <= len(prefix) {
+	if len(path) <= len(prefix) || prefix == "" {
 		return false
 	}
-	return strings.EqualFold(path[:len(prefix)], prefix) && os.IsPathSeparator(path[len(prefix)])
+	// A drive's or a share's root ends in its separator already: E:\.
+	return strings.EqualFold(path[:len(prefix)], prefix) &&
+		(os.IsPathSeparator(path[len(prefix)]) || os.IsPathSeparator(prefix[len(prefix)-1]))
 }

@@ -22,16 +22,19 @@ type Writer struct {
 	pending map[string][]func(*File)
 	timers  map[string]*time.Timer
 	// writing serializes the writes, so two never read and write one
-	// file at once, and inFlight counts the writes taken from pending and
-	// not yet done, for Flush to wait on.
+	// file at once; inFlight counts, under mu, the writes taken from
+	// pending and not yet done, and done wakes Flush as it drops to none.
 	writing  sync.Mutex
-	inFlight sync.WaitGroup
+	inFlight int
+	done     *sync.Cond
 }
 
 // NewWriter returns a Writer that writes a folder's file delay after its
 // last change.
 func NewWriter(delay time.Duration) *Writer {
-	return &Writer{Delay: delay, pending: map[string][]func(*File){}, timers: map[string]*time.Timer{}}
+	w := &Writer{Delay: delay, pending: map[string][]func(*File){}, timers: map[string]*time.Timer{}}
+	w.done = sync.NewCond(&w.mu)
+	return w
 }
 
 // Change queues fn to change dir's file: fn is run on the file as it is on
@@ -59,7 +62,11 @@ func (w *Writer) Flush() {
 	for _, d := range dirs {
 		w.flush(d)
 	}
-	w.inFlight.Wait()
+	w.mu.Lock()
+	for w.inFlight > 0 {
+		w.done.Wait()
+	}
+	w.mu.Unlock()
 }
 
 // flush writes dir's waiting changes.
@@ -72,13 +79,19 @@ func (w *Writer) flush(dir string) {
 		delete(w.timers, dir)
 	}
 	if len(fns) > 0 {
-		w.inFlight.Add(1)
+		w.inFlight++
 	}
 	w.mu.Unlock()
 	if len(fns) == 0 {
 		return
 	}
-	defer w.inFlight.Done()
+	defer func() {
+		w.mu.Lock()
+		if w.inFlight--; w.inFlight == 0 {
+			w.done.Broadcast()
+		}
+		w.mu.Unlock()
+	}()
 	w.writing.Lock()
 	defer w.writing.Unlock()
 	if err := Update(dir, func(f *File) {

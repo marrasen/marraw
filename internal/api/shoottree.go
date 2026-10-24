@@ -216,7 +216,11 @@ func (l *Library) upgradeShootTree(ctx context.Context) {
 		}
 	}
 	roots := l.libraryRoots(ctx)
-	changed, marked := false, false
+	// The modes to keep, by library folder: found without a lock, as the
+	// look at the disk may take a while, and merged into the roots as
+	// they stand when written.
+	adds := map[string]map[string]string{}
+	marked := false
 	for i := range roots {
 		r := &roots[i]
 		key := strings.ToLower(filepath.Clean(r.Path))
@@ -240,19 +244,15 @@ func (l *Library) upgradeShootTree(ctx context.Context) {
 			if n, scanned, err := l.deps.DB.FolderPhotoCount(ctx, dir); err != nil || !scanned || n == 0 {
 				continue
 			}
-			if r.FolderModes == nil {
-				r.FolderModes = map[string]string{}
+			if adds[key] == nil {
+				adds[key] = map[string]string{}
 			}
-			r.FolderModes[k] = FolderOne
-			changed = true
+			adds[key][k] = FolderOne
 		}
 		l.upgraded[key], marked = true, true
 	}
-	if changed {
-		if err := l.SetLibraryRoots(ctx, roots); err != nil {
-			log.Printf("library: keep the shoots of an older catalog: %v", err)
-			return
-		}
+	if len(adds) > 0 && !l.keepModes(ctx, adds) {
+		return
 	}
 	if marked {
 		done := slices.Sorted(maps.Keys(l.upgraded))
@@ -310,4 +310,109 @@ func joinGroup(group, name string) string {
 // split.
 func shootRecursion(root LibraryRoot, path string) bool {
 	return root.FolderModes[strings.ToLower(path)] != FolderSplit
+}
+
+// keepModes adds the folder modes adds, by library folder, to the roots as
+// they stand now, leaving a mode the user set since; and tells every window
+// the roots changed, as a request's context may not reach them. It reports
+// whether the roots were written.
+func (l *Library) keepModes(ctx context.Context, adds map[string]map[string]string) bool {
+	l.rootsMu.Lock()
+	defer l.rootsMu.Unlock()
+	roots := l.libraryRoots(ctx)
+	for i := range roots {
+		r := &roots[i]
+		for k, mode := range adds[strings.ToLower(filepath.Clean(r.Path))] {
+			if r.FolderModes[k] != "" {
+				continue
+			}
+			if r.FolderModes == nil {
+				r.FolderModes = map[string]string{}
+			}
+			r.FolderModes[k] = mode
+		}
+	}
+	if err := l.setRoots(ctx, roots); err != nil {
+		log.Printf("library: keep the shoots of an older catalog: %v", err)
+		return false
+	}
+	keys := []string{libraryRootsKey}
+	for p := range adds {
+		keys = append(keys, shootsKey(p))
+	}
+	l.deps.TriggerRefresh(keys...)
+	return true
+}
+
+// Homes is scan.Scanner.Homes: the library's rules, as they stand now, for
+// which catalog folder a photo's row belongs in. The rule it returns reads
+// the folders' cached listings and no catalog, so it can run while a sync
+// holds the catalog.
+func (l *Library) Homes() func(file string) string {
+	roots := l.libraryRoots(context.Background())
+	return func(file string) string { return l.homeIn(roots, file) }
+}
+
+// homeIn is the folder, among roots, that reads the photo at file as part
+// of itself: a shoot holding it (at any depth, as ListShoots finds them), a
+// library folder holding it loose, or a folder added on its own that holds
+// it directly, or with its subfolders. "" where none does: the photo is
+// in a folder hidden, or one not read, or none of the library's.
+func (l *Library) homeIn(roots []LibraryRoot, file string) string {
+	clean := filepath.Clean(file)
+	var root LibraryRoot
+	found := false
+	for _, r := range roots {
+		rp := filepath.Clean(r.Path)
+		if hasPathPrefixFold(clean, rp) && (!found || len(rp) > len(root.Path)) {
+			root, found = r, true
+			root.Path = rp
+		}
+	}
+	if !found {
+		return ""
+	}
+	dir := filepath.Dir(clean)
+	if strings.EqualFold(dir, root.Path) {
+		return root.Path
+	}
+	if !root.IsParent {
+		if root.IncludeSubfolders {
+			return root.Path
+		}
+		return ""
+	}
+	rel, err := filepath.Rel(root.Path, dir)
+	if err != nil {
+		return ""
+	}
+	cur := root.Path
+	parts := strings.Split(rel, string(filepath.Separator))
+	for i, part := range parts {
+		if i >= shootDepth {
+			return ""
+		}
+		cur = filepath.Join(cur, part)
+		k := strings.ToLower(cur)
+		if slices.Contains(root.ExcludedChildren, k) {
+			return ""
+		}
+		in, ok := l.deps.dirs.info(cur)
+		if !ok {
+			return ""
+		}
+		mode := root.FolderModes[k]
+		switch {
+		case in.raws > 0 && mode != FolderSplit:
+			return cur
+		case in.raws > 0:
+			// Split: its own RAWs alone.
+			if i == len(parts)-1 {
+				return cur
+			}
+		case mode == FolderOne || mode != FolderSplit && (datedName.MatchString(part) || cardCopy(in)):
+			return cur
+		}
+	}
+	return ""
 }
