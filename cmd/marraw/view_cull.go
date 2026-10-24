@@ -1228,10 +1228,17 @@ func (v *cullView) Layout(c gunim.Constraints, f gunim.Frame, kids gunim.Childre
 	kids.At(15).Layout(gunim.Tight(geom.Sz(box.W, bandH+v.top)))
 	kids.At(15).Place(geom.Point{})
 	// The confirm bar, at the foot of the photo's room, over the strip.
+	// The crop's and the eyedropper's bars take its place: it fades for
+	// them (confirmAway) and takes no pointer.
 	cfs := kids.At(20).Layout(gunim.Loose(box))
 	fr := v.freeRect()
 	v.confirmRect = geom.Rc(fr.Center().X-cfs.W/2, foot-14-cfs.H, cfs.W, cfs.H)
-	kids.At(20).Place(v.confirmRect.Min)
+	if v.confirmAway() > 0.01 {
+		v.confirmRect = geom.Rect{}
+		kids.At(20).Place(geom.Pt(-10000, -10000))
+	} else {
+		kids.At(20).Place(v.confirmRect.Min)
+	}
 
 	return box
 }
@@ -1299,7 +1306,15 @@ func (v *cullView) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gu
 	}
 	// The confirm bar at the foot of the photo, and the pills along the
 	// top, as marraw's.
-	v.faded(p, "confirm", func() { kids.At(20).Paint(p) })
+	v.faded(p, "confirm", func() {
+		if k := v.confirmAway(); k > 0.01 {
+			if k > 0.99 {
+				return
+			}
+			defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: 1 - k})()
+		}
+		kids.At(20).Paint(p)
+	})
 	v.faded(p, "top", func() {
 		kids.At(16).Paint(p)
 		kids.At(17).Paint(p)
@@ -1452,6 +1467,12 @@ func (v *cullView) idleCheck(u *gunim.UI) {
 	v.keep = v.pieceAt(v.pointer)
 	v.idle.Animate(0, chromeFade)
 	u.Invalidate()
+}
+
+// confirmAway is how far the confirm bar has gone for the crop's or the
+// eyedropper's bar, which sit where it does.
+func (v *cullView) confirmAway() float32 {
+	return min(max(v.cropIn.Value(), v.wbIn.Value()), 1)
 }
 
 // pieceAt is the piece of what floats over the photo at p, or "".
