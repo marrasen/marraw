@@ -346,6 +346,11 @@ type culler struct {
 	aids aidsOf
 	// presetGen counts the presets laid or shown, so a late one is let go.
 	presetGen int
+	// autoSeq counts the creative auto presets' saves, so an older one
+	// never lands after a newer.
+	autoSeq int
+	// userSeq counts the user presets' saves, as autoSeq does.
+	userSeq int
 	// masks are the develop panel's masks: the one chosen, the brush; and
 	// devTab is the panel's tab showing.
 	masks  maskState
@@ -660,6 +665,8 @@ func (cu *culler) serve() error {
 				cu.modelDelete(in.File)
 			case DefaultPreset:
 				cu.defaultPreset(in)
+			case AutoPresetOp:
+				cu.autoPresetOp(in)
 			case LinkRevoke:
 				cu.linkRevoke(in.ID)
 			case MaskPickAt:
@@ -794,7 +801,15 @@ func (cu *culler) serve() error {
 			case PresetSave:
 				cu.presetSave(in)
 			case PresetDelete:
-				cu.presetDelete(in.Index)
+				cu.presetDelete(cu.presetIndex(in.ID))
+			case PresetRename:
+				cu.askPresetRename(cu.presetIndex(in.ID))
+			case PresetOverwrite:
+				cu.presetOverwrite(cu.presetIndex(in.ID))
+			case PresetsExport:
+				cu.presetsExport()
+			case PresetsImport:
+				cu.presetsImport()
 			case BurstKeep:
 				if cu.feature("bursts") {
 					cu.burstKeep(in.Pick)
@@ -1262,6 +1277,17 @@ func (cu *culler) scriptStep(k string) bool {
 			}
 			cu.dialSet(DialSet{Key: key, Value: v})
 			cu.dialSet(DialSet{Key: key, Value: v, Commit: true})
+		}
+	case ok && verb == "presets":
+		// presets:export:path and presets:import:path write the user
+		// presets to a file and add those of one, past the system's dialog.
+		op, path, _ := strings.Cut(arg, ":")
+		cu.do <- func() {
+			if op == "export" {
+				cu.presetsWrite(path)
+			} else {
+				cu.presetsRead(path)
+			}
 		}
 	case ok && verb == "fail":
 		// A made-up failure, to see the error tray.

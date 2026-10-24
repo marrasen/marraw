@@ -91,6 +91,10 @@ func (cu *culler) confirmed(a Confirmed) {
 		cu.refocus()
 		cu.aiRestore(strings.TrimPrefix(a.Kind, "aiRestore:"))
 		return
+	case strings.HasPrefix(a.Kind, "presetMasks:") && a.OK:
+		cu.refocus()
+		cu.presetMasksDownload(strings.TrimPrefix(a.Kind, "presetMasks:"))
+		return
 	case a.Kind == "cropModel" && a.OK:
 		cu.refocus()
 		cu.cropAuto(true)

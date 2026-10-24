@@ -6,10 +6,10 @@ import (
 	"crypto/rand"
 	"fmt"
 	"image/jpeg"
-	"log"
 	"math"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/marrasen/gunim"
@@ -59,7 +59,10 @@ var presetWhole = []struct {
 			d.ToneCurve, d.ToneCurveR = slices.Clone(s.ToneCurve), slices.Clone(s.ToneCurveR)
 			d.ToneCurveG, d.ToneCurveB = slices.Clone(s.ToneCurveG), slices.Clone(s.ToneCurveB)
 		}},
-	{"wb", func(p *marrawclient.Params) bool { return p.WBMode == "" }, func(d, s *marrawclient.Params) { d.WBMode = s.WBMode }},
+	// The camera's white balance is the neutral one, whichever way it is
+	// spelled: a preset made in marraw says "camera".
+	{"wb", func(p *marrawclient.Params) bool { return p.WBMode == "" || p.WBMode == marrawclient.WBModeCamera },
+		func(d, s *marrawclient.Params) { d.WBMode = s.WBMode }},
 	{"wb", func(p *marrawclient.Params) bool { return p.WBMul == [4]float64{} }, func(d, s *marrawclient.Params) { d.WBMul = s.WBMul }},
 	{"wb", func(p *marrawclient.Params) bool { return p.WBKelvin == 0 }, func(d, s *marrawclient.Params) { d.WBKelvin = s.WBKelvin }},
 	{"color", func(p *marrawclient.Params) bool { return !p.BW }, func(d, s *marrawclient.Params) { d.BW = s.BW }},
@@ -69,6 +72,16 @@ var presetWhole = []struct {
 	{"detail", func(p *marrawclient.Params) bool { return p.FBDDNoiseRd == 0 }, func(d, s *marrawclient.Params) { d.FBDDNoiseRd = s.FBDDNoiseRd }},
 	{"detail", func(p *marrawclient.Params) bool { return p.Demosaic == "" }, func(d, s *marrawclient.Params) { d.Demosaic = s.Demosaic }},
 	{"detail", func(p *marrawclient.Params) bool { return p.LensMode == "" }, func(d, s *marrawclient.Params) { d.LensMode = s.LensMode }},
+}
+
+// presetGroupAt is where group id is in presetGroups.
+func presetGroupAt(id string) int {
+	for i, g := range presetGroups {
+		if g.id == id {
+			return i
+		}
+	}
+	return -1
 }
 
 // presetSections is the groups preset carries: all where it names none.
@@ -224,14 +237,29 @@ type (
 		Index int
 	}
 	// PresetSave saves the photo's edit as a preset named Name, carrying
-	// the groups Sections, relative or not.
+	// the groups Sections, relative or not. Auto are the autos it runs
+	// again on each photo, which makes it adaptive, and Masks says it
+	// carries the photo's smart masks. No groups and the masks is a
+	// preset of the masks alone.
 	PresetSave struct {
 		Name     string
 		Sections []string
 		Relative bool
+		Auto     []string
+		Masks    bool
 	}
-	// PresetDelete deletes the user preset at Index.
-	PresetDelete struct{ Index int }
+	// PresetDelete deletes the user preset ID. They name it by its id, not
+	// its place, so two clicks before the cards redraw never reach
+	// another.
+	PresetDelete struct{ ID string }
+	// PresetRename asks for a new name for the user preset ID, and
+	// PresetOverwrite saves the photo's edit over it.
+	PresetRename    struct{ ID string }
+	PresetOverwrite struct{ ID string }
+	// PresetsExport writes the user presets to a file, and PresetsImport
+	// adds the presets of one.
+	PresetsExport struct{}
+	PresetsImport struct{}
 	// AskPreset asks for the name and groups to save the edit as.
 	AskPreset struct{}
 	// PresetsShown says the panel's presets show, or not.
@@ -323,6 +351,10 @@ func (cu *culler) presetApply(in PresetApply) {
 			cu.presetAmt = &presetAmount{id: id, base: base, result: p, name: name, amount: 1}
 			_ = cu.c.Update("develop", cu.developState())
 			cu.tell(name)
+			if !in.Auto {
+				// The smart masks only once the look has landed.
+				cu.presetMasks(id, job.users[in.Index], false)
+			}
 		}:
 		case <-cu.ctx.Done():
 		}
@@ -371,30 +403,109 @@ func (cu *culler) presetHover(in PresetHover) {
 	}()
 }
 
-// PresetAsk is what the dialog to save a preset starts from.
-type PresetAsk struct{ Name string }
+// PresetAsk is what the dialog to save a preset starts from: its name,
+// and how many smart masks the photo has to carry.
+type PresetAsk struct {
+	Name  string
+	Masks int
+}
 
-// newPresetDialog asks for a preset's name, the groups it carries, and
-// whether it adds to a photo's own edit or replaces it.
+// presetAutos are the autos an adaptive preset runs again on each photo,
+// as marraw's save row names them. Each is a group's own, by its id.
+var presetAutos = []struct{ id, label string }{{"tone", "Auto tone"}, {"wb", "Auto WB"}, {"color", "Auto colour"}}
+
+// newPresetDialog asks for a preset's name, the groups it carries,
+// whether it adds to a photo's own edit or replaces it, the autos it runs
+// again on each photo, and whether it carries the photo's smart masks.
 func newPresetDialog(s PresetAsk) *widget.Dialog {
 	d := widget.NewDialog("Save the edit as a preset")
 	name := widget.NewTextField()
 	name.SetText(s.Name, nil)
 	checks := make([]*widget.Checkbox, len(presetGroups))
+	autos := make([]*widget.Checkbox, len(presetAutos))
+	rel := widget.NewCheckbox("Add to a photo's own edit, rather than replace it")
+	rel.Tooltip = "Relative: apply the preset as offsets on top of a photo's existing edits instead of replacing them"
+	masks := widget.NewCheckbox(fmt.Sprintf("Smart masks (%d)", s.Masks))
+	masks.Tooltip = "Include this photo's smart masks as recipes: AI masks find the subject, scene or depth again " +
+		"on each photo, and range masks select by tone and colour again"
+	masks.SetChecked(s.Masks > 0, nil)
+	// relWanted and autoWanted are the boxes as chosen: an auto shows
+	// only while its group is carried, and an adaptive preset is always
+	// relative, which its box shows while it is.
+	relWanted, autoWanted := false, make([]bool, len(presetAutos))
+	adaptive := func() bool {
+		for _, a := range autos {
+			if a.Checked() {
+				return true
+			}
+		}
+		return false
+	}
+	// follow keeps the autos to the groups carried, and the relative box
+	// to whether the preset adapts.
+	follow := func(u *gunim.UI) {
+		for i, a := range presetAutos {
+			on := checks[presetGroupAt(a.id)].Checked()
+			autos[i].Disabled = !on
+			autos[i].SetChecked(on && autoWanted[i], u)
+		}
+		if adaptive() {
+			rel.SetChecked(true, u)
+			rel.Disabled = true
+		} else {
+			rel.SetChecked(relWanted, u)
+			rel.Disabled = false
+		}
+		if u != nil {
+			u.Invalidate()
+		}
+	}
 	var boxes []gunim.Node
 	for i, g := range presetGroups {
 		checks[i] = widget.NewCheckbox(g.label)
 		checks[i].SetChecked(true, nil)
 		boxes = append(boxes, checks[i])
 	}
-	rel := widget.NewCheckbox("Add to a photo's own edit, rather than replace it")
-	hint := widget.NewLabel("A preset is a look: crop, straighten and masks stay with the photo.")
-	hint.Color, hint.Size, hint.MaxLines = widget.PaletteHint, noteSize, 2
+	var autoBoxes []gunim.Node
+	for i, a := range presetAutos {
+		autos[i] = widget.NewCheckbox(a.label)
+		autos[i].Tooltip = "Run " + strings.ToLower(a.label) + " again on each photo, and lay this preset's difference over it"
+		autoBoxes = append(autoBoxes, autos[i])
+	}
+	for _, c := range checks {
+		c.OnChange = func(_ bool, u *gunim.UI) gunim.Intent {
+			follow(u)
+			return nil
+		}
+	}
+	for i, a := range autos {
+		a.OnChange = func(on bool, u *gunim.UI) gunim.Intent {
+			autoWanted[i] = on
+			follow(u)
+			return nil
+		}
+	}
+	rel.OnChange = func(on bool, _ *gunim.UI) gunim.Intent {
+		relWanted = on
+		return nil
+	}
+	hint := widget.NewLabel("A preset is a look: crop, straighten and masks stay with the photo. " +
+		"Adapts runs those autos again on each photo, and lays your edit over it as its difference from this photo's auto.")
+	if s.Masks > 0 {
+		hint.Text = "A preset is a look: crop, straighten and painted masks stay with the photo. " +
+			"Adapts runs those autos again on each photo, and lays your edit over it as its difference from this photo's auto. " +
+			"Smart masks travel as recipes, made again on each photo."
+	}
+	hint.Color, hint.Size, hint.MaxLines = widget.PaletteHint, noteSize, 4
 	form := widget.NewForm().Add("Name", name).
 		Add("Carries", widget.Column(widget.Row(boxes[:3]...), widget.Row(boxes[3:]...))).
-		Add("", rel)
+		Add("", rel).
+		Add("Adapts", widget.Row(autoBoxes...))
+	if s.Masks > 0 {
+		form.Add("Masks", masks)
+	}
 	d.Body = widget.Column(form, hint)
-	d.Width = 520
+	d.Width = 560
 	d.SetButtons("Save", "Cancel")
 	d.Check = func() string {
 		if strings.TrimSpace(name.Text()) == "" {
@@ -405,20 +516,28 @@ func newPresetDialog(s PresetAsk) *widget.Dialog {
 				return ""
 			}
 		}
+		if s.Masks > 0 {
+			if masks.Checked() {
+				return ""
+			}
+			return "Choose at least one group, or the smart masks on their own"
+		}
 		return "Choose at least one group for the preset to carry"
 	}
 	d.OnAccept = func(*gunim.UI) gunim.Intent {
-		var secs []string
+		var secs, auto []string
 		for i, c := range checks {
 			if c.Checked() {
 				secs = append(secs, presetGroups[i].id)
 			}
 		}
-		if len(secs) == len(presetGroups) {
-			// All of them is spelled as none, as marraw keeps it.
-			secs = nil
+		for i, a := range autos {
+			if a.Checked() {
+				auto = append(auto, presetAutos[i].id)
+			}
 		}
-		return PresetSave{Name: strings.TrimSpace(name.Text()), Sections: secs, Relative: rel.Checked()}
+		return PresetSave{Name: strings.TrimSpace(name.Text()), Sections: secs, Relative: relWanted, Auto: auto,
+			Masks: s.Masks > 0 && masks.Checked()}
 	}
 	d.OnDismiss = widget.Sends(PresetSave{})
 	return d
@@ -432,11 +551,13 @@ func (cu *culler) askPreset() {
 	}
 	users, _ := cu.presetsOf()
 	cu.asking = true
-	_ = cu.c.Mount(gunim.Root, "preset", "preset", PresetAsk{Name: fmt.Sprintf("Preset %d", len(users)+1)})
+	_ = cu.c.Mount(gunim.Root, "preset", "preset", PresetAsk{Name: fmt.Sprintf("Preset %d", len(users)+1),
+		Masks: len(maskRecipes(d.params))})
 }
 
 // presetSave takes the dialog's answer: the edit showing saved as a
-// preset, after marraw's others, or nothing.
+// preset, after marraw's others, or nothing. An adaptive preset keeps
+// the edit's difference from the photo's own auto, as marraw's does.
 func (cu *culler) presetSave(in PresetSave) {
 	cu.asking = false
 	_ = cu.c.Unmount("preset")
@@ -445,14 +566,63 @@ func (cu *culler) presetSave(in PresetSave) {
 	if in.Name == "" || cu.ui == nil || !d.open {
 		return
 	}
+	var recipes []marrawclient.Mask
+	if in.Masks {
+		recipes = maskRecipes(d.params)
+	}
 	p := marrawclient.UserPreset{ID: newPresetID(), Name: in.Name, Params: stripToLook(d.params), Sections: in.Sections,
 		Relative: in.Relative}
-	if i, ok := cu.index[d.id]; ok {
+	if len(in.Sections) == 0 {
+		// A preset of the masks alone sits on neutral, relative, so its
+		// look changes nothing.
+		if len(recipes) == 0 {
+			return
+		}
+		p.Params, p.Relative = marrawclient.Params{}, true
+	} else if i, ok := cu.index[d.id]; ok {
 		p.BaseExpEV = cu.photos[i].BaseExpEV
 	}
-	cu.ui.UserPresets = append(cu.ui.UserPresets, p)
+	if len(p.Sections) == len(presetGroups) {
+		// All of them is spelled as none, as marraw keeps it.
+		p.Sections = nil
+	}
+	p.Params.Masks = recipes
+	var autos []string
+	for _, a := range in.Auto {
+		if slices.Contains(in.Sections, a) {
+			autos = append(autos, a)
+		}
+	}
+	if len(autos) == 0 {
+		cu.addPreset(p)
+		return
+	}
+	id, draft := d.id, d.params
+	go func() {
+		ctx, cancel := context.WithTimeout(cu.ctx, 30*time.Second)
+		defer cancel()
+		auto, err := cu.api.Edits.AutoAdjust(ctx, id, draft, autos)
+		cu.onDo(func() {
+			if err != nil || auto == nil {
+				cu.fail("Auto adjust failed", orNoAnswer(err))
+				return
+			}
+			p.Params = adaptiveLookDiff(draft, *auto)
+			p.Params.Masks = recipes
+			p.Relative, p.BaseExpEV, p.AutoSections = true, 0, autos
+			cu.addPreset(p)
+		})
+	}()
+}
+
+// addPreset adds p after the user's other presets.
+func (cu *culler) addPreset(p marrawclient.UserPreset) {
+	if cu.ui == nil {
+		return
+	}
+	cu.ui.UserPresets = append(slices.Clone(cu.ui.UserPresets), p)
 	cu.savePresets()
-	cu.tell("Saved the preset " + in.Name)
+	cu.tell("Saved the preset " + p.Name)
 }
 
 // presetDelete deletes user preset i.
@@ -466,14 +636,119 @@ func (cu *culler) presetDelete(i int) {
 	cu.tell("Deleted the preset " + name)
 }
 
-// savePresets saves the user presets, and shows them.
-func (cu *culler) savePresets() {
-	all := slices.Clone(cu.ui.UserPresets)
-	go func() {
-		if err := cu.api.Settings.SetUserPresets(cu.ctx, all); err != nil {
-			log.Printf("presets: %v", err)
+// askPresetRename asks for a new name for user preset i.
+func (cu *culler) askPresetRename(i int) {
+	if cu.ui == nil || i < 0 || i >= len(cu.ui.UserPresets) {
+		return
+	}
+	p := cu.ui.UserPresets[i]
+	cu.askPrompt(PromptAsk{Kind: "presetRename", Key: p.ID, Title: "Rename the preset", Label: "Preset name",
+		Value: p.Name, OK: "Rename"})
+}
+
+// presetRenamed names the user preset id name.
+func (cu *culler) presetRenamed(id, name string) {
+	name = strings.TrimSpace(name)
+	if cu.ui == nil || name == "" {
+		return
+	}
+	i := slices.IndexFunc(cu.ui.UserPresets, func(p marrawclient.UserPreset) bool { return p.ID == id })
+	if i < 0 || cu.ui.UserPresets[i].Name == name {
+		return
+	}
+	ps := slices.Clone(cu.ui.UserPresets)
+	ps[i].Name = name
+	cu.ui.UserPresets = ps
+	cu.savePresets()
+}
+
+// presetOverwrite saves the edit showing over user preset i, as marraw's
+// Overwrite does: the preset keeps its id, its place and its kind. One
+// with smart masks takes the photo's, and one of masks alone stays so,
+// which needs a photo with smart masks. An adaptive one keeps the edit's
+// difference from this photo's own auto, as saving it does.
+func (cu *culler) presetOverwrite(i int) {
+	d := &cu.dev
+	if cu.ui == nil || !d.open || i < 0 || i >= len(cu.ui.UserPresets) {
+		return
+	}
+	x := cu.ui.UserPresets[i]
+	recipes := maskRecipes(d.params)
+	if isMasksOnlyPreset(x) {
+		if len(recipes) == 0 {
+			cu.tell("“" + x.Name + "” carries only smart masks, and this photo has none to save")
+			return
 		}
+		x.Params, x.BaseExpEV = marrawclient.Params{Masks: recipes}, 0
+		cu.overwritten(x)
+		return
+	}
+	keep := len(x.Params.Masks) > 0
+	x.Params = stripToLook(d.params)
+	x.BaseExpEV = 0
+	if j, ok := cu.index[d.id]; ok {
+		x.BaseExpEV = cu.photos[j].BaseExpEV
+	}
+	if keep {
+		x.Params.Masks = recipes
+	}
+	if len(x.AutoSections) == 0 {
+		cu.overwritten(x)
+		return
+	}
+	id, draft := d.id, d.params
+	go func() {
+		ctx, cancel := context.WithTimeout(cu.ctx, 30*time.Second)
+		defer cancel()
+		auto, err := cu.api.Edits.AutoAdjust(ctx, id, draft, x.AutoSections)
+		cu.onDo(func() {
+			if err != nil || auto == nil {
+				cu.fail("Auto adjust failed", orNoAnswer(err))
+				return
+			}
+			// The look alone: a rename meanwhile stays.
+			i := slices.IndexFunc(cu.ui.UserPresets, func(p marrawclient.UserPreset) bool { return p.ID == x.ID })
+			if i < 0 {
+				return
+			}
+			now := cu.ui.UserPresets[i]
+			now.Params = adaptiveLookDiff(draft, *auto)
+			now.Params.Masks = x.Params.Masks
+			now.BaseExpEV = 0
+			cu.overwritten(now)
+		})
 	}()
+}
+
+// overwritten puts x in the place of the user preset with its id.
+func (cu *culler) overwritten(x marrawclient.UserPreset) {
+	i := slices.IndexFunc(cu.ui.UserPresets, func(p marrawclient.UserPreset) bool { return p.ID == x.ID })
+	if i < 0 {
+		return
+	}
+	ps := slices.Clone(cu.ui.UserPresets)
+	ps[i] = x
+	cu.ui.UserPresets = ps
+	cu.savePresets()
+	cu.tell("“" + x.Name + "” overwritten with the current edit")
+}
+
+// savePresets saves the user presets, and shows them. The saves go in
+// order: one started after another never loses to it.
+func (cu *culler) savePresets() {
+	cu.userSeq++
+	seq, all := cu.userSeq, slices.Clone(cu.ui.UserPresets)
+	cu.call("The presets could not be saved", func(ctx context.Context) error {
+		userSaving.Lock()
+		defer userSaving.Unlock()
+		if seq <= userSaving.sent {
+			return nil
+		}
+		userSaving.sent = seq
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		return cu.api.Settings.SetUserPresets(ctx, all)
+	}, nil)
 	if cu.dev.mounted {
 		_ = cu.c.Update("develop", cu.developState())
 		cu.loadPresetThumbs()
@@ -501,19 +776,25 @@ func (cu *culler) presetCards() []PresetCard {
 	return out
 }
 
-// presetBadge marks what kind of preset p is, as marraw's cards do: auto
-// for one that adapts to the photo, ± for one that adds to its edit, and
-// how many of the six groups it carries where not all.
+// presetBadge marks what kind of preset p is, as marraw's cards do: masks
+// for one of smart masks alone, auto for one that adapts to the photo, ±
+// for one that adds to its edit, and how many of the six groups it
+// carries where not all.
 func presetBadge(p marrawclient.UserPreset) string {
+	if isMasksOnlyPreset(p) {
+		return "masks"
+	}
+	part := ""
+	if len(p.Sections) > 0 {
+		part = fmt.Sprintf("%d/%d", len(presetSections(p)), len(presetGroups))
+	}
 	switch {
 	case len(p.AutoSections) > 0:
-		return "auto"
+		return strings.TrimSpace("auto " + part)
 	case p.Relative:
-		return "±"
-	case len(p.Sections) > 0 && len(p.Sections) < len(presetGroups):
-		return fmt.Sprintf("%d/%d", len(presetSections(p)), len(presetGroups))
+		return strings.TrimSpace("± " + part)
 	}
-	return ""
+	return part
 }
 
 // presetThumbEdge is how large the presets' small pictures are rendered.
@@ -594,4 +875,19 @@ func (cu *culler) showTab(i int) {
 	if cu.dev.mounted {
 		_ = cu.c.Update("develop", cu.developState())
 	}
+}
+
+// userSaving keeps the user presets' saves in order, as autoSaving does
+// the creative autos'.
+var userSaving struct {
+	sync.Mutex
+	sent int
+}
+
+// presetIndex is the place of the user preset id, or -1.
+func (cu *culler) presetIndex(id string) int {
+	if cu.ui == nil {
+		return -1
+	}
+	return slices.IndexFunc(cu.ui.UserPresets, func(p marrawclient.UserPreset) bool { return p.ID == id })
 }
