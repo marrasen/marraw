@@ -312,11 +312,13 @@ type culler struct {
 	// panel's presets show, for their small pictures to render.
 	crop         cropMode
 	presetsShown bool
-	// original says the photo shows as it was before any edit, origImg
-	// those pixels for photo origID, and swapNow that the next picture
-	// shows at once, with no fade.
+	// original says the photo shows as it was before any edit but its
+	// crop and turns, origImg those pixels for photo origID in the frame
+	// origGeom names, and swapNow that the next picture shows at once,
+	// with no fade.
 	original bool
 	origID   int64
+	origGeom string
 	origImg  *paint.Image
 	swapNow  bool
 	// asking says a dialog is open, and deleting holds the photos its

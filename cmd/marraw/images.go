@@ -54,7 +54,9 @@ func (w want) String() string {
 
 // got is a decoded rendition, and what it took.
 type got struct {
-	img           *paint.Image
+	img *paint.Image
+	// rgba is img's pixels as decoded.
+	rgba          *image.RGBA
 	w, h          int
 	fetch, decode time.Duration
 	provisional   bool
@@ -117,7 +119,7 @@ func (im *images) get(ctx context.Context, p marrawclient.Photo, w want) (got, e
 	}
 	b := m.Bounds()
 	img := paint.NewImage(m)
-	return got{img: img, w: b.Dx(), h: b.Dy(), fetch: fetched.Sub(start), decode: time.Since(fetched),
+	return got{img: img, rgba: m, w: b.Dx(), h: b.Dy(), fetch: fetched.Sub(start), decode: time.Since(fetched),
 		provisional: resp.Header.Get("Cache-Control") == "no-store"}, nil
 }
 
