@@ -38,7 +38,7 @@ import { dropWindow, noteShownEdit, useLoupeWindow, wantWindow } from '@/lib/pre
 import { useDevicePixelRatio } from '@/lib/useDevicePixelRatio';
 import { setLoupeNav } from '@/lib/loupeNav';
 import { useUIStore } from '@/stores/uiStore';
-import { displayDims as fullDisplayDims, geometryMatrix, renderedDims, rotatedDims, rotateTurns, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
+import { displayDims as fullDisplayDims, geometryMatrix, hasCrop, renderedDims, rotatedDims, rotateTurns, rotateCropPatch, flipCropPatch, fitCropToRotation, ASPECT_PRESETS } from '@/lib/crop';
 import { CropOverlay } from '@/components/CropOverlay';
 import { AIModelDialog, type PendingAIDownload } from '@/components/AIModelDialog';
 import { isModelNotDownloaded } from '@/lib/aiConsent';
@@ -517,11 +517,14 @@ export function CinemaImage({
   // remembered crop counts only while it is still the photo's saved one,
   // as far as the photo row tells (an edit made elsewhere since, say).
   const memo = cropMemo.get(photo.id);
+  // A full-frame crop is the backend's no crop.
+  const cropOf = (p: { cropW?: number; cropH?: number }) =>
+    hasCrop(p) && !(p.cropW === 1 && p.cropH === 1) ? [p.cropW!, p.cropH!] : [0, 0];
   const memoCurrent =
     memo != null &&
     rotateTurns(memo) === rotateTurns(photo) &&
-    Math.abs((memo.cropW ?? 0) - (photo.cropW ?? 0)) < 1e-6 &&
-    Math.abs((memo.cropH ?? 0) - (photo.cropH ?? 0)) < 1e-6;
+    Math.abs(cropOf(memo)[0] - cropOf(photo)[0]) < 1e-6 &&
+    Math.abs(cropOf(memo)[1] - cropOf(photo)[1]) < 1e-6;
   const origEdit = liveCrop ?? (memoCurrent ? memo : null);
   const origW = fdw * (boxW / dw);
   const origH = fdh * (boxW / dw);
@@ -602,8 +605,9 @@ export function CinemaImage({
   const fitLevel: Level = plan.srcLevel;
   // The original in the edit's frame draws the whole frame, larger than the
   // crop the fit level is sized for: its own level, from the cache alone
-  // (2048 at most, as the layer never renders).
-  const origPx = levelForPx(Math.max(origW, origH) * window.devicePixelRatio);
+  // (2048 at most, as the layer never renders), at the zoom's target as
+  // the fit level is, so a zoom gliding there asks for no level between.
+  const origPx = levelForPx(Math.max(fdw, fdh) * scale * window.devicePixelRatio);
   const origLevel: Level = !origGeometry ? fitLevel : origPx === 'tiles' ? '2048' : origPx;
   // Warm neighbours whenever the loupe is showing committed renditions (fit
   // included — that path has no tile layer to bridge a cold 2048).
