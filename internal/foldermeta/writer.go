@@ -22,8 +22,10 @@ type Writer struct {
 	pending map[string][]func(*File)
 	timers  map[string]*time.Timer
 	// writing serializes the writes, so two never read and write one
-	// file at once.
-	writing sync.Mutex
+	// file at once, and inFlight counts the writes taken from pending and
+	// not yet done, for Flush to wait on.
+	writing  sync.Mutex
+	inFlight sync.WaitGroup
 }
 
 // NewWriter returns a Writer that writes a folder's file delay after its
@@ -57,8 +59,7 @@ func (w *Writer) Flush() {
 	for _, d := range dirs {
 		w.flush(d)
 	}
-	w.writing.Lock()
-	w.writing.Unlock() //nolint:staticcheck // waits for a write under way
+	w.inFlight.Wait()
 }
 
 // flush writes dir's waiting changes.
@@ -70,10 +71,14 @@ func (w *Writer) flush(dir string) {
 		t.Stop()
 		delete(w.timers, dir)
 	}
+	if len(fns) > 0 {
+		w.inFlight.Add(1)
+	}
 	w.mu.Unlock()
 	if len(fns) == 0 {
 		return
 	}
+	defer w.inFlight.Done()
 	w.writing.Lock()
 	defer w.writing.Unlock()
 	if err := Update(dir, func(f *File) {

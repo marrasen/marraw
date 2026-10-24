@@ -176,13 +176,14 @@ func (f *File) SetFingerprint(name string, size int64, fp string) {
 	f.Photos[name] = p
 }
 
-// AddDeleted records a photo deleted on purpose, once by its fingerprint.
+// AddDeleted records a photo deleted on purpose, once by its name and
+// fingerprint: a photo and a copy of it deleted both are two records.
 func (f *File) AddDeleted(d Deleted) {
 	if d.FP == "" {
 		return
 	}
 	for i, e := range f.Deleted {
-		if e.FP == d.FP {
+		if e.FP == d.FP && e.Name == d.Name {
 			if d.DeletedAt > e.DeletedAt {
 				f.Deleted[i] = d
 			}

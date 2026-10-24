@@ -97,6 +97,8 @@ func (l *Library) syncWatchedParents(roots []LibraryRoot) {
 // shoots of their own, unless the user split it, which leaves it its own RAWs.
 func (l *Library) scanRecursionFor(ctx context.Context, path string) bool {
 	clean := filepath.Clean(path)
+	// An older catalog's shoots are kept before a folder of one is read.
+	l.upgradeShootTree(ctx)
 	roots := l.libraryRoots(ctx)
 	for _, r := range roots {
 		if strings.EqualFold(r.Path, clean) {
@@ -133,6 +135,7 @@ func (l *Library) ListShoots(ctx context.Context, parentPath string) ([]Shoot, e
 		return nil, aprot.ErrInvalidParams(fmt.Sprintf("cannot read %s: %v", parent, err))
 	}
 
+	l.upgradeShootTree(ctx)
 	roots := l.libraryRoots(ctx)
 	var root LibraryRoot
 	excluded := map[string]bool{}
@@ -388,6 +391,29 @@ func (l *Library) libraryRoots(ctx context.Context) []LibraryRoot {
 		return []LibraryRoot{}
 	}
 	return roots
+}
+
+// SameOwner reports whether the folders a and b belong to one root of the
+// library: the nearest stored root holding each, a library folder or a
+// folder added on its own, is the same, or neither lies in one. Photo rows
+// move only between such folders (scan.Scanner.Related), so a folder added
+// with its subfolders around a library folder never takes its shoots'.
+func (l *Library) SameOwner(a, b string) bool {
+	roots := l.libraryRoots(context.Background())
+	return ownerOf(roots, a) == ownerOf(roots, b)
+}
+
+// ownerOf is the nearest of roots holding path, lowercased; "" for none.
+func ownerOf(roots []LibraryRoot, path string) string {
+	clean := filepath.Clean(path)
+	best := ""
+	for _, r := range roots {
+		rp := filepath.Clean(r.Path)
+		if (strings.EqualFold(rp, clean) || hasPathPrefixFold(clean, rp)) && len(rp) > len(best) {
+			best = strings.ToLower(rp)
+		}
+	}
+	return best
 }
 
 // rootFor finds the stored root config for a path (case-insensitive, as

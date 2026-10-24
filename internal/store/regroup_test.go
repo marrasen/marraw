@@ -100,3 +100,102 @@ func TestAFolderReadAnotherWayKeepsItsPhotos(t *testing.T) {
 		t.Fatal("a photo gone from the disk was handed over")
 	}
 }
+
+// writeRaws makes the files at paths under root.
+func writeRaws(t *testing.T, root string, paths ...string) {
+	t.Helper()
+	for _, p := range paths {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, p)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, p), []byte("raw"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A folder read as one shoot and then made a group is never read again, so
+// its subfolders, read on their own, take their photos' rows from it.
+func TestASubfolderTakesItsRowsFromAFolderAboveIt(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	trip := t.TempDir()
+	writeRaws(t, trip, filepath.Join("Day1", "x.ARW"), filepath.Join("Day2", "y.ARW"))
+	id, _ := db.UpsertFolder(ctx, trip)
+	if _, err := db.SyncFolder(ctx, id, trip, []FileEntry{
+		{Name: filepath.Join("Day1", "x.ARW"), Size: 3, MtimeNs: 1},
+		{Name: filepath.Join("Day2", "y.ARW"), Size: 3, MtimeNs: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ps, _ := db.ListPhotos(ctx, id)
+	var x Photo
+	for _, p := range ps {
+		if p.FileName == filepath.Join("Day1", "x.ARW") {
+			x = p
+		}
+	}
+	if err := db.SetRating(ctx, []int64{x.ID}, 5, 1); err != nil {
+		t.Fatal(err)
+	}
+	day1 := filepath.Join(trip, "Day1")
+	d1, _ := db.UpsertFolder(ctx, day1)
+	_, touched, err := db.SyncFolderWith(ctx, d1, day1, []FileEntry{{Name: "x.ARW", Size: 3, MtimeNs: 1}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := db.ListPhotos(ctx, d1)
+	if len(got) != 1 || got[0].ID != x.ID || got[0].Rating != 5 {
+		t.Fatalf("Day1 = %+v; want photo %d rated 5", got, x.ID)
+	}
+	if len(touched) != 1 || touched[0] != id {
+		t.Fatalf("touched %v, want the folder above, %d", touched, id)
+	}
+}
+
+// Rows move only between folders said to be related, and a row whose name
+// the listing has in another case stays put rather than going to a
+// subfolder: on a disk that ignores case it is the same file.
+func TestRowsMoveOnlyBetweenRelatedFolders(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	root := t.TempDir()
+	writeRaws(t, root, filepath.Join("Sub", "y.ARW"))
+	sub := filepath.Join(root, "Sub")
+	sid, _ := db.UpsertFolder(ctx, sub)
+	if _, err := db.SyncFolder(ctx, sid, sub, []FileEntry{{Name: "y.ARW", Size: 3, MtimeNs: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := db.UpsertFolder(ctx, root)
+	nested := filepath.Join("Sub", "y.ARW")
+	unrelated := func(p string) bool { return !filepath.IsAbs(p) || p != sub }
+	if _, _, err := db.SyncFolderWith(ctx, id, root, []FileEntry{{Name: nested, Size: 3, MtimeNs: 1}}, unrelated); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := db.ListPhotos(ctx, sid); len(got) != 1 {
+		t.Fatalf("an unrelated folder gave up its row: %+v", got)
+	}
+
+	// The same file listed in another case: the old row is not handed on.
+	other := t.TempDir()
+	writeRaws(t, other, filepath.Join("CamA", "x.ARW"))
+	oid, _ := db.UpsertFolder(ctx, other)
+	if _, err := db.SyncFolder(ctx, oid, other, []FileEntry{{Name: filepath.Join("CamA", "x.ARW"), Size: 3, MtimeNs: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SyncFolder(ctx, oid, other, []FileEntry{{Name: filepath.Join("cama", "x.ARW"), Size: 3, MtimeNs: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM folders WHERE path = ? COLLATE NOCASE`, filepath.Join(other, "CamA")).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("a case-only rename handed a row to a folder of its own: %d, %v", n, err)
+	}
+}

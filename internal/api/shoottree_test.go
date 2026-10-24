@@ -146,8 +146,9 @@ func shootsByName(t *testing.T, l *Library, lib string) map[string]Shoot {
 func lowerPath(p string) string { return strings.ToLower(filepath.Clean(p)) }
 
 // A folder right in the library folder that an older marraw read as one
-// shoot of its subfolders stays one, so its catalog rows are not left
-// behind; one the catalog has not read follows the rules.
+// shoot of its subfolders stays one, once, as the user's own choice, so its
+// catalog rows are not left behind; one the catalog has not read follows
+// the rules.
 func TestAFolderReadAsOneShootStaysOne(t *testing.T) {
 	lib := t.TempDir()
 	for _, p := range []string{
@@ -183,5 +184,23 @@ func TestAFolderReadAsOneShootStaysOne(t *testing.T) {
 	}
 	if s, ok := got["CamA"]; !ok || s.Group != "Jones Party" {
 		t.Errorf("Jones Party's subfolders: %+v", got)
+	}
+	// Kept as the user's own choice, which the user can undo, and which a
+	// listing once made never makes again.
+	roots := l.libraryRoots(ctx)
+	if roots[0].FolderModes[lowerPath(smith)] != FolderOne {
+		t.Fatalf("modes after the upgrade: %v", roots[0].FolderModes)
+	}
+	roots[0].FolderModes[lowerPath(smith)] = FolderSplit
+	setRoots(t, l, roots)
+	l.upgraded = nil
+	shoots, err := l.ListShoots(ctx, lib)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range shoots {
+		if strings.EqualFold(s.Path, smith) {
+			t.Error("the upgrade undid the user's split")
+		}
 	}
 }

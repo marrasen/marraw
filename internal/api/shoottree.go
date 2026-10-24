@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,10 +29,6 @@ import (
 //   - So is a folder holding a DCIM folder, whatever its name: a memory
 //     card copied as it is, with the photos in DCIM/100MSDCF and the
 //     camera's own folders, as PRIVATE and AVF_INFO, beside it.
-//   - So is a folder right in the library folder that the catalog already
-//     read as one shoot, of photos in its subfolders: marraw once made a
-//     shoot of every folder there, and splitting one now would leave its
-//     catalog rows, and all they hold, behind.
 //   - Any other folder without RAWs directly in it is a group, such as a
 //     year or a client, and the folders in it are looked at the same way.
 //
@@ -175,9 +175,6 @@ func (w *shootWalk) visit(dir, group string, depth int) bool {
 		}
 		w.add(dir, group, false, len(in.subdirs) > 0)
 		return true
-	case depth == 1 && mode != FolderSplit && w.readAsOne(dir):
-		w.add(dir, group, false, len(in.subdirs) > 0)
-		return true
 	}
 	if depth >= shootDepth {
 		return false
@@ -194,11 +191,76 @@ func (w *shootWalk) visit(dir, group string, depth int) bool {
 	return any
 }
 
-// readAsOne reports whether the catalog holds photos read under dir, which
-// has none directly in it: it was read as one shoot of its subfolders.
-func (w *shootWalk) readAsOne(dir string) bool {
-	n, scanned, err := w.l.deps.DB.FolderPhotoCount(w.ctx, dir)
-	return err == nil && scanned && n > 0
+// shootTreeUpgraded is the setting naming the library folders whose shoots
+// the catalog of an older marraw has been looked at for.
+const shootTreeUpgraded = "shootTreeUpgraded"
+
+// upgradeShootTree keeps, once for each library folder, what an older
+// marraw showed: a shoot of every folder right in it. A folder there that
+// the rules above make a group, but that the catalog holds photos of read
+// as one shoot, is made one shoot by the user's own choice (FolderOne), so
+// its photos keep their rows and the user can still split it. Later
+// folders follow the rules.
+func (l *Library) upgradeShootTree(ctx context.Context) {
+	l.upgradeMu.Lock()
+	defer l.upgradeMu.Unlock()
+	if l.upgraded == nil {
+		l.upgraded = map[string]bool{}
+		if raw, err := l.deps.DB.GetSetting(ctx, shootTreeUpgraded); err == nil && raw != "" {
+			var done []string
+			if json.Unmarshal([]byte(raw), &done) == nil {
+				for _, p := range done {
+					l.upgraded[p] = true
+				}
+			}
+		}
+	}
+	roots := l.libraryRoots(ctx)
+	changed, marked := false, false
+	for i := range roots {
+		r := &roots[i]
+		key := strings.ToLower(filepath.Clean(r.Path))
+		if !r.IsParent || l.upgraded[key] || !l.rootOnline(r.Path) {
+			continue
+		}
+		in, ok := l.deps.dirs.info(r.Path)
+		if !ok {
+			continue
+		}
+		for _, s := range in.subdirs {
+			dir := filepath.Join(r.Path, s)
+			k := strings.ToLower(dir)
+			if r.FolderModes[k] != "" || slices.Contains(r.ExcludedChildren, k) {
+				continue
+			}
+			sub, ok := l.deps.dirs.info(dir)
+			if !ok || sub.raws > 0 || datedName.MatchString(s) || cardCopy(sub) {
+				continue
+			}
+			if n, scanned, err := l.deps.DB.FolderPhotoCount(ctx, dir); err != nil || !scanned || n == 0 {
+				continue
+			}
+			if r.FolderModes == nil {
+				r.FolderModes = map[string]string{}
+			}
+			r.FolderModes[k] = FolderOne
+			changed = true
+		}
+		l.upgraded[key], marked = true, true
+	}
+	if changed {
+		if err := l.SetLibraryRoots(ctx, roots); err != nil {
+			log.Printf("library: keep the shoots of an older catalog: %v", err)
+			return
+		}
+	}
+	if marked {
+		done := slices.Sorted(maps.Keys(l.upgraded))
+		b, _ := json.Marshal(done)
+		if err := l.deps.DB.SetSetting(ctx, shootTreeUpgraded, string(b)); err != nil {
+			log.Printf("library: %v", err)
+		}
+	}
 }
 
 // add lists the shoot at dir: split, its own RAWs alone; else everything

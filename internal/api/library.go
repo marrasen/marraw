@@ -34,6 +34,12 @@ type Library struct {
 	// each with a detached copy of the request context that opened it.
 	focusMu sync.Mutex
 	focused []focusedFolder
+
+	// upgraded are the library folders whose shoots the catalog of an
+	// older marraw has been looked at for (upgradeShootTree), by their
+	// lowercased paths.
+	upgradeMu sync.Mutex
+	upgraded  map[string]bool
 }
 
 // ListDrives returns the filesystem roots to seed the folder tree.

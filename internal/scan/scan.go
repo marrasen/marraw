@@ -215,6 +215,11 @@ type Scanner struct {
 	// OnPhotosChanged is called (already throttled) when a folder's photo
 	// rows changed and subscribers should refresh.
 	OnPhotosChanged func(folderID int64)
+	// Related says whether photo rows may move between the catalog folders
+	// at folder and other as a folder is read another way than before
+	// (store.SyncFolderWith): those of one library folder, say. Nil lets
+	// all.
+	Related func(folder, other string) bool
 }
 
 // OpenFolder syncs the folder's directory listing into the store (fast; no
@@ -236,9 +241,19 @@ func (s *Scanner) OpenFolder(ctx context.Context, path string, recursive bool) (
 	if err != nil {
 		return 0, 0, err
 	}
-	count, err := s.DB.SyncFolder(ctx, folderID, abs, entries)
+	var related func(string) bool
+	if s.Related != nil {
+		related = func(other string) bool { return s.Related(abs, other) }
+	}
+	count, touched, err := s.DB.SyncFolderWith(ctx, folderID, abs, entries, related)
 	if err != nil {
 		return 0, 0, err
+	}
+	// Folders that gave this one rows, or took them, list otherwise now.
+	if s.OnPhotosChanged != nil {
+		for _, id := range touched {
+			s.OnPhotosChanged(id)
+		}
 	}
 	// Reconcile portable sidecars: adopt edits copied in with the folder, and
 	// backfill sidecars for catalog-only intent. Best-effort — a folder must
