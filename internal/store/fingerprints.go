@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 )
 
 // deletedPhotosSQL makes the table of photos deleted on purpose; schema.sql
@@ -101,14 +102,24 @@ func (db *DB) FolderByPath(ctx context.Context, path string) (id int64, photos i
 }
 
 // ReadFolderPath is the catalog's spelling of the folder at path, matched in
-// any case, when the folder has been read.
+// any case, when the folder has been read. Go folds the case: SQLite's
+// NOCASE knows only ASCII, and a folder named Öland is common.
 func (db *DB) ReadFolderPath(ctx context.Context, path string) (string, bool, error) {
-	var got string
-	err := db.QueryRowContext(ctx, `
-		SELECT path FROM folders WHERE path = ? COLLATE NOCASE AND last_scanned_at IS NOT NULL
-		ORDER BY path = ? DESC LIMIT 1`, path, path).Scan(&got)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+	rows, err := db.QueryContext(ctx, `
+		SELECT path FROM folders WHERE length(path) = length(?) AND last_scanned_at IS NOT NULL`, path)
+	if err != nil {
+		return "", false, err
 	}
-	return got, err == nil, err
+	defer rows.Close()
+	got := ""
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return "", false, err
+		}
+		if p == path || got == "" && strings.EqualFold(p, path) {
+			got = p
+		}
+	}
+	return got, got != "", rows.Err()
 }

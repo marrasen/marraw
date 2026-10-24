@@ -233,3 +233,36 @@ func TestACaseOnlyRenameHandsNothingOver(t *testing.T) {
 		t.Fatalf("a case-only rename handed a row to a folder of its own: %d, %v", n, err)
 	}
 }
+
+// A read that leaves out a photo still on disk whose home the rules say is
+// this very folder keeps its row: the rules changed under the read, as a
+// split undone at once does, and deleting it would lose its rating.
+func TestARowWhoseHomeIsThisFolderStays(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	trip := t.TempDir()
+	writeRaws(t, trip, filepath.Join("Day1", "x.ARW"))
+	nested := filepath.Join("Day1", "x.ARW")
+	id, _ := db.UpsertFolder(ctx, trip)
+	whole := homeAt(trip)
+	if _, _, err := db.SyncFolderWith(ctx, id, trip, []FileEntry{{Name: nested, Size: 3, MtimeNs: 1}}, whole); err != nil {
+		t.Fatal(err)
+	}
+	x, _ := photoIn(t, db, id, nested)
+	if err := db.SetRating(ctx, []int64{x.ID}, 5, 1); err != nil {
+		t.Fatal(err)
+	}
+	// Read without its subfolders, as a split would, but under rules
+	// that make it one shoot again.
+	if _, _, err := db.SyncFolderWith(ctx, id, trip, nil, whole); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := photoIn(t, db, id, nested)
+	if !ok || got.ID != x.ID || got.Rating != 5 {
+		t.Fatalf("the row = %+v, %v; want photo %d rated 5", got, ok, x.ID)
+	}
+}

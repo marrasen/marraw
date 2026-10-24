@@ -996,8 +996,13 @@ function ShootRow({
     await saveRoots(client, next);
     if (!open || !isUnder(open, path) || useUIStore.getState().folderPath !== open) return;
     const shoots = await listShoots(client, parent.path).catch(() => null);
-    if (!shoots || shoots.some((s) => samePath(s.path, open))) return;
-    if (useUIStore.getState().folderPath !== open) return;
+    if (!shoots || useUIStore.getState().folderPath !== open) return;
+    if (shoots.some((s) => samePath(s.path, open))) {
+      // Still a shoot, read now with or without its folders: read it again
+      // so its photos are the ones it holds now.
+      if (samePath(open, path)) await openFolder(client, open).catch(() => {});
+      return;
+    }
     const sorted = sortShoots(shoots, useUIStore.getState().shootSort);
     const holder = sorted
       .filter((s) => !s.isSelf && !s.split && isUnder(open, s.path))

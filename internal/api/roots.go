@@ -91,20 +91,22 @@ func (l *Library) rereadRegrouped(ctx context.Context, changed map[string]string
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-	go func() {
+	l.rereads.Go(func() {
 		defer cancel()
 		for key, root := range changed {
 			path, ok, err := l.deps.DB.ReadFolderPath(ctx, key)
 			if err != nil || !ok || l.scanRecursionFor(ctx, path) {
 				continue
 			}
-			if _, _, err := l.deps.Scanner.OpenFolder(ctx, path, false); err != nil {
+			id, _, err := l.deps.Scanner.OpenFolder(ctx, path, false)
+			if err != nil {
 				log.Printf("library: read %s again: %v", path, err)
 				continue
 			}
-			l.deps.TriggerRefresh(shootsKey(root))
+			// A window with it open shows the photos it still holds.
+			l.deps.TriggerRefresh(photosKey(id), shootsKey(root))
 		}
-	}()
+	})
 }
 
 // setRoots is SetLibraryRoots, rootsMu held, without telling the watcher.

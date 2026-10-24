@@ -114,7 +114,7 @@ func TestHomesFollowTheShoots(t *testing.T) {
 // before anyone opens them.
 func TestSplittingAFolderHandsItsRowsDown(t *testing.T) {
 	lib := t.TempDir()
-	trip := filepath.Join(lib, "2026-10-01 Trip")
+	trip := filepath.Join(lib, "2026-10-01 Öland")
 	touchRaw(t, filepath.Join(trip, "Day1", "x.ARW"))
 	touchRaw(t, filepath.Join(trip, "Day2", "y.ARW"))
 	roots := []LibraryRoot{{Path: lib, IsParent: true}}
@@ -130,20 +130,16 @@ func TestSplittingAFolderHandsItsRowsDown(t *testing.T) {
 	if err := l.SetLibraryRoots(ctx, roots); err != nil {
 		t.Fatal(err)
 	}
-	day2 := filepath.Join(trip, "Day2")
-	for deadline := time.Now().Add(10 * time.Second); ; {
-		sums, err := l.deps.DB.FolderSummaries(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, s := range sums {
-			if s.Path == day2 {
-				return
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("Day2 holds no rows after the split: %+v", sums)
-		}
-		time.Sleep(20 * time.Millisecond)
+	l.rereads.Wait()
+	sums, err := l.deps.DB.FolderSummaries(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
+	day2 := filepath.Join(trip, "Day2")
+	for _, s := range sums {
+		if s.Path == day2 {
+			return
+		}
+	}
+	t.Fatalf("Day2 holds no rows after the split: %+v", sums)
 }
