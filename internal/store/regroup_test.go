@@ -266,3 +266,25 @@ func TestARowWhoseHomeIsThisFolderStays(t *testing.T) {
 		t.Fatalf("the row = %+v, %v; want photo %d rated 5", got, ok, x.ID)
 	}
 }
+
+// A folder mode's key, lowercased in Go, finds the folder read under any
+// spelling, letters beyond ASCII too.
+func TestReadFolderPathFoldsAsTheModesDo(t *testing.T) {
+	db, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	for _, name := range []string{"2026-07-01 Öland", "2026-05-01 İstanbul"} {
+		path := filepath.Join(t.TempDir(), name)
+		id, _ := db.UpsertFolder(ctx, path)
+		if _, _, err := db.SyncFolderWith(ctx, id, path, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := db.ReadFolderPath(ctx, strings.ToLower(path))
+		if err != nil || !ok || got != path {
+			t.Fatalf("ReadFolderPath(%q) = %q, %v, %v; want %q", strings.ToLower(path), got, ok, err, path)
+		}
+	}
+}
