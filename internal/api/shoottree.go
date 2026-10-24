@@ -203,8 +203,7 @@ const shootTreeUpgraded = "shootTreeUpgraded"
 // folders follow the rules.
 func (l *Library) upgradeShootTree(ctx context.Context) {
 	// The modes to keep, by library folder, found under upgradeMu and
-	// written after it: the write tells the watcher, whose loop may be in a
-	// read waiting here.
+	// written after it, under rootsMu: one lock at a time.
 	adds, looked := l.shootTreeModes(ctx)
 	if len(looked) == 0 {
 		return
@@ -231,13 +230,17 @@ func (l *Library) shootTreeModes(ctx context.Context) (adds map[string]map[strin
 	l.upgradeMu.Lock()
 	defer l.upgradeMu.Unlock()
 	if l.upgraded == nil {
+		raw, err := l.deps.DB.GetSetting(ctx, shootTreeUpgraded)
+		if err != nil {
+			// Called off, say: what is done is read on the next read, not
+			// taken for nothing.
+			return nil, nil
+		}
 		l.upgraded = map[string]bool{}
-		if raw, err := l.deps.DB.GetSetting(ctx, shootTreeUpgraded); err == nil && raw != "" {
-			var done []string
-			if json.Unmarshal([]byte(raw), &done) == nil {
-				for _, p := range done {
-					l.upgraded[p] = true
-				}
+		var done []string
+		if raw != "" && json.Unmarshal([]byte(raw), &done) == nil {
+			for _, p := range done {
+				l.upgraded[p] = true
 			}
 		}
 	}

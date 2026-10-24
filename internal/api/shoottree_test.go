@@ -204,3 +204,33 @@ func TestAFolderReadAsOneShootStaysOne(t *testing.T) {
 		}
 	}
 }
+
+// A first read called off does not take the library folders done for none
+// done: a folder the user made follow the rules after its upgrade stays so.
+func TestAnUpgradeCalledOffForgetsNothingDone(t *testing.T) {
+	lib := t.TempDir()
+	touchRaw(t, filepath.Join(lib, "Smith Wedding", "CamA", "a.ARW"))
+	l := libraryWith(t, []LibraryRoot{{Path: lib, IsParent: true}})
+	ctx := context.Background()
+	smith := filepath.Join(lib, "Smith Wedding")
+	id, _ := l.deps.DB.UpsertFolder(ctx, smith)
+	if _, err := l.deps.DB.SyncFolder(ctx, id, smith, []store.FileEntry{{Name: filepath.Join("CamA", "a.ARW"), Size: 3, MtimeNs: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	l.upgradeShootTree(ctx)
+	roots := l.libraryRoots(ctx)
+	if roots[0].FolderModes[lowerPath(smith)] != FolderOne {
+		t.Fatalf("not upgraded: %v", roots[0].FolderModes)
+	}
+	// The user makes it follow the rules; the app starts again.
+	delete(roots[0].FolderModes, lowerPath(smith))
+	setRoots(t, l, roots)
+	l.upgraded = nil
+	off, cancel := context.WithCancel(ctx)
+	cancel()
+	l.upgradeShootTree(off)
+	l.upgradeShootTree(ctx)
+	if m := l.libraryRoots(ctx)[0].FolderModes[lowerPath(smith)]; m != "" {
+		t.Fatalf("the upgrade ran again after a read called off: %q", m)
+	}
+}
