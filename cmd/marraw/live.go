@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	"log"
+	"path/filepath"
+	"strings"
 
 	"github.com/marrasen/aprot/client"
 
@@ -42,7 +44,7 @@ func (cu *culler) followFolderID(id int64) func() {
 		}))
 	go func() {
 		for ps := range sub.C {
-			hand(func() { cu.listed(ps) })
+			hand(func() { cu.listed(id, ps) })
 		}
 	}()
 	go func() {
@@ -62,12 +64,13 @@ func (cu *culler) followFolderID(id int64) func() {
 	return sub.Close
 }
 
-// listed takes a new listing of the folder: what the backend has read and
+// listed takes a new listing of folder id: what the backend has read and
 // measured of each photo since, as when it was taken, its size and the
 // exposure it rests at, and its culling aids: its sharpness, its burst,
-// its eyes. A change of those orders and groups the photos anew.
-func (cu *culler) listed(ps []marrawclient.Photo) {
-	aided := false
+// its eyes. A change of those orders and groups the photos anew, as do
+// photos come to the folder on disk or gone from it.
+func (cu *culler) listed(id int64, ps []marrawclient.Photo) {
+	aided := cu.diskChanged(id, ps)
 	for _, f := range ps {
 		for _, p := range []*marrawclient.Photo{cu.listedPhoto(f.ID, true), cu.listedPhoto(f.ID, false)} {
 			if p == nil {
@@ -86,6 +89,64 @@ func (cu *culler) listed(ps []marrawclient.Photo) {
 	if aided {
 		cu.aidsChanged()
 	}
+}
+
+// diskChanged takes the photos of a listing of folder id that the folder
+// showing lacks, and lets go of those the listing no longer holds: files
+// copied in or deleted on disk while the folder is open. It reports
+// whether any came or went. A listing of a folder no longer showing,
+// still on its way, changes nothing.
+func (cu *culler) diskChanged(id int64, ps []marrawclient.Photo) bool {
+	dir := cu.folderPath
+	if cu.set != nil {
+		s, ok := cu.set.shoots[id]
+		if !ok {
+			return false
+		}
+		dir = s.path
+	} else if id != cu.folder {
+		return false
+	}
+	in := make(map[int64]bool, len(ps))
+	held := make(map[string]bool, len(cu.all))
+	for _, p := range cu.all {
+		held[strings.ToLower(filepath.Join(cu.folderOf(p), p.FileName))] = true
+	}
+	var added []marrawclient.Photo
+	for _, p := range ps {
+		in[p.ID] = true
+		if _, ok := cu.allIndex[p.ID]; ok {
+			continue
+		}
+		// A set holds a file once, whichever of its folders read it.
+		if k := strings.ToLower(filepath.Join(dir, p.FileName)); !held[k] {
+			held[k] = true
+			added = append(added, p)
+		}
+	}
+	gone := 0
+	for _, p := range cu.all {
+		if p.FolderID == id && !in[p.ID] {
+			gone++
+		}
+	}
+	if len(added) == 0 && gone == 0 {
+		return false
+	}
+	cu.syncAll()
+	keep := make([]marrawclient.Photo, 0, len(cu.all)-gone+len(added))
+	for _, p := range cu.all {
+		if p.FolderID != id || in[p.ID] {
+			keep = append(keep, p)
+		}
+	}
+	keep = append(keep, added...)
+	cu.all = keep
+	cu.allIndex = make(map[int64]int, len(keep))
+	for i, p := range keep {
+		cu.allIndex[p.ID] = i
+	}
+	return true
 }
 
 // listedPhoto is photo id as it shows, or in the folder's whole list.
