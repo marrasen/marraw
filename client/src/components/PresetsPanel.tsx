@@ -357,29 +357,35 @@ function UserPresetsSection({
   // masks; one without stays mask-free. A masks-only preset stays masks-only
   // — re-snapshotting the whole look into it would silently turn it into a
   // different kind of preset — so it needs a draft with smart masks.
-  const overwrite = (p: UserPreset) => {
+  const overwrite = async (p: UserPreset) => {
     if (!draft) return;
     const masksOnly = isMasksOnlyPreset(p);
     if (masksOnly && !draftRecipes) {
       toast.error(`“${p.name}” carries only smart masks — this photo has none to save`);
       return;
     }
+    const masks = (p.params.masks?.length ?? 0) > 0 ? draftRecipes : undefined;
+    let params: Params = masksOnly ? { ...NEUTRAL, masks: draftRecipes } : { ...stripToLook(draft), masks };
+    let baseExpEV = masksOnly ? undefined : photo?.baseExpEV || undefined;
+    const autos = p.autoSections ?? [];
+    if (!masksOnly && autos.length > 0 && photo) {
+      // An adaptive preset stays adaptive: it stores the difference from
+      // this photo's own auto, as a new one does.
+      let auto: Params;
+      try {
+        auto = await autoAdjust(client, photo.id, draft, autos as AutoSection[]);
+      } catch (err) {
+        toast.error(`Auto adjust failed: ${(err as Error).message}`);
+        return;
+      }
+      params = { ...adaptiveLookDiff(draft, auto, autos), masks };
+      if (autos.includes('tone')) baseExpEV = undefined;
+    }
+    // The presets as they are now: a rename while the auto ran stays.
+    const now = useUIStore.getState().userPresets;
     updateUserPresets(
       client,
-      presets.map((x) =>
-        x.id === p.id
-          ? {
-              ...x,
-              params: masksOnly
-                ? { ...NEUTRAL, masks: draftRecipes }
-                : {
-                    ...stripToLook(draft),
-                    masks: (x.params.masks?.length ?? 0) > 0 ? draftRecipes : undefined,
-                  },
-              baseExpEV: masksOnly ? undefined : photo?.baseExpEV || undefined,
-            }
-          : x,
-      ),
+      now.map((x) => (x.id === p.id ? { ...x, params, baseExpEV } : x)),
     );
     toast.success(`“${p.name}” overwritten with the current edit`);
   };
@@ -511,7 +517,7 @@ function UserPresetsSection({
                   icon={<RefreshCw className="size-3" />}
                   label={`Overwrite ${p.name} with the current edit`}
                   disabled={!draft}
-                  onClick={() => overwrite(p)}
+                  onClick={() => void overwrite(p)}
                 />
                 <CardAction
                   icon={<X className="size-3" />}
