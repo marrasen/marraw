@@ -192,6 +192,9 @@ type culler struct {
 	// the settings that remember it come: the first window, started with
 	// no folder.
 	restore bool
+	// restoring is the folder that start is opening, whose failing to
+	// open shows no error.
+	restoring string
 	// secondary says this window is not the first: it leaves telling of
 	// updates to that one. newWindow opens another window on the folder
 	// at path, or on the library for "".
@@ -1289,6 +1292,11 @@ func (cu *culler) scriptStep(k string) bool {
 				cu.presetsRead(path)
 			}
 		}
+	case ok && verb == "find":
+		// find:from:to says the folder at from is at to now, past the
+		// system's dialog, as Find folder… does.
+		from, to, _ := strings.Cut(arg, ":")
+		cu.do <- func() { cu.relocate(from, to) }
 	case ok && verb == "fail":
 		// A made-up failure, to see the error tray.
 		cu.do <- func() { cu.fail(arg, errors.New("made up by the test script for "+arg)) }

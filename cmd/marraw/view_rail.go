@@ -241,14 +241,24 @@ func railMenu(it RailItem) ([]widget.MenuItem, []string) {
 		if it.Offline {
 			caption = it.Path + " · offline"
 		}
+		if it.Missing {
+			caption = it.Path + " · moved or deleted"
+		}
 	case "group":
 		caption += fmt.Sprintf(" · %d shoots", it.Count)
 	case "shoot", "root":
 		if it.Count > 0 {
 			caption = fmt.Sprintf("%s · %d RAW", it.Name, it.Count)
 		}
+		if it.Missing {
+			caption = it.Path + " · moved or deleted"
+		}
 	}
 	add(widget.MenuItem{Label: caption, Caption: true}, "")
+	if it.Offline && (it.Kind == "parent" || it.Kind == "root" && !it.Outside) {
+		// A folder moved, or a drive under another letter.
+		add(widget.MenuItem{Label: "Find folder…", Icon: icon.FolderSearch}, "find")
+	}
 	switch it.Kind {
 	case "parent", "group":
 		add(widget.MenuItem{Label: "Rename group…", Icon: icon.Pencil}, "rename")
@@ -511,6 +521,10 @@ func (r *railRow) set(e railEntry, u *gunim.UI) {
 	r.name.Face = theme.Token[*text.Face]{}
 	r.sub.Text, r.sub.Align = "", text.AlignStart
 	r.n.Text = ""
+	r.badge.Text = "Offline"
+	if e.Missing {
+		r.badge.Text = "Missing"
+	}
 	switch e.Kind {
 	case "parent", "group":
 		// A library's heading: its name in small capitals, its folder

@@ -56,11 +56,13 @@ type (
 		Group, Open bool
 		// Sub is a header's path, under its name.
 		Sub string
-		// Offline says the folder's drive is not connected, Self that
+		// Offline says the folder is not there to read, and Missing
+		// that its drive is: moved or deleted, not unplugged. Self says
 		// the row is a library folder's own loose photos, Shared how
 		// many live links share it, and Subfolders that a root's
 		// photos are read from its subfolders too.
 		Offline    bool
+		Missing    bool
 		Self       bool
 		Shared     int
 		Subfolders bool
@@ -323,6 +325,7 @@ func (cu *culler) railItems() []RailItem {
 		on, ok := l.online[strings.ToLower(path)]
 		return on || !ok
 	}
+	missing := func(path string) bool { return l.status[strings.ToLower(path)].Missing }
 	shared := func(path string) int {
 		n := 0
 		for _, k := range l.links {
@@ -353,13 +356,16 @@ func (cu *culler) railItems() []RailItem {
 			}
 			isOpen := open(key)
 			items = append(items, RailItem{Key: key, Path: r.Path, Name: name, Kind: "parent", Group: true, Open: isOpen,
-				Sub: r.Path, Offline: !on, Count: len(rows), First: first, Last: last})
+				Sub: r.Path, Offline: !on, Missing: !on && missing(r.Path), Count: len(rows), First: first, Last: last})
 			if !isOpen {
 				continue
 			}
 			if !on {
-				items = append(items, RailItem{Key: key + "|note", Kind: "note", Depth: 1,
-					Name: "Drive not connected. Its folders come back when you plug it in again."})
+				note := "Drive not connected. Its folders come back when you plug it in again."
+				if missing(r.Path) {
+					note = "This folder was moved or deleted. Right-click it and choose Find folder… to show where it is now."
+				}
+				items = append(items, RailItem{Key: key + "|note", Kind: "note", Depth: 1, Name: note})
 				continue
 			}
 			shoot := func(s marrawclient.Shoot, depth int) RailItem {
@@ -445,7 +451,7 @@ func (cu *culler) railItems() []RailItem {
 			st := l.status[strings.ToLower(r.Path)]
 			title, line := shootLabels(rootName(r), st.EarliestTakenAt, r.PhotoCount)
 			items = append(items, RailItem{Key: r.Path, Path: r.Path, Name: rootName(r), Kind: "root", Count: r.PhotoCount,
-				Depth: 1, Offline: !online(r.Path), Shared: shared(r.Path), Subfolders: r.IncludeSubfolders,
+				Depth: 1, Offline: !online(r.Path), Missing: !online(r.Path) && missing(r.Path), Shared: shared(r.Path), Subfolders: r.IncludeSubfolders,
 				Title: title, Line: line, Picked: st.Picked, Rejected: st.Rejected, ref: st.Cover})
 		}
 	}
@@ -991,6 +997,8 @@ func (cu *culler) railAct(in RailAct) {
 			next = append(next, b.blockRoots()...)
 		}
 		cu.saveRoots(next, nil)
+	case "find":
+		cu.findFolder(it)
 	case "remove":
 		next := slices.DeleteFunc(slices.Clone(roots), func(r marrawclient.LibraryRoot) bool {
 			switch it.Kind {
@@ -1266,10 +1274,16 @@ func (cu *culler) loadSettings() {
 		if cu.restore {
 			// The folder open when marraw last closed, unless one opens
 			// already. One that fails to open stays remembered: its drive
-			// plugged in again, the next start lands there.
+			// plugged in again, the next start lands there. Its failing
+			// is no news, so the library shows without a word: the rail
+			// says where it went.
 			cu.restore = false
 			if ui.LastFolder != "" && cu.folder == 0 && cu.opening == "" {
+				cu.restoring = ui.LastFolder
 				cu.openShoot(ui.LastFolder)
+				if cu.opening != ui.LastFolder {
+					cu.restoring = ""
+				}
 			}
 		}
 		if v := viewFor(ui, cu.folderPath); cu.folder != 0 && v != cu.libView && !cu.culling {
@@ -1300,11 +1314,77 @@ func (cu *culler) openShoot(path string) {
 	if strings.EqualFold(path, cu.folderPath) && cu.set == nil {
 		return
 	}
-	if it, ok := cu.railItem(path); ok && it.Offline {
+	if it, ok := cu.railItem(path); ok && it.Missing {
+		cu.notify(it.Name + " is no longer in " + parentDir(it.Path) + ". If you moved it, right-click it and choose Find folder…")
+		return
+	} else if ok && it.Offline {
 		cu.notify(it.Name + " is offline. Reconnect its drive and it comes back on its own.")
 		return
 	}
 	cu.loadShoot(path)
+}
+
+// findFolder asks where the folder of row it is now, and has the library
+// read it there. Its ratings and edits come along in its marraw.json.
+func (cu *culler) findFolder(it RailItem) {
+	opts := chooseFolder("Where is " + it.Name + " now?")
+	opts.Folder = parentDir(it.Path)
+	go func() {
+		paths, err := cu.c.ChooseFiles(cu.ctx, opts)
+		if err != nil || len(paths) == 0 {
+			return
+		}
+		cu.onDo(func() { cu.relocate(it.Path, paths[0]) })
+	}()
+}
+
+// relocate points the library's folder at from to the folder at to,
+// where it was moved. A folder the library holds there already keeps
+// its place, and the old entry goes.
+func (cu *culler) relocate(from, to string) {
+	to = filepath.Clean(to)
+	i := slices.IndexFunc(cu.lib.roots, func(r marrawclient.LibraryRoot) bool { return strings.EqualFold(r.Path, from) })
+	if i < 0 || strings.EqualFold(from, to) {
+		return
+	}
+	if st, err := os.Stat(to); err != nil || !st.IsDir() {
+		cu.notify(baseName(to) + " is not a folder")
+		return
+	}
+	old := cu.lib.roots[i]
+	held := slices.ContainsFunc(cu.lib.roots, func(r marrawclient.LibraryRoot) bool {
+		return strings.EqualFold(r.Path, to) || r.IsParent && !old.IsParent && hasPathUnder(to, r.Path)
+	})
+	next := slices.Clone(cu.lib.roots)
+	if held {
+		next = slices.Delete(next, i, i+1)
+		cu.saveRoots(next, func() {
+			cu.notify(baseName(to) + " is in the library already. The old entry is gone.")
+			if !old.IsParent && cu.libraryHolds(to) {
+				cu.openShoot(to)
+			}
+		})
+		return
+	}
+	next[i].Path = to
+	// How the folders in a library folder show is kept by their paths,
+	// which moved with it.
+	if len(old.FolderModes) > 0 {
+		modes := make(map[string]string, len(old.FolderModes))
+		for k, m := range old.FolderModes {
+			if rel, err := filepath.Rel(strings.ToLower(filepath.Clean(from)), k); err == nil && !strings.HasPrefix(rel, "..") {
+				k = strings.ToLower(filepath.Join(to, rel))
+			}
+			modes[k] = m
+		}
+		next[i].FolderModes = modes
+	}
+	cu.saveRoots(next, func() {
+		cu.notify("Found " + rootName(old) + " in " + parentDir(to))
+		if !old.IsParent {
+			cu.openShoot(to)
+		}
+	})
 }
 
 // loadShoot reads the folder at path and shows it in the grid, the one
@@ -1320,6 +1400,8 @@ func (cu *culler) loadShoot(path string) {
 		}
 		select {
 		case cu.do <- func() {
+			quiet := strings.EqualFold(cu.restoring, path)
+			cu.restoring = ""
 			if cu.opening != path {
 				// Another shoot was chosen meanwhile.
 				return
@@ -1327,6 +1409,10 @@ func (cu *culler) loadShoot(path string) {
 			cu.opening = ""
 			if err != nil {
 				cu.railChanged()
+				if quiet {
+					log.Printf("reopening %s: %v", path, err)
+					return
+				}
 				cu.fail("The folder could not be opened", err)
 				return
 			}

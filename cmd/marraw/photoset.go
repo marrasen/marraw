@@ -141,7 +141,9 @@ func (cu *culler) setShoots(it RailItem) []setShoot {
 		}
 	case "group":
 		for _, r := range cu.lib.roots {
-			if !r.IsParent && strings.EqualFold(filepath.Dir(r.Path), it.Path) {
+			// A shoot not there to read shows none of the photos the
+			// catalog kept of it.
+			if !r.IsParent && strings.EqualFold(filepath.Dir(r.Path), it.Path) && cu.online(r.Path) {
 				out = append(out, setShoot{path: r.Path, name: rootName(r), earliest: cu.lib.status[strings.ToLower(r.Path)].EarliestTakenAt})
 			}
 		}
