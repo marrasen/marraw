@@ -117,15 +117,21 @@ export function useLibraryRoots(): { roots: LibraryRoot[]; isLoading: boolean } 
   return { roots: data ?? [], isLoading };
 }
 
+/** Whether a root is there, on a drive not connected, or moved or deleted. */
+export type RootPresence = 'online' | 'offline' | 'missing';
+
 /**
- * Which roots' storage is reachable. Unknown paths read as online: the first
- * snapshot arrives a moment after mount, and flashing "Offline" on a perfectly
+ * Where each root stands. Unknown paths read as online: the first snapshot
+ * arrives a moment after mount, and flashing "Offline" on a perfectly
  * healthy library would be worse than a beat of silence.
  */
-export function useRootOnline(): (path: string) => boolean {
+export function useRootPresence(): (path: string) => RootPresence {
   const { data } = useGetRootStatus();
-  return (path: string) =>
-    data?.find((s) => samePath(s.path, path))?.online ?? true;
+  return (path: string) => {
+    const st = data?.find((s) => samePath(s.path, path));
+    if (!st || st.online) return 'online';
+    return st.missing ? 'missing' : 'offline';
+  };
 }
 
 export function saveRoots(client: ApiClient, roots: LibraryRoot[]) {

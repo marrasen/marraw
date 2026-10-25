@@ -144,6 +144,7 @@ export interface RenderProgressEvent {
 export interface RootStatus {
     path: string;
     online: boolean;
+    missing: boolean;
     earliestTakenAt: number;
     picked: number;
     rejected: number;

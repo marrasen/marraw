@@ -1405,6 +1405,39 @@ if (shot === 'cull') {
     probe.error = String(err);
     probe.rowsAtError = rows();
   }
+} else if (shot === 'rootmissing') {
+  // Two shoots added by hand beside the open folder: one whose folder is
+  // gone from a parent still there (moved), and one whose parent is gone
+  // too (a drive unplugged). The rail must call the first missing and the
+  // second offline, and say so when each is clicked.
+  ui().setMode('library');
+  const folder = ui().folderPath;
+  const lib = folder.replace(/[\\/][^\\/]+$/, '');
+  const sep = folder.includes('\\') ? '\\' : '/';
+  const moved = `${lib}${sep}Moved away shoot`;
+  const unplugged = `${lib}${sep}No such drive${sep}Trip`;
+  await mw.setLibraryRoots([
+    { path: folder, alias: '', includeSubfolders: false, photoCount: 0, isParent: false },
+    { path: moved, alias: '', includeSubfolders: false, photoCount: 0, isParent: false },
+    { path: unplugged, alias: '', includeSubfolders: false, photoCount: 0, isParent: false },
+  ]);
+  const probe = (window.__rootMissingProbe = { stage: 'waiting for badges' });
+  const row = (name) =>
+    [...document.querySelectorAll('[data-testid="rail-root"]')].find((r) => r.dataset.name === name);
+  const toastText = () =>
+    [...document.querySelectorAll('[data-sonner-toast]')].map((t) => t.textContent.trim());
+  try {
+    await until(() => row('Moved away shoot')?.textContent.includes('Missing') && row('Trip')?.textContent.includes('Offline'), 15000);
+    probe.moved = { text: row('Moved away shoot').textContent.trim(), title: row('Moved away shoot').title };
+    probe.unplugged = { text: row('Trip').textContent.trim(), title: row('Trip').title };
+    probe.stage = 'clicking the missing shoot';
+    row('Moved away shoot').click();
+    await until(() => toastText().some((t) => /is missing/.test(t)), 5000);
+    probe.movedToast = toastText();
+    probe.stage = 'done';
+  } catch (err) {
+    probe.error = String(err);
+  }
 } else if (shot === 'share' || shot === 'share-publish') {
   // The share dialog, reached the way a user reaches it: right-click a shoot
   // in the rail. Needs MARRAW_SHOT_OWN_DAEMON=1 — the shared `marrawd --dev`
@@ -3147,6 +3180,7 @@ const probe =
   window.__settleProbe ??
   window.__restoreProbe ??
   window.__railTreeProbe ??
+  window.__rootMissingProbe ??
   window.__welcomeProbe ??
   window.__folderViewProbe ??
   window.__exportCopyProbe ??

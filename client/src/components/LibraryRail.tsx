@@ -18,6 +18,7 @@ import {
   Monitor,
   Pencil,
   Play,
+  FolderX,
   PlugZap,
   Plus,
   RefreshCw,
@@ -69,13 +70,15 @@ import {
   openRoot,
   openShoot,
   parentKey,
+  parentPath,
   isUnder,
   railBlocks,
   rootName,
   samePath,
   saveRoots,
   useLibraryRoots,
-  useRootOnline,
+  useRootPresence,
+  type RootPresence,
   type RailBlock,
   type RootGroup,
 } from '@/lib/library';
@@ -114,14 +117,16 @@ function blockId(b: RailBlock): string {
     : `g:${b.group.parentPath.toLowerCase()}`;
 }
 
-/** Whether a folder's storage is reachable, threaded down from one subscription. */
-type OnlineFn = (path: string) => boolean;
+/** Where a folder stands, threaded down from one subscription. */
+type PresenceFn = (path: string) => RootPresence;
 
 /**
  * The folder's storage is disconnected — an unplugged external drive, or an
  * unreachable share. Nothing is lost; the daemon polls and the folder returns.
+ * Missing, the drive is there and the folder is not: moved or deleted, so
+ * waiting brings nothing back.
  */
-function OfflineBadge({ className }: { className?: string }) {
+function OfflineBadge({ className, missing }: { className?: string; missing?: boolean }) {
   return (
     <span
       data-testid="offline-badge"
@@ -129,10 +134,18 @@ function OfflineBadge({ className }: { className?: string }) {
         'flex shrink-0 items-center gap-1 rounded-full bg-secondary px-1.5 py-px font-mono text-[9.5px] tracking-[.04em] text-muted-foreground uppercase dark:bg-white/8',
         className,
       )}
-      title="This folder's drive is not connected. It will come back on its own when you reconnect it."
+      title={
+        missing
+          ? 'This folder is not where it was. It was moved or deleted. Remove it, then add it again from its new place.'
+          : "This folder's drive is not connected. It will come back on its own when you reconnect it."
+      }
     >
-      <PlugZap className="size-[9px]" strokeWidth={2} />
-      Offline
+      {missing ? (
+        <FolderX className="size-[9px]" strokeWidth={2} />
+      ) : (
+        <PlugZap className="size-[9px]" strokeWidth={2} />
+      )}
+      {missing ? 'Missing' : 'Offline'}
     </span>
   );
 }
@@ -178,7 +191,7 @@ export function LibraryRail() {
   const setSettingsOpen = useUIStore((s) => s.setSettingsOpen);
   const groupAliases = useUIStore((s) => s.groupAliases);
   // One subscription for the whole rail, not one per row.
-  const rootOnline = useRootOnline();
+  const rootPresence = useRootPresence();
   const { data: shareLinks } = useListLinks();
   // Expired links are still listed (so they can be tidied up in Settings) but
   // they share nothing, so they must not mark a shoot as shared.
@@ -246,7 +259,8 @@ export function LibraryRail() {
                     filter={q}
                     renaming={renaming}
                     setRenaming={setRenaming}
-                    online={rootOnline(b.root.path)}
+                    online={rootPresence(b.root.path) === 'online'}
+                    missing={rootPresence(b.root.path) === 'missing'}
                   />
                 ) : (
                   <Group
@@ -257,7 +271,7 @@ export function LibraryRail() {
                     renaming={renaming}
                     setRenaming={setRenaming}
                     forceOpen={q !== ''}
-                    rootOnline={rootOnline}
+                    rootPresence={rootPresence}
                   />
                 ),
               )}
@@ -704,6 +718,7 @@ function ManagedParent({
   renaming,
   setRenaming,
   online,
+  missing,
 }: {
   root: LibraryRoot;
   roots: LibraryRoot[];
@@ -712,6 +727,7 @@ function ManagedParent({
   renaming: string | null;
   setRenaming: (v: string | null) => void;
   online: boolean;
+  missing: boolean;
 }) {
   const client = useApiClient();
   const groupAliases = useUIStore((s) => s.groupAliases);
@@ -813,7 +829,7 @@ function ManagedParent({
                 strokeWidth={1.5}
                 aria-label="Library folder"
               />
-              {!online && <OfflineBadge />}
+              {!online && <OfflineBadge missing={missing} />}
             </>
           }
           onToggle={() => updateRailGroupOpen(client, key, !open)}
@@ -827,7 +843,9 @@ function ManagedParent({
               {root.path} ·{' '}
               {online
                 ? `${rows.length} folder${rows.length === 1 ? '' : 's'} · auto-updating`
-                : 'offline'}
+                : missing
+                  ? 'missing'
+                  : 'offline'}
             </span>
           </div>
           <ContextMenuSeparator />
@@ -1190,7 +1208,7 @@ function Group({
   renaming,
   setRenaming,
   forceOpen,
-  rootOnline,
+  rootPresence,
 }: {
   group: RootGroup;
   blocks: RailBlock[];
@@ -1198,7 +1216,7 @@ function Group({
   renaming: string | null;
   setRenaming: (v: string | null) => void;
   forceOpen: boolean;
-  rootOnline: OnlineFn;
+  rootPresence: PresenceFn;
 }) {
   const client = useApiClient();
   const groupAliases = useUIStore((s) => s.groupAliases);
@@ -1316,7 +1334,8 @@ function Group({
               key={r.path}
               root={r}
               roots={roots}
-              online={rootOnline(r.path)}
+              online={rootPresence(r.path) === 'online'}
+              missing={rootPresence(r.path) === 'missing'}
               onRename={() => setRenaming(r.path.toLowerCase())}
             />
           ),
@@ -1330,11 +1349,13 @@ function RootRow({
   root,
   roots,
   online,
+  missing,
   onRename,
 }: {
   root: LibraryRoot;
   roots: LibraryRoot[];
   online: boolean;
+  missing: boolean;
   onRename: () => void;
 }) {
   const client = useApiClient();
@@ -1343,6 +1364,12 @@ function RootRow({
   const scanning = useFolderBusy(root.path);
 
   const open = () => {
+    if (missing) {
+      toast.error(`${rootName(root)} is missing`, {
+        description: `It is no longer in ${parentPath(root.path)}. If you moved it, remove it here and add it again from its new place. Your edits travel with the folder.`,
+      });
+      return;
+    }
     if (!online) {
       toast.error(`${rootName(root)} is offline`, {
         description: 'Reconnect the drive — the folder returns on its own.',
@@ -1397,7 +1424,13 @@ function RootRow({
             onRename();
           }
         }}
-        title={online ? root.path : `${root.path} — drive not connected`}
+        title={
+          online
+            ? root.path
+            : missing
+              ? `${root.path} — moved or deleted`
+              : `${root.path} — drive not connected`
+        }
         data-testid="rail-root"
         data-name={rootName(root)}
         data-online={online ? '1' : '0'}
@@ -1410,7 +1443,7 @@ function RootRow({
           {rootName(root)}
         </span>
         {!online ? (
-          <OfflineBadge />
+          <OfflineBadge missing={missing} />
         ) : scanning ? (
           <ChipSpinner className="size-3" />
         ) : root.photoCount > 0 ? (
