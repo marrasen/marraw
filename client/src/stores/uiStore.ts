@@ -129,6 +129,9 @@ interface UIState {
   folderPath: string | null;
   view: View;
   addFolderOpen: boolean;
+  // The library folder whose new place the folder picker is finding (the
+  // rail's "Find folder…"), or null.
+  findFolderFor: string | null;
   paletteOpen: boolean;
   shortcutsOpen: boolean;
   // OS fullscreen (F11) — mirrored from the Electron window so Esc can exit.
@@ -317,6 +320,7 @@ interface UIState {
 
   setMode: (m: Mode) => void;
   setAddFolderOpen: (open: boolean) => void;
+  setFindFolderFor: (path: string | null) => void;
   setPaletteOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setContactSheet: (open: boolean) => void;
@@ -357,6 +361,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   folderPath: null,
   view: 'grid',
   addFolderOpen: false,
+  findFolderFor: null,
   paletteOpen: false,
   shortcutsOpen: false,
   fullscreen: false,
@@ -432,6 +437,7 @@ export const useUIStore = create<UIState>((set, get) => ({
         : { mode: m, view: 'loupe', showOriginal: false },
     ),
   setAddFolderOpen: (open) => set({ addFolderOpen: open }),
+  setFindFolderFor: (path) => set({ findFolderFor: path }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setContactSheet: (open) => set({ contactSheet: open }),

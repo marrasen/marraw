@@ -13,7 +13,15 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Segmented } from '@/components/ui/segmented';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { openRoot, parentPath, samePath, saveRoots, useLibraryRoots } from '@/lib/library';
+import {
+  openRoot,
+  parentPath,
+  relocateRoot,
+  rootName,
+  samePath,
+  saveRoots,
+  useLibraryRoots,
+} from '@/lib/library';
 import { useUIStore } from '@/stores/uiStore';
 
 type ImportMode = 'shoot' | 'library';
@@ -40,20 +48,27 @@ function crumbs(path: string): { name: string; path: string }[] {
 /**
  * Add-folder picker (handoff plate "ADD FOLDER"): the old filesystem browser
  * repurposed as a modal. Navigate drives, tick folders, import them as
- * library roots — files never move.
+ * library roots — files never move. The same picker finds where a library
+ * folder that was moved is now (the rail's "Find folder…").
  */
 export function AddFolderDialog() {
   const open = useUIStore((s) => s.addFolderOpen);
   const setOpen = useUIStore((s) => s.setAddFolderOpen);
+  const findFor = useUIStore((s) => s.findFolderFor);
+  const setFindFor = useUIStore((s) => s.setFindFolderFor);
+  if (findFor) return <PickerBody key={findFor} find={findFor} onClose={() => setFindFor(null)} />;
   if (!open) return null;
   return <PickerBody onClose={() => setOpen(false)} />;
 }
 
-function PickerBody({ onClose }: { onClose: () => void }) {
+function PickerBody({ onClose, find }: { onClose: () => void; find?: string }) {
   const client = useApiClient();
   const { roots } = useLibraryRoots();
   const { data: drives } = useListDrives();
-  const [path, setPath] = useState<string | null>(null);
+  // Finding, the folder it was in opens first: a moved folder is often
+  // near where it was.
+  const [path, setPath] = useState<string | null>(find ? parentPath(find) : null);
+  const finding = find ? roots.find((r) => samePath(r.path, find)) : undefined;
   const [mode, setMode] = useState<ImportMode>('shoot');
   // Shoot mode only. A library parent always scans non-recursively (its own row
   // holds loose RAWs; nested folders become its children), so this is ignored
@@ -61,9 +76,14 @@ function PickerBody({ onClose }: { onClose: () => void }) {
   const [subfolders, setSubfolders] = useState(true);
 
   const location = path ?? drives?.[0]?.path ?? null;
-  const isLibrary = mode === 'library';
-  const recursive = isLibrary || subfolders;
-  const already = location != null && roots.some((r) => samePath(r.path, location));
+  // Finding keeps the folder's own mode and subfolders setting.
+  const isLibrary = finding ? finding.isParent : mode === 'library';
+  const recursive = isLibrary || (finding ? finding.includeSubfolders : subfolders);
+  // Finding, a folder the library holds is fine: relocateRoot drops the
+  // old entry for it. Only the old place itself is no answer.
+  const already =
+    location != null &&
+    (finding ? samePath(finding.path, location) : roots.some((r) => samePath(r.path, location)));
   const atDriveRoot = location != null && isDriveRoot(location);
 
   // Recursive RAW total for the folder Add would import, debounced and keyed
@@ -93,6 +113,11 @@ function PickerBody({ onClose }: { onClose: () => void }) {
 
   const add = async () => {
     if (!location || already) return;
+    if (finding) {
+      onClose();
+      await relocateRoot(client, roots, finding, location);
+      return;
+    }
 
     const newRoot: LibraryRoot = {
       path: location,
@@ -133,9 +158,13 @@ function PickerBody({ onClose }: { onClose: () => void }) {
       >
         <div className="flex items-center justify-between border-b px-[22px] py-[15px]">
           <div className="flex flex-col gap-0.5">
-            <span className="text-base font-semibold">Add folder to library</span>
+            <span className="text-base font-semibold">
+              {finding ? `Find ${rootName(finding)}` : 'Add folder to library'}
+            </span>
             <span className="text-xs text-muted-foreground">
-              Pick an import mode, then open the folder you want to add
+              {finding
+                ? 'Open the folder where it is now. Its ratings and edits come along.'
+                : 'Pick an import mode, then open the folder you want to add'}
             </span>
           </div>
           <button
@@ -147,7 +176,7 @@ function PickerBody({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div className="flex flex-col gap-3 border-b px-[22px] py-3">
+        <div className={cn('flex flex-col gap-3 border-b px-[22px] py-3', finding && 'hidden')}>
           <Segmented
             items={[
               { value: 'shoot', label: 'Import single shoot' },
@@ -220,6 +249,7 @@ function PickerBody({ onClose }: { onClose: () => void }) {
             atDriveRoot={atDriveRoot}
             files={files}
             shoot={!isLibrary}
+            finding={finding != null}
           />
           <Button variant="outline" size="lg" onClick={onClose}>
             Cancel
@@ -229,7 +259,7 @@ function PickerBody({ onClose }: { onClose: () => void }) {
             disabled={!location || already || atDriveRoot || nothingToImport}
             onClick={() => void add()}
           >
-            {isLibrary ? 'Add as library folder' : 'Add to library'}
+            {finding ? 'Use this folder' : isLibrary ? 'Add as library folder' : 'Add to library'}
           </Button>
         </div>
       </DialogContent>
@@ -333,12 +363,14 @@ function FooterInfo({
   atDriveRoot,
   files,
   shoot,
+  finding,
 }: {
   location: string | null;
   already: boolean;
   atDriveRoot: boolean;
   files: number | null;
   shoot: boolean;
+  finding: boolean;
 }) {
   if (!location) return <div className="flex-1" />;
 
@@ -347,12 +379,14 @@ function FooterInfo({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5" title={location}>
       <span className="truncate text-[12.5px]">
-        <span className="text-muted-foreground">Add </span>
+        <span className="text-muted-foreground">{finding ? 'Use ' : 'Add '}</span>
         <span className="font-medium text-foreground">{name}</span>
       </span>
       <span className="truncate font-mono text-[11px] text-muted-foreground">
         {already
-          ? 'Already in your library'
+          ? finding
+            ? 'This is where it was'
+            : 'Already in your library'
           : atDriveRoot
             ? 'Open a folder on this drive to add it'
             : files == null
