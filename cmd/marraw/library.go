@@ -1357,7 +1357,6 @@ func (cu *culler) relocate(from, to string) {
 	// save saves next as the library and, once it is saved, does then: a
 	// failed save says so, and nothing goes on as if it had worked.
 	save := func(next []marrawclient.LibraryRoot, then func()) {
-		before := cu.lib.roots
 		cu.lib.roots = next
 		cu.railChanged()
 		var err error
@@ -1366,12 +1365,13 @@ func (cu *culler) relocate(from, to string) {
 			return err
 		}, func() {
 			if err != nil {
-				// The sidebar as the library still is, unless another
-				// change came meanwhile, which is the library's now.
-				if len(cu.lib.roots) == len(next) && (len(next) == 0 || &cu.lib.roots[0] == &next[0]) {
-					cu.lib.roots = before
-					cu.railChanged()
-				}
+				// The sidebar as the library still is: read again, as
+				// another change may have failed too, or been saved.
+				go func() {
+					if roots, err := cu.api.Library.GetLibraryRoots(cu.ctx); err == nil {
+						cu.onDo(func() { cu.rootsIn(roots) })
+					}
+				}()
 				return
 			}
 			then()

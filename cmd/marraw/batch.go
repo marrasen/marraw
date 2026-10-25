@@ -124,7 +124,11 @@ func (cu *culler) batchPreset(in BatchPreset) {
 			}
 			if mapErr != nil {
 				// The look goes on all the same, as when the model is
-				// declined.
+				// declined; a preset of AI masks alone has none.
+				if isMasksOnlyPreset(users[in.Index]) && len(ranges) == 0 {
+					cu.fail("The preset's AI masks could not be made", mapErr)
+					return
+				}
 				cu.batchPresetRun(ids, in, users, autos, ranges, nil, evs, "without its AI masks: "+mapErr.Error())
 				return
 			}
