@@ -72,7 +72,9 @@ func TestPresenceStopsWhereSharesAreMounted(t *testing.T) {
 			t.Errorf("%s is where shares are mounted", dir)
 		}
 	}
-	if mountHolder("/home/u/Photos") {
-		t.Error("a photo folder is no mount holder")
+	for _, dir := range []string{"/home/u/Photos", "/net/nas/export/Photos"} {
+		if mountHolder(dir) {
+			t.Errorf("%s is a photo folder, no mount holder", dir)
+		}
 	}
 }

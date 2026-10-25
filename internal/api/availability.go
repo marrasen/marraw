@@ -152,11 +152,11 @@ func mountHolder(dir string) bool {
 	case "/", "/Volumes", "/media", "/mnt", "/net":
 		return true
 	}
-	if filepath.Base(dir) == "gvfs" || strings.HasPrefix(dir, "/net/") {
+	if filepath.Base(dir) == "gvfs" {
 		return true
 	}
 	up := filepath.Dir(dir)
-	return up == "/media" || up == "/run/media"
+	return up == "/media" || up == "/run/media" || up == "/net"
 }
 
 // holdsSomething checks whether dir has anything in it, away from Windows:
