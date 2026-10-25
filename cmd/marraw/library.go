@@ -1354,19 +1354,51 @@ func (cu *culler) relocate(from, to string) {
 		return
 	}
 	old := cu.lib.roots[i]
+	// save saves next as the library and, once it is saved, does then: a
+	// failed save says so, and nothing goes on as if it had worked.
+	save := func(next []marrawclient.LibraryRoot, then func()) {
+		cu.lib.roots = next
+		cu.railChanged()
+		var err error
+		cu.call("The library could not be saved", func(ctx context.Context) error {
+			err = cu.api.Library.SetLibraryRoots(ctx, next)
+			return err
+		}, func() {
+			if err == nil {
+				then()
+			}
+		})
+	}
 	held := slices.ContainsFunc(cu.lib.roots, func(r marrawclient.LibraryRoot) bool {
 		return strings.EqualFold(r.Path, to) || r.IsParent && !old.IsParent && hasPathUnder(to, r.Path)
 	})
 	next := slices.Clone(cu.lib.roots)
 	if held {
 		next = slices.Delete(next, i, i+1)
-		cu.saveRoots(next, func() {
+		// The library folder that holds it shows it, hidden there or not.
+		lower := strings.ToLower(to)
+		for j := range next {
+			if next[j].IsParent && hasPathUnder(to, next[j].Path) {
+				next[j].ExcludedChildren = slices.DeleteFunc(slices.Clone(next[j].ExcludedChildren), func(k string) bool {
+					return k == lower || hasPathUnder(lower, k)
+				})
+			}
+		}
+		save(next, func() {
 			cu.notify(baseName(to) + " is in the library already. The old entry is gone.")
 			if !old.IsParent && cu.libraryHolds(to) {
 				cu.openShoot(to)
 			}
 		})
 		return
+	}
+	if old.IsParent {
+		// A library folder shows the shoots right inside its new place,
+		// so one added there by hand would show twice, as adding it does.
+		next = slices.DeleteFunc(next, func(r marrawclient.LibraryRoot) bool {
+			return !r.IsParent && strings.EqualFold(parentDir(r.Path), to)
+		})
+		i = slices.IndexFunc(next, func(r marrawclient.LibraryRoot) bool { return strings.EqualFold(r.Path, from) })
 	}
 	next[i].Path = to
 	// How the folders in a library folder show, and which are hidden, is
@@ -1385,7 +1417,7 @@ func (cu *culler) relocate(from, to string) {
 		}
 		next[i].ExcludedChildren = hidden
 	}
-	cu.saveRoots(next, func() {
+	save(next, func() {
 		cu.notify("Found " + rootName(old) + " in " + parentDir(to))
 		if old.IsParent {
 			cu.moveRailState(from, to)

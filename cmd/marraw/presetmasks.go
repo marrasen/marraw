@@ -35,7 +35,7 @@ var autoFields = map[string][]string{
 // the edit draft's difference from auto, the photo's own auto, laid on
 // their neutral. The rest stay draft's: the choices, hues and curves land
 // whole, and the other quantities have no auto to differ from, so they
-// land on each photo as in any relative preset.
+// land as the preset's relative switch says.
 func adaptiveLookDiff(draft, auto marrawclient.Params, sections []string) marrawclient.Params {
 	out := stripToLook(draft)
 	var neutral marrawclient.Params

@@ -113,6 +113,15 @@ func applyUserPreset(draft marrawclient.Params, preset marrawclient.UserPreset, 
 	out := draft
 	src := preset.Params
 	rel := preset.Relative
+	// An adaptive preset keeps what its autos write as the difference from
+	// the auto of the photo it was made on: that lands on this photo's own
+	// auto (draft, here) whatever the preset says of the rest.
+	adaptive := map[string]bool{}
+	for _, s := range preset.AutoSections {
+		for _, key := range autoFields[s] {
+			adaptive[key] = true
+		}
+	}
 	var neutral marrawclient.Params
 	if secs["tone"] {
 		// The look's exposure is its offset from the camera's rest on the
@@ -120,7 +129,7 @@ func applyUserPreset(draft marrawclient.Params, preset marrawclient.UserPreset, 
 		creative := src.ExpEV - preset.BaseExpEV
 		ev := baseEV + creative
 		switch {
-		case rel:
+		case rel || adaptive["expEV"]:
 			ev = draft.ExpEV + creative
 		case preset.BaseExpEV == 0:
 			ev = src.ExpEV
@@ -132,7 +141,7 @@ func applyUserPreset(draft marrawclient.Params, preset marrawclient.UserPreset, 
 		if !secs[group] || !ok {
 			continue
 		}
-		if !rel {
+		if !rel && !adaptive[key] {
 			raw := sp.get(&src)
 			sp.set(&out, clampRound(raw, float64(sp.min), float64(sp.max)))
 			continue
@@ -154,8 +163,11 @@ func applyUserPreset(draft marrawclient.Params, preset marrawclient.UserPreset, 
 			}
 		}
 	}
+	// Auto white balance sets the mode, the multipliers and the kelvin.
+	wbAuto := slices.Contains(preset.AutoSections, "wb")
 	for _, f := range presetWhole {
-		if secs[f.group] && (!rel || !f.neutral(&src)) {
+		relHere := rel || f.group == "wb" && wbAuto
+		if secs[f.group] && (!relHere || !f.neutral(&src)) {
 			f.copy(&out, &src)
 		}
 	}
@@ -435,31 +447,16 @@ func newPresetDialog(s PresetAsk) *widget.Dialog {
 		"on each photo, and range masks select by tone and colour again"
 	masks.SetChecked(s.Masks > 0, nil)
 	// relWanted and autoWanted are the boxes as chosen: an auto shows
-	// only while its group is carried, and an adaptive preset is always
-	// relative, which its box shows while it is.
+	// only while its group is carried. What the autos set always lands as
+	// the difference from each photo's own auto; the relative box says
+	// how the rest lands.
 	relWanted, autoWanted := false, make([]bool, len(presetAutos))
-	adaptive := func() bool {
-		for _, a := range autos {
-			if a.Checked() {
-				return true
-			}
-		}
-		return false
-	}
-	// follow keeps the autos to the groups carried, and the relative box
-	// to whether the preset adapts.
+	// follow keeps the autos to the groups carried.
 	follow := func(u *gunim.UI) {
 		for i, a := range presetAutos {
 			on := checks[presetGroupAt(a.id)].Checked()
 			autos[i].Disabled = !on
 			autos[i].SetChecked(on && autoWanted[i], u)
-		}
-		if adaptive() {
-			rel.SetChecked(true, u)
-			rel.Disabled = true
-		} else {
-			rel.SetChecked(relWanted, u)
-			rel.Disabled = false
 		}
 		if u != nil {
 			u.Invalidate()
@@ -614,7 +611,7 @@ func (cu *culler) presetSave(in PresetSave) {
 			}
 			p.Params = adaptiveLookDiff(draft, *auto, autos)
 			p.Params.Masks = recipes
-			p.Relative, p.AutoSections = true, autos
+			p.AutoSections = autos
 			if slices.Contains(autos, "tone") {
 				// Exposure rides each photo's own auto: no baseline to
 				// anchor. Otherwise it is kept as drawn, and anchors as

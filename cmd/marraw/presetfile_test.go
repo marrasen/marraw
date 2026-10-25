@@ -151,6 +151,12 @@ func TestAdaptiveLookDiff(t *testing.T) {
 		math.Abs(got.Clarity-0.4) > 1e-9 || math.Abs(got.Vignette+0.3) > 1e-9 || math.Abs(got.HSLSat[2]-0.2) > 1e-9 || !got.BW {
 		t.Errorf("applied %+v", got)
 	}
+	// Not relative, the rest lands as drawn, over the photo's own.
+	other.Clarity = 0.1
+	p.Relative = false
+	if got := applyUserPreset(other, p, 0); math.Abs(got.Clarity-0.4) > 1e-9 || math.Abs(got.Contrast-0.6) > 1e-9 {
+		t.Errorf("applied absolute %+v", got)
+	}
 	// Tone not auto, its fields are kept as drawn.
 	if d := adaptiveLookDiff(draft, auto, []string{"color"}); d.Contrast != 0.5 || d.ExpEV != 1.5 {
 		t.Errorf("tone not auto: %+v", d)
