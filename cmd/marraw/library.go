@@ -363,7 +363,7 @@ func (cu *culler) railItems() []RailItem {
 			if !on {
 				note := "Drive not connected. Its folders come back when you plug it in again."
 				if missing(r.Path) {
-					note = "This folder was moved or deleted. Right-click it and choose Find folder… to show where it is now."
+					note = "Moved or deleted. Right-click it and choose Find folder…"
 				}
 				items = append(items, RailItem{Key: key + "|note", Kind: "note", Depth: 1, Name: note})
 				continue
@@ -1278,11 +1278,11 @@ func (cu *culler) loadSettings() {
 			// is no news, so the library shows without a word: the rail
 			// says where it went.
 			cu.restore = false
-			if ui.LastFolder != "" && cu.folder == 0 && cu.opening == "" {
-				cu.restoring = ui.LastFolder
+			it, known := cu.railItem(ui.LastFolder)
+			if ui.LastFolder != "" && cu.folder == 0 && cu.opening == "" && !(known && it.Offline) {
 				cu.openShoot(ui.LastFolder)
-				if cu.opening != ui.LastFolder {
-					cu.restoring = ""
+				if cu.opening == ui.LastFolder {
+					cu.restoring = ui.LastFolder
 				}
 			}
 		}
@@ -1311,6 +1311,8 @@ func (cu *culler) railHas(path string) bool {
 // showing, the cull view closing first if it is open.
 func (cu *culler) openShoot(path string) {
 	cu.openingSet = ""
+	// Chosen, a folder that start was opening says why it fails.
+	cu.restoring = ""
 	if strings.EqualFold(path, cu.folderPath) && cu.set == nil {
 		return
 	}
@@ -1367,24 +1369,91 @@ func (cu *culler) relocate(from, to string) {
 		return
 	}
 	next[i].Path = to
-	// How the folders in a library folder show is kept by their paths,
-	// which moved with it.
+	// How the folders in a library folder show, and which are hidden, is
+	// kept by their paths, which moved with it.
 	if len(old.FolderModes) > 0 {
 		modes := make(map[string]string, len(old.FolderModes))
 		for k, m := range old.FolderModes {
-			if rel, err := filepath.Rel(strings.ToLower(filepath.Clean(from)), k); err == nil && !strings.HasPrefix(rel, "..") {
-				k = strings.ToLower(filepath.Join(to, rel))
-			}
-			modes[k] = m
+			modes[movedKey(k, from, to)] = m
 		}
 		next[i].FolderModes = modes
 	}
+	if len(old.ExcludedChildren) > 0 {
+		hidden := make([]string, len(old.ExcludedChildren))
+		for j, k := range old.ExcludedChildren {
+			hidden[j] = movedKey(k, from, to)
+		}
+		next[i].ExcludedChildren = hidden
+	}
 	cu.saveRoots(next, func() {
 		cu.notify("Found " + rootName(old) + " in " + parentDir(to))
-		if !old.IsParent {
+		if old.IsParent {
+			cu.moveRailState(from, to)
+		} else {
 			cu.openShoot(to)
 		}
 	})
+}
+
+// movedKey is the key k, a lowercased path, after the folder at from
+// moved to to: as it was, for a path not in that folder.
+func movedKey(k, from, to string) string {
+	rel, err := filepath.Rel(strings.ToLower(filepath.Clean(from)), k)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return k
+	}
+	return strings.ToLower(filepath.Join(to, rel))
+}
+
+// moveRailState carries a library folder's sidebar name, and which of
+// its headers are closed, from its old path to its new one.
+func (cu *culler) moveRailState(from, to string) {
+	if cu.ui == nil {
+		return
+	}
+	oldKey, newKey := "parent:"+strings.ToLower(from), "parent:"+strings.ToLower(to)
+	moved := func(k string) (string, bool) {
+		if k == oldKey || strings.HasPrefix(k, oldKey+"|") {
+			return newKey + k[len(oldKey):], true
+		}
+		return "", false
+	}
+	var closed [][2]string
+	for k, open := range cu.ui.RailGroups {
+		if nk, ok := moved(k); ok && !open {
+			closed = append(closed, [2]string{k, nk})
+		}
+	}
+	for _, c := range closed {
+		delete(cu.ui.RailGroups, c[0])
+		cu.ui.RailGroups[c[1]] = false
+	}
+	alias := cu.ui.GroupAliases[oldKey]
+	if alias != "" {
+		delete(cu.ui.GroupAliases, oldKey)
+		cu.ui.GroupAliases[newKey] = alias
+	}
+	if len(closed) == 0 && alias == "" {
+		return
+	}
+	cu.railChanged()
+	cu.call("The sidebar could not keep that", func(ctx context.Context) error {
+		for _, c := range closed {
+			if err := cu.api.Settings.SetRailGroupOpen(ctx, c[0], true); err != nil {
+				return err
+			}
+			if err := cu.api.Settings.SetRailGroupOpen(ctx, c[1], false); err != nil {
+				return err
+			}
+		}
+		if alias == "" {
+			return nil
+		}
+		if err := cu.api.Settings.SetGroupAlias(ctx, oldKey, ""); err != nil {
+			return err
+		}
+		return cu.api.Settings.SetGroupAlias(ctx, newKey, alias)
+	}, nil)
 }
 
 // loadShoot reads the folder at path and shows it in the grid, the one

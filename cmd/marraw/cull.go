@@ -1293,9 +1293,9 @@ func (cu *culler) scriptStep(k string) bool {
 			}
 		}
 	case ok && verb == "find":
-		// find:from:to says the folder at from is at to now, past the
+		// find:from|to says the folder at from is at to now, past the
 		// system's dialog, as Find folder… does.
-		from, to, _ := strings.Cut(arg, ":")
+		from, to, _ := strings.Cut(arg, "|")
 		cu.do <- func() { cu.relocate(from, to) }
 	case ok && verb == "fail":
 		// A made-up failure, to see the error tray.

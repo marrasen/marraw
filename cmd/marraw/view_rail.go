@@ -337,7 +337,7 @@ func (v *railView) show(s RailState, u *gunim.UI) {
 	for i, it := range s.Items {
 		// The row of what shows: the folder whose overview shows, or else
 		// the shoot open.
-		current := !it.Group && s.Overview == "" && strings.EqualFold(it.Path, s.Current)
+		current := !it.Group && it.Path != "" && s.Overview == "" && strings.EqualFold(it.Path, s.Current)
 		if it.Group {
 			current = s.Overview != "" && it.Key == s.Overview
 		}
@@ -532,6 +532,10 @@ func (r *railRow) set(e railEntry, u *gunim.UI) {
 		r.name.Text = strings.ToUpper(e.Name)
 		r.name.Color, r.name.Size, r.name.MaxLines, r.name.Face = sectionLabelInk, sectionLabelSize, 1, widget.BoldFont
 		r.sub.Text, r.sub.Size, r.sub.Align = e.Sub, railSub, text.AlignEnd
+		if e.Offline {
+			// The badge stands in the folder's place.
+			r.sub.Text = ""
+		}
 	case "time":
 		r.name.Color, r.name.Size = noteInk, railCount
 		if e.Count > 0 {
