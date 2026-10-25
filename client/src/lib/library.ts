@@ -178,11 +178,29 @@ function movedKey(k: string, from: string, to: string): string {
  */
 export async function relocateRoot(client: ApiClient, roots: LibraryRoot[], from: LibraryRoot, to: string) {
   if (samePath(from.path, to)) return;
-  const held = roots.some(
-    (r) => samePath(r.path, to) || (r.isParent && !from.isParent && isUnder(to, r.path)),
-  );
-  if (held) {
-    await saveRoots(client, roots.filter((r) => !samePath(r.path, from.path)));
+  // Saved, or told why not: saveRoots reports its own failure and resolves
+  // either way, so the rest must not go on as if it had worked.
+  const save = async (next: LibraryRoot[]) => {
+    try {
+      await setLibraryRoots(client, next);
+      return true;
+    } catch (err) {
+      toast.error(`Could not save library: ${(err as Error).message}`);
+      return false;
+    }
+  };
+  const lowered = to.toLowerCase();
+  const holder = from.isParent ? undefined : roots.find((r) => r.isParent && isUnder(to, r.path) && !samePath(r.path, to));
+  if (roots.some((r) => samePath(r.path, to)) || holder) {
+    // The library folder that holds it shows it, hidden there or not.
+    const next = roots
+      .filter((r) => !samePath(r.path, from.path))
+      .map((r) =>
+        r === holder && r.excludedChildren?.some((k) => isUnder(lowered, k))
+          ? { ...r, excludedChildren: r.excludedChildren.filter((k) => !isUnder(lowered, k)) }
+          : r,
+      );
+    if (!(await save(next))) return;
     toast.success(`${baseName(to)} is in the library already`, { description: 'The old entry is gone.' });
     if (from.isParent) return;
     try {
@@ -201,8 +219,11 @@ export async function relocateRoot(client: ApiClient, roots: LibraryRoot[], from
       : from.folderModes,
     excludedChildren: from.excludedChildren?.map((k) => movedKey(k, from.path, to)),
   };
-  const next = roots.map((r) => (samePath(r.path, from.path) ? moved : r));
-  await saveRoots(client, next);
+  // A library folder now shows the shoots right inside its new place, so
+  // one added there by hand would show twice, as adding it does.
+  const absorbed = (r: LibraryRoot) => from.isParent && !r.isParent && samePath(parentPath(r.path), to);
+  const next = roots.filter((r) => !absorbed(r)).map((r) => (samePath(r.path, from.path) ? moved : r));
+  if (!(await save(next))) return;
   toast.success(`Found ${rootName(from)} in ${parentPath(to)}`);
   if (!from.isParent) {
     await openRoot(client, next, moved);

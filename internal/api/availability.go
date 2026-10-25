@@ -137,16 +137,22 @@ const (
 	missing
 )
 
-// mountHolder reports whether dir is where the system mounts drives, so a
-// folder missing from it is a drive unplugged, not a folder moved:
-// /Volumes on macOS, /media, /media/<user>, /run/media/<user> and /mnt on
-// Linux. A drive's letter on Windows goes with the drive.
+// mountHolder reports whether dir is where the system mounts drives and
+// shares, so a folder missing from it, or from below it, is a drive
+// unplugged or a share dropped, not a folder moved: /Volumes on macOS,
+// /media, /media/<user>, /run/media/<user> and /mnt on Linux, GNOME's
+// gvfs folder of mounted shares, autofs's /net, and the top of the
+// filesystem itself, which holds the mount points made by hand. A drive's
+// letter on Windows goes with the drive.
 func mountHolder(dir string) bool {
 	if runtime.GOOS == "windows" {
 		return false
 	}
 	switch dir {
-	case "/Volumes", "/media", "/mnt":
+	case "/", "/Volumes", "/media", "/mnt", "/net":
+		return true
+	}
+	if filepath.Base(dir) == "gvfs" || strings.HasPrefix(dir, "/net/") {
 		return true
 	}
 	up := filepath.Dir(dir)
