@@ -3,6 +3,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -28,5 +29,21 @@ func TestPresenceTellsMovedFromUnplugged(t *testing.T) {
 		if got[strings.ToLower(path)] != want {
 			t.Errorf("%s: presence %d, want %d", filepath.Base(path), got[strings.ToLower(path)], want)
 		}
+	}
+}
+
+// Away from Windows, a folder missing from an empty one reads as a drive
+// unplugged from its mount point, not a folder moved.
+func TestPresenceTakesAnEmptyParentForAMountPoint(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no mount points in folders to mistake")
+	}
+	mount := filepath.Join(t.TempDir(), "Drive")
+	if err := os.Mkdir(mount, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	trip := filepath.Join(mount, "Trip")
+	if got := presenceAll([]string{trip})[strings.ToLower(trip)]; got != disconnected {
+		t.Errorf("presence %d, want disconnected (%d)", got, disconnected)
 	}
 }
