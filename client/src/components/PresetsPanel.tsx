@@ -302,10 +302,12 @@ function UserPresetsSection({
         toast.error(`Auto adjust failed: ${(err as Error).message}`);
         return;
       }
-      params = { ...adaptiveLookDiff(draft, auto), masks: recipes };
+      params = { ...adaptiveLookDiff(draft, auto, autos), masks: recipes };
       rel = true;
-      // Exposure rides the per-photo auto result; no baseline to anchor.
-      baseEV = undefined;
+      // Exposure rides the per-photo auto result where tone is auto: no
+      // baseline to anchor. Otherwise it is kept as drawn, and re-anchors
+      // as in any preset.
+      if (autos.includes('tone')) baseEV = undefined;
     }
     const preset: UserPreset = {
       id: crypto.randomUUID(),

@@ -320,3 +320,49 @@ func TestAutoToneSubjectAwareMetering(t *testing.T) {
 		t.Errorf("sliver matte moved ExpEV: %v vs %v", tiny.ExpEV, global.ExpEV)
 	}
 }
+
+// Auto tone and color write only the fields an adaptive preset adapts
+// (AUTO_FIELDS in client/src/lib/presetSections.ts, and gunim's copy). A
+// field written here and missing there would be stored in the preset as
+// drawn, and land on top of each photo's own auto.
+func TestAutoAdjustWritesOnlyItsFields(t *testing.T) {
+	writes := map[string]bool{"ExpEV": true, "Contrast": true, "Whites": true, "Blacks": true,
+		"ToneShadows": true, "ToneHighlights": true, "Saturation": true, "Vibrance": true}
+	var p edit.Params
+	v := reflect.ValueOf(&p).Elem()
+	for i := range v.NumField() {
+		f := v.Field(i)
+		switch f.Kind() {
+		case reflect.Float64:
+			f.SetFloat(0.37)
+		case reflect.Int, reflect.Int64:
+			f.SetInt(2)
+		case reflect.Bool:
+			f.SetBool(true)
+		case reflect.Array:
+			for j := range f.Len() {
+				if f.Index(j).Kind() == reflect.Float64 {
+					f.Index(j).SetFloat(0.37)
+				}
+			}
+		}
+	}
+	before := p
+	img := grayImage(t, []block{{20, 300}, {40, 400}, {60, 300}})
+	AutoAdjust(img, testGamma, &p, []AutoSection{AutoTone, AutoColor}, nil)
+	a, b := reflect.ValueOf(before), reflect.ValueOf(p)
+	changed := 0
+	for i := range a.NumField() {
+		name := a.Type().Field(i).Name
+		if reflect.DeepEqual(a.Field(i).Interface(), b.Field(i).Interface()) {
+			continue
+		}
+		changed++
+		if !writes[name] {
+			t.Errorf("auto wrote %s, which adaptive presets keep as drawn", name)
+		}
+	}
+	if changed == 0 {
+		t.Fatal("auto wrote nothing: the test image no longer moves it")
+	}
+}
