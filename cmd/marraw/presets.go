@@ -256,6 +256,11 @@ type (
 	// PresetOverwrite saves the photo's edit over it.
 	PresetRename    struct{ ID string }
 	PresetOverwrite struct{ ID string }
+	// PresetDuplicate adds a copy of the user preset ID after it, and
+	// PresetMove puts the user preset ID in the place of the one To, as
+	// a card dropped on another does.
+	PresetDuplicate struct{ ID string }
+	PresetMove      struct{ ID, To string }
 	// PresetsExport writes the user presets to a file, and PresetsImport
 	// adds the presets of one.
 	PresetsExport struct{}
@@ -664,6 +669,51 @@ func (cu *culler) presetRenamed(id, name string) {
 	}
 	ps := slices.Clone(cu.ui.UserPresets)
 	ps[i].Name = name
+	cu.ui.UserPresets = ps
+	cu.savePresets()
+}
+
+// presetDuplicate adds a copy of user preset i right after it, with an id
+// of its own and a name numbered apart, as marraw's Duplicate does.
+func (cu *culler) presetDuplicate(i int) {
+	if cu.ui == nil || i < 0 || i >= len(cu.ui.UserPresets) {
+		return
+	}
+	ps := cu.ui.UserPresets
+	p := ps[i]
+	p.ID, p.Name = newPresetID(), copyName(p.Name, ps)
+	cu.ui.UserPresets = slices.Insert(slices.Clone(ps), i+1, p)
+	cu.savePresets()
+}
+
+// copyName is a copy's name: name with (2), (3) and so on after it, its
+// own number let go first, so a copy of "Warm (2)" is "Warm (3)" where
+// that is free. Unlike presetName it always numbers.
+func copyName(name string, ps []marrawclient.UserPreset) string {
+	if open := strings.LastIndex(name, " ("); open >= 0 && strings.HasSuffix(name, ")") {
+		if n := name[open+2 : len(name)-1]; n != "" && strings.Trim(n, "0123456789") == "" {
+			name = name[:open]
+		}
+	}
+	for i := 2; ; i++ {
+		n := fmt.Sprintf("%s (%d)", name, i)
+		if !slices.ContainsFunc(ps, func(p marrawclient.UserPreset) bool { return p.Name == n }) {
+			return n
+		}
+	}
+}
+
+// presetMove puts user preset id in the place of preset to, the others
+// moving up or down one to make room. The order is that of Ctrl, Shift
+// and 1 to 9.
+func (cu *culler) presetMove(id, to string) {
+	i, j := cu.presetIndex(id), cu.presetIndex(to)
+	if i < 0 || j < 0 || i == j {
+		return
+	}
+	ps := slices.Clone(cu.ui.UserPresets)
+	p := ps[i]
+	ps = slices.Insert(slices.Delete(ps, i, i+1), j, p)
 	cu.ui.UserPresets = ps
 	cu.savePresets()
 }

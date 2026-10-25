@@ -201,8 +201,9 @@ func (g *presetGrid) Paint(p *paint.Painter, _ gunim.Frame, _ geom.Size, kids gu
 
 // presetCard is a preset's card: its small picture, which lifts and rings
 // under the pointer, and its name. A user preset's card shows its actions
-// under the pointer, as marraw's: rename, overwrite with the edit, and
-// delete.
+// under the pointer, as marraw's: rename, duplicate, overwrite with the
+// edit, and delete. It drags onto another of the user's to take its
+// place, which is how marraw orders them.
 type presetCard struct {
 	anim.Group
 	card     PresetCard
@@ -212,7 +213,21 @@ type presetCard struct {
 	box      geom.Size
 	// overAct is the action under the pointer, or -1.
 	overAct int
+	// held says the button went down on the card, at press, and dragging
+	// that it moved far enough to pick the card up. dropIn lights the
+	// card as another is dragged over it.
+	press          geom.Point
+	held, dragging bool
+	dropIn         *anim.Float
 }
+
+// presetDrag is what a user preset's card carries as it is dragged: the
+// preset's id.
+type presetDrag struct{ id string }
+
+// presetPickUp is how far the pointer moves before it picks a card up, so
+// a click stays a click.
+const presetPickUp = 4
 
 // presetCardActs are a user preset's card's actions, left to right.
 var presetCardActs = []struct {
@@ -220,14 +235,16 @@ var presetCardActs = []struct {
 	send func(id string) gunim.Intent
 }{
 	{icon.Pencil, func(id string) gunim.Intent { return PresetRename{ID: id} }},
+	{icon.CopyPlus, func(id string) gunim.Intent { return PresetDuplicate{ID: id} }},
 	{icon.RefreshCw, func(id string) gunim.Intent { return PresetOverwrite{ID: id} }},
 	{icon.X, func(id string) gunim.Intent { return PresetDelete{ID: id} }},
 }
 
 func newPresetCard(p PresetCard) *presetCard {
-	c := &presetCard{card: p, name: newSmallLabel(p.Name), hot: anim.NewFloat(0), in: anim.NewFloat(1), overAct: -1}
+	c := &presetCard{card: p, name: newSmallLabel(p.Name), hot: anim.NewFloat(0), in: anim.NewFloat(1), overAct: -1,
+		dropIn: anim.NewFloat(0)}
 	c.name.MaxLines = 1
-	c.Add(c.hot, c.in)
+	c.Add(c.hot, c.in, c.dropIn)
 	return c
 }
 
@@ -272,7 +289,12 @@ func (c *presetCard) Layout(cs gunim.Constraints, _ gunim.Frame, kids gunim.Chil
 	return c.box
 }
 
-// Handle implements [gunim.Handler].
+// id is the user preset's id, from the card's key.
+func (c *presetCard) id() string { return strings.TrimPrefix(c.card.Key, "u:") }
+
+// Handle implements [gunim.Handler]. A click applies the preset as the
+// button comes up, as marraw's does, so a press that moves on a user
+// preset's card drags it instead.
 func (c *presetCard) Handle(e input.Event, u *gunim.UI) bool {
 	th := u.Theme()
 	switch e := e.(type) {
@@ -281,6 +303,18 @@ func (c *presetCard) Handle(e input.Event, u *gunim.UI) bool {
 		u.Send(c, PresetHover{Auto: c.card.Auto, Index: c.card.Index})
 	case input.PointerMove:
 		c.overAct = c.actAt(e.Pos)
+		if !c.held || c.dragging || c.card.Auto {
+			break
+		}
+		if dx, dy := e.Pos.X-c.press.X, e.Pos.Y-c.press.Y; dx*dx+dy*dy < presetPickUp*presetPickUp {
+			break
+		}
+		// Picked up: the look showing goes back to the edit, and the card
+		// rides under the pointer.
+		c.dragging = true
+		u.Send(c, PresetHover{Index: -1})
+		pic := &presetGhost{img: c.img, size: c.picRect().Size()}
+		u.StartDrag(c, presetDrag{id: c.id()}, widget.NewDragGhost(pic, c.press), c.press)
 	case input.PointerLeave:
 		c.hot.Animate(0, widget.Quick.Get(th))
 		c.overAct = -1
@@ -293,11 +327,37 @@ func (c *presetCard) Handle(e input.Event, u *gunim.UI) bool {
 			// The look showing goes back to the edit first: the card may
 			// go, or a dialog cover it, under a pointer that does not move.
 			u.Send(c, PresetHover{Index: -1})
-			u.Send(c, presetCardActs[a].send(strings.TrimPrefix(c.card.Key, "u:")))
+			u.Send(c, presetCardActs[a].send(c.id()))
 			return true
 		}
-		u.Send(c, PresetApply{Auto: c.card.Auto, Index: c.card.Index})
+		c.held, c.press = true, e.Pos
 		return true
+	case input.PointerUp:
+		if !c.held {
+			return false
+		}
+		if !c.dragging {
+			u.Send(c, PresetApply{Auto: c.card.Auto, Index: c.card.Index})
+		}
+		c.held = false
+		return true
+	case input.DragEnd:
+		c.held, c.dragging = false, false
+	case input.DragOver:
+		d, ok := e.Data.(presetDrag)
+		if !ok || c.card.Auto || d.id == c.id() {
+			return false
+		}
+		c.dropIn.Animate(1, widget.Quick.Get(th))
+	case input.DragLeave:
+		c.dropIn.Animate(0, widget.Settle.Get(th))
+	case input.Drop:
+		d, ok := e.Data.(presetDrag)
+		if !ok || c.card.Auto || d.id == c.id() {
+			return false
+		}
+		c.dropIn.Animate(0, widget.Settle.Get(th))
+		u.Send(c, PresetMove{ID: d.id, To: c.id()})
 	default:
 		return false
 	}
@@ -309,9 +369,13 @@ func (c *presetCard) Handle(e input.Event, u *gunim.UI) bool {
 func (c *presetCard) Cursor(geom.Point) input.Cursor { return input.CursorHand }
 
 // Paint implements [gunim.Node].
-func (c *presetCard) Paint(p *paint.Painter, f gunim.Frame, _ geom.Size, kids gunim.Children) {
+func (c *presetCard) Paint(p *paint.Painter, f gunim.Frame, box geom.Size, kids gunim.Children) {
 	hot := c.hot.Value()
 	r := c.picRect()
+	if c.dragging {
+		// Away under the pointer: the card dims where it was.
+		defer p.Layer(paint.LayerOpts{Bounds: geom.Rect{Max: box.Point()}, Opacity: 0.35})()
+	}
 	func() {
 		defer p.Push(paint.Scale(1+0.03*hot, r.Center()))()
 		p.RRect(r, 6, paint.Solid(frameInk))
@@ -322,9 +386,8 @@ func (c *presetCard) Paint(p *paint.Painter, f gunim.Frame, _ geom.Size, kids gu
 		if c.img != nil {
 			p.Image(c.img, r, paint.ImageOpts{Src: coverSrc(c.img, r), Radius: 6, Opacity: k})
 		}
-		if hot > 0.01 {
-			ring := widget.Accent.Get(f.Theme)
-			p.RRectStroke(r, 6, paint.Fill{}, paint.Stroke{Width: 2, Color: withAlpha(ring, hot)})
+		if ring := max(hot, c.dropIn.Value()); ring > 0.01 {
+			p.RRectStroke(r, 6, paint.Fill{}, paint.Stroke{Width: 2, Color: withAlpha(widget.Accent.Get(f.Theme), ring)})
 		}
 		if !c.card.Auto && hot > 0.01 {
 			for i, a := range presetCardActs {
@@ -342,6 +405,25 @@ func (c *presetCard) Paint(p *paint.Painter, f gunim.Frame, _ geom.Size, kids gu
 		}
 	}()
 	kids.At(0).Paint(p)
+}
+
+// presetGhost is the picture a user preset's card carries as it is
+// dragged: its small picture.
+type presetGhost struct {
+	img  *paint.Image
+	size geom.Size
+}
+
+// Layout implements [gunim.Node].
+func (g *presetGhost) Layout(gunim.Constraints, gunim.Frame, gunim.Children) geom.Size { return g.size }
+
+// Paint implements [gunim.Node].
+func (g *presetGhost) Paint(p *paint.Painter, _ gunim.Frame, box geom.Size, _ gunim.Children) {
+	r := geom.Rect{Max: box.Point()}
+	p.RRect(r, 6, paint.Solid(frameInk))
+	if g.img != nil {
+		p.Image(g.img, r, paint.ImageOpts{Src: coverSrc(g.img, r), Radius: 6, Opacity: 1})
+	}
 }
 
 // coverSrc is the part of img that fills r, its middle, cut to r's shape.

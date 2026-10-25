@@ -90,6 +90,18 @@ func TestPresetName(t *testing.T) {
 	}
 }
 
+// A copy is always numbered, from its original's name without a number,
+// as marraw's uniqueName names a duplicate.
+func TestCopyName(t *testing.T) {
+	ps := []marrawclient.UserPreset{{Name: "Look"}, {Name: "Look (2)"}, {Name: "Mix (a)"}}
+	for in, want := range map[string]string{"Look": "Look (3)", "Look (2)": "Look (3)", "Other": "Other (2)",
+		"Mix (a)": "Mix (a) (2)", "Old (12)": "Old (2)"} {
+		if got := copyName(in, ps); got != want {
+			t.Errorf("copy of %q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
 // The smart masks travel, hidden and painted ones do not, and a preset
 // of them alone is told from one that carries a look.
 func TestMaskRecipes(t *testing.T) {

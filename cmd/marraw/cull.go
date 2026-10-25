@@ -809,6 +809,10 @@ func (cu *culler) serve() error {
 				cu.askPresetRename(cu.presetIndex(in.ID))
 			case PresetOverwrite:
 				cu.presetOverwrite(cu.presetIndex(in.ID))
+			case PresetDuplicate:
+				cu.presetDuplicate(cu.presetIndex(in.ID))
+			case PresetMove:
+				cu.presetMove(in.ID, in.To)
 			case PresetsExport:
 				cu.presetsExport()
 			case PresetsImport:
