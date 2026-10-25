@@ -1357,6 +1357,7 @@ func (cu *culler) relocate(from, to string) {
 	// save saves next as the library and, once it is saved, does then: a
 	// failed save says so, and nothing goes on as if it had worked.
 	save := func(next []marrawclient.LibraryRoot, then func()) {
+		before := cu.lib.roots
 		cu.lib.roots = next
 		cu.railChanged()
 		var err error
@@ -1364,9 +1365,13 @@ func (cu *culler) relocate(from, to string) {
 			err = cu.api.Library.SetLibraryRoots(ctx, next)
 			return err
 		}, func() {
-			if err == nil {
-				then()
+			if err != nil {
+				// The sidebar as the library still is.
+				cu.lib.roots = before
+				cu.railChanged()
+				return
 			}
+			then()
 		})
 	}
 	held := slices.ContainsFunc(cu.lib.roots, func(r marrawclient.LibraryRoot) bool {
@@ -1375,14 +1380,22 @@ func (cu *culler) relocate(from, to string) {
 	next := slices.Clone(cu.lib.roots)
 	if held {
 		next = slices.Delete(next, i, i+1)
-		// The library folder that holds it shows it, hidden there or not.
+		// The library folder that holds it shows it again if it was hidden
+		// there. Inside a folder hidden there, showing it would show that
+		// whole folder, so the entry stays as it is.
 		lower := strings.ToLower(to)
 		for j := range next {
-			if next[j].IsParent && hasPathUnder(to, next[j].Path) {
-				next[j].ExcludedChildren = slices.DeleteFunc(slices.Clone(next[j].ExcludedChildren), func(k string) bool {
-					return k == lower || hasPathUnder(lower, k)
-				})
+			if !next[j].IsParent || !hasPathUnder(to, next[j].Path) {
+				continue
 			}
+			for _, k := range next[j].ExcludedChildren {
+				if hasPathUnder(lower, k) {
+					cu.notify(fmt.Sprintf("%s is in %s, which is hidden in the library. Move it out of %s and find it again, or remove %s from the library.",
+						baseName(to), baseName(k), baseName(k), rootName(old)))
+					return
+				}
+			}
+			next[j].ExcludedChildren = slices.DeleteFunc(slices.Clone(next[j].ExcludedChildren), func(k string) bool { return k == lower })
 		}
 		save(next, func() {
 			cu.notify(baseName(to) + " is in the library already. The old entry is gone.")
