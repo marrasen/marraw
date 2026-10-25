@@ -18,6 +18,7 @@ import {
   Monitor,
   Pencil,
   Play,
+  FolderSearch,
   FolderX,
   PlugZap,
   Plus,
@@ -136,7 +137,7 @@ function OfflineBadge({ className, missing }: { className?: string; missing?: bo
       )}
       title={
         missing
-          ? 'This folder is not where it was. It was moved or deleted. Remove it, then add it again from its new place.'
+          ? 'This folder is not where it was. It was moved or deleted. Right-click it and choose Find folder… to show where it is now.'
           : "This folder's drive is not connected. It will come back on its own when you reconnect it."
       }
     >
@@ -849,6 +850,11 @@ function ManagedParent({
             </span>
           </div>
           <ContextMenuSeparator />
+          {!online && (
+            <ContextMenuItem onClick={() => useUIStore.getState().setFindFolderFor(root.path)}>
+              <FolderSearch /> <span className="flex-1 text-foreground">Find folder…</span>
+            </ContextMenuItem>
+          )}
           <ContextMenuItem onClick={() => setRenaming(key)}>
             <Pencil /> <span className="flex-1">Rename group…</span>
           </ContextMenuItem>
@@ -1366,7 +1372,7 @@ function RootRow({
   const open = () => {
     if (missing) {
       toast.error(`${rootName(root)} is missing`, {
-        description: `It is no longer in ${parentPath(root.path)}. If you moved it, remove it here and add it again from its new place. Your edits travel with the folder.`,
+        description: `It is no longer in ${parentPath(root.path)}. If you moved it, right-click it and choose Find folder…`,
       });
       return;
     }
@@ -1463,6 +1469,12 @@ function RootRow({
           </div>
         </div>
         <ContextMenuSeparator />
+        {!online && (
+          // A folder moved, or a drive under another letter.
+          <ContextMenuItem onClick={() => useUIStore.getState().setFindFolderFor(root.path)}>
+            <FolderSearch /> <span className="flex-1 text-foreground">Find folder…</span>
+          </ContextMenuItem>
+        )}
         <ContextMenuItem hint="Enter" disabled={!online} onClick={openInCull}>
           <Play /> <span className="flex-1 text-foreground">Open in Cull</span>
         </ContextMenuItem>

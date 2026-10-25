@@ -248,23 +248,37 @@ function presetExpEV(draft: Params, preset: UserPreset, targetBaseExpEV: number)
   return targetBaseExpEV + creative;
 }
 
+// AUTO_FIELDS are the look fields each auto section writes: the tone and
+// color ones in internal/pyramid/auto.go, the WB ones in the Edits.AutoAdjust
+// handler. Only these have a per-photo auto value for an adaptive preset to
+// adapt to; pyramid's TestAutoAdjustWritesOnlyItsFields holds the backend to
+// the list.
+const AUTO_FIELDS: Record<'tone' | 'wb' | 'color', LookParamKey[]> = {
+  tone: ['expEV', 'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights'],
+  color: ['saturation', 'vibrance'],
+  wb: ['wbMode', 'wbMul', 'wbTemp', 'wbTint', 'wbKelvin'],
+};
+
 // adaptiveLookDiff converts a hand-made look into the params of an ADAPTIVE
-// preset: `auto` is the backend's auto result for the same photo, and the
-// stored params carry the CREATIVE DIFFERENCE — for smooth numerics, the
+// preset: `auto` is the backend's auto result for the same photo over the
+// auto `sections`, and the stored params carry the CREATIVE DIFFERENCE for
+// the fields those sections write — for smooth numerics, the
 // neutral-anchored delta `draft − auto` (so a relative apply on top of a
 // fresh auto reproduces the look adapted to the target photo); position
 // numerics, cycle values and the WB multipliers keep the draft's value
-// as-is (they land absolutely, and only when non-neutral). Exposure's diff
-// needs no baseline: it rides the per-photo auto result, so the preset
-// stores baseExpEV = 0.
-export function adaptiveLookDiff(draft: Params, auto: Params): Params {
+// as-is (they land absolutely, and only when non-neutral). A field no auto
+// section writes has no auto value to differ from: it keeps the draft's
+// value, and lands relatively as in any relative preset. Exposure's diff
+// needs no baseline where tone is auto: it rides the per-photo auto result,
+// so the preset stores baseExpEV = 0.
+export function adaptiveLookDiff(draft: Params, auto: Params, sections: string[]): Params {
   const out: Params = { ...stripToLook(draft) };
+  const written = new Set<LookParamKey>(
+    sections.flatMap((s) => AUTO_FIELDS[s as keyof typeof AUTO_FIELDS] ?? []),
+  );
   for (const key of LOOK_KEYS) {
+    if (!written.has(key)) continue; // keep draft's value
     const { mode } = PRESET_FIELDS[key];
-    if (key === 'hslHue' || key === 'hslSat' || key === 'hslLum') {
-      out[key] = draft[key].map((v, i) => v - auto[key][i]) as Params['hslHue'];
-      continue;
-    }
     if (key === 'wbMul' || mode === 'enum' || mode === 'absolute') continue; // keep draft's value
     const delta = effective(key, draft) - effective(key, auto);
     let stored = Math.round((effective(key, NEUTRAL) + delta) * 1000) / 1000;

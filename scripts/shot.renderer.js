@@ -1438,6 +1438,60 @@ if (shot === 'cull') {
   } catch (err) {
     probe.error = String(err);
   }
+} else if (shot === 'rootfind') {
+  // A shoot added by hand whose folder moved to ../elsewhere: Find folder…
+  // in its menu opens the picker where it was; browsing to the new place
+  // and "Use this folder" points the shoot there and opens it.
+  ui().setMode('library');
+  const folder = ui().folderPath;
+  const lib = folder.replace(/[\\/][^\\/]+$/, '');
+  const sep = folder.includes('\\') ? '\\' : '/';
+  const moved = `${lib}${sep}Moved away shoot`;
+  await mw.setLibraryRoots([
+    { path: folder, alias: '', includeSubfolders: false, photoCount: 0, isParent: false },
+    { path: moved, alias: 'Trip', includeSubfolders: false, photoCount: 0, isParent: false },
+  ]);
+  const probe = (window.__rootFindProbe = { stage: 'waiting for the badge' });
+  const row = () => [...document.querySelectorAll('[data-testid="rail-root"]')].find((r) => r.dataset.name === 'Trip');
+  const button = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
+  // A folder in the list, not the path's crumbs.
+  const entry = (text) =>
+    [...document.querySelectorAll('[role="dialog"] button.h-10')].find((b) => b.querySelector('span')?.textContent.trim() === text);
+  try {
+    await until(() => row()?.textContent.includes('Missing'), 15000);
+    probe.stage = 'menu';
+    const r = row();
+    const rect = r.getBoundingClientRect();
+    r.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left + 30, clientY: rect.top + 8 }));
+    await until(() => [...document.querySelectorAll('[role="menuitem"]')].length > 0, 3000).catch(() => {});
+    probe.menu = [...document.querySelectorAll('[role="menuitem"]')].map((m) => m.textContent.trim());
+    [...document.querySelectorAll('[role="menuitem"]')].find((m) => /Find folder/.test(m.textContent)).click();
+    await until(() => document.querySelector('[role="dialog"]')?.textContent.includes('Find Trip'), 5000);
+    probe.title = document.querySelector('[role="dialog"]').textContent.match(/Find Trip[^.]*\./)?.[0];
+    probe.stage = 'browsing';
+    probe.startedAt = document.querySelector('[role="dialog"] .font-semibold.text-foreground')?.textContent;
+    // Down from the top: the dialog's Back builds Windows paths.
+    [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === '/').click();
+    for (const name of ['tmp', 'rootmissing', 'elsewhere']) {
+      await until(() => entry(name), 5000);
+      entry(name).click();
+    }
+    await until(() => entry('Moved away shoot'), 5000);
+    entry('Moved away shoot').click();
+    await until(() => !button('Use this folder')?.disabled && /RAW file/.test(document.querySelector('[role="dialog"]').textContent), 8000);
+    await sleep(300);
+    probe.footer = document.querySelector('[role="dialog"]').textContent.match(/Use [^]*?RAW files?/)?.[0];
+    button('Use this folder').click();
+    probe.stage = 'relocating';
+    await until(() => /elsewhere/.test(ui().folderPath ?? ''), 15000);
+    probe.opened = ui().folderPath;
+    await until(() => row() && !row().textContent.includes('Missing'), 15000);
+    probe.rowPath = row().title;
+    probe.rowText = row().textContent.trim();
+    probe.stage = 'done';
+  } catch (err) {
+    probe.error = String(err);
+  }
 } else if (shot === 'share' || shot === 'share-publish') {
   // The share dialog, reached the way a user reaches it: right-click a shoot
   // in the rail. Needs MARRAW_SHOT_OWN_DAEMON=1 — the shared `marrawd --dev`
@@ -3181,6 +3235,7 @@ const probe =
   window.__restoreProbe ??
   window.__railTreeProbe ??
   window.__rootMissingProbe ??
+  window.__rootFindProbe ??
   window.__welcomeProbe ??
   window.__folderViewProbe ??
   window.__exportCopyProbe ??
