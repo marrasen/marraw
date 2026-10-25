@@ -104,12 +104,9 @@ func aiMapKind(kind marrawclient.AIKind) marrawclient.AIKind {
 	return kind
 }
 
-// presetMasks adds user preset p's smart masks to photo id's edit, as a
-// step of their own after its look, as marraw's esApplyPresetMasks does:
-// each AI mask's map is made first. A model not downloaded yet is asked
-// for, and download says the user said yes.
-func (cu *culler) presetMasks(id int64, p marrawclient.UserPreset, download bool) {
-	var ai, ranges []marrawclient.Mask
+// presetRecipes are user preset p's smart masks, as it lays them on a
+// photo: its AI masks, and its range masks.
+func presetRecipes(p marrawclient.UserPreset) (ai, ranges []marrawclient.Mask) {
 	for _, m := range p.Params.Masks {
 		switch {
 		case m.Type == "ai" && m.AIKind != "":
@@ -118,6 +115,26 @@ func (cu *culler) presetMasks(id int64, p marrawclient.UserPreset, download bool
 			ranges = append(ranges, m)
 		}
 	}
+	return ai, ranges
+}
+
+// aiMapKinds are the maps AI masks ai read, each once.
+func aiMapKinds(ai []marrawclient.Mask) []marrawclient.AIKind {
+	var out []marrawclient.AIKind
+	for _, m := range ai {
+		if k := aiMapKind(m.AIKind); !slices.Contains(out, k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// presetMasks adds user preset p's smart masks to photo id's edit, as a
+// step of their own after its look, as marraw's esApplyPresetMasks does:
+// each AI mask's map is made first. A model not downloaded yet is asked
+// for, and download says the user said yes.
+func (cu *culler) presetMasks(id int64, p marrawclient.UserPreset, download bool) {
+	ai, ranges := presetRecipes(p)
 	if len(ai)+len(ranges) == 0 {
 		return
 	}
@@ -125,11 +142,7 @@ func (cu *culler) presetMasks(id int64, p marrawclient.UserPreset, download bool
 		ctx, cancel := context.WithTimeout(cu.ctx, 10*time.Minute)
 		defer cancel()
 		vers := map[marrawclient.AIKind]string{}
-		for _, m := range ai {
-			k := aiMapKind(m.AIKind)
-			if _, ok := vers[k]; ok {
-				continue
-			}
+		for _, k := range aiMapKinds(ai) {
 			if !download {
 				if st, err := cu.api.Edits.AIModelStatus(ctx, k); err == nil && st != nil && !st.Downloaded {
 					cu.askModel(fmt.Sprintf("presetMasks:%d:%s", id, p.ID), aiModelWhat[string(k)], st.Bytes)

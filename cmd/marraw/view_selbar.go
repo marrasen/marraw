@@ -23,11 +23,15 @@ type (
 	}
 	// Key, where set, names the preset as its card does ("u:" or "a:"
 	// and its id), found again as it applies: the list may have
-	// changed since the menu was made.
+	// changed since the menu was made. Download says the user let the
+	// model its AI masks need download, and SkipAI that they did not:
+	// it goes on without them.
 	BatchPreset struct {
-		Auto  bool
-		Index int
-		Key   string
+		Auto     bool
+		Index    int
+		Key      string
+		Download bool
+		SkipAI   bool
 	}
 )
 
