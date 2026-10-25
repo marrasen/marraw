@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -60,48 +62,64 @@ func (g *statGate) leave(path string) {
 	g.mu.Unlock()
 }
 
-// reachable reports whether path is an existing directory right now.
+// look is what one check of a path found: ok, that it is an existing
+// directory (or, for mountLeftEmpty, a folder with something in it), and
+// gone, that the system said there is nothing there. A check that did not
+// answer in time knows neither.
+type look struct{ ok, gone bool }
+
+// probe runs check for key on its own goroutine, one at a time per key,
+// and gives up on it after statTimeout.
 //
-// The stat runs on its own goroutine so a wedged filesystem cannot hold the
-// poller. That goroutine outlives the timeout — it ends when the kernel finally
-// answers — which is why the result channel is buffered: nobody may be left to
-// receive it.
-func reachable(path string) bool {
-	if !statsInFlight.enter(path) {
-		// The previous check for this path is still stuck in the kernel. What
-		// it is stuck on is the path not answering, so that is the answer —
-		// and piling a second goroutine onto it would not learn anything the
-		// first one will not.
-		return false
+// The goroutine outlives the timeout — it ends when the kernel finally
+// answers — which is why the result channel is buffered: nobody may be left
+// to receive it.
+func probe(key string, check func() look) look {
+	if !statsInFlight.enter(key) {
+		// The previous check is still stuck in the kernel. What it is stuck
+		// on is the path not answering, so that is the answer — and piling a
+		// second goroutine onto it would not learn anything the first one
+		// will not.
+		return look{}
 	}
-	done := make(chan bool, 1)
+	done := make(chan look, 1)
 	go func() {
-		defer statsInFlight.leave(path)
-		fi, err := os.Stat(path)
-		done <- err == nil && fi.IsDir()
+		defer statsInFlight.leave(key)
+		done <- check()
 	}()
 	timer := time.NewTimer(statTimeout)
 	defer timer.Stop()
 	select {
-	case ok := <-done:
-		return ok
+	case r := <-done:
+		return r
 	case <-timer.C:
-		return false
+		return look{}
 	}
 }
 
-// reachableAll checks paths concurrently, keyed by lowercased path.
-func reachableAll(paths []string) map[string]bool {
-	out := make(map[string]bool, len(paths))
+// lookAt checks whether path is an existing directory right now.
+func lookAt(path string) look {
+	return probe(path, func() look {
+		fi, err := os.Stat(path)
+		return look{ok: err == nil && fi.IsDir(), gone: errors.Is(err, fs.ErrNotExist)}
+	})
+}
+
+// reachable reports whether path is an existing directory right now.
+func reachable(path string) bool { return lookAt(path).ok }
+
+// lookAll checks paths concurrently, keyed by lowercased path.
+func lookAll(paths []string, check func(string) look) map[string]look {
+	out := make(map[string]look, len(paths))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, p := range paths {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ok := reachable(p)
+			r := check(p)
 			mu.Lock()
-			out[strings.ToLower(p)] = ok
+			out[strings.ToLower(p)] = r
 			mu.Unlock()
 		}()
 	}
@@ -135,53 +153,69 @@ func mountHolder(dir string) bool {
 	return up == "/media" || up == "/run/media"
 }
 
-// mountLeftEmpty reports whether dir is empty away from Windows: an empty
-// folder is more likely a drive's mount point with the drive unplugged
-// than the folder a shoot moved out of.
-func mountLeftEmpty(dir string) bool {
+// holdsSomething checks whether dir has anything in it, away from Windows:
+// an empty folder is more likely a drive's mount point with the drive
+// unplugged than the folder a shoot moved out of. On Windows every folder
+// counts as holding something.
+func holdsSomething(dir string) look {
 	if runtime.GOOS == "windows" {
-		return false
+		return look{ok: true}
 	}
-	f, err := os.Open(dir)
-	if err != nil {
-		return true
-	}
-	defer f.Close()
-	names, _ := f.Readdirnames(1)
-	return len(names) == 0
+	return probe("list:"+dir, func() look {
+		f, err := os.Open(dir)
+		if err != nil {
+			return look{}
+		}
+		defer f.Close()
+		names, _ := f.Readdirnames(1)
+		return look{ok: len(names) > 0}
+	})
 }
 
 // presenceAll checks paths concurrently, keyed by lowercased path. Sequential
-// checks would cost statTimeout *per* dead path; this costs it once. A
-// folder not there is missing where its parent is (moved or deleted
-// leaves the parent behind; an unplugged drive takes it along), and each
-// parent is checked once: the stat gate would fail a second check of it
-// while the first runs.
+// checks would cost statTimeout *per* dead path; this costs it a few times
+// at most. A folder the system says is not there is missing where its
+// parent is there and holds something (moved or deleted leaves the parent
+// behind; an unplugged drive takes it along). One that does not answer, or
+// answers with another error, as a dropped network share does, is
+// disconnected. Each parent is checked once: the stat gate would fail a
+// second check of it while the first runs.
 func presenceAll(paths []string) map[string]presence {
+	looks := lookAll(paths, lookAt)
 	out := make(map[string]presence, len(paths))
-	for p, ok := range reachableAll(paths) {
-		out[p] = disconnected
-		if ok {
-			out[p] = present
-		}
-	}
 	seen := map[string]bool{}
 	var parents []string
 	for _, p := range paths {
+		r := looks[strings.ToLower(p)]
+		switch {
+		case r.ok:
+			out[strings.ToLower(p)] = present
+			continue
+		case !r.gone:
+			out[strings.ToLower(p)] = disconnected
+			continue
+		}
+		out[strings.ToLower(p)] = disconnected
 		parent := filepath.Dir(p)
-		if out[strings.ToLower(p)] == present || parent == p || mountHolder(parent) || seen[strings.ToLower(parent)] {
+		if parent == p || mountHolder(parent) || seen[strings.ToLower(parent)] {
 			continue
 		}
 		seen[strings.ToLower(parent)] = true
 		parents = append(parents, parent)
 	}
-	there := reachableAll(parents)
+	there := lookAll(parents, lookAt)
+	var full []string
+	for _, parent := range parents {
+		if there[strings.ToLower(parent)].ok {
+			full = append(full, parent)
+		}
+	}
+	holding := lookAll(full, holdsSomething)
 	for _, p := range paths {
-		parent := filepath.Dir(p)
-		if out[strings.ToLower(p)] == present || parent == p || mountHolder(parent) {
+		if out[strings.ToLower(p)] != disconnected || !looks[strings.ToLower(p)].gone {
 			continue
 		}
-		if there[strings.ToLower(parent)] && !mountLeftEmpty(parent) {
+		if holding[strings.ToLower(filepath.Dir(p))].ok && filepath.Dir(p) != p {
 			out[strings.ToLower(p)] = missing
 		}
 	}
