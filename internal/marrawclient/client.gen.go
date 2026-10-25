@@ -2284,6 +2284,9 @@ type RootStatus struct {
 	// Online is false when the folder's storage is disconnected — an external
 	// drive that is unplugged, or a network share that is unreachable.
 	Online bool `json:"online"`
+	// Missing is true when the folder is gone from storage that is
+	// connected: moved or deleted, so reconnecting brings nothing back.
+	Missing bool `json:"missing"`
 	// EarliestTakenAt, Picked, Rejected and Cover are as a Shoot's, over the
 	// root's photos, its subfolders' too where it includes them. Zero and nil
 	// until the folder is scanned.
