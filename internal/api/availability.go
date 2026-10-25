@@ -174,48 +174,74 @@ func holdsSomething(dir string) look {
 
 // presenceAll checks paths concurrently, keyed by lowercased path. Sequential
 // checks would cost statTimeout *per* dead path; this costs it a few times
-// at most. A folder the system says is not there is missing where its
-// parent is there and holds something (moved or deleted leaves the parent
-// behind; an unplugged drive takes it along). One that does not answer, or
-// answers with another error, as a dropped network share does, is
-// disconnected. Each parent is checked once: the stat gate would fail a
-// second check of it while the first runs.
+// at most.
+//
+// A folder the system says is not there is missing where the nearest folder
+// above it that is there holds something: a folder moved or deleted, or one
+// above it, leaves the rest of the tree behind; an unplugged drive takes it
+// all, the drive's own top folder too, up to the folder drives are mounted
+// in. A folder that
+// does not answer, or answers with another error, as a dropped network share
+// does, is disconnected. The folders above are checked a level at a time,
+// each once: the stat gate would fail a second check of one while the first
+// runs.
 func presenceAll(paths []string) map[string]presence {
 	looks := lookAll(paths, lookAt)
 	out := make(map[string]presence, len(paths))
-	seen := map[string]bool{}
-	var parents []string
+	// above is the folder over each gone path still to check.
+	above := map[string]string{}
+	var pending []string
 	for _, p := range paths {
 		r := looks[strings.ToLower(p)]
-		switch {
-		case r.ok:
-			out[strings.ToLower(p)] = present
-			continue
-		case !r.gone:
-			out[strings.ToLower(p)] = disconnected
-			continue
-		}
 		out[strings.ToLower(p)] = disconnected
-		parent := filepath.Dir(p)
-		if parent == p || mountHolder(parent) || seen[strings.ToLower(parent)] {
-			continue
-		}
-		seen[strings.ToLower(parent)] = true
-		parents = append(parents, parent)
-	}
-	there := lookAll(parents, lookAt)
-	var full []string
-	for _, parent := range parents {
-		if there[strings.ToLower(parent)].ok {
-			full = append(full, parent)
+		if r.ok {
+			out[strings.ToLower(p)] = present
+		} else if r.gone {
+			above[p] = filepath.Dir(p)
+			pending = append(pending, p)
 		}
 	}
-	holding := lookAll(full, holdsSomething)
-	for _, p := range paths {
-		if out[strings.ToLower(p)] != disconnected || !looks[strings.ToLower(p)].gone {
-			continue
+	// anchor is the folder above each gone path that is there.
+	anchor := map[string]string{}
+	for len(pending) > 0 {
+		seen := map[string]bool{}
+		var dirs []string
+		var left []string
+		for _, p := range pending {
+			d := above[p]
+			if mountHolder(d) {
+				continue // where drives are mounted
+			}
+			left = append(left, p)
+			if !seen[strings.ToLower(d)] {
+				seen[strings.ToLower(d)] = true
+				dirs = append(dirs, d)
+			}
 		}
-		if holding[strings.ToLower(filepath.Dir(p))].ok && filepath.Dir(p) != p {
+		there := lookAll(dirs, lookAt)
+		pending = nil
+		for _, p := range left {
+			d := above[p]
+			switch r := there[strings.ToLower(d)]; {
+			case r.ok:
+				anchor[p] = d
+			case r.gone && filepath.Dir(d) != d:
+				above[p] = filepath.Dir(d)
+				pending = append(pending, p)
+			}
+		}
+	}
+	seen := map[string]bool{}
+	var anchors []string
+	for _, d := range anchor {
+		if !seen[strings.ToLower(d)] {
+			seen[strings.ToLower(d)] = true
+			anchors = append(anchors, d)
+		}
+	}
+	holding := lookAll(anchors, holdsSomething)
+	for p, d := range anchor {
+		if holding[strings.ToLower(d)].ok {
 			out[strings.ToLower(p)] = missing
 		}
 	}
