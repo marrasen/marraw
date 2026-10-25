@@ -192,12 +192,22 @@ export async function relocateRoot(client: ApiClient, roots: LibraryRoot[], from
   const lowered = to.toLowerCase();
   const holder = from.isParent ? undefined : roots.find((r) => r.isParent && isUnder(to, r.path) && !samePath(r.path, to));
   if (roots.some((r) => samePath(r.path, to)) || holder) {
-    // The library folder that holds it shows it, hidden there or not.
+    // The library folder that holds it shows it again if it was hidden
+    // there. Inside a folder hidden there, showing it would show that
+    // whole folder, so the entry stays as it is.
+    const hidden = holder?.excludedChildren ?? [];
+    const inHidden = hidden.find((k) => k !== lowered && isUnder(lowered, k));
+    if (inHidden) {
+      toast.error(`${baseName(to)} is in ${baseName(inHidden)}, which is hidden in the library`, {
+        description: `Move it out of ${baseName(inHidden)} and find it again, or remove ${rootName(from)} from the library.`,
+      });
+      return;
+    }
     const next = roots
       .filter((r) => !samePath(r.path, from.path))
       .map((r) =>
-        r === holder && r.excludedChildren?.some((k) => isUnder(lowered, k))
-          ? { ...r, excludedChildren: r.excludedChildren.filter((k) => !isUnder(lowered, k)) }
+        r === holder && hidden.includes(lowered)
+          ? { ...r, excludedChildren: hidden.filter((k) => k !== lowered) }
           : r,
       );
     if (!(await save(next))) return;
