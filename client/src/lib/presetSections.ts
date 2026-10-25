@@ -152,14 +152,19 @@ export function applyUserPreset(draft: Params, preset: UserPreset, targetBaseExp
   const sections = new Set(presetSections(preset));
   const out: Params = { ...draft };
   const src = preset.params;
-  const relative = preset.relative === true;
+  // An adaptive preset stores the fields its autos write as the difference
+  // from the source photo's auto, so they land relatively on each photo's
+  // own auto (the draft here); the rest land as the preset says.
+  const adaptive = autoFieldsOf(preset.autoSections ?? []);
 
   for (const key of LOOK_KEYS) {
     const { group, mode } = PRESET_FIELDS[key];
     if (!sections.has(group)) continue;
+    const relative = preset.relative === true || adaptive.has(key);
 
     if (key === 'expEV') {
-      out.expEV = clampRound(presetExpEV(draft, preset, targetBaseExpEV), -5, 5);
+      const p = relative ? { ...preset, relative: true } : preset;
+      out.expEV = clampRound(presetExpEV(draft, p, targetBaseExpEV), -5, 5);
       continue;
     }
 
@@ -191,8 +196,9 @@ export function applyUserPreset(draft: Params, preset: UserPreset, targetBaseExp
 
     if (mode === 'enum') {
       // Cycle values: absolute presets write as stored; relative presets
-      // only when the preset's value is non-neutral.
-      if (!relative || src[key] !== NEUTRAL[key]) {
+      // only when the preset's value is non-neutral, in any of its
+      // spellings (isNeutralField).
+      if (!relative || !isNeutralField(key, src)) {
         (out as unknown as Record<string, unknown>)[key] = src[key];
       }
       continue;
@@ -211,7 +217,7 @@ export function applyUserPreset(draft: Params, preset: UserPreset, targetBaseExp
     const asStored = raw === neutral ? raw : clampRound(raw, min, max);
 
     if (mode === 'absolute') {
-      if (!relative || raw !== neutral) fields[key] = asStored;
+      if (!relative || !isNeutralField(key, src)) fields[key] = asStored;
       continue;
     }
 
@@ -259,6 +265,11 @@ const AUTO_FIELDS: Record<'tone' | 'wb' | 'color', LookParamKey[]> = {
   wb: ['wbMode', 'wbMul', 'wbTemp', 'wbTint', 'wbKelvin'],
 };
 
+// autoFieldsOf is the fields the auto sections write.
+function autoFieldsOf(sections: string[]): Set<LookParamKey> {
+  return new Set(sections.flatMap((s) => AUTO_FIELDS[s as keyof typeof AUTO_FIELDS] ?? []));
+}
+
 // adaptiveLookDiff converts a hand-made look into the params of an ADAPTIVE
 // preset: `auto` is the backend's auto result for the same photo over the
 // auto `sections`, and the stored params carry the CREATIVE DIFFERENCE for
@@ -268,14 +279,12 @@ const AUTO_FIELDS: Record<'tone' | 'wb' | 'color', LookParamKey[]> = {
 // numerics, cycle values and the WB multipliers keep the draft's value
 // as-is (they land absolutely, and only when non-neutral). A field no auto
 // section writes has no auto value to differ from: it keeps the draft's
-// value, and lands relatively as in any relative preset. Exposure's diff
+// value, and lands as the preset's relative switch says. Exposure's diff
 // needs no baseline where tone is auto: it rides the per-photo auto result,
 // so the preset stores baseExpEV = 0.
 export function adaptiveLookDiff(draft: Params, auto: Params, sections: string[]): Params {
   const out: Params = { ...stripToLook(draft) };
-  const written = new Set<LookParamKey>(
-    sections.flatMap((s) => AUTO_FIELDS[s as keyof typeof AUTO_FIELDS] ?? []),
-  );
+  const written = autoFieldsOf(sections);
   for (const key of LOOK_KEYS) {
     if (!written.has(key)) continue; // keep draft's value
     const { mode } = PRESET_FIELDS[key];

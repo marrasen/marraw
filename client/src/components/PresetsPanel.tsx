@@ -282,7 +282,7 @@ function UserPresetsSection({
     let params: Params = masksOnly
       ? { ...NEUTRAL, masks: recipes }
       : { ...stripToLook(draft), masks: recipes };
-    let rel = relative || masksOnly;
+    const rel = relative || masksOnly;
     // The source photo's calibrated exposure baseline: apply re-anchors
     // the look's creative exposure to the target photo's baseline, so a
     // preset saved on a +1.3 EV-compensated shot doesn't drag that
@@ -303,7 +303,6 @@ function UserPresetsSection({
         return;
       }
       params = { ...adaptiveLookDiff(draft, auto, autos), masks: recipes };
-      rel = true;
       // Exposure rides the per-photo auto result where tone is auto: no
       // baseline to anchor. Otherwise it is kept as drawn, and re-anchors
       // as in any preset.
@@ -559,16 +558,14 @@ function UserPresetsSection({
             <button
               className={cn(
                 'rounded-md border px-1.5 py-0.5 text-[11px] transition-colors',
-                (relative || autoSecs.length > 0)
+                relative
                   ? 'border-primary/50 bg-primary/15 text-accent-text'
                   : 'border-input text-muted-foreground hover:text-foreground',
-                autoSecs.length > 0 && 'opacity-60',
               )}
-              disabled={autoSecs.length > 0}
               onClick={() => setRelative((r) => !r)}
               title={
                 autoSecs.length > 0
-                  ? 'Adaptive presets are always relative — the diff lands on each photo’s own auto'
+                  ? 'Relative: apply the rest of the preset as offsets on top of a photo’s existing edits. What the autos set always lands as the difference from each photo’s own auto'
                   : 'Relative: apply the preset as offsets on top of a photo’s existing edits instead of replacing them'
               }
             >

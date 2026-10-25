@@ -62,3 +62,17 @@ func TestPresenceTakesAnEmptyParentForAMountPoint(t *testing.T) {
 		t.Errorf("presence %d, want disconnected (%d)", got, disconnected)
 	}
 }
+
+// A share whose mount went, under GNOME's gvfs or autofs's /net, is not a
+// folder moved, though the folder above it is there and holds other
+// mounts.
+func TestPresenceStopsWhereSharesAreMounted(t *testing.T) {
+	for _, dir := range []string{"/run/user/1000/gvfs", "/net", "/net/nas", "/"} {
+		if runtime.GOOS != "windows" && !mountHolder(dir) {
+			t.Errorf("%s is where shares are mounted", dir)
+		}
+	}
+	if mountHolder("/home/u/Photos") {
+		t.Error("a photo folder is no mount holder")
+	}
+}
