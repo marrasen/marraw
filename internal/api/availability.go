@@ -2,7 +2,11 @@ package api
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -58,49 +62,64 @@ func (g *statGate) leave(path string) {
 	g.mu.Unlock()
 }
 
-// reachable reports whether path is an existing directory right now.
+// look is what one check of a path found: ok, that it is an existing
+// directory (or, for mountLeftEmpty, a folder with something in it), and
+// gone, that the system said there is nothing there. A check that did not
+// answer in time knows neither.
+type look struct{ ok, gone bool }
+
+// probe runs check for key on its own goroutine, one at a time per key,
+// and gives up on it after statTimeout.
 //
-// The stat runs on its own goroutine so a wedged filesystem cannot hold the
-// poller. That goroutine outlives the timeout — it ends when the kernel finally
-// answers — which is why the result channel is buffered: nobody may be left to
-// receive it.
-func reachable(path string) bool {
-	if !statsInFlight.enter(path) {
-		// The previous check for this path is still stuck in the kernel. What
-		// it is stuck on is the path not answering, so that is the answer —
-		// and piling a second goroutine onto it would not learn anything the
-		// first one will not.
-		return false
+// The goroutine outlives the timeout — it ends when the kernel finally
+// answers — which is why the result channel is buffered: nobody may be left
+// to receive it.
+func probe(key string, check func() look) look {
+	if !statsInFlight.enter(key) {
+		// The previous check is still stuck in the kernel. What it is stuck
+		// on is the path not answering, so that is the answer — and piling a
+		// second goroutine onto it would not learn anything the first one
+		// will not.
+		return look{}
 	}
-	done := make(chan bool, 1)
+	done := make(chan look, 1)
 	go func() {
-		defer statsInFlight.leave(path)
-		fi, err := os.Stat(path)
-		done <- err == nil && fi.IsDir()
+		defer statsInFlight.leave(key)
+		done <- check()
 	}()
 	timer := time.NewTimer(statTimeout)
 	defer timer.Stop()
 	select {
-	case ok := <-done:
-		return ok
+	case r := <-done:
+		return r
 	case <-timer.C:
-		return false
+		return look{}
 	}
 }
 
-// reachableAll checks paths concurrently, keyed by lowercased path. Sequential
-// checks would cost statTimeout *per* dead path; this costs it once.
-func reachableAll(paths []string) map[string]bool {
-	out := make(map[string]bool, len(paths))
+// lookAt checks whether path is an existing directory right now.
+func lookAt(path string) look {
+	return probe(path, func() look {
+		fi, err := os.Stat(path)
+		return look{ok: err == nil && fi.IsDir(), gone: errors.Is(err, fs.ErrNotExist)}
+	})
+}
+
+// reachable reports whether path is an existing directory right now.
+func reachable(path string) bool { return lookAt(path).ok }
+
+// lookAll checks paths concurrently, keyed by lowercased path.
+func lookAll(paths []string, check func(string) look) map[string]look {
+	out := make(map[string]look, len(paths))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, p := range paths {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			ok := reachable(p)
+			r := check(p)
 			mu.Lock()
-			out[strings.ToLower(p)] = ok
+			out[strings.ToLower(p)] = r
 			mu.Unlock()
 		}()
 	}
@@ -108,17 +127,113 @@ func reachableAll(paths []string) map[string]bool {
 	return out
 }
 
-// availability caches the last known reachability of each root so the poller
+// presence is what the poller knows of a root: there, on storage that is
+// not connected, or gone from storage that is.
+type presence int8
+
+const (
+	present presence = iota
+	disconnected
+	missing
+)
+
+// mountHolder reports whether dir is where the system mounts drives, so a
+// folder missing from it is a drive unplugged, not a folder moved:
+// /Volumes on macOS, /media, /media/<user>, /run/media/<user> and /mnt on
+// Linux. A drive's letter on Windows goes with the drive.
+func mountHolder(dir string) bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	switch dir {
+	case "/Volumes", "/media", "/mnt":
+		return true
+	}
+	up := filepath.Dir(dir)
+	return up == "/media" || up == "/run/media"
+}
+
+// holdsSomething checks whether dir has anything in it, away from Windows:
+// an empty folder is more likely a drive's mount point with the drive
+// unplugged than the folder a shoot moved out of. On Windows every folder
+// counts as holding something.
+func holdsSomething(dir string) look {
+	if runtime.GOOS == "windows" {
+		return look{ok: true}
+	}
+	return probe("list:"+dir, func() look {
+		f, err := os.Open(dir)
+		if err != nil {
+			return look{}
+		}
+		defer f.Close()
+		names, _ := f.Readdirnames(1)
+		return look{ok: len(names) > 0}
+	})
+}
+
+// presenceAll checks paths concurrently, keyed by lowercased path. Sequential
+// checks would cost statTimeout *per* dead path; this costs it a few times
+// at most. A folder the system says is not there is missing where its
+// parent is there and holds something (moved or deleted leaves the parent
+// behind; an unplugged drive takes it along). One that does not answer, or
+// answers with another error, as a dropped network share does, is
+// disconnected. Each parent is checked once: the stat gate would fail a
+// second check of it while the first runs.
+func presenceAll(paths []string) map[string]presence {
+	looks := lookAll(paths, lookAt)
+	out := make(map[string]presence, len(paths))
+	seen := map[string]bool{}
+	var parents []string
+	for _, p := range paths {
+		r := looks[strings.ToLower(p)]
+		switch {
+		case r.ok:
+			out[strings.ToLower(p)] = present
+			continue
+		case !r.gone:
+			out[strings.ToLower(p)] = disconnected
+			continue
+		}
+		out[strings.ToLower(p)] = disconnected
+		parent := filepath.Dir(p)
+		if parent == p || mountHolder(parent) || seen[strings.ToLower(parent)] {
+			continue
+		}
+		seen[strings.ToLower(parent)] = true
+		parents = append(parents, parent)
+	}
+	there := lookAll(parents, lookAt)
+	var full []string
+	for _, parent := range parents {
+		if there[strings.ToLower(parent)].ok {
+			full = append(full, parent)
+		}
+	}
+	holding := lookAll(full, holdsSomething)
+	for _, p := range paths {
+		if out[strings.ToLower(p)] != disconnected || !looks[strings.ToLower(p)].gone {
+			continue
+		}
+		if holding[strings.ToLower(filepath.Dir(p))].ok && filepath.Dir(p) != p {
+			out[strings.ToLower(p)] = missing
+		}
+	}
+	return out
+}
+
+// availability caches the last known presence of each root so the poller
 // only pushes when something actually changed, and so a request handler can
 // answer without touching the disk.
 type availability struct {
 	mu     sync.RWMutex
-	online map[string]bool // lowercased path -> reachable
+	online map[string]presence // lowercased path -> presence
 }
 
-func newAvailability() *availability { return &availability{online: map[string]bool{}} }
+func newAvailability() *availability { return &availability{online: map[string]presence{}} }
 
-func (a *availability) get(path string) (bool, bool) {
+// get is the root at path's presence, and whether the poller has seen it.
+func (a *availability) get(path string) (presence, bool) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	v, ok := a.online[strings.ToLower(path)]
@@ -126,7 +241,7 @@ func (a *availability) get(path string) (bool, bool) {
 }
 
 // snapshot replaces the cache and reports which paths changed state.
-func (a *availability) snapshot(next map[string]bool) []string {
+func (a *availability) snapshot(next map[string]presence) []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	var changed []string
@@ -159,7 +274,7 @@ func (l *Library) GetRootStatus(ctx context.Context) ([]RootStatus, error) {
 			unknown = append(unknown, r.Path)
 		}
 	}
-	fresh := reachableAll(unknown)
+	fresh := presenceAll(unknown)
 	// What the rail shows of each root from the catalog; a failed lookup
 	// leaves it out rather than failing the status.
 	summaries, err := l.deps.DB.FolderSummaries(ctx)
@@ -170,11 +285,11 @@ func (l *Library) GetRootStatus(ctx context.Context) ([]RootStatus, error) {
 
 	out := make([]RootStatus, 0, len(roots))
 	for _, r := range roots {
-		online, cached := l.deps.Avail.get(r.Path)
+		at, cached := l.deps.Avail.get(r.Path)
 		if !cached {
-			online = fresh[strings.ToLower(r.Path)]
+			at = fresh[strings.ToLower(r.Path)]
 		}
-		st := RootStatus{Path: r.Path, Online: online,
+		st := RootStatus{Path: r.Path, Online: at == present, Missing: at == missing,
 			EarliestTakenAt: earliestFor(earliest, r.Path, !r.IncludeSubfolders)}
 		st.Picked, st.Rejected, st.Cover = summaryFor(summaries, r.Path, !r.IncludeSubfolders)
 		out = append(out, st)
@@ -205,7 +320,7 @@ func (l *Library) refreshAvailability(ctx context.Context) {
 	for _, r := range roots {
 		paths = append(paths, r.Path)
 	}
-	changed := l.deps.Avail.snapshot(reachableAll(paths))
+	changed := l.deps.Avail.snapshot(presenceAll(paths))
 	if len(changed) == 0 {
 		return
 	}
@@ -235,8 +350,8 @@ func contains(list []string, v string) bool {
 // the poller's cache over a fresh stat.
 func (l *Library) rootOnline(path string) bool {
 	if l.deps.Avail != nil {
-		if online, cached := l.deps.Avail.get(path); cached {
-			return online
+		if at, cached := l.deps.Avail.get(path); cached {
+			return at == present
 		}
 	}
 	return reachable(path)
