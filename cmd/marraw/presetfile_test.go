@@ -115,19 +115,32 @@ func TestMaskRecipes(t *testing.T) {
 }
 
 // An adaptive preset laid over the photo's own auto gives the edit it was
-// made from back.
+// made from back. The auto, as the backend's, is the draft with only its
+// own fields changed; the rest come back as drawn, so the preset keeps
+// them as drawn.
 func TestAdaptiveLookDiff(t *testing.T) {
-	draft := marrawclient.Params{ExpEV: 1.5, Contrast: 0.5, Saturation: 0.3, Bright: 1.4, BW: true}
+	draft := marrawclient.Params{ExpEV: 1.5, Contrast: 0.5, Saturation: 0.3, Bright: 1.4, Clarity: 0.4, Vignette: -0.3, BW: true}
 	draft.HSLSat[2] = 0.2
-	auto := marrawclient.Params{ExpEV: 1.2, Contrast: 0.1, Saturation: 0.3}
-	diff := adaptiveLookDiff(draft, auto)
+	auto := draft
+	auto.ExpEV, auto.Contrast = 1.2, 0.1
+	diff := adaptiveLookDiff(draft, auto, []string{"tone", "color"})
 	if diff.Saturation != 0 || math.Abs(diff.Contrast-0.4) > 1e-9 || math.Abs(diff.ExpEV-0.3) > 1e-9 || !diff.BW {
 		t.Errorf("diff %+v", diff)
 	}
-	p := marrawclient.UserPreset{Params: diff, Relative: true, AutoSections: []string{"tone"}}
-	got := applyUserPreset(auto, p, 0)
-	if math.Abs(got.Contrast-0.5) > 1e-9 || math.Abs(got.ExpEV-1.5) > 1e-9 || math.Abs(got.Bright-1.4) > 1e-9 ||
-		got.Saturation != 0.3 || math.Abs(got.HSLSat[2]-0.2) > 1e-9 || !got.BW {
+	if diff.Clarity != 0.4 || diff.Vignette != -0.3 || diff.HSLSat[2] != 0.2 || diff.Bright != 1.4 {
+		t.Errorf("diff dropped what no auto writes: %+v", diff)
+	}
+	// On another photo, the same: its own auto and the rest of its edit
+	// neutral.
+	other := marrawclient.Params{ExpEV: 0.6, Contrast: 0.2, Saturation: 0.1}
+	p := marrawclient.UserPreset{Params: diff, Relative: true, AutoSections: []string{"tone", "color"}}
+	got := applyUserPreset(other, p, 0)
+	if math.Abs(got.Contrast-0.6) > 1e-9 || math.Abs(got.ExpEV-0.9) > 1e-9 || got.Saturation != 0.1 ||
+		math.Abs(got.Clarity-0.4) > 1e-9 || math.Abs(got.Vignette+0.3) > 1e-9 || math.Abs(got.HSLSat[2]-0.2) > 1e-9 || !got.BW {
 		t.Errorf("applied %+v", got)
+	}
+	// Tone not auto, its fields are kept as drawn.
+	if d := adaptiveLookDiff(draft, auto, []string{"color"}); d.Contrast != 0.5 || d.ExpEV != 1.5 {
+		t.Errorf("tone not auto: %+v", d)
 	}
 }

@@ -607,9 +607,15 @@ func (cu *culler) presetSave(in PresetSave) {
 				cu.fail("Auto adjust failed", orNoAnswer(err))
 				return
 			}
-			p.Params = adaptiveLookDiff(draft, *auto)
+			p.Params = adaptiveLookDiff(draft, *auto, autos)
 			p.Params.Masks = recipes
-			p.Relative, p.BaseExpEV, p.AutoSections = true, 0, autos
+			p.Relative, p.AutoSections = true, autos
+			if slices.Contains(autos, "tone") {
+				// Exposure rides each photo's own auto: no baseline to
+				// anchor. Otherwise it is kept as drawn, and anchors as
+				// in any preset.
+				p.BaseExpEV = 0
+			}
 			cu.addPreset(p)
 		})
 	}()
@@ -712,9 +718,12 @@ func (cu *culler) presetOverwrite(i int) {
 				return
 			}
 			now := cu.ui.UserPresets[i]
-			now.Params = adaptiveLookDiff(draft, *auto)
+			now.Params = adaptiveLookDiff(draft, *auto, x.AutoSections)
 			now.Params.Masks = x.Params.Masks
-			now.BaseExpEV = 0
+			now.BaseExpEV = x.BaseExpEV
+			if slices.Contains(x.AutoSections, "tone") {
+				now.BaseExpEV = 0
+			}
 			cu.overwritten(now)
 		})
 	}()

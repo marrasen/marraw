@@ -19,40 +19,46 @@ import (
 // masks as recipes, the AI masks and the range masks, which mean
 // something on any photo, unlike a painted one.
 
+// autoFields are the quantities each auto section writes, as marraw's
+// AUTO_FIELDS has them: tone's and colour's in the backend's
+// pyramid/auto.go, white balance's in its AutoAdjust. Only these have a
+// photo's own auto for an adaptive preset to adapt to. White balance's
+// mode and multipliers land whole, as drawn.
+var autoFields = map[string][]string{
+	"tone":  {"expEV", "contrast", "whites", "blacks", "toneShadows", "toneHighlights"},
+	"color": {"saturation", "vibrance"},
+	"wb":    {"wbTemp", "wbTint"},
+}
+
 // adaptiveLookDiff is the look of an adaptive preset, as marraw's
-// adaptiveLookDiff makes it: the edit draft's difference from auto, the
-// photo's own auto, for the quantities, laid on their neutral; the
-// choices, hues and curves stay draft's, as they land whole.
-func adaptiveLookDiff(draft, auto marrawclient.Params) marrawclient.Params {
+// adaptiveLookDiff makes it: for the quantities the auto sections write,
+// the edit draft's difference from auto, the photo's own auto, laid on
+// their neutral. The rest stay draft's: the choices, hues and curves land
+// whole, and the other quantities have no auto to differ from, so they
+// land on each photo as in any relative preset.
+func adaptiveLookDiff(draft, auto marrawclient.Params, sections []string) marrawclient.Params {
 	out := stripToLook(draft)
 	var neutral marrawclient.Params
-	for i := range 8 {
-		out.HSLHue[i] = draft.HSLHue[i] - auto.HSLHue[i]
-		out.HSLSat[i] = draft.HSLSat[i] - auto.HSLSat[i]
-		out.HSLLum[i] = draft.HSLLum[i] - auto.HSLLum[i]
-	}
-	keys := []string{"expEV"}
-	for key := range presetAdd {
-		keys = append(keys, key)
-	}
-	for _, key := range keys {
-		sp, ok := devSpecs[key]
-		if !ok {
-			continue
+	for _, s := range sections {
+		for _, key := range autoFields[s] {
+			sp, ok := devSpecs[key]
+			if !ok {
+				continue
+			}
+			delta := sp.get(&draft) - sp.get(&auto)
+			if delta == 0 {
+				// Untouched reads as neutral, so a relative apply skips it.
+				sp.set(&out, sp.get(&neutral))
+				continue
+			}
+			v := math.Round((sp.get(&neutral)+delta)*1000) / 1000
+			if v == 0 {
+				// A difference must never round to nought, which reads as
+				// untouched where nought is the field's own spelling of it.
+				v = math.Copysign(0.001, delta)
+			}
+			sp.set(&out, v)
 		}
-		delta := sp.get(&draft) - sp.get(&auto)
-		if delta == 0 {
-			// Untouched reads as neutral, so a relative apply skips it.
-			sp.set(&out, sp.get(&neutral))
-			continue
-		}
-		v := math.Round((sp.get(&neutral)+delta)*1000) / 1000
-		if v == 0 {
-			// A difference must never round to nought, which reads as
-			// untouched where nought is the field's own spelling of it.
-			v = math.Copysign(0.001, delta)
-		}
-		sp.set(&out, v)
 	}
 	return out
 }
