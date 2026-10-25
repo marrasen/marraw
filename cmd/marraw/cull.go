@@ -267,6 +267,10 @@ type culler struct {
 	// batchShown says the batch panel takes the develop panel's place, as
 	// it does for several photos selected.
 	batchShown bool
+	// batchGen counts the changes made to several photos at once, so a
+	// batch preset waiting on its AI masks lets itself go when another
+	// came meanwhile.
+	batchGen int
 	// sheet says the grid shows as Cull's contact sheet.
 	sheet bool
 	// errs are the errors the user has not cleared, and errSeq the last

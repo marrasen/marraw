@@ -336,7 +336,8 @@ func (c *presetCard) Handle(e input.Event, u *gunim.UI) bool {
 		if !c.held {
 			return false
 		}
-		if !c.dragging {
+		// A click is let go on the card: let go elsewhere, nothing.
+		if in := (geom.Rect{Max: c.box.Point()}).Contains(e.Pos); !c.dragging && in {
 			u.Send(c, PresetApply{Auto: c.card.Auto, Index: c.card.Index})
 		}
 		c.held = false

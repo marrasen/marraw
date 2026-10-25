@@ -17,6 +17,7 @@ func (cu *culler) batchDelta(in BatchDelta) {
 	if len(ids) == 0 {
 		return
 	}
+	cu.batchGen++
 	by := in.By
 	var d marrawclient.Delta
 	switch in.Field {
@@ -62,45 +63,77 @@ func (cu *culler) batchPreset(in BatchPreset) {
 		cu.notify(fmt.Sprintf("There is no preset %d", in.Index+1))
 		return
 	}
+	// Each photo's exposure rest, as the photos are now: the AI masks'
+	// maps can take minutes, and another shoot may show by then.
+	evs := map[int64]float64{}
+	for _, id := range ids {
+		if i, ok := cu.index[id]; ok {
+			evs[id] = cu.photos[i].BaseExpEV
+		} else if i, ok := cu.allIndex[id]; ok {
+			evs[id] = cu.all[i].BaseExpEV
+		}
+	}
+	cu.batchGen++
+	gen := cu.batchGen
 	var ai, ranges []marrawclient.Mask
 	if !in.Auto {
 		ai, ranges = presetRecipes(users[in.Index])
 	}
-	if in.SkipAI {
+	if in.SkipAI && len(ai) > 0 {
 		ai = nil
+		if isMasksOnlyPreset(users[in.Index]) && len(ranges) == 0 {
+			cu.notify(users[in.Index].Name + " carries only AI masks, and their model is not downloaded: nothing changed")
+			return
+		}
 	}
 	if len(ai) == 0 {
-		cu.batchPresetRun(ids, in, users, autos, ranges, nil)
+		cu.batchPresetRun(ids, in, users, autos, ranges, nil, evs, "")
 		return
 	}
 	key := users[in.Index].ID
 	kinds := aiMapKinds(ai)
+	cu.notify("Making the preset's AI masks…")
 	go func() {
 		ctx, cancel := context.WithTimeout(cu.ctx, 10*time.Minute)
 		defer cancel()
 		vers := map[marrawclient.AIKind]string{}
+		var mapErr error
 		for _, k := range kinds {
 			if !in.Download {
 				if st, err := cu.api.Edits.AIModelStatus(ctx, k); err == nil && st != nil && !st.Downloaded {
-					cu.askModelFor("batchPresetMasks:"+key, aiModelWhat[string(k)],
-						fmt.Sprintf("the smart masks of %d photos", len(ids)), st.Bytes)
+					cu.askModelOr("batchPresetMasks:"+key, aiModelWhat[string(k)],
+						fmt.Sprintf("the smart masks of %d photos", len(ids)), st.Bytes, func() {
+							cu.notify("Answer the open question first, then apply the preset again")
+						})
 					return
 				}
 			}
 			res, err := cu.api.Edits.GenerateAIMap(ctx, ids[0], k, in.Download)
 			if err != nil || res == nil {
-				cu.onDo(func() { cu.fail("The preset's AI masks could not be made", orNoAnswer(err)) })
-				return
+				mapErr = orNoAnswer(err)
+				break
 			}
 			vers[k] = res.MapVer
 		}
 		cu.onDo(func() {
+			// Something else was chosen or done to the photos meanwhile:
+			// this would land on top of it.
+			if cu.batchGen != gen || !slices.Equal(cu.targetIDs(), ids) {
+				cu.notify("The photos changed meanwhile, so the preset was not applied")
+				return
+			}
+			if mapErr != nil {
+				// The look goes on all the same, as when the model is
+				// declined.
+				cu.batchPresetRun(ids, in, users, autos, ranges, nil, evs, "without its AI masks: "+mapErr.Error())
+				return
+			}
 			var masks []marrawclient.Mask
 			for _, m := range ai {
 				m.MapVer = vers[aiMapKind(m.AIKind)]
 				masks = append(masks, m)
 			}
-			cu.batchPresetRun(ids, in, users, autos, append(masks, ranges...), kinds)
+			cu.batchPresetRun(ids, in, users, autos, append(masks, ranges...), kinds, evs, "")
 		})
 	}()
 }
@@ -115,15 +148,11 @@ func (cu *culler) batchPresetAnswer(what string, ok bool) {
 
 // batchPresetRun lays the preset of in over each of ids, its look and
 // then masks after the photo's own, and makes the maps of kinds for the
-// photos behind once all are saved.
+// photos behind once all are saved. evs are the photos' exposure rests,
+// and without, where not "", what the note says was left out.
 func (cu *culler) batchPresetRun(ids []int64, in BatchPreset, users []marrawclient.UserPreset,
-	autos []marrawclient.AutoPreset, masks []marrawclient.Mask, kinds []marrawclient.AIKind) {
-	evs := map[int64]float64{}
-	for _, id := range ids {
-		if i, ok := cu.index[id]; ok {
-			evs[id] = cu.photos[i].BaseExpEV
-		}
-	}
+	autos []marrawclient.AutoPreset, masks []marrawclient.Mask, kinds []marrawclient.AIKind,
+	evs map[int64]float64, without string) {
 	cu.notify("Applying the preset to " + itoa(int64(len(ids))) + " photos…")
 	var (
 		mu   sync.Mutex
@@ -156,13 +185,18 @@ func (cu *culler) batchPresetRun(ids []int64, in BatchPreset, users []marrawclie
 	}, func(err error) {
 		if err != nil {
 			cu.fail("The preset could not be applied to every photo", err)
-			return
+		} else {
+			note := name + " applied to " + itoa(int64(len(ids))) + " photos"
+			switch {
+			case without != "":
+				note += ", " + without
+			case in.SkipAI:
+				note += ", without its AI masks: their model is not downloaded"
+			}
+			cu.notify(note)
 		}
-		note := name + " applied to " + itoa(int64(len(ids))) + " photos"
-		if in.SkipAI {
-			note += ", without its AI masks: their model is not downloaded"
-		}
-		cu.notify(note)
+		// The maps of the photos saved with the masks, even where some
+		// were not: a map of one not saved is made for nothing.
 		if len(kinds) > 0 && len(ids) > 1 {
 			// Made after the save, so the render each map drops is that of
 			// the edit with the masks.
@@ -194,6 +228,7 @@ func (cu *culler) batchAuto(in BatchAuto) {
 	case len(in.Sections) > 0 && in.Sections[0] != "tone":
 		label = "Auto color"
 	}
+	cu.batchGen++
 	cu.notify(label + " on " + itoa(int64(len(ids))) + " photos…")
 	cu.eachPhoto(ids, func(ctx context.Context, id int64) error {
 		base, err := cu.api.Edits.GetEditParams(ctx, id)

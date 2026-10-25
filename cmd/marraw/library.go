@@ -1366,9 +1366,12 @@ func (cu *culler) relocate(from, to string) {
 			return err
 		}, func() {
 			if err != nil {
-				// The sidebar as the library still is.
-				cu.lib.roots = before
-				cu.railChanged()
+				// The sidebar as the library still is, unless another
+				// change came meanwhile, which is the library's now.
+				if len(cu.lib.roots) == len(next) && (len(next) == 0 || &cu.lib.roots[0] == &next[0]) {
+					cu.lib.roots = before
+					cu.railChanged()
+				}
 				return
 			}
 			then()

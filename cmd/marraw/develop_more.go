@@ -242,6 +242,7 @@ func (cu *culler) editPaste() {
 	if len(ids) == 0 {
 		return
 	}
+	cu.batchGen++
 	go func() {
 		// Not the panel's own save: the patches tell the view.
 		if _, err := cu.api.Edits.PasteEditParams(cu.ctx, ids, params); err != nil {

@@ -397,9 +397,18 @@ func (cu *culler) askModel(kind, what string, bytes int64) {
 // askModelFor is askModel, saying what the model is for: "this", or
 // "the AI masks of 12 photos here".
 func (cu *culler) askModelFor(kind, what, purpose string, bytes int64) {
+	cu.askModelOr(kind, what, purpose, bytes, nil)
+}
+
+// askModelOr is askModelFor, doing busy in its place, where it is not nil,
+// while another question is open.
+func (cu *culler) askModelOr(kind, what, purpose string, bytes int64, busy func()) {
 	select {
 	case cu.do <- func() {
 		if cu.asking {
+			if busy != nil {
+				busy()
+			}
 			return
 		}
 		cu.asking = true

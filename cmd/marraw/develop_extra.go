@@ -186,6 +186,7 @@ func (cu *culler) devReset() {
 	if len(ids) == 0 {
 		return
 	}
+	cu.batchGen++
 	go func() {
 		// Not the panel's own save: the patches tell the view.
 		if _, err := cu.api.Edits.ResetEdits(cu.ctx, ids); err != nil {
