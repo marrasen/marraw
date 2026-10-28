@@ -8,6 +8,7 @@ import {
   type Shoot,
 } from '@/api/library';
 import type { ApiClient } from '@/api/client';
+import { updateGroupAlias, updateRailGroupOpen } from '@/lib/uiSettings';
 import { useUIStore } from '@/stores/uiStore';
 
 // Last path segment for display; drive roots like "D:\" keep their letter.
@@ -156,6 +157,102 @@ export async function openRoot(client: ApiClient, roots: LibraryRoot[], root: Li
     }
   } catch (err) {
     toast.error(`Cannot open folder: ${(err as Error).message}`);
+  }
+}
+
+/** The key k, a lowercased path, after the folder at `from` moved to `to`. */
+function movedKey(k: string, from: string, to: string): string {
+  const f = from.replace(/[\\/]+$/, '').toLowerCase();
+  if (k !== f && !k.startsWith(`${f}\\`) && !k.startsWith(`${f}/`)) return k;
+  return (to.replace(/[\\/]+$/, '') + k.slice(f.length)).toLowerCase();
+}
+
+/**
+ * Points the library's folder `from` at the folder `to`, where it was moved
+ * (the rail's "Find folder…"). A folder the library holds there already —
+ * a root, or a folder inside a library folder — keeps its place and the old
+ * entry goes. Otherwise the entry takes the new path; how a library
+ * folder's folders show, which are hidden, its name in the rail and its
+ * closed headers are all kept by path, so they move with it. A shoot opens
+ * where it is now, its ratings and edits read from its marraw.json.
+ */
+export async function relocateRoot(client: ApiClient, roots: LibraryRoot[], from: LibraryRoot, to: string) {
+  if (samePath(from.path, to)) return;
+  // Saved, or told why not: saveRoots reports its own failure and resolves
+  // either way, so the rest must not go on as if it had worked.
+  const save = async (next: LibraryRoot[]) => {
+    try {
+      await setLibraryRoots(client, next);
+      return true;
+    } catch (err) {
+      toast.error(`Could not save library: ${(err as Error).message}`);
+      return false;
+    }
+  };
+  const lowered = to.toLowerCase();
+  const holder = from.isParent ? undefined : roots.find((r) => r.isParent && isUnder(to, r.path) && !samePath(r.path, to));
+  if (roots.some((r) => samePath(r.path, to)) || holder) {
+    // The library folder that holds it shows it again if it was hidden
+    // there. Inside a folder hidden there, showing it would show that
+    // whole folder, so the entry stays as it is.
+    const hidden = holder?.excludedChildren ?? [];
+    const inHidden = hidden.find((k) => k !== lowered && isUnder(lowered, k));
+    if (inHidden) {
+      toast.error(`${baseName(to)} is in ${baseName(inHidden)}, which is hidden in the library`, {
+        description: `Move it out of ${baseName(inHidden)} and find it again, or remove ${rootName(from)} from the library.`,
+      });
+      return;
+    }
+    const next = roots
+      .filter((r) => !samePath(r.path, from.path))
+      .map((r) =>
+        r === holder && hidden.includes(lowered)
+          ? { ...r, excludedChildren: hidden.filter((k) => k !== lowered) }
+          : r,
+      );
+    if (!(await save(next))) return;
+    toast.success(`${baseName(to)} is in the library already`, { description: 'The old entry is gone.' });
+    if (from.isParent) return;
+    try {
+      const info = await openFolder(client, to);
+      useUIStore.getState().setFolder(info.folderId, to);
+    } catch (err) {
+      toast.error(`Cannot open folder: ${(err as Error).message}`);
+    }
+    return;
+  }
+  const moved: LibraryRoot = {
+    ...from,
+    path: to,
+    folderModes: from.folderModes
+      ? Object.fromEntries(Object.entries(from.folderModes).map(([k, m]) => [movedKey(k, from.path, to), m]))
+      : from.folderModes,
+    excludedChildren: from.excludedChildren?.map((k) => movedKey(k, from.path, to)),
+  };
+  // A library folder now shows the shoots right inside its new place, so
+  // one added there by hand would show twice, as adding it does.
+  const absorbed = (r: LibraryRoot) => from.isParent && !r.isParent && samePath(parentPath(r.path), to);
+  const next = roots.filter((r) => !absorbed(r)).map((r) => (samePath(r.path, from.path) ? moved : r));
+  if (!(await save(next))) return;
+  toast.success(`Found ${rootName(from)} in ${parentPath(to)}`);
+  if (!from.isParent) {
+    await openRoot(client, next, moved);
+    return;
+  }
+  // The rail's state for a library folder is keyed "parent:<path>", its
+  // headers "parent:<path>|…".
+  const oldKey = parentKey(from.path).toLowerCase();
+  const newKey = parentKey(to).toLowerCase();
+  const { railGroups, groupAliases } = useUIStore.getState();
+  for (const [k, open] of Object.entries(railGroups)) {
+    if (open || (k !== oldKey && !k.startsWith(`${oldKey}|`))) continue;
+    updateRailGroupOpen(client, k, true);
+    updateRailGroupOpen(client, newKey + k.slice(oldKey.length), false);
+  }
+  const alias = groupAliases[oldKey];
+  if (alias) {
+    updateGroupAlias(client, oldKey, '');
+    updateGroupAlias(client, newKey, alias);
   }
 }
 

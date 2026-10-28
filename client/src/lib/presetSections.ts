@@ -152,14 +152,19 @@ export function applyUserPreset(draft: Params, preset: UserPreset, targetBaseExp
   const sections = new Set(presetSections(preset));
   const out: Params = { ...draft };
   const src = preset.params;
-  const relative = preset.relative === true;
+  // An adaptive preset stores the fields its autos write as the difference
+  // from the source photo's auto, so they land relatively on each photo's
+  // own auto (the draft here); the rest land as the preset says.
+  const adaptive = autoFieldsOf(preset.autoSections ?? []);
 
   for (const key of LOOK_KEYS) {
     const { group, mode } = PRESET_FIELDS[key];
     if (!sections.has(group)) continue;
+    const relative = preset.relative === true || adaptive.has(key);
 
     if (key === 'expEV') {
-      out.expEV = clampRound(presetExpEV(draft, preset, targetBaseExpEV), -5, 5);
+      const p = relative ? { ...preset, relative: true } : preset;
+      out.expEV = clampRound(presetExpEV(draft, p, targetBaseExpEV), -5, 5);
       continue;
     }
 
@@ -191,8 +196,9 @@ export function applyUserPreset(draft: Params, preset: UserPreset, targetBaseExp
 
     if (mode === 'enum') {
       // Cycle values: absolute presets write as stored; relative presets
-      // only when the preset's value is non-neutral.
-      if (!relative || src[key] !== NEUTRAL[key]) {
+      // only when the preset's value is non-neutral, in any of its
+      // spellings (isNeutralField).
+      if (!relative || !isNeutralField(key, src)) {
         (out as unknown as Record<string, unknown>)[key] = src[key];
       }
       continue;
@@ -211,7 +217,7 @@ export function applyUserPreset(draft: Params, preset: UserPreset, targetBaseExp
     const asStored = raw === neutral ? raw : clampRound(raw, min, max);
 
     if (mode === 'absolute') {
-      if (!relative || raw !== neutral) fields[key] = asStored;
+      if (!relative || !isNeutralField(key, src)) fields[key] = asStored;
       continue;
     }
 
@@ -248,23 +254,40 @@ function presetExpEV(draft: Params, preset: UserPreset, targetBaseExpEV: number)
   return targetBaseExpEV + creative;
 }
 
+// AUTO_FIELDS are the look fields each auto section writes: the tone and
+// color ones in internal/pyramid/auto.go, the WB ones in the Edits.AutoAdjust
+// handler. Only these have a per-photo auto value for an adaptive preset to
+// adapt to; pyramid's TestAutoAdjustWritesOnlyItsFields holds the backend to
+// the list.
+const AUTO_FIELDS: Record<'tone' | 'wb' | 'color', LookParamKey[]> = {
+  tone: ['expEV', 'contrast', 'whites', 'blacks', 'toneShadows', 'toneHighlights'],
+  color: ['saturation', 'vibrance'],
+  wb: ['wbMode', 'wbMul', 'wbTemp', 'wbTint', 'wbKelvin'],
+};
+
+// autoFieldsOf is the fields the auto sections write.
+function autoFieldsOf(sections: string[]): Set<LookParamKey> {
+  return new Set(sections.flatMap((s) => AUTO_FIELDS[s as keyof typeof AUTO_FIELDS] ?? []));
+}
+
 // adaptiveLookDiff converts a hand-made look into the params of an ADAPTIVE
-// preset: `auto` is the backend's auto result for the same photo, and the
-// stored params carry the CREATIVE DIFFERENCE — for smooth numerics, the
+// preset: `auto` is the backend's auto result for the same photo over the
+// auto `sections`, and the stored params carry the CREATIVE DIFFERENCE for
+// the fields those sections write — for smooth numerics, the
 // neutral-anchored delta `draft − auto` (so a relative apply on top of a
 // fresh auto reproduces the look adapted to the target photo); position
 // numerics, cycle values and the WB multipliers keep the draft's value
-// as-is (they land absolutely, and only when non-neutral). Exposure's diff
-// needs no baseline: it rides the per-photo auto result, so the preset
-// stores baseExpEV = 0.
-export function adaptiveLookDiff(draft: Params, auto: Params): Params {
+// as-is (they land absolutely, and only when non-neutral). A field no auto
+// section writes has no auto value to differ from: it keeps the draft's
+// value, and lands as the preset's relative switch says. Exposure's diff
+// needs no baseline where tone is auto: it rides the per-photo auto result,
+// so the preset stores baseExpEV = 0.
+export function adaptiveLookDiff(draft: Params, auto: Params, sections: string[]): Params {
   const out: Params = { ...stripToLook(draft) };
+  const written = autoFieldsOf(sections);
   for (const key of LOOK_KEYS) {
+    if (!written.has(key)) continue; // keep draft's value
     const { mode } = PRESET_FIELDS[key];
-    if (key === 'hslHue' || key === 'hslSat' || key === 'hslLum') {
-      out[key] = draft[key].map((v, i) => v - auto[key][i]) as Params['hslHue'];
-      continue;
-    }
     if (key === 'wbMul' || mode === 'enum' || mode === 'absolute') continue; // keep draft's value
     const delta = effective(key, draft) - effective(key, auto);
     let stored = Math.round((effective(key, NEUTRAL) + delta) * 1000) / 1000;

@@ -282,7 +282,7 @@ function UserPresetsSection({
     let params: Params = masksOnly
       ? { ...NEUTRAL, masks: recipes }
       : { ...stripToLook(draft), masks: recipes };
-    let rel = relative || masksOnly;
+    const rel = relative || masksOnly;
     // The source photo's calibrated exposure baseline: apply re-anchors
     // the look's creative exposure to the target photo's baseline, so a
     // preset saved on a +1.3 EV-compensated shot doesn't drag that
@@ -302,10 +302,11 @@ function UserPresetsSection({
         toast.error(`Auto adjust failed: ${(err as Error).message}`);
         return;
       }
-      params = { ...adaptiveLookDiff(draft, auto), masks: recipes };
-      rel = true;
-      // Exposure rides the per-photo auto result; no baseline to anchor.
-      baseEV = undefined;
+      params = { ...adaptiveLookDiff(draft, auto, autos), masks: recipes };
+      // Exposure rides the per-photo auto result where tone is auto: no
+      // baseline to anchor. Otherwise it is kept as drawn, and re-anchors
+      // as in any preset.
+      if (autos.includes('tone')) baseEV = undefined;
     }
     const preset: UserPreset = {
       id: crypto.randomUUID(),
@@ -355,29 +356,35 @@ function UserPresetsSection({
   // masks; one without stays mask-free. A masks-only preset stays masks-only
   // — re-snapshotting the whole look into it would silently turn it into a
   // different kind of preset — so it needs a draft with smart masks.
-  const overwrite = (p: UserPreset) => {
+  const overwrite = async (p: UserPreset) => {
     if (!draft) return;
     const masksOnly = isMasksOnlyPreset(p);
     if (masksOnly && !draftRecipes) {
       toast.error(`“${p.name}” carries only smart masks — this photo has none to save`);
       return;
     }
+    const masks = (p.params.masks?.length ?? 0) > 0 ? draftRecipes : undefined;
+    let params: Params = masksOnly ? { ...NEUTRAL, masks: draftRecipes } : { ...stripToLook(draft), masks };
+    let baseExpEV = masksOnly ? undefined : photo?.baseExpEV || undefined;
+    const autos = p.autoSections ?? [];
+    if (!masksOnly && autos.length > 0 && photo) {
+      // An adaptive preset stays adaptive: it stores the difference from
+      // this photo's own auto, as a new one does.
+      let auto: Params;
+      try {
+        auto = await autoAdjust(client, photo.id, draft, autos as AutoSection[]);
+      } catch (err) {
+        toast.error(`Auto adjust failed: ${(err as Error).message}`);
+        return;
+      }
+      params = { ...adaptiveLookDiff(draft, auto, autos), masks };
+      if (autos.includes('tone')) baseExpEV = undefined;
+    }
+    // The presets as they are now: a rename while the auto ran stays.
+    const now = useUIStore.getState().userPresets;
     updateUserPresets(
       client,
-      presets.map((x) =>
-        x.id === p.id
-          ? {
-              ...x,
-              params: masksOnly
-                ? { ...NEUTRAL, masks: draftRecipes }
-                : {
-                    ...stripToLook(draft),
-                    masks: (x.params.masks?.length ?? 0) > 0 ? draftRecipes : undefined,
-                  },
-              baseExpEV: masksOnly ? undefined : photo?.baseExpEV || undefined,
-            }
-          : x,
-      ),
+      now.map((x) => (x.id === p.id ? { ...x, params, baseExpEV } : x)),
     );
     toast.success(`“${p.name}” overwritten with the current edit`);
   };
@@ -509,7 +516,7 @@ function UserPresetsSection({
                   icon={<RefreshCw className="size-3" />}
                   label={`Overwrite ${p.name} with the current edit`}
                   disabled={!draft}
-                  onClick={() => overwrite(p)}
+                  onClick={() => void overwrite(p)}
                 />
                 <CardAction
                   icon={<X className="size-3" />}
@@ -551,16 +558,14 @@ function UserPresetsSection({
             <button
               className={cn(
                 'rounded-md border px-1.5 py-0.5 text-[11px] transition-colors',
-                (relative || autoSecs.length > 0)
+                relative
                   ? 'border-primary/50 bg-primary/15 text-accent-text'
                   : 'border-input text-muted-foreground hover:text-foreground',
-                autoSecs.length > 0 && 'opacity-60',
               )}
-              disabled={autoSecs.length > 0}
               onClick={() => setRelative((r) => !r)}
               title={
                 autoSecs.length > 0
-                  ? 'Adaptive presets are always relative — the diff lands on each photo’s own auto'
+                  ? 'Relative: apply the rest of the preset as offsets on top of a photo’s existing edits. What the autos set always lands as the difference from each photo’s own auto'
                   : 'Relative: apply the preset as offsets on top of a photo’s existing edits instead of replacing them'
               }
             >
