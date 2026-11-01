@@ -820,7 +820,11 @@ func (cu *culler) presetsChanged() {
 	}
 	if !cu.culling {
 		_ = cu.c.Update("grid", cu.gridState())
+		return
 	}
+	// The grid under the cull view is not built anew on the way back: it
+	// takes the presets now.
+	_ = cu.c.Patch("grid", GridPresets{Presets: cu.presetCards()})
 }
 
 // oneOnly tells, and reports, that what is done to one photo waits while

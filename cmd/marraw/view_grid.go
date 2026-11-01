@@ -520,6 +520,14 @@ func (v *gridView) libMarksIn(m LibMarks, u *gunim.UI) {
 	}
 }
 
+// presetsIn takes the presets saved, renamed or moved while the cull view
+// covers the grid.
+func (v *gridView) presetsIn(p GridPresets, u *gunim.UI) {
+	v.st.Presets = p.Presets
+	lastOf(u).grid.Presets = p.Presets
+	v.batch.set(max(v.selN, 0), p.Presets, u)
+}
+
 // coveredIn says whether the cull view covers the grid: the band then
 // moves no window.
 func (v *gridView) coveredIn(c Covered, u *gunim.UI) {

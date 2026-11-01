@@ -54,6 +54,9 @@ type (
 	AsideIn struct{ On bool }
 	// Covered says the cull view covers the grid, or no longer does.
 	Covered struct{ On bool }
+	// GridPresets takes the presets anew while the cull view covers the
+	// grid, so its cards list them once the library shows again.
+	GridPresets struct{ Presets []PresetCard }
 	// GridPhoto is one photo as a tile shows it.
 	GridPhoto struct {
 		ID     int64
